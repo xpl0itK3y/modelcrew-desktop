@@ -63,8 +63,8 @@ function addPanel(
 }
 
 // Новый терминал встаёт в сетку: делим самую большую группу вдоль её
-// длинной стороны. Когда минимумы 240×160 не позволяют сплит — вкладка
-// в активной группе + тост (правило ТЗ).
+// длинной стороны. Вкладок нет — один терминал = одна панель, поэтому
+// при упоре в минимумы 240×160 новый терминал не создаём вовсе.
 function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
   const groups = api.groups;
   if (groups.length === 0) {
@@ -86,7 +86,6 @@ function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
     direction = "below";
   }
   if (!direction) {
-    addPanel(api, { group: api.activeGroup ?? target });
     onNoSpace?.();
     return;
   }
@@ -96,14 +95,6 @@ function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
 function GroupActions(props: IDockviewHeaderActionsProps) {
   return (
     <div className="group-actions">
-      <button
-        type="button"
-        className="icon-button"
-        title="Новый терминал во вкладке (⌘⇧T)"
-        onClick={() => addPanel(props.containerApi, { group: props.group })}
-      >
-        <PlusIcon />
-      </button>
       <button
         type="button"
         className="icon-button"
@@ -158,9 +149,6 @@ function Welcome(props: IWatermarkPanelProps) {
           <kbd>⌘T</kbd> новый терминал
         </span>
         <span>
-          <kbd>⌘⇧T</kbd> вкладка в группе
-        </span>
-        <span>
           <kbd>⌘⌥</kbd> номера панелей
         </span>
         <span>
@@ -207,17 +195,9 @@ export default function App() {
     }
   }, [showToast]);
 
-  const newTab = useCallback(() => {
-    const api = apiRef.current;
-    if (api) {
-      addPanel(api, { group: api.activeGroup ?? undefined });
-    }
-  }, []);
-
   const badges = useHotkeys({
     getApi: () => apiRef.current,
     newTerminal,
-    newTab,
     requestCloseGroup: setCloseGroupRequest,
     suppressCleanupRef,
   });
@@ -241,6 +221,17 @@ export default function App() {
     });
     event.api.onDidAddPanel(() => {
       setTerminalCount(event.api.panels.length);
+    });
+    // Вкладок нет: перетаскивание может целиться только в сплиты,
+    // дроп в центр/таббар чужой группы запрещён.
+    event.api.onWillShowOverlay((overlay) => {
+      if (
+        overlay.kind === "tab" ||
+        overlay.kind === "header_space" ||
+        (overlay.kind === "content" && overlay.position === "center")
+      ) {
+        overlay.preventDefault();
+      }
     });
     addPanel(event.api);
   }, []);

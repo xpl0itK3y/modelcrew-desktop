@@ -32,7 +32,6 @@ const EDGE_POSITIONS = {
 type HotkeyOptions = {
   getApi: () => DockviewApi | null;
   newTerminal: () => void;
-  newTab: () => void;
   requestCloseGroup: (group: DockviewGroupPanel) => void;
   suppressCleanupRef: MutableRefObject<boolean>;
 };
@@ -255,7 +254,8 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         return;
       }
 
-      // Mod+Shift+стрелка — перенос активного терминала в направлении.
+      // Mod+Shift+стрелка — перенос: меняемся местами с соседом в этом
+      // направлении (вкладок нет), у края окна — новый сплит по краю.
       if (event.shiftKey && !event.altKey && arrow) {
         consume(event);
         const panel = api.activePanel;
@@ -265,7 +265,15 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         const from = panel.group;
         const adjacent = findAdjacentGroup(api, from, arrow);
         if (adjacent) {
-          panel.api.moveTo({ group: adjacent });
+          const neighbor = adjacent.activePanel;
+          if (neighbor) {
+            swapPanels(
+              api,
+              panel,
+              neighbor,
+              optionsRef.current.suppressCleanupRef,
+            );
+          }
         } else {
           // У края окна — новый сплит по этому краю.
           if (api.groups.length === 1 && from.panels.length === 1) {
@@ -318,14 +326,10 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         return;
       }
 
-      // Mod+T — новый терминал в сетку; Mod+Shift+T — вкладкой в группе.
+      // Mod+T (и Mod+Shift+T) — новый терминал в сетку.
       if (code === "KeyT") {
         consume(event);
-        if (event.shiftKey) {
-          optionsRef.current.newTab();
-        } else {
-          optionsRef.current.newTerminal();
-        }
+        optionsRef.current.newTerminal();
         return;
       }
 
