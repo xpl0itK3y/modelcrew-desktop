@@ -15,7 +15,8 @@ import { destroyTerminal } from "./terminal/registry";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
+import { CloseIcon, MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
+import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, WORKSPACE_NAME } from "./constants";
 import "./App.css";
@@ -127,6 +128,14 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
       >
         <MaximizeIcon />
       </button>
+      <button
+        type="button"
+        className="icon-button"
+        title="Закрыть группу (⌘⇧W)"
+        onClick={() => appActions.requestCloseGroup(props.group)}
+      >
+        <CloseIcon />
+      </button>
     </div>
   );
 }
@@ -212,6 +221,13 @@ export default function App() {
     requestCloseGroup: setCloseGroupRequest,
     suppressCleanupRef,
   });
+
+  useEffect(() => {
+    appActions.requestCloseGroup = setCloseGroupRequest;
+    return () => {
+      appActions.requestCloseGroup = () => {};
+    };
+  }, []);
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     apiRef.current = event.api;
