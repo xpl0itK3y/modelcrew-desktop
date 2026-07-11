@@ -9,7 +9,9 @@
   --mc-text-muted: #8b93a3;
   --mc-text-faint: #5c6472;
   --mc-accent: #f471b5;
-  --mc-accent-soft: rgba(244, 113, 181, 0.14);
+  --mc-accent-soft: color-mix(in srgb, var(--mc-accent) 14%, transparent);
+  --mc-accent-border: color-mix(in srgb, var(--mc-accent) 50%, transparent);
+  --mc-accent-glow: color-mix(in srgb, var(--mc-accent) 35%, transparent);
   --mc-green: #4ade80;
   --mc-titlebar-height: 40px;
 }
@@ -228,11 +230,52 @@ body {
   justify-content: center;
   padding: 0 6px;
   border-radius: 10px;
-  background: rgba(244, 113, 181, 0.16);
-  border: 1px solid rgba(244, 113, 181, 0.35);
+  background: color-mix(in srgb, var(--mc-accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc-accent) 35%, transparent);
   color: var(--mc-accent);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.workspace-delete {
+  flex: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mc-text-faint);
+  cursor: pointer;
+}
+
+.workspace-item:hover .workspace-delete {
+  display: inline-flex;
+}
+
+.workspace-item:hover .workspace-badge {
+  display: none;
+}
+
+.workspace-delete:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--mc-text-bright);
+}
+
+.workspace-rename-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--mc-accent-border);
+  border-radius: 4px;
+  background: var(--mc-bg);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  outline: none;
 }
 
 /* ---------- Тема dockview ---------- */
@@ -272,9 +315,9 @@ body {
 }
 
 .dockview-theme-modelcrew .dv-groupview.dv-active-group {
-  border-color: rgba(244, 113, 181, 0.6);
-  box-shadow: 0 0 0 1px rgba(244, 113, 181, 0.35),
-    0 0 22px rgba(244, 113, 181, 0.1);
+  border-color: color-mix(in srgb, var(--mc-accent) 60%, transparent);
+  box-shadow: 0 0 0 1px var(--mc-accent-glow),
+    0 0 22px color-mix(in srgb, var(--mc-accent) 10%, transparent);
 }
 
 .dockview-theme-modelcrew .dv-tabs-and-actions-container {
@@ -316,7 +359,7 @@ body {
 
 .tab-rename-input {
   width: 120px;
-  border: 1px solid rgba(244, 113, 181, 0.5);
+  border: 1px solid var(--mc-accent-border);
   border-radius: 4px;
   background: var(--mc-bg);
   color: var(--mc-text-bright);
@@ -402,7 +445,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  border: 1px solid rgba(244, 113, 181, 0.45);
+  border: 1px solid var(--mc-accent-border);
   border-radius: 8px;
   background: var(--mc-accent-soft);
   color: var(--mc-text-bright);
@@ -411,7 +454,7 @@ body {
 }
 
 .welcome-button:hover {
-  background: rgba(244, 113, 181, 0.22);
+  background: color-mix(in srgb, var(--mc-accent) 22%, transparent);
 }
 
 .welcome-hints {
@@ -496,7 +539,7 @@ body {
 }
 
 .quick-badge.is-active {
-  border-color: rgba(244, 113, 181, 0.65);
+  border-color: color-mix(in srgb, var(--mc-accent) 65%, transparent);
   color: var(--mc-accent);
 }
 
@@ -577,4 +620,81 @@ body {
 .dialog-button:focus-visible {
   outline: 1px solid var(--mc-accent);
   outline-offset: 1px;
+}
+
+/* ---------- Настройки ---------- */
+
+.settings-dialog {
+  min-width: 380px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mc-text-bright);
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mc-text-faint);
+}
+
+.accent-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 32px);
+  gap: 8px;
+}
+
+.accent-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 100ms ease;
+}
+
+.accent-swatch:hover {
+  transform: scale(1.12);
+}
+
+.accent-swatch.is-selected {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--mc-bg), 0 0 10px var(--mc-accent-glow);
+}
+
+.accent-custom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  color: var(--mc-text-muted);
+  font-size: 12.5px;
+}
+
+.accent-custom input[type="color"] {
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
 }

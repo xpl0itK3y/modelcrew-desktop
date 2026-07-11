@@ -14,6 +14,7 @@ type TitlebarProps = {
   sidebarVisible: boolean;
   onToggleSidebar: () => void;
   onNewTerminal: () => void;
+  onOpenSettings: () => void;
 };
 
 export function Titlebar(props: TitlebarProps) {
@@ -51,7 +52,12 @@ export function Titlebar(props: TitlebarProps) {
         <button type="button" className="icon-button is-disabled" title="Активность — скоро">
           <SlidersIcon />
         </button>
-        <button type="button" className="icon-button is-disabled" title="Настройки — скоро">
+        <button
+          type="button"
+          className="icon-button"
+          title="Настройки"
+          onClick={props.onOpenSettings}
+        >
           <GearIcon />
         </button>
       </div>

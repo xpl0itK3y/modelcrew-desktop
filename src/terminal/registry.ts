@@ -133,6 +133,19 @@ export function isManualTitle(id: string): boolean {
   return registry.get(id)?.manualTitle ?? false;
 }
 
+// Последнее автоимя (процесс переднего плана) каждого терминала: панели
+// скрытых воркспейсов не получают событий, при переключении обратно
+// имя доводится из этого кэша.
+const autoTitles = new Map<string, string>();
+
+export function rememberAutoTitle(id: string, title: string): void {
+  autoTitles.set(id, title);
+}
+
+export function getAutoTitle(id: string): string | undefined {
+  return autoTitles.get(id);
+}
+
 export async function ensureSpawned(entry: TerminalEntry): Promise<void> {
   if (entry.spawned) {
     return;
@@ -194,6 +207,7 @@ export async function destroyTerminal(id: string): Promise<void> {
     return;
   }
   registry.delete(id);
+  autoTitles.delete(id);
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
   }

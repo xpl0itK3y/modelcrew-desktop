@@ -7,20 +7,41 @@ import {
   DockviewTheme,
   IDockviewHeaderActionsProps,
   IWatermarkPanelProps,
+  SerializedDockview,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
-import { destroyTerminal, isManualTitle } from "./terminal/registry";
+import {
+  destroyTerminal,
+  getAutoTitle,
+  isManualTitle,
+  rememberAutoTitle,
+} from "./terminal/registry";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { Settings } from "./ui/Settings";
 import { CloseIcon, MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
+import { applyAccent, loadAccent, saveAccent } from "./theme";
 import { PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, WORKSPACE_NAME } from "./constants";
 import "./App.css";
+
+type Workspace = {
+  id: string;
+  name: string;
+  // Снимок раскладки на момент ухода из воркспейса; null = ещё не открывался.
+  layout: SerializedDockview | null;
+  count: number;
+};
+
+type WorkspacesState = {
+  list: Workspace[];
+  activeId: string;
+};
 
 const components = { terminal: TerminalPanel };
 const tabComponents = { terminal: TerminalTab };
@@ -165,11 +186,29 @@ export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
-  // Во время swap layout пересоздаётся через fromJSON: панели формально
-  // удаляются, но PTY-сессии должны остаться живыми.
+  // Во время swap/переключения воркспейса layout пересоздаётся через
+  // fromJSON: панели формально удаляются, но PTY должны остаться живыми.
   const suppressCleanupRef = useRef(false);
   const [closeGroupRequest, setCloseGroupRequest] =
     useState<DockviewGroupPanel | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accent, setAccent] = useState(loadAccent);
+  const [workspaces, setWorkspaces] = useState<WorkspacesState>(() => {
+    const first: Workspace = {
+      id: crypto.randomUUID(),
+      name: WORKSPACE_NAME,
+      layout: null,
+      count: 0,
+    };
+    return { list: [first], activeId: first.id };
+  });
+  const [deleteWorkspaceRequest, setDeleteWorkspaceRequest] =
+    useState<Workspace | null>(null);
+
+  useEffect(() => {
+    applyAccent(accent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -209,6 +248,135 @@ export default function App() {
     };
   }, []);
 
+  // Панели скрытых воркспейсов не получают pty-title: доводим имена из кэша.
+  const applyAutoTitles = useCallback((api: DockviewApi) => {
+    for (const panel of api.panels) {
+      const title = getAutoTitle(panel.id);
+      if (title && !isManualTitle(panel.id)) {
+        panel.api.setTitle(title);
+      }
+    }
+  }, []);
+
+  // Снимок активного воркспейса перед уходом с него.
+  const snapshotActive = useCallback(
+    (list: Workspace[], activeId: string): Workspace[] => {
+      const api = apiRef.current;
+      if (!api) {
+        return list;
+      }
+      const layout = api.toJSON();
+      const count = api.panels.length;
+      return list.map((workspace) =>
+        workspace.id === activeId ? { ...workspace, layout, count } : workspace,
+      );
+    },
+    [],
+  );
+
+  const loadWorkspace = useCallback(
+    (workspace: Workspace) => {
+      const api = apiRef.current;
+      if (!api) {
+        return;
+      }
+      suppressCleanupRef.current = true;
+      try {
+        if (workspace.layout) {
+          api.fromJSON(workspace.layout);
+        } else {
+          api.closeAllGroups();
+        }
+      } finally {
+        suppressCleanupRef.current = false;
+      }
+      if (!workspace.layout) {
+        addPanel(api);
+      }
+      applyAutoTitles(api);
+      setTerminalCount(api.panels.length);
+    },
+    [applyAutoTitles],
+  );
+
+  const selectWorkspace = useCallback(
+    (id: string) => {
+      setWorkspaces((prev) => {
+        if (id === prev.activeId) {
+          return prev;
+        }
+        const target = prev.list.find((workspace) => workspace.id === id);
+        if (!target) {
+          return prev;
+        }
+        const list = snapshotActive(prev.list, prev.activeId);
+        loadWorkspace(target);
+        return { list, activeId: id };
+      });
+    },
+    [loadWorkspace, snapshotActive],
+  );
+
+  const createWorkspace = useCallback(() => {
+    setWorkspaces((prev) => {
+      const fresh: Workspace = {
+        id: crypto.randomUUID(),
+        name: `workspace ${prev.list.length + 1}`,
+        layout: null,
+        count: 0,
+      };
+      const list = snapshotActive(prev.list, prev.activeId);
+      loadWorkspace(fresh);
+      return { list: [...list, fresh], activeId: fresh.id };
+    });
+  }, [loadWorkspace, snapshotActive]);
+
+  const renameWorkspace = useCallback((id: string, name: string) => {
+    setWorkspaces((prev) => ({
+      ...prev,
+      list: prev.list.map((workspace) =>
+        workspace.id === id ? { ...workspace, name } : workspace,
+      ),
+    }));
+  }, []);
+
+  const workspacePanelCount = useCallback(
+    (workspace: Workspace): number => {
+      if (workspace.id === workspaces.activeId) {
+        return apiRef.current?.panels.length ?? workspace.count;
+      }
+      return workspace.layout
+        ? Object.keys(workspace.layout.panels).length
+        : workspace.count;
+    },
+    [workspaces.activeId],
+  );
+
+  // Удаление воркспейса: все его терминалы убиваются.
+  const deleteWorkspace = useCallback(
+    (workspace: Workspace) => {
+      setWorkspaces((prev) => {
+        const remaining = prev.list.filter((item) => item.id !== workspace.id);
+        if (remaining.length === 0) {
+          return prev;
+        }
+        if (workspace.id === prev.activeId) {
+          const api = apiRef.current;
+          // Закрываем без подавления — PTY этих панелей должны умереть.
+          api?.closeAllGroups();
+          const next = remaining[0];
+          loadWorkspace(next);
+          return { list: remaining, activeId: next.id };
+        }
+        for (const panelId of Object.keys(workspace.layout?.panels ?? {})) {
+          void destroyTerminal(panelId);
+        }
+        return { list: remaining, activeId: prev.activeId };
+      });
+    },
+    [loadWorkspace],
+  );
+
   const onReady = useCallback((event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     // Закрытие панели любым путём (крестик, группа, хоткей) должно
@@ -237,6 +405,7 @@ export default function App() {
     // пока пользователь не переименовал её руками.
     if ("__TAURI_INTERNALS__" in window) {
       void listen<{ id: string; title: string }>("pty-title", (titleEvent) => {
+        rememberAutoTitle(titleEvent.payload.id, titleEvent.payload.title);
         const panel = event.api.getPanel(titleEvent.payload.id);
         if (panel && !isManualTitle(titleEvent.payload.id)) {
           panel.api.setTitle(titleEvent.payload.title);
@@ -246,17 +415,43 @@ export default function App() {
     addPanel(event.api);
   }, []);
 
+  const activeWorkspace = workspaces.list.find(
+    (workspace) => workspace.id === workspaces.activeId,
+  );
+
   return (
     <div className={`app-shell ${sidebarVisible ? "" : "sidebar-hidden"}`}>
       <Titlebar
-        workspaceName={WORKSPACE_NAME}
+        workspaceName={activeWorkspace?.name ?? WORKSPACE_NAME}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="app-body">
         {sidebarVisible && (
-          <Sidebar workspaceName={WORKSPACE_NAME} terminalCount={terminalCount} />
+          <Sidebar
+            workspaces={workspaces.list.map((workspace) => ({
+              id: workspace.id,
+              name: workspace.name,
+              count:
+                workspace.id === workspaces.activeId
+                  ? terminalCount
+                  : workspacePanelCount(workspace),
+            }))}
+            activeId={workspaces.activeId}
+            onSelect={selectWorkspace}
+            onCreate={createWorkspace}
+            onRename={renameWorkspace}
+            onDelete={(id) => {
+              const workspace = workspaces.list.find(
+                (item) => item.id === id,
+              );
+              if (workspace) {
+                setDeleteWorkspaceRequest(workspace);
+              }
+            }}
+          />
         )}
         <main className="dock-area">
           <DockviewReact
@@ -297,6 +492,34 @@ export default function App() {
             setCloseGroupRequest(null);
           }}
           onCancel={() => setCloseGroupRequest(null)}
+        />
+      )}
+      {deleteWorkspaceRequest && (
+        <ConfirmDialog
+          text={`Удалить воркспейс «${deleteWorkspaceRequest.name}» и закрыть ${workspacePanelCount(
+            deleteWorkspaceRequest,
+          )} ${plural(
+            workspacePanelCount(deleteWorkspaceRequest),
+            "терминал",
+            "терминала",
+            "терминалов",
+          )}?`}
+          confirmLabel="Удалить"
+          onConfirm={() => {
+            deleteWorkspace(deleteWorkspaceRequest);
+            setDeleteWorkspaceRequest(null);
+          }}
+          onCancel={() => setDeleteWorkspaceRequest(null)}
+        />
+      )}
+      {settingsOpen && (
+        <Settings
+          accent={accent}
+          onSelectAccent={(color) => {
+            setAccent(color);
+            saveAccent(color);
+          }}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
     </div>
