@@ -49,6 +49,29 @@ export type TerminalEntry = {
 
 const registry = new Map<string, TerminalEntry>();
 
+// Статус терминала для UI (точка в табе): running → exited.
+export type TerminalStatus = "running" | "exited";
+
+type StatusListener = (id: string, status: TerminalStatus) => void;
+
+const statusListeners = new Set<StatusListener>();
+
+export function onTerminalStatus(listener: StatusListener): () => void {
+  statusListeners.add(listener);
+  return () => statusListeners.delete(listener);
+}
+
+export function getTerminalStatus(id: string): TerminalStatus {
+  return registry.get(id)?.exited ? "exited" : "running";
+}
+
+function markExited(entry: TerminalEntry): void {
+  entry.exited = true;
+  for (const listener of statusListeners) {
+    listener(entry.id, "exited");
+  }
+}
+
 export function getOrCreateTerminal(id: string): TerminalEntry {
   const existing = registry.get(id);
   if (existing) {
@@ -135,7 +158,7 @@ export async function ensureSpawned(entry: TerminalEntry): Promise<void> {
       onOutput: output,
     });
   } catch (error) {
-    entry.exited = true;
+    markExited(entry);
     entry.term.write(`\x1b[31mНе удалось запустить шелл: ${String(error)}\x1b[0m\r\n`);
   }
 }
@@ -161,7 +184,7 @@ export async function destroyTerminal(id: string): Promise<void> {
 void listen<{ id: string; code: number | null }>("pty-exit", (event) => {
   const entry = registry.get(event.payload.id);
   if (entry && !entry.exited) {
-    entry.exited = true;
+    markExited(entry);
     const code = event.payload.code;
     entry.term.write(
       `\r\n\x1b[2m[процесс завершён${code !== null ? ` · код ${code}` : ""}]\x1b[0m\r\n`,
