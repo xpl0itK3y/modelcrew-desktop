@@ -68,6 +68,66 @@ export function flipGroups(
   }
 }
 
+/**
+ * «Перелёт» панели при свапе: элемент приподнимается (лёгкое уменьшение
+ * + тень), плывёт со старого места на новое и мягко приземляется.
+ * Группы при свапе остаются на местах — летают панели, поэтому дельта
+ * считается по прямоугольнику панели до/после, а не по группам.
+ */
+export function swapFlight(element: HTMLElement, from: DOMRect): void {
+  if (reducedMotion()) {
+    return;
+  }
+  const to = element.getBoundingClientRect();
+  if (
+    from.width === 0 ||
+    to.width === 0 ||
+    from.height === 0 ||
+    to.height === 0
+  ) {
+    return;
+  }
+  const dx = from.left - to.left;
+  const dy = from.top - to.top;
+  const sx = from.width / to.width;
+  const sy = from.height / to.height;
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+    return;
+  }
+
+  const previousZIndex = element.style.zIndex;
+  element.style.zIndex = "40";
+
+  const midScaleX = (sx + 1) / 2 * 0.965;
+  const midScaleY = (sy + 1) / 2 * 0.965;
+  const animation = element.animate(
+    [
+      {
+        transformOrigin: "top left",
+        transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+        boxShadow: "0 0 0 rgba(0, 0, 0, 0)",
+      },
+      {
+        offset: 0.45,
+        transformOrigin: "top left",
+        transform: `translate(${dx * 0.5}px, ${dy * 0.5}px) scale(${midScaleX}, ${midScaleY})`,
+        boxShadow: "0 22px 56px rgba(0, 0, 0, 0.55)",
+      },
+      {
+        transformOrigin: "top left",
+        transform: "none",
+        boxShadow: "0 0 0 rgba(0, 0, 0, 0)",
+      },
+    ],
+    { duration: 360, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" },
+  );
+  const restore = () => {
+    element.style.zIndex = previousZIndex;
+  };
+  animation.onfinish = restore;
+  animation.oncancel = restore;
+}
+
 function fadeOutElement(element: HTMLElement, done: () => void): void {
   if (reducedMotion()) {
     done();

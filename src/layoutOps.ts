@@ -1,6 +1,6 @@
 import { MutableRefObject } from "react";
 import { DockviewApi, IDockviewPanel } from "dockview";
-import { flipGroups, snapshotGroupRects } from "./animations";
+import { swapFlight } from "./animations";
 
 // Swap позиций двух панелей через сериализованный layout: меняем их id
 // местами в дереве и восстанавливаем. Инстансы xterm живут вне React,
@@ -11,7 +11,10 @@ export function swapPanels(
   b: IDockviewPanel,
   suppressCleanup: MutableRefObject<boolean>,
 ): void {
-  const before = snapshotGroupRects(api);
+  // Позиции самих панелей до свапа: группы остаются на местах,
+  // перелетают именно панели.
+  const fromA = a.group.element.getBoundingClientRect();
+  const fromB = b.group.element.getBoundingClientRect();
   const layout = api.toJSON();
 
   type GridNode = {
@@ -46,6 +49,14 @@ export function swapPanels(
     suppressCleanup.current = false;
   }
   api.getPanel(a.id)?.api.setActive();
+
   // Обе панели «перелетают» на места друг друга поверх мгновенного layout.
-  flipGroups(api, before, 250);
+  const elementA = api.getPanel(a.id)?.group.element;
+  const elementB = api.getPanel(b.id)?.group.element;
+  if (elementA) {
+    swapFlight(elementA, fromA);
+  }
+  if (elementB) {
+    swapFlight(elementB, fromB);
+  }
 }
