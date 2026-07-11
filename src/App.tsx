@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DockviewApi,
   DockviewGroupPanel,
@@ -30,7 +30,7 @@ const modelcrewTheme: DockviewTheme = {
   name: "modelcrew",
   className: "dockview-theme-modelcrew",
   colorScheme: "dark",
-  gap: 8,
+  gap: 3,
   dndOverlayMounting: "absolute",
   dndPanelOverlay: "group",
   tabGroupIndicator: "none",
@@ -62,6 +62,37 @@ function addPanel(
         }
       : {}),
   });
+}
+
+// Новый терминал встаёт в сетку: делим самую большую группу вдоль её
+// длинной стороны. Когда минимумы 240×160 не позволяют сплит — вкладка
+// в активной группе + тост (правило ТЗ).
+function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
+  const groups = api.groups;
+  if (groups.length === 0) {
+    addPanel(api);
+    return;
+  }
+  let target = groups[0];
+  for (const group of groups) {
+    if (group.width * group.height > target.width * target.height) {
+      target = group;
+    }
+  }
+  const canRight = target.width / 2 >= PANEL_MIN_WIDTH;
+  const canBelow = target.height / 2 >= PANEL_MIN_HEIGHT;
+  let direction: "right" | "below" | undefined;
+  if (canRight && (target.width >= target.height || !canBelow)) {
+    direction = "right";
+  } else if (canBelow) {
+    direction = "below";
+  }
+  if (!direction) {
+    addPanel(api, { group: api.activeGroup ?? target });
+    onNoSpace?.();
+    return;
+  }
+  addPanel(api, { group: target, direction });
 }
 
 function GroupActions(props: IDockviewHeaderActionsProps) {
@@ -112,7 +143,7 @@ function Welcome(props: IWatermarkPanelProps) {
       <button
         type="button"
         className="welcome-button"
-        onClick={() => addPanel(props.containerApi)}
+        onClick={() => addTerminalAutoGrid(props.containerApi)}
       >
         <PlusIcon /> Новый терминал
       </button>
@@ -135,6 +166,32 @@ export default function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const [terminalCount, setTerminalCount] = useState(0);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
+
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    if (toastTimer.current !== undefined) {
+      window.clearTimeout(toastTimer.current);
+    }
+    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current !== undefined) {
+        window.clearTimeout(toastTimer.current);
+      }
+    };
+  }, []);
+
+  const newTerminal = useCallback(() => {
+    if (apiRef.current) {
+      addTerminalAutoGrid(apiRef.current, () =>
+        showToast("Нет места для сплита — открыл вкладкой"),
+      );
+    }
+  }, [showToast]);
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     apiRef.current = event.api;
@@ -156,6 +213,7 @@ export default function App() {
         workspaceName={WORKSPACE_NAME}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
+        onNewTerminal={newTerminal}
       />
       <div className="app-body">
         {sidebarVisible && (
@@ -172,6 +230,7 @@ export default function App() {
           />
         </main>
       </div>
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }

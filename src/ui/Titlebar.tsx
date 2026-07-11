@@ -1,4 +1,11 @@
-import { BellIcon, GearIcon, GridIcon, SidebarIcon, SlidersIcon } from "./Icons";
+import {
+  BellIcon,
+  GearIcon,
+  GridIcon,
+  PlusIcon,
+  SidebarIcon,
+  SlidersIcon,
+} from "./Icons";
 
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -6,6 +13,7 @@ type TitlebarProps = {
   workspaceName: string;
   sidebarVisible: boolean;
   onToggleSidebar: () => void;
+  onNewTerminal: () => void;
 };
 
 export function Titlebar(props: TitlebarProps) {
@@ -26,6 +34,14 @@ export function Titlebar(props: TitlebarProps) {
         <span className="titlebar-workspace">{props.workspaceName}</span>
       </div>
       <div className="titlebar-side titlebar-right">
+        <button
+          type="button"
+          className="icon-button"
+          title="Новый терминал в сетку"
+          onClick={props.onNewTerminal}
+        >
+          <PlusIcon />
+        </button>
         <button type="button" className="icon-button is-disabled" title="Раскладки — скоро">
           <GridIcon />
         </button>

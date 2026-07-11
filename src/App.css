@@ -240,8 +240,8 @@ body {
 .dockview-theme-modelcrew {
   --dv-group-view-background-color: var(--mc-panel);
   --dv-tabs-and-actions-container-background-color: var(--mc-panel-header);
-  --dv-tabs-and-actions-container-height: 34px;
-  --dv-tabs-and-actions-container-font-size: 12.5px;
+  --dv-tabs-and-actions-container-height: 30px;
+  --dv-tabs-and-actions-container-font-size: 12px;
   --dv-activegroup-visiblepanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
@@ -262,11 +262,11 @@ body {
   --dv-background-color: transparent;
 }
 
-/* Группа = карточка со скруглением; активная — розовая рамка, как в референсе */
+/* Плотная сетка: тонкие рамки, лёгкое скругление; активная — розовая рамка */
 .dockview-theme-modelcrew .dv-groupview {
-  border-radius: 10px;
+  border-radius: 6px;
   overflow: hidden;
-  border: 1px solid var(--mc-border);
+  border: 1px solid #1f242d;
   box-sizing: border-box;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -350,12 +350,20 @@ body {
   color: var(--mc-text-bright);
 }
 
+/* Кнопки группы не шумят: проявляются при наведении на группу */
 .group-actions {
   display: flex;
   align-items: center;
   gap: 2px;
   height: 100%;
   padding: 0 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.dv-groupview:hover .group-actions,
+.dv-groupview.dv-active-group .group-actions {
+  opacity: 1;
 }
 
 /* ---------- Терминальная панель ---------- */
@@ -447,4 +455,39 @@ body {
   padding: 1px 5px;
   margin-right: 4px;
   color: var(--mc-text-muted);
+}
+
+/* ---------- Тост ---------- */
+
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: #1c2028;
+  color: var(--mc-text);
+  font-size: 12.5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 100;
+  animation: toast-in 160ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
 }
