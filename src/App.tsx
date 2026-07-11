@@ -14,14 +14,11 @@ import { TerminalTab } from "./panels/TerminalTab";
 import { destroyTerminal } from "./terminal/registry";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
+import { useHotkeys } from "./hotkeys/useHotkeys";
+import { PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, WORKSPACE_NAME } from "./constants";
 import "./App.css";
-
-// Минимальный размер панели по ТЗ: ~30 колонок × 7 строк терминала.
-export const PANEL_MIN_WIDTH = 240;
-export const PANEL_MIN_HEIGHT = 160;
-
-const WORKSPACE_NAME = "modelcrew";
 
 const components = { terminal: TerminalPanel };
 const tabComponents = { terminal: TerminalTab };
@@ -101,7 +98,7 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
       <button
         type="button"
         className="icon-button"
-        title="Новый терминал во вкладке"
+        title="Новый терминал во вкладке (⌘⇧T)"
         onClick={() => addPanel(props.containerApi, { group: props.group })}
       >
         <PlusIcon />
@@ -119,7 +116,7 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
       <button
         type="button"
         className="icon-button"
-        title="Развернуть/вернуть группу"
+        title="Развернуть/вернуть (⌘↩)"
         onClick={() => {
           if (props.containerApi.hasMaximizedGroup()) {
             props.containerApi.exitMaximizedGroup();
@@ -152,7 +149,10 @@ function Welcome(props: IWatermarkPanelProps) {
           <kbd>⌘T</kbd> новый терминал
         </span>
         <span>
-          <kbd>⌘⇧T</kbd> новая группа
+          <kbd>⌘⇧T</kbd> вкладка в группе
+        </span>
+        <span>
+          <kbd>⌘⌥</kbd> номера панелей
         </span>
         <span>
           <kbd>⌘↩</kbd> зум
@@ -168,6 +168,11 @@ export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
+  // Во время swap layout пересоздаётся через fromJSON: панели формально
+  // удаляются, но PTY-сессии должны остаться живыми.
+  const suppressCleanupRef = useRef(false);
+  const [closeGroupRequest, setCloseGroupRequest] =
+    useState<DockviewGroupPanel | null>(null);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -193,12 +198,29 @@ export default function App() {
     }
   }, [showToast]);
 
+  const newTab = useCallback(() => {
+    const api = apiRef.current;
+    if (api) {
+      addPanel(api, { group: api.activeGroup ?? undefined });
+    }
+  }, []);
+
+  const badges = useHotkeys({
+    getApi: () => apiRef.current,
+    newTerminal,
+    newTab,
+    requestCloseGroup: setCloseGroupRequest,
+    suppressCleanupRef,
+  });
+
   const onReady = useCallback((event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     // Закрытие панели любым путём (крестик, группа, хоткей) должно
     // убивать процесс — единая точка уборки.
     event.api.onDidRemovePanel((panel) => {
-      void destroyTerminal(panel.id);
+      if (!suppressCleanupRef.current) {
+        void destroyTerminal(panel.id);
+      }
       setTerminalCount(event.api.panels.length);
     });
     event.api.onDidAddPanel(() => {
@@ -231,6 +253,47 @@ export default function App() {
         </main>
       </div>
       {toast && <div className="toast">{toast}</div>}
+      {badges && (
+        <div className="quick-badges">
+          {badges.map((badge) => (
+            <div
+              key={badge.num}
+              className={`quick-badge ${badge.active ? "is-active" : ""}`}
+              style={{ left: badge.left, top: badge.top }}
+            >
+              {badge.num}
+            </div>
+          ))}
+        </div>
+      )}
+      {closeGroupRequest && (
+        <ConfirmDialog
+          text={`Закрыть ${closeGroupRequest.panels.length} ${plural(
+            closeGroupRequest.panels.length,
+            "терминал",
+            "терминала",
+            "терминалов",
+          )}?`}
+          confirmLabel="Закрыть"
+          onConfirm={() => {
+            closeGroupRequest.api.close();
+            setCloseGroupRequest(null);
+          }}
+          onCancel={() => setCloseGroupRequest(null)}
+        />
+      )}
     </div>
   );
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return one;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return few;
+  }
+  return many;
 }

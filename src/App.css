@@ -491,3 +491,115 @@ body {
     animation: none;
   }
 }
+
+/* ---------- Бейджи быстрой навигации (⌘⌥) ---------- */
+
+.quick-badges {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 90;
+}
+
+.quick-badge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(16, 18, 22, 0.88);
+  border: 1px solid var(--mc-border);
+  color: var(--mc-text-bright);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  animation: badge-in 100ms ease-out;
+}
+
+.quick-badge.is-active {
+  border-color: rgba(244, 113, 181, 0.65);
+  color: var(--mc-accent);
+}
+
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-badge {
+    animation: none;
+  }
+}
+
+/* ---------- Диалог подтверждения ---------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 10, 0.55);
+  z-index: 95;
+}
+
+.dialog {
+  min-width: 300px;
+  padding: 18px;
+  border: 1px solid var(--mc-border);
+  border-radius: 10px;
+  background: #1a1d24;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.dialog-text {
+  margin: 0 0 16px;
+  color: var(--mc-text-bright);
+  font-size: 13.5px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-button {
+  padding: 7px 14px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: #232833;
+  color: var(--mc-text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.dialog-button:hover {
+  background: #2a3040;
+}
+
+.dialog-button.is-danger {
+  border-color: rgba(255, 114, 133, 0.5);
+  background: rgba(255, 114, 133, 0.14);
+  color: #ff8fa3;
+}
+
+.dialog-button.is-danger:hover {
+  background: rgba(255, 114, 133, 0.22);
+}
+
+.dialog-button:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 1px;
+}

@@ -11,6 +11,9 @@ import "@xterm/xterm/css/xterm.css";
 
 const RESIZE_DEBOUNCE_MS = 100;
 
+// В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
+const isTauri = "__TAURI_INTERNALS__" in window;
+
 export const TERMINAL_BACKGROUND = "#16181d";
 
 const terminalTheme: ITheme = {
@@ -122,6 +125,14 @@ export async function ensureSpawned(entry: TerminalEntry): Promise<void> {
   }
   entry.spawned = true;
 
+  if (!isTauri) {
+    markExited(entry);
+    entry.term.write(
+      "\x1b[2m[веб-превью: шелл работает только в приложении]\x1b[0m\r\n",
+    );
+    return;
+  }
+
   const output = new Channel<ArrayBuffer | string>();
   output.onmessage = (data) => {
     entry.term.write(
@@ -174,6 +185,9 @@ export async function destroyTerminal(id: string): Promise<void> {
   }
   entry.term.dispose();
   entry.container.remove();
+  if (!isTauri) {
+    return;
+  }
   try {
     await invoke("pty_kill", { id });
   } catch {
@@ -181,7 +195,8 @@ export async function destroyTerminal(id: string): Promise<void> {
   }
 }
 
-void listen<{ id: string; code: number | null }>("pty-exit", (event) => {
+if (isTauri) {
+  void listen<{ id: string; code: number | null }>("pty-exit", (event) => {
   const entry = registry.get(event.payload.id);
   if (entry && !entry.exited) {
     markExited(entry);
@@ -190,6 +205,7 @@ void listen<{ id: string; code: number | null }>("pty-exit", (event) => {
       `\r\n\x1b[2m[процесс завершён${code !== null ? ` · код ${code}` : ""}]\x1b[0m\r\n`,
     );
   }
-}).catch(() => {
-  // Вне Tauri (обычный браузер) события недоступны — терминалы там и не работают.
-});
+  }).catch(() => {
+    // Событие может быть недоступно при раннем старте — не критично.
+  });
+}
