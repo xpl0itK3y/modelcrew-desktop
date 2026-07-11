@@ -590,6 +590,58 @@ body {
   }
 }
 
+/* ---------- ⌘-драг терминалов ---------- */
+
+.cmd-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--mc-accent-border);
+  border-radius: 8px;
+  background: rgba(22, 24, 29, 0.92);
+  color: var(--mc-text-bright);
+  font-size: 12.5px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  opacity: 0.9;
+  pointer-events: none;
+  will-change: transform;
+}
+
+body.cmd-dragging,
+body.cmd-dragging * {
+  cursor: grabbing !important;
+}
+
+.dv-groupview.cmd-drag-source {
+  opacity: 0.55;
+}
+
+.dockview-theme-modelcrew .dv-groupview.cmd-drag-over {
+  border-color: var(--mc-accent);
+  box-shadow: 0 0 0 2px var(--mc-accent-glow), 0 0 20px var(--mc-accent-glow);
+  animation: drop-pulse 900ms ease-in-out infinite;
+}
+
+.edge-drop-indicator {
+  position: fixed;
+  z-index: 119;
+  border-radius: 2px;
+  background: var(--mc-accent);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dockview-theme-modelcrew .dv-groupview.cmd-drag-over {
+    animation: none;
+  }
+}
+
 /* ---------- Бейджи быстрой навигации (⌘⌥) ---------- */
 
 .quick-badges {

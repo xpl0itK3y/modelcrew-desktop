@@ -25,6 +25,7 @@ import { Settings } from "./ui/Settings";
 import { CloseIcon, MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
+import { useCmdDrag } from "./hotkeys/useCmdDrag";
 import { applyAccent, loadAccent, saveAccent } from "./theme";
 import {
   closeGroupAnimated,
@@ -279,6 +280,12 @@ export default function App() {
     getApi: () => apiRef.current,
     newTerminal,
     requestCloseGroup: setCloseGroupRequest,
+    suppressCleanupRef,
+  });
+
+  // ⌘-драг: перетаскивание терминала за любое место мышью.
+  useCmdDrag({
+    getApi: () => apiRef.current,
     suppressCleanupRef,
   });
 
