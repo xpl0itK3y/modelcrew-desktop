@@ -9,14 +9,15 @@ import {
   themeDark,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
-import { PlaceholderPanel } from "./panels/PlaceholderPanel";
+import { TerminalPanel } from "./panels/TerminalPanel";
+import { destroyTerminal } from "./terminal/registry";
 import "./App.css";
 
 // Минимальный размер панели по ТЗ: ~30 колонок × 7 строк терминала.
 export const PANEL_MIN_WIDTH = 240;
 export const PANEL_MIN_HEIGHT = 160;
 
-const components = { placeholder: PlaceholderPanel };
+const components = { terminal: TerminalPanel };
 
 let panelCounter = 0;
 
@@ -24,7 +25,7 @@ function addPanel(api: DockviewApi, group?: DockviewGroupPanel) {
   panelCounter += 1;
   api.addPanel({
     id: crypto.randomUUID(),
-    component: "placeholder",
+    component: "terminal",
     title: `Терминал ${panelCounter}`,
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
@@ -63,6 +64,11 @@ function Watermark(props: IWatermarkPanelProps) {
 
 export default function App() {
   const onReady = useCallback((event: DockviewReadyEvent) => {
+    // Закрытие панели любым путём (крестик, группа, хоткей) должно
+    // убивать процесс — единая точка уборки.
+    event.api.onDidRemovePanel((panel) => {
+      void destroyTerminal(panel.id);
+    });
     addPanel(event.api);
   }, []);
 
