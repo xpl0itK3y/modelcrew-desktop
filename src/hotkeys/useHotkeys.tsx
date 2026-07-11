@@ -1,6 +1,11 @@
 import { MutableRefObject, useEffect, useRef, useState } from "react";
 import { DockviewApi, DockviewGroupPanel, IDockviewPanel } from "dockview";
 import { isMac } from "../constants";
+import {
+  closePanelAnimated,
+  flipGroups,
+  snapshotGroupRects,
+} from "../animations";
 
 // Все хоткеи приложения перехватываются одним capture-слушателем на
 // window: он срабатывает раньше xterm, забирает только свои комбинации
@@ -108,6 +113,7 @@ function swapPanels(
   b: IDockviewPanel,
   suppressCleanup: MutableRefObject<boolean>,
 ): void {
+  const before = snapshotGroupRects(api);
   const layout = api.toJSON();
 
   type GridNode = {
@@ -142,6 +148,8 @@ function swapPanels(
     suppressCleanup.current = false;
   }
   api.getPanel(a.id)?.api.setActive();
+  // Обе панели «перелетают» на места друг друга поверх мгновенного layout.
+  flipGroups(api, before, 250);
 }
 
 export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
@@ -279,8 +287,10 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
           if (api.groups.length === 1 && from.panels.length === 1) {
             return;
           }
+          const before = snapshotGroupRects(api);
           const group = api.addGroup({ direction: EDGE_POSITIONS[arrow] });
           panel.api.moveTo({ group });
+          flipGroups(api, before, 200);
         }
         return;
       }
@@ -300,10 +310,12 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         }
         const grow = code === "Equal" || code === "NumpadAdd";
         const factor = grow ? 1.05 : 1 / 1.05;
+        const before = snapshotGroupRects(api);
         group.api.setSize({
           width: group.width * factor,
           height: group.height * factor,
         });
+        flipGroups(api, before, 150);
         return;
       }
 
@@ -318,11 +330,13 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         if (!panel) {
           return;
         }
+        const before = snapshotGroupRects(api);
         if (panel.api.isMaximized()) {
           panel.api.exitMaximized();
         } else {
           panel.api.maximize();
         }
+        flipGroups(api, before, 220);
         return;
       }
 
@@ -342,7 +356,10 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
             optionsRef.current.requestCloseGroup(group);
           }
         } else {
-          api.activePanel?.api.close();
+          const panel = api.activePanel;
+          if (panel) {
+            closePanelAnimated(panel);
+          }
         }
       }
     };

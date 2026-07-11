@@ -324,6 +324,30 @@ body {
   border-bottom: 1px solid var(--mc-border);
 }
 
+/* Drop-зона при перетаскивании: мягкий пульс рамки */
+.dockview-theme-modelcrew .dv-drop-target-selection {
+  animation: drop-pulse 900ms ease-in-out infinite;
+  border: 1px solid var(--mc-accent);
+  border-radius: 6px;
+}
+
+@keyframes drop-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--mc-accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 3px var(--mc-accent-glow),
+      0 0 16px var(--mc-accent-glow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dockview-theme-modelcrew .dv-drop-target-selection {
+    animation: none;
+  }
+}
+
 /* ---------- Кастомный таб терминала ---------- */
 
 .terminal-tab {
@@ -391,6 +415,27 @@ body {
   box-sizing: border-box;
   background: var(--mc-panel);
   padding: 8px 2px 4px 12px;
+}
+
+.terminal-panel.panel-enter {
+  animation: panel-in 180ms ease-out;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-panel.panel-enter {
+    animation: none;
+  }
 }
 
 .terminal-host {

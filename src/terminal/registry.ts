@@ -50,6 +50,8 @@ export type TerminalEntry = {
   resizeTimer: number | undefined;
   // Панель переименована руками — автоимя от процесса больше не трогаем.
   manualTitle: boolean;
+  // Анимация появления играется только при первом монтировании.
+  everAttached: boolean;
 };
 
 const registry = new Map<string, TerminalEntry>();
@@ -117,6 +119,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     exited: false,
     resizeTimer: undefined,
     manualTitle: false,
+    everAttached: false,
   };
   registry.set(id, entry);
   return entry;

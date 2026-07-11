@@ -22,6 +22,18 @@ export function TerminalPanel(props: IDockviewPanelProps) {
     entry.fit.fit();
     void ensureSpawned(entry);
 
+    // Появление нового терминала: fade + scale только при первом маунте,
+    // переносы/свопы того же инстанса не мигают.
+    if (!entry.everAttached) {
+      entry.everAttached = true;
+      host.classList.add("panel-enter");
+      host.addEventListener(
+        "animationend",
+        () => host.classList.remove("panel-enter"),
+        { once: true },
+      );
+    }
+
     const observer = new ResizeObserver(() => {
       if (entry.container.isConnected) {
         entry.fit.fit();

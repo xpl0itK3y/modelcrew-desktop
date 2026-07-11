@@ -27,6 +27,11 @@ import { CloseIcon, MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { applyAccent, loadAccent, saveAccent } from "./theme";
+import {
+  closeGroupAnimated,
+  flipGroups,
+  snapshotGroupRects,
+} from "./animations";
 import { PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, WORKSPACE_NAME } from "./constants";
 import "./App.css";
 
@@ -110,7 +115,10 @@ function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
     onNoSpace?.();
     return;
   }
+  // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
+  const before = snapshotGroupRects(api);
   addPanel(api, { group: target, direction });
+  flipGroups(api, before, 200);
 }
 
 function GroupActions(props: IDockviewHeaderActionsProps) {
@@ -120,9 +128,14 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
         type="button"
         className="icon-button"
         title="Сплит вправо"
-        onClick={() =>
-          addPanel(props.containerApi, { group: props.group, direction: "right" })
-        }
+        onClick={() => {
+          const before = snapshotGroupRects(props.containerApi);
+          addPanel(props.containerApi, {
+            group: props.group,
+            direction: "right",
+          });
+          flipGroups(props.containerApi, before, 200);
+        }}
       >
         <SplitIcon />
       </button>
@@ -488,7 +501,7 @@ export default function App() {
           )}?`}
           confirmLabel="Закрыть"
           onConfirm={() => {
-            closeGroupRequest.api.close();
+            closeGroupAnimated(closeGroupRequest);
             setCloseGroupRequest(null);
           }}
           onCancel={() => setCloseGroupRequest(null)}
