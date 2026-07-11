@@ -19,7 +19,7 @@ type TitlebarProps = {
 
 export function Titlebar(props: TitlebarProps) {
   return (
-    <header className="titlebar" data-tauri-drag-region>
+    <header className="titlebar" data-tauri-drag-region="deep">
       <div className="titlebar-side titlebar-left">
         {isMac && <span className="traffic-lights-spacer" />}
         <button
@@ -31,7 +31,7 @@ export function Titlebar(props: TitlebarProps) {
           <SidebarIcon />
         </button>
       </div>
-      <div className="titlebar-center" data-tauri-drag-region>
+      <div className="titlebar-center">
         <span className="titlebar-workspace">{props.workspaceName}</span>
       </div>
       <div className="titlebar-side titlebar-right">

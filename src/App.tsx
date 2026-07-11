@@ -486,7 +486,7 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="app-body">
-        {sidebarVisible && (
+        <div className="sidebar-rail" aria-hidden={!sidebarVisible}>
           <Sidebar
             workspaces={workspaces.list.map((workspace) => ({
               id: workspace.id,
@@ -509,7 +509,7 @@ export default function App() {
               }
             }}
           />
-        )}
+        </div>
         <main className="dock-area">
           <DockviewReact
             components={components}
@@ -537,12 +537,7 @@ export default function App() {
       )}
       {closeGroupRequest && (
         <ConfirmDialog
-          text={`Закрыть ${closeGroupRequest.panels.length} ${plural(
-            closeGroupRequest.panels.length,
-            "терминал",
-            "терминала",
-            "терминалов",
-          )}?`}
+          text="Закрытие терминала"
           confirmLabel="Закрыть"
           onConfirm={() => {
             closeGroupAnimated(closeGroupRequest);
