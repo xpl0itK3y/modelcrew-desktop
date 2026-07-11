@@ -1,51 +1,80 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { useCallback } from "react";
+import {
+  DockviewApi,
+  DockviewGroupPanel,
+  DockviewReact,
+  DockviewReadyEvent,
+  IDockviewHeaderActionsProps,
+  IWatermarkPanelProps,
+  themeDark,
+} from "dockview";
+import "dockview/dist/styles/dockview.css";
+import { PlaceholderPanel } from "./panels/PlaceholderPanel";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+// Минимальный размер панели по ТЗ: ~30 колонок × 7 строк терминала.
+export const PANEL_MIN_WIDTH = 240;
+export const PANEL_MIN_HEIGHT = 160;
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+const components = { placeholder: PlaceholderPanel };
 
+let panelCounter = 0;
+
+function addPanel(api: DockviewApi, group?: DockviewGroupPanel) {
+  panelCounter += 1;
+  api.addPanel({
+    id: crypto.randomUUID(),
+    component: "placeholder",
+    title: `Терминал ${panelCounter}`,
+    minimumWidth: PANEL_MIN_WIDTH,
+    minimumHeight: PANEL_MIN_HEIGHT,
+    ...(group ? { position: { referenceGroup: group } } : {}),
+  });
+}
+
+function GroupAddButton(props: IDockviewHeaderActionsProps) {
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
+    <div className="group-actions">
+      <button
+        type="button"
+        className="icon-button"
+        title="Новый терминал"
+        onClick={() => addPanel(props.containerApi, props.group)}
       >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+        +
+      </button>
+    </div>
   );
 }
 
-export default App;
+function Watermark(props: IWatermarkPanelProps) {
+  return (
+    <div className="watermark">
+      <button
+        type="button"
+        className="watermark-button"
+        onClick={() => addPanel(props.containerApi)}
+      >
+        + Новый терминал
+      </button>
+    </div>
+  );
+}
+
+export default function App() {
+  const onReady = useCallback((event: DockviewReadyEvent) => {
+    addPanel(event.api);
+  }, []);
+
+  return (
+    <div className="app-root">
+      <DockviewReact
+        components={components}
+        watermarkComponent={Watermark}
+        rightHeaderActionsComponent={GroupAddButton}
+        onReady={onReady}
+        theme={themeDark}
+      />
+    </div>
+  );
+}
