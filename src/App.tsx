@@ -7,7 +7,6 @@ import {
   DockviewTheme,
   IDockviewHeaderActionsProps,
   IWatermarkPanelProps,
-  SerializedDockview,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
@@ -32,21 +31,14 @@ import {
   flipGroups,
   snapshotGroupRects,
 } from "./animations";
+import {
+  loadWorkspacesState,
+  saveWorkspacesState,
+  type Workspace,
+  type WorkspacesState,
+} from "./persist";
 import { PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, WORKSPACE_NAME } from "./constants";
 import "./App.css";
-
-type Workspace = {
-  id: string;
-  name: string;
-  // Снимок раскладки на момент ухода из воркспейса; null = ещё не открывался.
-  layout: SerializedDockview | null;
-  count: number;
-};
-
-type WorkspacesState = {
-  list: Workspace[];
-  activeId: string;
-};
 
 const components = { terminal: TerminalPanel };
 const tabComponents = { terminal: TerminalTab };
@@ -207,6 +199,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accent, setAccent] = useState(loadAccent);
   const [workspaces, setWorkspaces] = useState<WorkspacesState>(() => {
+    const saved = loadWorkspacesState();
+    if (saved) {
+      return saved;
+    }
     const first: Workspace = {
       id: crypto.randomUUID(),
       name: WORKSPACE_NAME,
@@ -217,11 +213,43 @@ export default function App() {
   });
   const [deleteWorkspaceRequest, setDeleteWorkspaceRequest] =
     useState<Workspace | null>(null);
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
+  const persistTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     applyAccent(accent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Снимок всего состояния воркспейсов в localStorage; активный —
+  // с живой раскладкой из dockview.
+  const persistNow = useCallback(() => {
+    const { list, activeId } = workspacesRef.current;
+    const api = apiRef.current;
+    const snapshot = list.map((workspace) =>
+      workspace.id === activeId && api
+        ? { ...workspace, layout: api.toJSON(), count: api.panels.length }
+        : workspace,
+    );
+    saveWorkspacesState({ list: snapshot, activeId });
+  }, []);
+
+  const schedulePersist = useCallback(() => {
+    if (persistTimer.current !== undefined) {
+      window.clearTimeout(persistTimer.current);
+    }
+    persistTimer.current = window.setTimeout(persistNow, 500);
+  }, [persistNow]);
+
+  useEffect(() => {
+    schedulePersist();
+  }, [workspaces, schedulePersist]);
+
+  useEffect(() => {
+    window.addEventListener("beforeunload", persistNow);
+    return () => window.removeEventListener("beforeunload", persistNow);
+  }, [persistNow]);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -425,7 +453,23 @@ export default function App() {
         }
       }).catch(() => {});
     }
-    addPanel(event.api);
+    // Восстановление раскладки прошлого запуска; шеллы поднимутся свежие.
+    const { list, activeId } = workspacesRef.current;
+    const active = list.find((workspace) => workspace.id === activeId);
+    if (active?.layout) {
+      try {
+        event.api.fromJSON(active.layout);
+      } catch {
+        addPanel(event.api);
+      }
+      setTerminalCount(event.api.panels.length);
+    } else {
+      addPanel(event.api);
+    }
+    event.api.onDidLayoutChange(() => {
+      schedulePersist();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeWorkspace = workspaces.list.find(
