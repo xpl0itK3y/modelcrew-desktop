@@ -1,2 +1,46 @@
 # modelcrew-desktop
-ModelCrew - a modular agent-based system for development, where each agent role can operate on a separate model, and the user controls quality, cost, security, and the level of autonomy.
+
+ModelCrew — a modular agent-based system for development, where each agent role can operate on a separate model, and the user controls quality, cost, security, and the level of autonomy.
+
+Текущая версия — терминальный фундамент: десктоп-менеджер терминалов
+(Tauri 2 + React + xterm.js + dockview + portable-pty). Терминалы
+раскладываются флот-сеткой, живут в воркспейсах, управляются мышью и
+хоткеями, панели сами подписываются именем запущенной программы.
+
+## Запуск
+
+```bash
+npm install
+npm run tauri dev     # dev-режим
+npm run tauri build   # релизная сборка (.app / установщик)
+```
+
+Тесты бэкенда (PTY, батчинг, стресс):
+
+```bash
+cd src-tauri && cargo test
+```
+
+## Хоткеи
+
+| Комбинация (⌘ = Ctrl вне macOS) | Действие |
+|---|---|
+| ⌘T | Новый терминал в сетку |
+| ⌘W | Закрыть активный терминал |
+| ⌘⇧W | Закрыть группу (с подтверждением) |
+| ⌘⌥ + стрелки | Фокус на соседний терминал |
+| ⌘⇧ + стрелки | Поменяться местами с соседом; у края — новый сплит |
+| ⌘⌥ (держать) | Номера поверх панелей |
+| ⌘⌥ + цифра | Фокус на панель № |
+| ⌘⌥⇧ + цифра | Своп активной панели с № |
+| ⌘↩ | Зум панели / вернуть раскладку |
+| ⌘⌥ +/− | Панель больше/меньше на 5% |
+
+Двойной клик по имени панели — переименовать (фиксирует имя).
+Двойной клик по воркспейсу в сайдбаре — переименовать его.
+Шестерёнка в титлбаре — настройки (цвет подсветки).
+
+## Что дальше (v0.2+)
+
+Оркестрация агентов (swarm), канбан-доска задач, память с графом
+связей, встроенный браузер-превью — поверх этого фундамента.
