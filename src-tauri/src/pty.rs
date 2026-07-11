@@ -355,6 +355,127 @@ mod tests {
         assert!(manager.write("t2", b"x").is_err(), "сессия должна быть снята");
     }
 
+    /// Стресс приёмки: 50 МБ сплошного вывода не должны идти по байту —
+    /// батчер обязан отдавать крупные куски, и весь объём должен дойти.
+    #[test]
+    fn fifty_megabytes_arrive_batched() {
+        const PAYLOAD: usize = 50 * 1024 * 1024;
+
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "stress".into(),
+                    shell: Some("/bin/sh".into()),
+                    cwd: None,
+                    cols: 120,
+                    rows: 40,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        // Маркер вычисляется шеллом, иначе он поймается в эхе самой команды.
+        manager
+            .write(
+                "stress",
+                format!(
+                    "dd if=/dev/zero bs=1048576 count={} 2>/dev/null; echo STRESS_$((1300 + 37))\n",
+                    PAYLOAD / 1048576
+                )
+                .as_bytes(),
+            )
+            .expect("запись команды");
+
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut total = 0usize;
+        let mut chunks = 0usize;
+        let mut tail: Vec<u8> = Vec::new();
+        loop {
+            assert!(Instant::now() < deadline, "50 МБ не дошли за 60 секунд");
+            let Ok(chunk) = out_rx.recv_timeout(Duration::from_secs(5)) else {
+                panic!("поток вывода заглох (получено {total} байт)");
+            };
+            total += chunk.len();
+            chunks += 1;
+            tail.extend_from_slice(&chunk);
+            let keep = tail.len().min(64);
+            tail = tail.split_off(tail.len() - keep);
+            if String::from_utf8_lossy(&tail).contains("STRESS_1337") {
+                break;
+            }
+        }
+
+        assert!(total >= PAYLOAD, "дошло только {total} байт");
+        let avg = total / chunks.max(1);
+        assert!(
+            avg >= 4 * 1024,
+            "вывод идёт мелкими кусками: {chunks} чанков, средний {avg} байт"
+        );
+
+        manager.kill("stress").expect("kill после стресса");
+    }
+
+    /// Дюжина живых сессий одновременно: все отвечают, kill_all всех убирает.
+    #[test]
+    fn dozen_concurrent_sessions() {
+        const SESSIONS: usize = 12;
+
+        let manager = PtyManager::default();
+        let mut outputs = Vec::new();
+        let (exit_tx, exit_rx) = mpsc::channel::<()>();
+
+        for index in 0..SESSIONS {
+            let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+            let exit_tx = exit_tx.clone();
+            manager
+                .spawn(
+                    SpawnOptions {
+                        id: format!("s{index}"),
+                        shell: Some("/bin/sh".into()),
+                        cwd: None,
+                        cols: 80,
+                        rows: 24,
+                    },
+                    move |bytes| {
+                        let _ = out_tx.send(bytes);
+                    },
+                    move |_| {
+                        let _ = exit_tx.send(());
+                    },
+                )
+                .expect("сессия должна подняться");
+            outputs.push(out_rx);
+        }
+
+        for (index, out_rx) in outputs.iter().enumerate() {
+            manager
+                .write(
+                    &format!("s{index}"),
+                    format!("echo PING_$(({index} + 100))\n").as_bytes(),
+                )
+                .expect("запись в сессию");
+            wait_for_output(
+                out_rx,
+                &format!("PING_{}", index + 100),
+                Duration::from_secs(10),
+            )
+            .expect("сессия должна ответить");
+        }
+
+        manager.kill_all();
+        for _ in 0..SESSIONS {
+            exit_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("после kill_all каждая сессия должна завершиться");
+        }
+    }
+
     #[test]
     fn spawn_bad_shell_fails() {
         let manager = PtyManager::default();
