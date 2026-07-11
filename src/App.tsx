@@ -9,9 +9,10 @@ import {
   IWatermarkPanelProps,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
+import { listen } from "@tauri-apps/api/event";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
-import { destroyTerminal } from "./terminal/registry";
+import { destroyTerminal, isManualTitle } from "./terminal/registry";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -34,8 +35,6 @@ const modelcrewTheme: DockviewTheme = {
   tabGroupIndicator: "none",
 };
 
-let panelCounter = 0;
-
 function addPanel(
   api: DockviewApi,
   options: {
@@ -43,12 +42,13 @@ function addPanel(
     direction?: "left" | "right" | "above" | "below";
   } = {},
 ) {
-  panelCounter += 1;
   api.addPanel({
     id: crypto.randomUUID(),
     component: "terminal",
     tabComponent: "terminal",
-    title: `терминал ${panelCounter}`,
+    // Placeholder до первого тика вотчера, который подпишет панель
+    // именем процесса (zsh, codex, vim, …).
+    title: "терминал",
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
     ...(options.group
@@ -233,6 +233,16 @@ export default function App() {
         overlay.preventDefault();
       }
     });
+    // Панель подписывается именем процесса переднего плана из PTY,
+    // пока пользователь не переименовал её руками.
+    if ("__TAURI_INTERNALS__" in window) {
+      void listen<{ id: string; title: string }>("pty-title", (titleEvent) => {
+        const panel = event.api.getPanel(titleEvent.payload.id);
+        if (panel && !isManualTitle(titleEvent.payload.id)) {
+          panel.api.setTitle(titleEvent.payload.title);
+        }
+      }).catch(() => {});
+    }
     addPanel(event.api);
   }, []);
 

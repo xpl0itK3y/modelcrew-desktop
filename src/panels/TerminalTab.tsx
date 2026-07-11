@@ -2,10 +2,10 @@ import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { IDockviewPanelHeaderProps } from "dockview";
 import {
   getTerminalStatus,
+  markManualTitle,
   onTerminalStatus,
   type TerminalStatus,
 } from "../terminal/registry";
-import { CloseIcon } from "../ui/Icons";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const [title, setTitle] = useState(props.api.title ?? "");
@@ -42,6 +42,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     const value = inputRef.current?.value.trim();
     if (value) {
       props.api.setTitle(value);
+      markManualTitle(props.api.id);
     }
     setEditing(false);
   };
@@ -72,18 +73,6 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
           {title}
         </span>
       )}
-      <button
-        type="button"
-        className="tab-close"
-        title="Закрыть терминал"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          props.api.close();
-        }}
-      >
-        <CloseIcon width={11} height={11} />
-      </button>
     </div>
   );
 }

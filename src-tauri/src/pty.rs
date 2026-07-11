@@ -190,6 +190,20 @@ impl PtyManager {
         self.sessions.lock().unwrap().remove(id);
     }
 
+    /// PID процесса переднего плана каждого живого терминала (для имён панелей).
+    pub fn foreground_processes(&self) -> Vec<(String, i32)> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions
+            .iter()
+            .filter_map(|(id, session)| {
+                session
+                    .master
+                    .process_group_leader()
+                    .map(|pid| (id.clone(), pid as i32))
+            })
+            .collect()
+    }
+
     pub fn kill_all(&self) {
         let sessions: Vec<PtySession> = {
             let mut map = self.sessions.lock().unwrap();

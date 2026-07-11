@@ -11,6 +11,85 @@ struct PtyExitPayload {
     code: Option<i32>,
 }
 
+#[derive(Clone, Serialize)]
+struct PtyTitlePayload {
+    id: String,
+    title: String,
+}
+
+/// Имена процессов по PID одним вызовом ps (macOS/Linux).
+#[cfg(unix)]
+fn process_names(pids: &[i32]) -> std::collections::HashMap<i32, String> {
+    let mut names = std::collections::HashMap::new();
+    if pids.is_empty() {
+        return names;
+    }
+    let list = pids
+        .iter()
+        .map(|pid| pid.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-o", "pid=,comm=", "-p", &list])
+        .output()
+    else {
+        return names;
+    };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((pid_str, comm)) = line.trim().split_once(char::is_whitespace) else {
+            continue;
+        };
+        let Ok(pid) = pid_str.trim().parse::<i32>() else {
+            continue;
+        };
+        let comm = comm.trim();
+        let name = comm.rsplit('/').next().unwrap_or(comm);
+        // Логин-шелл представляется как "-zsh".
+        let name = name.trim_start_matches('-');
+        if !name.is_empty() {
+            names.insert(pid, name.to_string());
+        }
+    }
+    names
+}
+
+#[cfg(not(unix))]
+fn process_names(_pids: &[i32]) -> std::collections::HashMap<i32, String> {
+    std::collections::HashMap::new()
+}
+
+/// Раз в ~1.5 с смотрим, что крутится в каждом PTY, и шлём во фронт
+/// событие только при смене — панель подписывает себя именем программы.
+fn spawn_title_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last: std::collections::HashMap<String, String> = Default::default();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let procs = app.state::<PtyManager>().foreground_processes();
+            if procs.is_empty() {
+                last.clear();
+                continue;
+            }
+            let pids: Vec<i32> = procs.iter().map(|(_, pid)| *pid).collect();
+            let names = process_names(&pids);
+            last.retain(|id, _| procs.iter().any(|(pid_id, _)| pid_id == id));
+            for (id, pid) in &procs {
+                let Some(name) = names.get(pid) else { continue };
+                if last.get(id) != Some(name) {
+                    last.insert(id.clone(), name.clone());
+                    let _ = app.emit(
+                        "pty-title",
+                        PtyTitlePayload {
+                            id: id.clone(),
+                            title: name.clone(),
+                        },
+                    );
+                }
+            }
+        }
+    });
+}
+
 #[tauri::command]
 fn pty_create(
     app: tauri::AppHandle,
@@ -105,6 +184,10 @@ pub fn run() {
 
     builder
         .manage(PtyManager::default())
+        .setup(|app| {
+            spawn_title_watcher(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pty_create, pty_write, pty_resize, pty_kill
         ])

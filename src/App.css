@@ -288,7 +288,7 @@ body {
   align-items: center;
   gap: 7px;
   height: 100%;
-  padding: 0 4px 0 10px;
+  padding: 0 10px;
   max-width: 220px;
 }
 
@@ -323,31 +323,6 @@ body {
   font: inherit;
   padding: 2px 6px;
   outline: none;
-}
-
-.tab-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--mc-text-faint);
-  cursor: pointer;
-  opacity: 0;
-}
-
-.terminal-tab:hover .tab-close,
-.dv-tab.dv-active-tab .tab-close {
-  opacity: 1;
-}
-
-.tab-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--mc-text-bright);
 }
 
 /* Кнопки группы не шумят: проявляются при наведении на группу */

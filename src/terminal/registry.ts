@@ -48,6 +48,8 @@ export type TerminalEntry = {
   spawned: boolean;
   exited: boolean;
   resizeTimer: number | undefined;
+  // Панель переименована руками — автоимя от процесса больше не трогаем.
+  manualTitle: boolean;
 };
 
 const registry = new Map<string, TerminalEntry>();
@@ -114,9 +116,21 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     spawned: false,
     exited: false,
     resizeTimer: undefined,
+    manualTitle: false,
   };
   registry.set(id, entry);
   return entry;
+}
+
+export function markManualTitle(id: string): void {
+  const entry = registry.get(id);
+  if (entry) {
+    entry.manualTitle = true;
+  }
+}
+
+export function isManualTitle(id: string): boolean {
+  return registry.get(id)?.manualTitle ?? false;
 }
 
 export async function ensureSpawned(entry: TerminalEntry): Promise<void> {
