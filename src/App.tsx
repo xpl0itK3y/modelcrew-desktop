@@ -9,6 +9,7 @@ import {
   IWatermarkPanelProps,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TerminalPanel } from "./panels/TerminalPanel";
@@ -392,7 +393,21 @@ export default function App() {
       if (typeof picked !== "string") {
         return; // отменил выбор — воркспейс не создаём
       }
-      folder = picked;
+      try {
+        folder = await invoke<string>("canonicalize_dir", { path: picked });
+      } catch (error) {
+        showToast(String(error));
+        return;
+      }
+      // Одна canonical-папка — один воркспейс.
+      const existing = workspacesRef.current.list.find(
+        (workspace) => workspace.folder === folder,
+      );
+      if (existing) {
+        showToast(`Папка уже открыта в «${existing.name}»`);
+        selectWorkspace(existing.id);
+        return;
+      }
     }
     const baseName =
       folder?.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || null;
@@ -410,7 +425,7 @@ export default function App() {
       loadWorkspace(fresh);
       return workspacesRef.current;
     });
-  }, [loadWorkspace, snapshotActive]);
+  }, [loadWorkspace, snapshotActive, selectWorkspace, showToast]);
 
   const renameWorkspace = useCallback((id: string, name: string) => {
     setWorkspaces((prev) => ({

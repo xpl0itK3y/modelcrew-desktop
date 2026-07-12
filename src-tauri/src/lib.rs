@@ -141,6 +141,18 @@ fn pty_kill(state: tauri::State<'_, PtyManager>, id: String) -> Result<(), Strin
     state.kill(&id)
 }
 
+/// Канонический путь папки (симлинки, регистр APFS): инвариант
+/// «одна canonical-папка — один воркспейс» сравнивает именно его.
+#[tauri::command]
+fn canonicalize_dir(path: String) -> Result<String, String> {
+    let canonical =
+        std::fs::canonicalize(&path).map_err(|e| format!("папка недоступна: {e}"))?;
+    if !canonical.is_dir() {
+        return Err(format!("не папка: {path}"));
+    }
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -191,7 +203,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            pty_create, pty_write, pty_resize, pty_kill
+            pty_create,
+            pty_write,
+            pty_resize,
+            pty_kill,
+            canonicalize_dir
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
