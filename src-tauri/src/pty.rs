@@ -395,16 +395,22 @@ mod tests {
         loop {
             assert!(Instant::now() < deadline, "50 МБ не дошли за 60 секунд");
             let Ok(chunk) = out_rx.recv_timeout(Duration::from_secs(5)) else {
-                panic!("поток вывода заглох (получено {total} байт)");
+                panic!(
+                    "поток вывода заглох (получено {total} байт), хвост: {:?}",
+                    String::from_utf8_lossy(&tail)
+                );
             };
             total += chunk.len();
             chunks += 1;
+            // Проверяем на склейке «хвост + чанк» ДО усечения: иначе маркер,
+            // за которым в том же чанке пришёл длинный промпт, вытесняется
+            // из окна раньше, чем мы его увидим.
             tail.extend_from_slice(&chunk);
-            let keep = tail.len().min(64);
-            tail = tail.split_off(tail.len() - keep);
             if String::from_utf8_lossy(&tail).contains("STRESS_1337") {
                 break;
             }
+            let keep = tail.len().min(64);
+            tail = tail.split_off(tail.len() - keep);
         }
 
         assert!(total >= PAYLOAD, "дошло только {total} байт");
