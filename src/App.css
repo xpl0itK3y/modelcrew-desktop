@@ -435,9 +435,10 @@ body {
   border-radius: 50%;
 }
 
+/* Живой терминал светится акцентным цветом из настроек, не зелёным. */
 .tab-dot.is-running {
-  background: var(--mc-green);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--mc-green) 60%, transparent);
+  background: var(--mc-accent);
+  box-shadow: 0 0 6px var(--mc-accent-glow);
 }
 
 .tab-dot.is-exited {
