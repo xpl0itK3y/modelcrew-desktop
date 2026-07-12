@@ -58,6 +58,14 @@ export function TerminalGlyphIcon(props: IconProps) {
   );
 }
 
+export function FolderIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M1.75 4.5c0-.55.45-1 1-1h3.2l1.3 1.5h6c.55 0 1 .45 1 1v6c0 .55-.45 1-1 1h-10.5c-.55 0-1-.45-1-1v-7.5Z" />
+    </svg>
+  );
+}
+
 export function SidebarIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

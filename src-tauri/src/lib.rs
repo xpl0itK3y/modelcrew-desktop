@@ -1,9 +1,12 @@
 mod pty;
+mod workspace_roots;
 
 use pty::{PtyManager, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Emitter, Manager, RunEvent};
+use tauri_plugin_dialog::DialogExt;
+use workspace_roots::{BindOutcome, WorkspaceRootBinding, WorkspaceRoots};
 
 #[derive(Clone, Serialize)]
 struct PtyExitPayload {
@@ -15,6 +18,40 @@ struct PtyExitPayload {
 struct PtyTitlePayload {
     id: String,
     title: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum WorkspaceRootResult {
+    Cancelled,
+    Bound { workspace_id: String, path: String },
+    AlreadyOpen { workspace_id: String, path: String },
+}
+
+impl From<BindOutcome> for WorkspaceRootResult {
+    fn from(outcome: BindOutcome) -> Self {
+        let (already_open, WorkspaceRootBinding { workspace_id, path }) = match outcome {
+            BindOutcome::Bound(binding) => (false, binding),
+            BindOutcome::AlreadyOpen(binding) => (true, binding),
+        };
+        if already_open {
+            Self::AlreadyOpen { workspace_id, path }
+        } else {
+            Self::Bound { workspace_id, path }
+        }
+    }
+}
+
+fn ensure_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("эта команда доступна только главному окну".into())
+    }
 }
 
 /// Имена процессов по PID одним вызовом ps (macOS/Linux).
@@ -77,7 +114,8 @@ fn spawn_title_watcher(app: tauri::AppHandle) {
                 let Some(name) = names.get(pid) else { continue };
                 if last.get(id) != Some(name) {
                     last.insert(id.clone(), name.clone());
-                    let _ = app.emit(
+                    let _ = app.emit_to(
+                        "main",
                         "pty-title",
                         PtyTitlePayload {
                             id: id.clone(),
@@ -92,21 +130,24 @@ fn spawn_title_watcher(app: tauri::AppHandle) {
 
 #[tauri::command]
 fn pty_create(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyManager>,
+    roots: tauri::State<'_, WorkspaceRoots>,
     id: String,
-    shell: Option<String>,
-    cwd: Option<String>,
+    workspace_id: String,
     cols: u16,
     rows: u16,
     on_output: Channel<InvokeResponseBody>,
 ) -> Result<(), String> {
+    ensure_main_window(&window)?;
+    let cwd = roots.resolve(&workspace_id)?;
     let exit_app = app.clone();
     let exit_id = id.clone();
     state.spawn(
         SpawnOptions {
             id,
-            shell,
+            shell: None,
             cwd,
             cols,
             rows,
@@ -116,41 +157,116 @@ fn pty_create(
         },
         move |code| {
             exit_app.state::<PtyManager>().remove(&exit_id);
-            let _ = exit_app.emit("pty-exit", PtyExitPayload { id: exit_id, code });
+            let _ = exit_app.emit_to(
+                "main",
+                "pty-exit",
+                PtyExitPayload { id: exit_id, code },
+            );
         },
     )
 }
 
 #[tauri::command]
-fn pty_write(state: tauri::State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
+fn pty_write(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, PtyManager>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    ensure_main_window(&window)?;
     state.write(&id, data.as_bytes())
 }
 
 #[tauri::command]
 fn pty_resize(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, PtyManager>,
     id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    ensure_main_window(&window)?;
     state.resize(&id, cols, rows)
 }
 
 #[tauri::command]
-fn pty_kill(state: tauri::State<'_, PtyManager>, id: String) -> Result<(), String> {
+fn pty_kill(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, PtyManager>,
+    id: String,
+) -> Result<(), String> {
+    ensure_main_window(&window)?;
     state.kill(&id)
 }
 
-/// Канонический путь папки (симлинки, регистр APFS): инвариант
-/// «одна canonical-папка — один воркспейс» сравнивает именно его.
 #[tauri::command]
-fn canonicalize_dir(path: String) -> Result<String, String> {
-    let canonical =
-        std::fs::canonicalize(&path).map_err(|e| format!("папка недоступна: {e}"))?;
-    if !canonical.is_dir() {
-        return Err(format!("не папка: {path}"));
-    }
-    Ok(canonical.to_string_lossy().into_owned())
+fn workspace_register_root(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> Result<WorkspaceRootResult, String> {
+    ensure_main_window(&window)?;
+    state
+        .bind(&workspace_id, std::path::Path::new(&path))
+        .map(Into::into)
+}
+
+#[tauri::command]
+fn workspace_reconcile_roots(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, WorkspaceRoots>,
+    workspace_ids: Vec<String>,
+) -> Result<(), String> {
+    ensure_main_window(&window)?;
+    state.retain_only(&workspace_ids)
+}
+
+#[tauri::command]
+fn workspace_validate_root(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> Result<String, String> {
+    ensure_main_window(&window)?;
+    state.resolve(&workspace_id).and_then(|path| {
+        path.to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "путь проекта содержит неподдерживаемые символы".into())
+    })
+}
+
+#[tauri::command]
+async fn workspace_pick_root(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> Result<WorkspaceRootResult, String> {
+    ensure_main_window(&window)?;
+    let selected = window
+        .dialog()
+        .file()
+        .set_title("Папка проекта для воркспейса")
+        .blocking_pick_folder();
+    let Some(selected) = selected else {
+        return Ok(WorkspaceRootResult::Cancelled);
+    };
+    let path = selected
+        .into_path()
+        .map_err(|error| format!("не удалось прочитать выбранный путь: {error}"))?;
+    state
+        .bind_user_selected(&workspace_id, &path)
+        .map(Into::into)
+}
+
+#[tauri::command]
+fn workspace_unregister_root(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> Result<(), String> {
+    ensure_main_window(&window)?;
+    state.unbind(&workspace_id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -198,6 +314,7 @@ pub fn run() {
 
     builder
         .manage(PtyManager::default())
+        .manage(WorkspaceRoots::default())
         .setup(|app| {
             spawn_title_watcher(app.handle().clone());
             Ok(())
@@ -207,7 +324,11 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_kill,
-            canonicalize_dir
+            workspace_reconcile_roots,
+            workspace_register_root,
+            workspace_validate_root,
+            workspace_pick_root,
+            workspace_unregister_root
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -217,4 +338,22 @@ pub fn run() {
                 app.state::<PtyManager>().kill_all();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_root_result_uses_camel_case_ipc_fields() {
+        let value = serde_json::to_value(WorkspaceRootResult::Bound {
+            workspace_id: "workspace-1".into(),
+            path: "/tmp/project".into(),
+        })
+        .unwrap();
+
+        assert_eq!(value["status"], "bound");
+        assert_eq!(value["workspaceId"], "workspace-1");
+        assert!(value.get("workspace_id").is_none());
+    }
 }

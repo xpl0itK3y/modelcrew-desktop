@@ -1,6 +1,7 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -15,7 +16,7 @@ const READ_BUF_BYTES: usize = 8 * 1024;
 pub struct SpawnOptions {
     pub id: String,
     pub shell: Option<String>,
-    pub cwd: Option<String>,
+    pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
 }
@@ -66,15 +67,12 @@ impl PtyManager {
         cmd.arg("-l");
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        let cwd = opts.cwd.or_else(home_dir);
-        if let Some(cwd) = cwd {
-            // Папка воркспейса могла исчезнуть (переименована, флешка вынута):
-            // не запускаем процесс, отдаём внятную причину во фронт.
-            if !std::path::Path::new(&cwd).is_dir() {
-                return Err(format!("папка недоступна: {cwd}"));
-            }
-            cmd.cwd(cwd);
+        // cwd обязателен и уже разрешён backend-реестром по workspace_id.
+        // Повторная проверка закрывает гонку между resolve и spawn.
+        if !opts.cwd.is_dir() {
+            return Err(format!("папка недоступна: {}", opts.cwd.display()));
         }
+        cmd.cwd(&opts.cwd);
 
         let mut child = pty
             .slave
@@ -257,22 +255,15 @@ fn shell_exists(shell: &str) -> bool {
     })
 }
 
-fn home_dir() -> Option<String> {
-    #[cfg(windows)]
-    {
-        std::env::var("USERPROFILE").ok()
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var("HOME").ok()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
+
+    fn test_cwd() -> PathBuf {
+        std::env::current_dir().expect("тестам нужна текущая папка")
+    }
 
     fn wait_for_output(
         rx: &mpsc::Receiver<Vec<u8>>,
@@ -303,7 +294,7 @@ mod tests {
                 SpawnOptions {
                     id: "t1".into(),
                     shell: Some("/bin/sh".into()),
-                    cwd: None,
+                    cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
                 },
@@ -342,7 +333,7 @@ mod tests {
                 SpawnOptions {
                     id: "t2".into(),
                     shell: Some("/bin/sh".into()),
-                    cwd: None,
+                    cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
                 },
@@ -374,7 +365,7 @@ mod tests {
                 SpawnOptions {
                     id: "stress".into(),
                     shell: Some("/bin/sh".into()),
-                    cwd: None,
+                    cwd: test_cwd(),
                     cols: 120,
                     rows: 40,
                 },
@@ -443,7 +434,7 @@ mod tests {
                     SpawnOptions {
                         id: format!("s{index}"),
                         shell: Some("/bin/sh".into()),
-                        cwd: None,
+                        cwd: test_cwd(),
                         cols: 80,
                         rows: 24,
                     },
@@ -488,7 +479,7 @@ mod tests {
             SpawnOptions {
                 id: "cwd".into(),
                 shell: Some("/bin/sh".into()),
-                cwd: Some("/nonexistent/workspace/folder".into()),
+                cwd: PathBuf::from("/nonexistent/workspace/folder"),
                 cols: 80,
                 rows: 24,
             },
@@ -506,7 +497,7 @@ mod tests {
             SpawnOptions {
                 id: "t3".into(),
                 shell: Some("/nonexistent/shell".into()),
-                cwd: None,
+                cwd: test_cwd(),
                 cols: 80,
                 rows: 24,
             },

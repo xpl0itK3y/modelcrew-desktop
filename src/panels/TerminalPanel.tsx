@@ -9,7 +9,7 @@ import {
 export { destroyTerminal };
 
 export function TerminalPanel(
-  props: IDockviewPanelProps<{ cwd?: string | null }>,
+  props: IDockviewPanelProps<{ workspaceId?: string }>,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
@@ -22,9 +22,9 @@ export function TerminalPanel(
     const entry = getOrCreateTerminal(props.api.id);
     host.appendChild(entry.container);
     entry.fit.fit();
-    // Стартовый cwd зафиксирован в params панели при создании — он же
-    // используется при восстановлении раскладки после рестарта.
-    void ensureSpawned(entry, props.params?.cwd ?? null);
+    // Панель знает только владельца. Фактический cwd разрешает Rust-реестр,
+    // поэтому восстановленные панели одного воркспейса не могут разъехаться.
+    void ensureSpawned(entry, props.params?.workspaceId ?? "");
 
     // Появление нового терминала: fade + scale только при первом маунте,
     // переносы/свопы того же инстанса не мигают.

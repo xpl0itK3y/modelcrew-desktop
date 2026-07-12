@@ -10,7 +10,7 @@ export type WorkspaceItem = {
 
 type SidebarProps = {
   workspaces: WorkspaceItem[];
-  activeId: string;
+  activeId: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
@@ -90,19 +90,17 @@ export function Sidebar(props: SidebarProps) {
             {workspace.count > 0 && (
               <span className="workspace-badge">{workspace.count}</span>
             )}
-            {props.workspaces.length > 1 && (
-              <button
-                type="button"
-                className="workspace-delete"
-                title="Удалить воркспейс"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onDelete(workspace.id);
-                }}
-              >
-                <CloseIcon width={11} height={11} />
-              </button>
-            )}
+            <button
+              type="button"
+              className="workspace-delete"
+              title="Удалить воркспейс"
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onDelete(workspace.id);
+              }}
+            >
+              <CloseIcon width={11} height={11} />
+            </button>
           </li>
         ))}
       </ul>

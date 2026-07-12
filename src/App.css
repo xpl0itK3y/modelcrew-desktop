@@ -58,6 +58,13 @@ body {
   height: 100%;
 }
 
+.workspace-loading {
+  display: grid;
+  place-items: center;
+  color: var(--mc-text-faint);
+  font-size: 12px;
+}
+
 /* ---------- Титлбар ---------- */
 
 .titlebar {

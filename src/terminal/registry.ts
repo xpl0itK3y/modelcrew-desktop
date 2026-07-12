@@ -151,12 +151,20 @@ export function getAutoTitle(id: string): string | undefined {
 
 export async function ensureSpawned(
   entry: TerminalEntry,
-  cwd: string | null = null,
+  workspaceId: string,
 ): Promise<void> {
   if (entry.spawned) {
     return;
   }
   entry.spawned = true;
+
+  if (!workspaceId) {
+    markExited(entry);
+    entry.term.write(
+      "\x1b[31mНе удалось запустить шелл: панель не связана с воркспейсом\x1b[0m\r\n",
+    );
+    return;
+  }
 
   if (!isTauri) {
     markExited(entry);
@@ -195,8 +203,7 @@ export async function ensureSpawned(
   try {
     await invoke("pty_create", {
       id: entry.id,
-      shell: null,
-      cwd,
+      workspaceId,
       cols: entry.term.cols,
       rows: entry.term.rows,
       onOutput: output,

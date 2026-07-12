@@ -11,7 +11,6 @@ import {
 import "dockview/dist/styles/dockview.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
 import {
@@ -24,7 +23,13 @@ import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Settings } from "./ui/Settings";
-import { CloseIcon, MaximizeIcon, PlusIcon, SplitIcon } from "./ui/Icons";
+import {
+  CloseIcon,
+  FolderIcon,
+  MaximizeIcon,
+  PlusIcon,
+  SplitIcon,
+} from "./ui/Icons";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { useCmdDrag } from "./hotkeys/useCmdDrag";
@@ -45,6 +50,12 @@ import "./App.css";
 
 const components = { terminal: TerminalPanel };
 const tabComponents = { terminal: TerminalTab };
+const isTauri = "__TAURI_INTERNALS__" in window;
+
+type WorkspaceRootResult =
+  | { status: "cancelled" }
+  | { status: "bound"; workspaceId: string; path: string }
+  | { status: "alreadyOpen"; workspaceId: string; path: string };
 
 const modelcrewTheme: DockviewTheme = {
   name: "modelcrew",
@@ -58,6 +69,7 @@ const modelcrewTheme: DockviewTheme = {
 
 function addPanel(
   api: DockviewApi,
+  workspaceId: string,
   options: {
     group?: DockviewGroupPanel;
     direction?: "left" | "right" | "above" | "below";
@@ -70,9 +82,8 @@ function addPanel(
     // Placeholder до первого тика вотчера, который подпишет панель
     // именем процесса (zsh, codex, vim, …).
     title: "терминал",
-    // Стартовый cwd — папка активного воркспейса; фиксируется в params,
-    // чтобы восстановление после рестарта подняло шелл там же.
-    params: { cwd: appActions.getActiveFolder() },
+    // В layout сохраняется только владелец панели. cwd разрешает Rust.
+    params: { workspaceId },
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
     ...(options.group
@@ -89,10 +100,14 @@ function addPanel(
 // Новый терминал встаёт в сетку: делим самую большую группу вдоль её
 // длинной стороны. Вкладок нет — один терминал = одна панель, поэтому
 // при упоре в минимумы 240×160 новый терминал не создаём вовсе.
-function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
+function addTerminalAutoGrid(
+  api: DockviewApi,
+  workspaceId: string,
+  onNoSpace?: () => void,
+) {
   const groups = api.groups;
   if (groups.length === 0) {
-    addPanel(api);
+    addPanel(api, workspaceId);
     return;
   }
   let target = groups[0];
@@ -115,7 +130,7 @@ function addTerminalAutoGrid(api: DockviewApi, onNoSpace?: () => void) {
   }
   // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
   const before = snapshotGroupRects(api);
-  addPanel(api, { group: target, direction });
+  addPanel(api, workspaceId, { group: target, direction });
   flipGroups(api, before, 200);
 }
 
@@ -127,8 +142,12 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
         className="icon-button"
         title="Сплит вправо"
         onClick={() => {
+          const workspaceId = appActions.getActiveWorkspaceId();
+          if (!workspaceId) {
+            return;
+          }
           const before = snapshotGroupRects(props.containerApi);
-          addPanel(props.containerApi, {
+          addPanel(props.containerApi, workspaceId, {
             group: props.group,
             direction: "right",
           });
@@ -164,6 +183,31 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
 }
 
 function Welcome(props: IWatermarkPanelProps) {
+  // Первый запуск (воркспейса нет) — онбординг через выбор папки проекта.
+  if (!appActions.hasActiveWorkspace()) {
+    return (
+      <div className="welcome">
+        <div className="welcome-badge">MODELCREW</div>
+        <h1 className="welcome-title">Собери свою команду.</h1>
+        <p className="welcome-subtitle">
+          Выбери папку проекта — в ней будут жить терминалы воркспейса.
+        </p>
+        <button
+          type="button"
+          className="welcome-button"
+          onClick={() => appActions.requestCreateWorkspace()}
+        >
+          <FolderIcon /> Открыть папку проекта
+        </button>
+        <div className="welcome-hints">
+          <span>
+            <kbd>⌘T</kbd> тоже откроет выбор папки
+          </span>
+        </div>
+      </div>
+    );
+  }
+  // Воркспейс есть, но все терминалы закрыты.
   return (
     <div className="welcome">
       <div className="welcome-badge">MODELCREW</div>
@@ -172,7 +216,12 @@ function Welcome(props: IWatermarkPanelProps) {
       <button
         type="button"
         className="welcome-button"
-        onClick={() => addTerminalAutoGrid(props.containerApi)}
+        onClick={() => {
+          const workspaceId = appActions.getActiveWorkspaceId();
+          if (workspaceId) {
+            addTerminalAutoGrid(props.containerApi, workspaceId);
+          }
+        }}
       >
         <PlusIcon /> Новый терминал
       </button>
@@ -205,19 +254,16 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accent, setAccent] = useState(loadAccent);
   const [workspaces, setWorkspaces] = useState<WorkspacesState>(() => {
-    const saved = loadWorkspacesState();
-    if (saved) {
-      return saved;
-    }
-    const first: Workspace = {
-      id: crypto.randomUUID(),
-      name: WORKSPACE_NAME,
-      folder: null,
-      layout: null,
-      count: 0,
-    };
-    return { list: [first], activeId: first.id };
+    // Первый запуск — без воркспейсов: пользователь начинает с выбора
+    // папки проекта на welcome-экране.
+    return loadWorkspacesState() ?? { list: [], activeId: null };
   });
+  // Dockview не монтируется, пока Rust не зарегистрировал корни: иначе
+  // восстановленные панели успеют запросить PTY раньше workspace roots.
+  const [rootRegistryReady, setRootRegistryReady] = useState(!isTauri);
+  const [rootErrors, setRootErrors] = useState<Record<string, string>>({});
+  const rootErrorsRef = useRef(rootErrors);
+  rootErrorsRef.current = rootErrors;
   const [deleteWorkspaceRequest, setDeleteWorkspaceRequest] =
     useState<Workspace | null>(null);
   const workspacesRef = useRef(workspaces);
@@ -267,6 +313,92 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!isTauri) {
+      return;
+    }
+    let cancelled = false;
+    const initial = workspacesRef.current.list;
+    void (async () => {
+      try {
+        await invoke("workspace_reconcile_roots", {
+          workspaceIds: initial.map((workspace) => workspace.id),
+        });
+      } catch (error) {
+        if (!cancelled) {
+          showToast(`Не удалось синхронизировать папки: ${String(error)}`);
+        }
+      }
+
+      const results = await Promise.all(
+        initial.map(async (workspace) => {
+          if (!workspace.folder) {
+            return {
+              id: workspace.id,
+              error: "Выберите папку проекта заново",
+            };
+          }
+          try {
+            const result = await invoke<WorkspaceRootResult>(
+              "workspace_register_root",
+              { workspaceId: workspace.id, path: workspace.folder },
+            );
+            if (result.status === "bound") {
+              return { id: workspace.id, path: result.path };
+            }
+            if (result.status === "alreadyOpen") {
+              return {
+                id: workspace.id,
+                error: `Папка уже принадлежит воркспейсу ${result.workspaceId}`,
+              };
+            }
+            return { id: workspace.id, error: "Папка проекта не выбрана" };
+          } catch (error) {
+            return { id: workspace.id, error: String(error) };
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      const canonicalPaths = new Map(
+        results
+          .filter(
+            (result): result is { id: string; path: string } =>
+              "path" in result,
+          )
+          .map((result) => [result.id, result.path]),
+      );
+      const errors = Object.fromEntries(
+        results
+          .filter(
+            (result): result is { id: string; error: string } =>
+              "error" in result,
+          )
+          .map((result) => [result.id, result.error]),
+      );
+      setWorkspaces((previous) => {
+        const next = {
+          ...previous,
+          list: previous.list.map((workspace) => ({
+            ...workspace,
+            folder: canonicalPaths.get(workspace.id) ?? workspace.folder,
+          })),
+        };
+        workspacesRef.current = next;
+        return next;
+      });
+      rootErrorsRef.current = errors;
+      setRootErrors(errors);
+      setRootRegistryReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Регистрация нужна один раз до первого mount Dockview. Новые корни
+    // добавляет атомарная backend-команда workspace_pick_root.
+  }, [showToast]);
+
+  useEffect(() => {
     return () => {
       if (toastTimer.current !== undefined) {
         window.clearTimeout(toastTimer.current);
@@ -275,12 +407,42 @@ export default function App() {
   }, []);
 
   const newTerminal = useCallback(() => {
-    if (apiRef.current) {
-      addTerminalAutoGrid(apiRef.current, () =>
-        showToast("Нет места для сплита — открыл вкладкой"),
-      );
+    // Терминалы живут только в воркспейсе: без него сначала выбор папки.
+    const { list, activeId } = workspacesRef.current;
+    const active = list.find((workspace) => workspace.id === activeId);
+    if (!active || !active.folder || rootErrorsRef.current[active.id]) {
+      appActions.requestCreateWorkspace();
+      return;
     }
-  }, [showToast]);
+    if (!rootRegistryReady) {
+      showToast("Папка проекта ещё проверяется");
+      return;
+    }
+    const addToGrid = () => {
+      if (!apiRef.current) {
+        return;
+      }
+      addTerminalAutoGrid(apiRef.current, active.id, () =>
+        showToast("Нет места для сплита"),
+      );
+    };
+    if (!isTauri) {
+      addToGrid();
+      return;
+    }
+    void invoke("workspace_validate_root", { workspaceId: active.id })
+      .then(addToGrid)
+      .catch((error) => {
+        const nextErrors = {
+          ...rootErrorsRef.current,
+          [active.id]: String(error),
+        };
+        rootErrorsRef.current = nextErrors;
+        setRootErrors(nextErrors);
+        showToast(String(error));
+        appActions.requestCreateWorkspace();
+      });
+  }, [rootRegistryReady, showToast]);
 
   const badges = useHotkeys({
     getApi: () => apiRef.current,
@@ -295,19 +457,6 @@ export default function App() {
     suppressCleanupRef,
   });
 
-  useEffect(() => {
-    appActions.requestCloseGroup = setCloseGroupRequest;
-    appActions.getActiveFolder = () => {
-      const { list, activeId } = workspacesRef.current;
-      return (
-        list.find((workspace) => workspace.id === activeId)?.folder ?? null
-      );
-    };
-    return () => {
-      appActions.requestCloseGroup = () => {};
-      appActions.getActiveFolder = () => null;
-    };
-  }, []);
 
   // Панели скрытых воркспейсов не получают pty-title: доводим имена из кэша.
   const applyAutoTitles = useCallback((api: DockviewApi) => {
@@ -321,7 +470,7 @@ export default function App() {
 
   // Снимок активного воркспейса перед уходом с него.
   const snapshotActive = useCallback(
-    (list: Workspace[], activeId: string): Workspace[] => {
+    (list: Workspace[], activeId: string | null): Workspace[] => {
       const api = apiRef.current;
       if (!api) {
         return list;
@@ -343,7 +492,11 @@ export default function App() {
       }
       suppressCleanupRef.current = true;
       try {
-        if (workspace.layout) {
+        if (
+          workspace.folder &&
+          !rootErrorsRef.current[workspace.id] &&
+          workspace.layout
+        ) {
           api.fromJSON(workspace.layout);
         } else {
           api.closeAllGroups();
@@ -351,8 +504,12 @@ export default function App() {
       } finally {
         suppressCleanupRef.current = false;
       }
-      if (!workspace.layout) {
-        addPanel(api);
+      if (
+        workspace.folder &&
+        !rootErrorsRef.current[workspace.id] &&
+        !workspace.layout
+      ) {
+        addPanel(api, workspace.id);
       }
       applyAutoTitles(api);
       setTerminalCount(api.panels.length);
@@ -382,50 +539,109 @@ export default function App() {
   );
 
   const createWorkspace = useCallback(async () => {
-    // Воркспейс = папка проекта: создание начинается с её выбора.
-    let folder: string | null = null;
-    if ("__TAURI_INTERNALS__" in window) {
-      const picked = await openFolderDialog({
-        directory: true,
-        multiple: false,
-        title: "Папка проекта для воркспейса",
+    if (!isTauri) {
+      showToast("Выбор папки доступен в приложении ModelCrew");
+      return;
+    }
+    const current = workspacesRef.current;
+    try {
+      await invoke("workspace_reconcile_roots", {
+        workspaceIds: current.list.map((workspace) => workspace.id),
       });
-      if (typeof picked !== "string") {
-        return; // отменил выбор — воркспейс не создаём
-      }
-      try {
-        folder = await invoke<string>("canonicalize_dir", { path: picked });
-      } catch (error) {
-        showToast(String(error));
-        return;
-      }
-      // Одна canonical-папка — один воркспейс.
+    } catch (error) {
+      showToast(`Не удалось подготовить папки: ${String(error)}`);
+      return;
+    }
+    const active = current.list.find(
+      (workspace) => workspace.id === current.activeId,
+    );
+    // Старый workspace без папки или с исчезнувшей папкой переиспользуем:
+    // его id и layout сохраняются, меняется только backend-привязка.
+    const relinking =
+      active && (!active.folder || rootErrorsRef.current[active.id])
+        ? active
+        : null;
+    const workspaceId = relinking?.id ?? crypto.randomUUID();
+
+    let result: WorkspaceRootResult;
+    try {
+      result = await invoke<WorkspaceRootResult>("workspace_pick_root", {
+        workspaceId,
+      });
+    } catch (error) {
+      showToast(String(error));
+      return;
+    }
+    if (result.status === "cancelled") {
+      return;
+    }
+    if (result.status === "alreadyOpen") {
       const existing = workspacesRef.current.list.find(
-        (workspace) => workspace.folder === folder,
+        (workspace) => workspace.id === result.workspaceId,
       );
       if (existing) {
         showToast(`Папка уже открыта в «${existing.name}»`);
         selectWorkspace(existing.id);
-        return;
+      } else {
+        showToast("Папка уже зарегистрирована другим воркспейсом");
       }
+      return;
     }
+    if (result.workspaceId !== workspaceId) {
+      showToast("Backend вернул чужой идентификатор воркспейса");
+      return;
+    }
+
+    const folder = result.path;
     const baseName =
-      folder?.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || null;
+      folder.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "workspace";
+    const nextErrors = { ...rootErrorsRef.current };
+    delete nextErrors[workspaceId];
+    rootErrorsRef.current = nextErrors;
+    setRootErrors(nextErrors);
+
     setWorkspaces((prev) => {
-      const fresh: Workspace = {
-        id: crypto.randomUUID(),
-        name: baseName ?? `workspace ${prev.list.length + 1}`,
-        folder,
-        layout: null,
-        count: 0,
-      };
-      const list = snapshotActive(prev.list, prev.activeId);
-      // Папка должна быть видна addPanel уже при создании первого терминала.
-      workspacesRef.current = { list: [...list, fresh], activeId: fresh.id };
+      const existing = prev.list.find((workspace) => workspace.id === workspaceId);
+      const fresh: Workspace = existing
+        ? { ...existing, folder }
+        : {
+            id: workspaceId,
+            name: baseName,
+            folder,
+            layout: null,
+            count: 0,
+          };
+      const list = existing
+        ? prev.list.map((workspace) =>
+            workspace.id === workspaceId ? fresh : workspace,
+          )
+        : [...snapshotActive(prev.list, prev.activeId), fresh];
+      workspacesRef.current = { list, activeId: fresh.id };
       loadWorkspace(fresh);
       return workspacesRef.current;
     });
   }, [loadWorkspace, snapshotActive, selectWorkspace, showToast]);
+
+  useEffect(() => {
+    appActions.requestCloseGroup = setCloseGroupRequest;
+    appActions.getActiveWorkspaceId = () => workspacesRef.current.activeId;
+    appActions.hasActiveWorkspace = () => {
+      const { list, activeId } = workspacesRef.current;
+      const active = list.find((workspace) => workspace.id === activeId);
+      return Boolean(
+        active?.folder && activeId && !rootErrorsRef.current[activeId],
+      );
+    };
+    appActions.requestCreateWorkspace = () => {
+      void createWorkspace();
+    };
+    return () => {
+      appActions.requestCloseGroup = () => {};
+      appActions.getActiveWorkspaceId = () => null;
+      appActions.hasActiveWorkspace = () => false;
+      appActions.requestCreateWorkspace = () => {};
+    };
+  }, [createWorkspace]);
 
   const renameWorkspace = useCallback((id: string, name: string) => {
     setWorkspaces((prev) => ({
@@ -451,15 +667,27 @@ export default function App() {
   // Удаление воркспейса: все его терминалы убиваются.
   const deleteWorkspace = useCallback(
     (workspace: Workspace) => {
+      if (isTauri) {
+        void invoke("workspace_unregister_root", {
+          workspaceId: workspace.id,
+        }).catch((error) => showToast(String(error)));
+      }
+      const nextErrors = { ...rootErrorsRef.current };
+      delete nextErrors[workspace.id];
+      rootErrorsRef.current = nextErrors;
+      setRootErrors(nextErrors);
       setWorkspaces((prev) => {
         const remaining = prev.list.filter((item) => item.id !== workspace.id);
-        if (remaining.length === 0) {
-          return prev;
-        }
         if (workspace.id === prev.activeId) {
           const api = apiRef.current;
           // Закрываем без подавления — PTY этих панелей должны умереть.
           api?.closeAllGroups();
+          // Последний воркспейс удалён — возврат к онбордингу.
+          if (remaining.length === 0) {
+            workspacesRef.current = { list: [], activeId: null };
+            setTerminalCount(0);
+            return workspacesRef.current;
+          }
           const next = remaining[0];
           workspacesRef.current = { list: remaining, activeId: next.id };
           loadWorkspace(next);
@@ -471,7 +699,7 @@ export default function App() {
         return { list: remaining, activeId: prev.activeId };
       });
     },
-    [loadWorkspace],
+    [loadWorkspace, showToast],
   );
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
@@ -510,17 +738,18 @@ export default function App() {
       }).catch(() => {});
     }
     // Восстановление раскладки прошлого запуска; шеллы поднимутся свежие.
+    // Без воркспейса терминалы не создаём — welcome ведёт через выбор папки.
     const { list, activeId } = workspacesRef.current;
     const active = list.find((workspace) => workspace.id === activeId);
-    if (active?.layout) {
+    if (active?.folder && !rootErrorsRef.current[active.id] && active.layout) {
       try {
         event.api.fromJSON(active.layout);
       } catch {
-        addPanel(event.api);
+        addPanel(event.api, active.id);
       }
       setTerminalCount(event.api.panels.length);
-    } else {
-      addPanel(event.api);
+    } else if (active?.folder && !rootErrorsRef.current[active.id]) {
+      addPanel(event.api, active.id);
     }
     event.api.onDidLayoutChange(() => {
       schedulePersist();
@@ -569,14 +798,18 @@ export default function App() {
           />
         </div>
         <main className="dock-area">
-          <DockviewReact
-            components={components}
-            tabComponents={tabComponents}
-            watermarkComponent={Welcome}
-            rightHeaderActionsComponent={GroupActions}
-            onReady={onReady}
-            theme={modelcrewTheme}
-          />
+          {rootRegistryReady ? (
+            <DockviewReact
+              components={components}
+              tabComponents={tabComponents}
+              watermarkComponent={Welcome}
+              rightHeaderActionsComponent={GroupActions}
+              onReady={onReady}
+              theme={modelcrewTheme}
+            />
+          ) : (
+            <div className="workspace-loading">Проверяем папки проектов…</div>
+          )}
         </main>
       </div>
       {toast && <div className="toast">{toast}</div>}

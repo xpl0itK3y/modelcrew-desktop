@@ -7,8 +7,9 @@ import { SerializedDockview } from "dockview";
 export type Workspace = {
   id: string;
   name: string;
-  // Папка проекта: единственный источник стартового cwd терминалов.
-  // null — воркспейс без привязки, шеллы стартуют в домашней папке.
+  // Канонический путь нужен UI и восстановлению backend-связи. Сам PTY
+  // никогда не доверяет этому полю и разрешает cwd только по workspaceId.
+  // null — старый/непривязанный воркспейс; терминал для него не запускается.
   folder: string | null;
   layout: SerializedDockview | null;
   count: number;
@@ -16,12 +17,33 @@ export type Workspace = {
 
 export type WorkspacesState = {
   list: Workspace[];
-  activeId: string;
+  // null — воркспейсов нет (первый запуск / все удалены).
+  activeId: string | null;
 };
 
 type PersistedState = WorkspacesState & { version: 1 };
 
 const STORAGE_KEY = "modelcrew.workspaces";
+
+export function bindLayoutToWorkspace(
+  layout: SerializedDockview | null,
+  workspaceId: string,
+): SerializedDockview | null {
+  if (!layout) {
+    return null;
+  }
+  return {
+    ...layout,
+    panels: Object.fromEntries(
+      Object.entries(layout.panels).map(([panelId, panel]) => {
+        const params = { ...(panel.params ?? {}) };
+        // v1 некоторое время сохраняла raw cwd в params панели.
+        delete params.cwd;
+        return [panelId, { ...panel, params: { ...params, workspaceId } }];
+      }),
+    ),
+  };
+}
 
 export function loadWorkspacesState(): WorkspacesState | null {
   try {
@@ -30,12 +52,13 @@ export function loadWorkspacesState(): WorkspacesState | null {
       return null;
     }
     const parsed = JSON.parse(raw) as PersistedState;
-    if (
-      parsed.version !== 1 ||
-      !Array.isArray(parsed.list) ||
-      parsed.list.length === 0 ||
-      !parsed.list.some((workspace) => workspace.id === parsed.activeId)
-    ) {
+    const hasValidActiveWorkspace =
+      Array.isArray(parsed.list) &&
+      (parsed.list.length === 0
+        ? parsed.activeId === null
+        : typeof parsed.activeId === "string" &&
+          parsed.list.some((workspace) => workspace.id === parsed.activeId));
+    if (parsed.version !== 1 || !hasValidActiveWorkspace) {
       return null;
     }
     return {
@@ -43,6 +66,7 @@ export function loadWorkspacesState(): WorkspacesState | null {
       list: parsed.list.map((workspace) => ({
         ...workspace,
         folder: workspace.folder ?? null,
+        layout: bindLayoutToWorkspace(workspace.layout ?? null, workspace.id),
       })),
       activeId: parsed.activeId,
     };
@@ -53,9 +77,16 @@ export function loadWorkspacesState(): WorkspacesState | null {
 
 export function saveWorkspacesState(state: WorkspacesState): void {
   try {
+    const normalized: WorkspacesState = {
+      ...state,
+      list: state.list.map((workspace) => ({
+        ...workspace,
+        layout: bindLayoutToWorkspace(workspace.layout, workspace.id),
+      })),
+    };
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ version: 1, ...state } satisfies PersistedState),
+      JSON.stringify({ version: 1, ...normalized } satisfies PersistedState),
     );
   } catch {
     // Нет localStorage — раскладка просто не переживёт рестарт.
