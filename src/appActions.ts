@@ -9,4 +9,8 @@ export const appActions = {
   hasActiveWorkspace: (): boolean => false,
   // Онбординг: создать воркспейс через выбор папки проекта.
   requestCreateWorkspace: (): void => {},
+  // Сетке некуда расти по месту — то же уведомление, что и у ⌘T.
+  notifyNoSpace: (): void => {},
+  // Достигнут жёсткий предел числа терминалов на воркспейс.
+  notifyLimit: (): void => {},
 };

@@ -16,6 +16,16 @@ import "@xterm/xterm/css/xterm.css";
 // «дёргании» разделителя дубли промпта копятся в буфере.
 const RESIZE_DEBOUNCE_MS = 250;
 
+// Плотная сетка → мелкий шрифт. Кегль подбираем от ширины ячейки под
+// целевое число колонок и зажимаем в читаемый диапазон: длинный промпт
+// перестаёт разворачиваться в лапшу на «максимально много» терминалов, а
+// на паре открытых терминалов текст, наоборот, крупнее.
+const MIN_FONT_PX = 12;
+const MAX_FONT_PX = 14;
+const TARGET_COLS = 50;
+// Шаг моноширинного глифа ≈ 0.6 кегля (SF Mono / JetBrains Mono).
+const CHAR_ADVANCE_RATIO = 0.6;
+
 // В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -112,6 +122,22 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   };
   registry.set(id, entry);
   return entry;
+}
+
+// Единая точка ресайза терминала: сначала подбираем кегль под текущую
+// ширину ячейки, затем пересчитываем cols/rows. Скрытый контейнер
+// (clientWidth 0) пропускаем — ResizeObserver позовёт снова с размерами.
+export function fitTerminal(entry: TerminalEntry): void {
+  const width = entry.container.clientWidth;
+  if (width <= 0) {
+    return;
+  }
+  const ideal = Math.round(width / (TARGET_COLS * CHAR_ADVANCE_RATIO));
+  const fontSize = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, ideal));
+  if (entry.term.options.fontSize !== fontSize) {
+    entry.term.options.fontSize = fontSize;
+  }
+  entry.fit.fit();
 }
 
 export function markManualTitle(id: string): void {

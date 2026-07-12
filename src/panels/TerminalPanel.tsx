@@ -3,6 +3,7 @@ import { IDockviewPanelProps } from "dockview";
 import {
   destroyTerminal,
   ensureSpawned,
+  fitTerminal,
   getOrCreateTerminal,
 } from "../terminal/registry";
 
@@ -21,7 +22,7 @@ export function TerminalPanel(
 
     const entry = getOrCreateTerminal(props.api.id);
     host.appendChild(entry.container);
-    entry.fit.fit();
+    fitTerminal(entry);
     // Панель знает только владельца. Фактический cwd разрешает Rust-реестр,
     // поэтому восстановленные панели одного воркспейса не могут разъехаться.
     void ensureSpawned(entry, props.params?.workspaceId ?? "");
@@ -40,7 +41,7 @@ export function TerminalPanel(
 
     const observer = new ResizeObserver(() => {
       if (entry.container.isConnected) {
-        entry.fit.fit();
+        fitTerminal(entry);
       }
     });
     observer.observe(host);

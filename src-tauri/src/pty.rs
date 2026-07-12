@@ -3,8 +3,9 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Вывод копится и уходит во фронт пачками: либо раз в BATCH_WINDOW,
@@ -26,11 +27,15 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    // Поколение сессии под этим id. Растёт при каждом spawn, чтобы
+    // exit-хендлер вытесненной сессии узнал, что его уже заменили.
+    epoch: u64,
 }
 
 #[derive(Default)]
 pub struct PtyManager {
-    sessions: Mutex<HashMap<String, PtySession>>,
+    sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+    epochs: AtomicU64,
 }
 
 impl PtyManager {
@@ -40,12 +45,12 @@ impl PtyManager {
         on_output: impl Fn(Vec<u8>) + Send + 'static,
         on_exit: impl FnOnce(Option<i32>) + Send + 'static,
     ) -> CommandResult<()> {
-        {
-            let sessions = self.sessions.lock().unwrap();
-            if sessions.contains_key(&opts.id) {
-                return Err(terminal_error(ErrorCode::TerminalAlreadyExists, &opts.id));
-            }
-        }
+        // Один id — один живой терминал. Reload webview поднимает фронт
+        // заново с теми же id, пока backend-процесс ещё жив: не конфликтуем,
+        // а заменяем прежнюю сессию свежей (сессии перезагрузку не переживают).
+        // Замену делаем ниже, после успешного spawn, чтобы неудачный запуск
+        // не оставил панель вообще без терминала.
+        let epoch = self.epochs.fetch_add(1, Ordering::Relaxed);
 
         let pty = native_pty_system()
             .openpty(PtySize {
@@ -95,14 +100,20 @@ impl PtyManager {
             terminal_error(ErrorCode::TerminalInputStreamFailed, &opts.id).with_debug(error)
         })?;
 
-        self.sessions.lock().unwrap().insert(
+        let previous = self.sessions.lock().unwrap().insert(
             opts.id.clone(),
             PtySession {
                 master: pty.master,
                 writer,
                 killer,
+                epoch,
             },
         );
+        // Свежая сессия уже в карте — гасим прежний процесс того же id.
+        // Его exit-хендлер увидит чужой epoch и промолчит (см. ниже).
+        if let Some(mut previous) = previous {
+            let _ = previous.killer.kill();
+        }
 
         let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
 
@@ -145,9 +156,27 @@ impl PtyManager {
             }
         });
 
+        let exit_sessions = Arc::clone(&self.sessions);
+        let exit_id = opts.id.clone();
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|status| status.exit_code() as i32);
-            on_exit(code);
+            // Молчим, только если нас вытеснила новая сессия того же id
+            // (reload). Своё завершение снимаем сами; при явном kill / kill_all
+            // сессии в карте уже нет — тогда тоже сообщаем.
+            let superseded = {
+                let mut sessions = exit_sessions.lock().unwrap();
+                match sessions.get(&exit_id) {
+                    Some(session) if session.epoch != epoch => true,
+                    Some(_) => {
+                        sessions.remove(&exit_id);
+                        false
+                    }
+                    None => false,
+                }
+            };
+            if !superseded {
+                on_exit(code);
+            }
         });
 
         Ok(())
@@ -190,11 +219,6 @@ impl PtyManager {
             }
             None => Err(terminal_error(ErrorCode::TerminalNotFound, id)),
         }
-    }
-
-    /// Уборка после самостоятельного завершения процесса.
-    pub fn remove(&self, id: &str) {
-        self.sessions.lock().unwrap().remove(id);
     }
 
     /// PID процесса переднего плана каждого живого терминала (для имён панелей).
@@ -360,6 +384,75 @@ mod tests {
             manager.write("t2", b"x").is_err(),
             "сессия должна быть снята"
         );
+    }
+
+    /// Reload webview: фронт поднимается заново с тем же id, пока прежний
+    /// процесс ещё жив. Повторный spawn обязан заменить сессию, а не упасть
+    /// с «терминал уже существует», и хендлер вытеснённой сессии не должен
+    /// «завершить» уже новый терминал.
+    #[test]
+    fn respawn_same_id_replaces_session() {
+        let manager = PtyManager::default();
+        let (stale_out_tx, _stale_out_rx) = mpsc::channel::<Vec<u8>>();
+        let (stale_exit_tx, stale_exit_rx) = mpsc::channel::<Option<i32>>();
+
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "r1".into(),
+                    shell: Some("/bin/sh".into()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                },
+                move |bytes| {
+                    let _ = stale_out_tx.send(bytes);
+                },
+                move |code| {
+                    let _ = stale_exit_tx.send(code);
+                },
+            )
+            .expect("первая сессия должна подняться");
+
+        let (fresh_out_tx, fresh_out_rx) = mpsc::channel::<Vec<u8>>();
+        let (fresh_exit_tx, fresh_exit_rx) = mpsc::channel::<Option<i32>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "r1".into(),
+                    shell: Some("/bin/sh".into()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                },
+                move |bytes| {
+                    let _ = fresh_out_tx.send(bytes);
+                },
+                move |code| {
+                    let _ = fresh_exit_tx.send(code);
+                },
+            )
+            .expect("повторный spawn того же id должен заменить сессию, а не упасть");
+
+        // Вытеснённая сессия завершилась (её убили), но во фронт это уходить
+        // не должно — иначе новый терминал сразу помечается «завершён».
+        assert!(
+            stale_exit_rx.recv_timeout(Duration::from_secs(3)).is_err(),
+            "exit вытесненной сессии не должен всплывать"
+        );
+
+        // Новая сессия — живая и отвечает своим каналом.
+        manager
+            .write("r1", b"echo AGAIN_$((1 + 1))\n")
+            .expect("запись в заменённую сессию");
+        wait_for_output(&fresh_out_rx, "AGAIN_2", Duration::from_secs(10))
+            .expect("ответ от новой сессии");
+
+        // Явный kill новой сессии по-прежнему сообщается во фронт.
+        manager.kill("r1").expect("kill заменённой сессии");
+        fresh_exit_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("новая сессия должна завершиться по kill");
     }
 
     /// Стресс приёмки: 50 МБ сплошного вывода не должны идти по байту —

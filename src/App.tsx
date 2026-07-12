@@ -64,6 +64,7 @@ import {
 } from "./i18n";
 import {
   isMac,
+  MAX_TERMINALS,
   PANEL_MIN_HEIGHT,
   PANEL_MIN_WIDTH,
   WORKSPACE_NAME,
@@ -161,8 +162,13 @@ function addPanel(
 function addTerminalAutoGrid(
   api: DockviewApi,
   workspaceId: string,
-  onNoSpace?: () => void,
+  onBlocked?: (reason: "limit" | "space") => void,
 ) {
+  // Жёсткий предел раньше пространственного: 12 терминалов на воркспейс.
+  if (api.panels.length >= MAX_TERMINALS) {
+    onBlocked?.("limit");
+    return;
+  }
   const groups = api.groups;
   if (groups.length === 0) {
     addPanel(api, workspaceId);
@@ -214,7 +220,7 @@ function addTerminalAutoGrid(
   } else if (newRowFits) {
     addPanel(api, workspaceId, { direction: "below" });
   } else {
-    onNoSpace?.();
+    onBlocked?.("space");
     return;
   }
   flipGroups(api, before, 200);
@@ -234,6 +240,17 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
         onClick={() => {
           const workspaceId = appActions.getActiveWorkspaceId();
           if (!workspaceId) {
+            return;
+          }
+          // Жёсткий предел числа терминалов — тот же, что и у ⌘T.
+          if (props.containerApi.panels.length >= MAX_TERMINALS) {
+            appActions.notifyLimit();
+            return;
+          }
+          // И пространственный: не дробим группу, если половинки станут уже
+          // минимума — иначе ⊞ плодит нечитаемые панели.
+          if (props.group.width < PANEL_MIN_WIDTH * 2) {
+            appActions.notifyNoSpace();
             return;
           }
           const before = snapshotGroupRects(props.containerApi);
@@ -585,8 +602,12 @@ export default function App() {
       if (!apiRef.current) {
         return;
       }
-      addTerminalAutoGrid(apiRef.current, active.id, () =>
-        showToast(translate("layout.noSplitSpace")),
+      addTerminalAutoGrid(apiRef.current, active.id, (reason) =>
+        showToast(
+          reason === "limit"
+            ? translate("layout.terminalLimit", { max: MAX_TERMINALS })
+            : translate("layout.noSplitSpace"),
+        ),
       );
     };
     if (!isTauri) {
@@ -827,13 +848,18 @@ export default function App() {
     appActions.requestCreateWorkspace = () => {
       void createWorkspace();
     };
+    appActions.notifyNoSpace = () => showToast(translate("layout.noSplitSpace"));
+    appActions.notifyLimit = () =>
+      showToast(translate("layout.terminalLimit", { max: MAX_TERMINALS }));
     return () => {
       appActions.requestCloseGroup = () => {};
       appActions.getActiveWorkspaceId = () => null;
       appActions.hasActiveWorkspace = () => false;
       appActions.requestCreateWorkspace = () => {};
+      appActions.notifyNoSpace = () => {};
+      appActions.notifyLimit = () => {};
     };
-  }, [createWorkspace]);
+  }, [createWorkspace, showToast]);
 
   const renameWorkspace = useCallback((id: string, name: string) => {
     setWorkspaces((prev) => ({

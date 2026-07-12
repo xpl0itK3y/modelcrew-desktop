@@ -108,27 +108,72 @@ fn process_names(pids: &[i32]) -> std::collections::HashMap<i32, String> {
         .collect::<Vec<_>>()
         .join(",");
     let Ok(output) = std::process::Command::new("ps")
-        .args(["-o", "pid=,comm=", "-p", &list])
+        .args(["-ww", "-o", "pid=,comm=,command=", "-p", &list])
         .output()
     else {
         return names;
     };
     for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let Some((pid_str, comm)) = line.trim().split_once(char::is_whitespace) else {
+        // Колонки: pid, comm (один токен), затем argv процесса.
+        let mut tokens = line.split_whitespace();
+        let (Some(pid_str), Some(comm)) = (tokens.next(), tokens.next()) else {
             continue;
         };
-        let Ok(pid) = pid_str.trim().parse::<i32>() else {
+        let Ok(pid) = pid_str.parse::<i32>() else {
             continue;
         };
-        let comm = comm.trim();
-        let name = comm.rsplit('/').next().unwrap_or(comm);
-        // Логин-шелл представляется как "-zsh".
-        let name = name.trim_start_matches('-');
+        let argv: Vec<&str> = tokens.collect();
+        let name = friendly_name(comm, &argv);
         if !name.is_empty() {
-            names.insert(pid, name.to_string());
+            names.insert(pid, name);
         }
     }
     names
+}
+
+/// Имя для подписи панели. Обычно это basename исполняемого файла, но для
+/// интерпретаторов (node/python/…) реальный инструмент прячется в argv:
+/// запущенный codex — это `node …/codex`, и без разбора аргументов панель
+/// подписалась бы «node». Достаём первый значимый токен argv.
+fn friendly_name(comm: &str, argv: &[&str]) -> String {
+    let comm_base = basename(comm).trim_start_matches('-');
+    if !is_interpreter(comm_base) {
+        return comm_base.to_string();
+    }
+    for arg in argv {
+        if arg.starts_with('-') {
+            continue; // флаг интерпретатора: -e, -m, --inspect …
+        }
+        let base = basename(arg).trim_start_matches('-');
+        if base.is_empty() || is_interpreter(base) {
+            continue; // сам путь к node/python — пропускаем
+        }
+        return strip_script_ext(base).to_string();
+    }
+    comm_base.to_string()
+}
+
+fn basename(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn is_interpreter(name: &str) -> bool {
+    matches!(
+        name,
+        "node" | "deno" | "bun" | "ruby" | "perl" | "php" | "python" | "python2" | "python3"
+    ) || name.starts_with("python2.")
+        || name.starts_with("python3.")
+}
+
+fn strip_script_ext(name: &str) -> &str {
+    for ext in [".js", ".mjs", ".cjs", ".ts", ".py", ".rb", ".pl", ".php"] {
+        if let Some(stem) = name.strip_suffix(ext) {
+            if !stem.is_empty() {
+                return stem;
+            }
+        }
+    }
+    name
 }
 
 #[cfg(not(unix))]
@@ -197,7 +242,8 @@ fn pty_create(
             let _ = on_output.send(InvokeResponseBody::Raw(bytes));
         },
         move |code| {
-            exit_app.state::<PtyManager>().remove(&exit_id);
+            // Снятие сессии из карты берёт на себя PtyManager (по epoch),
+            // чтобы вытеснённый reload'ом терминал не «завершил» новый.
             let _ = exit_app.emit_to("main", "pty-exit", PtyExitPayload { id: exit_id, code });
         },
     )
@@ -413,6 +459,30 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn friendly_name_unwraps_interpreters() {
+        // codex как node-скрипт с shebang: kernel запускает `node <path>/codex`.
+        assert_eq!(
+            friendly_name("node", &["node", "/opt/homebrew/bin/codex"]),
+            "codex"
+        );
+        // codex, выставивший process.title — argv[0] уже «codex».
+        assert_eq!(friendly_name("node", &["codex", "--model", "gpt"]), "codex");
+        // node-скрипт с расширением — режем .js.
+        assert_eq!(friendly_name("node", &["node", "/app/dist/cli.js"]), "cli");
+        // python -m: флаг пропускаем, берём модуль.
+        assert_eq!(
+            friendly_name("python3", &["python3", "-m", "http.server"]),
+            "http.server"
+        );
+        // Обычный бинарник не трогаем.
+        assert_eq!(friendly_name("vim", &["vim", "file.txt"]), "vim");
+        // Логин-шелл «-zsh» → zsh.
+        assert_eq!(friendly_name("-zsh", &["-zsh"]), "zsh");
+        // Голый REPL интерпретатора остаётся собой.
+        assert_eq!(friendly_name("node", &["node"]), "node");
+    }
 
     #[test]
     fn workspace_root_result_uses_camel_case_ipc_fields() {
