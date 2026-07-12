@@ -1,3 +1,4 @@
+use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -33,7 +34,7 @@ pub struct WorkspaceRoots {
 }
 
 impl WorkspaceRoots {
-    pub fn bind(&self, workspace_id: &str, selected_path: &Path) -> Result<BindOutcome, String> {
+    pub fn bind(&self, workspace_id: &str, selected_path: &Path) -> CommandResult<BindOutcome> {
         validate_workspace_id(workspace_id)?;
         let canonical_path = validate_root(selected_path)?;
         let identity_key = identity_key(&canonical_path)?;
@@ -43,9 +44,8 @@ impl WorkspaceRoots {
             if existing.identity_key == identity_key {
                 return Ok(BindOutcome::Bound(binding(workspace_id, existing)?));
             }
-            return Err(format!(
-                "воркспейс {workspace_id} уже связан с другой папкой"
-            ));
+            return Err(CommandError::new(ErrorCode::WorkspaceRootConflict)
+                .with_context("workspaceId", workspace_id));
         }
 
         if let Some((existing_id, existing)) = roots
@@ -71,7 +71,7 @@ impl WorkspaceRoots {
         &self,
         workspace_id: &str,
         selected_path: &Path,
-    ) -> Result<BindOutcome, String> {
+    ) -> CommandResult<BindOutcome> {
         validate_workspace_id(workspace_id)?;
         let canonical_path = validate_root(selected_path)?;
         let identity_key = identity_key(&canonical_path)?;
@@ -93,7 +93,7 @@ impl WorkspaceRoots {
         Ok(BindOutcome::Bound(result))
     }
 
-    pub fn resolve(&self, workspace_id: &str) -> Result<PathBuf, String> {
+    pub fn resolve(&self, workspace_id: &str) -> CommandResult<PathBuf> {
         validate_workspace_id(workspace_id)?;
         let root = self
             .roots
@@ -101,21 +101,24 @@ impl WorkspaceRoots {
             .unwrap()
             .get(workspace_id)
             .cloned()
-            .ok_or_else(|| format!("папка воркспейса {workspace_id} не зарегистрирована"))?;
+            .ok_or_else(|| {
+                CommandError::new(ErrorCode::WorkspaceRootNotRegistered)
+                    .with_context("workspaceId", workspace_id)
+            })?;
 
         // Проверяем ещё раз непосредственно перед spawn: папку могли удалить,
         // заменить или отключить вместе с внешним диском после регистрации.
         let canonical_path = validate_root(&root.canonical_path)?;
         let current_identity = identity_key(&canonical_path)?;
         if current_identity != root.identity_key {
-            return Err(format!(
-                "папка воркспейса {workspace_id} была заменена; выберите её заново"
-            ));
+            return Err(CommandError::new(ErrorCode::WorkspaceRootIdentityChanged)
+                .with_context("workspaceId", workspace_id)
+                .with_context("path", canonical_path.display()));
         }
         Ok(canonical_path)
     }
 
-    pub fn unbind(&self, workspace_id: &str) -> Result<(), String> {
+    pub fn unbind(&self, workspace_id: &str) -> CommandResult<()> {
         validate_workspace_id(workspace_id)?;
         self.roots.lock().unwrap().remove(workspace_id);
         Ok(())
@@ -124,7 +127,7 @@ impl WorkspaceRoots {
     /// Frontend может перезагрузиться отдельно от Rust во время разработки.
     /// Удаляем связи с workspace_id, которых больше нет в восстановленном
     /// состоянии, иначе неуспешное создание навсегда «занимает» папку.
-    pub fn retain_only(&self, workspace_ids: &[String]) -> Result<(), String> {
+    pub fn retain_only(&self, workspace_ids: &[String]) -> CommandResult<()> {
         for workspace_id in workspace_ids {
             validate_workspace_id(workspace_id)?;
         }
@@ -136,54 +139,64 @@ impl WorkspaceRoots {
     }
 }
 
-fn validate_workspace_id(workspace_id: &str) -> Result<(), String> {
+fn validate_workspace_id(workspace_id: &str) -> CommandResult<()> {
     if workspace_id.is_empty()
         || workspace_id.len() > 128
         || !workspace_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
     {
-        return Err("некорректный идентификатор воркспейса".into());
+        return Err(CommandError::new(ErrorCode::WorkspaceInvalidId)
+            .with_context("workspaceId", workspace_id));
     }
     Ok(())
 }
 
-fn validate_root(path: &Path) -> Result<PathBuf, String> {
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|error| format!("папка проекта недоступна: {error}"))?;
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|error| format!("не удалось проверить папку проекта: {error}"))?;
+fn validate_root(path: &Path) -> CommandResult<PathBuf> {
+    let canonical = std::fs::canonicalize(path).map_err(|error| root_io_error(path, error))?;
+    let metadata =
+        std::fs::metadata(&canonical).map_err(|error| root_io_error(&canonical, error))?;
     if !metadata.is_dir() {
-        return Err(format!("путь не является папкой: {}", path.display()));
+        return Err(CommandError::new(ErrorCode::WorkspaceRootNotDirectory)
+            .with_context("path", path.display()));
     }
     if canonical.to_str().is_none() {
-        return Err("путь проекта содержит неподдерживаемые символы".into());
+        return Err(CommandError::new(ErrorCode::WorkspacePathUnsupported)
+            .with_context("path", canonical.to_string_lossy()));
     }
     Ok(canonical)
 }
 
+fn root_io_error(path: &Path, error: std::io::Error) -> CommandError {
+    let code = match error.kind() {
+        std::io::ErrorKind::NotFound => ErrorCode::WorkspaceRootMissing,
+        std::io::ErrorKind::PermissionDenied => ErrorCode::WorkspaceRootPermissionDenied,
+        std::io::ErrorKind::NotADirectory => ErrorCode::WorkspaceRootNotDirectory,
+        _ => ErrorCode::WorkspaceRootUnavailable,
+    };
+    CommandError::new(code)
+        .with_context("path", path.display())
+        .with_debug(error)
+}
+
 #[cfg(unix)]
-fn identity_key(path: &Path) -> Result<String, String> {
+fn identity_key(path: &Path) -> CommandResult<String> {
     use std::os::unix::fs::MetadataExt;
 
-    let metadata = std::fs::metadata(path)
-        .map_err(|error| format!("не удалось определить папку проекта: {error}"))?;
+    let metadata = std::fs::metadata(path).map_err(|error| root_io_error(path, error))?;
     Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
 }
 
 #[cfg(not(unix))]
-fn identity_key(path: &Path) -> Result<String, String> {
-    Ok(format!(
-        "path:{}",
-        path.to_string_lossy().to_lowercase()
-    ))
+fn identity_key(path: &Path) -> CommandResult<String> {
+    Ok(format!("path:{}", path.to_string_lossy().to_lowercase()))
 }
 
-fn binding(workspace_id: &str, root: &WorkspaceRoot) -> Result<WorkspaceRootBinding, String> {
-    let path = root
-        .canonical_path
-        .to_str()
-        .ok_or_else(|| "путь проекта содержит неподдерживаемые символы".to_string())?;
+fn binding(workspace_id: &str, root: &WorkspaceRoot) -> CommandResult<WorkspaceRootBinding> {
+    let path = root.canonical_path.to_str().ok_or_else(|| {
+        CommandError::new(ErrorCode::WorkspacePathUnsupported)
+            .with_context("path", root.canonical_path.to_string_lossy())
+    })?;
     Ok(WorkspaceRootBinding {
         workspace_id: workspace_id.to_owned(),
         path: path.to_owned(),
@@ -217,7 +230,10 @@ mod tests {
             panic!("новая папка должна зарегистрироваться")
         };
         assert_eq!(binding.workspace_id, "workspace-1");
-        assert_eq!(roots.resolve("workspace-1").unwrap(), path.canonicalize().unwrap());
+        assert_eq!(
+            roots.resolve("workspace-1").unwrap(),
+            path.canonicalize().unwrap()
+        );
 
         roots.unbind("workspace-1").unwrap();
         assert!(roots.resolve("workspace-1").is_err());
@@ -247,8 +263,12 @@ mod tests {
         roots.bind("workspace", &first).unwrap();
 
         let error = roots.bind("workspace", &second).unwrap_err();
-        assert!(error.contains("уже связан"), "ошибка: {error}");
-        assert_eq!(roots.resolve("workspace").unwrap(), first.canonicalize().unwrap());
+        assert_eq!(error.code, ErrorCode::WorkspaceRootConflict);
+        assert_eq!(error.context["workspaceId"], "workspace");
+        assert_eq!(
+            roots.resolve("workspace").unwrap(),
+            first.canonicalize().unwrap()
+        );
         let _ = std::fs::remove_dir_all(first);
         let _ = std::fs::remove_dir_all(second);
     }
@@ -273,12 +293,38 @@ mod tests {
     #[test]
     fn missing_root_fails_closed() {
         let path = temp_dir("missing");
+        let canonical_path = path.canonicalize().unwrap();
         let roots = WorkspaceRoots::default();
         roots.bind("workspace", &path).unwrap();
         std::fs::remove_dir_all(&path).unwrap();
 
         let error = roots.resolve("workspace").unwrap_err();
-        assert!(error.contains("недоступна"), "ошибка: {error}");
+        assert_eq!(error.code, ErrorCode::WorkspaceRootMissing);
+        assert_eq!(error.context["path"], canonical_path.to_string_lossy());
+    }
+
+    #[test]
+    fn file_is_rejected_with_not_directory_code() {
+        let path = temp_dir("not-directory").join("project.txt");
+        std::fs::write(&path, b"not a directory").unwrap();
+        let roots = WorkspaceRoots::default();
+
+        let error = roots.bind("workspace", &path).unwrap_err();
+        assert_eq!(error.code, ErrorCode::WorkspaceRootNotDirectory);
+        assert_eq!(error.context["path"], path.to_string_lossy());
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(path.parent().unwrap());
+    }
+
+    #[test]
+    fn invalid_workspace_id_has_stable_code() {
+        let path = temp_dir("invalid-id");
+        let roots = WorkspaceRoots::default();
+
+        let error = roots.bind("workspace/id", &path).unwrap_err();
+        assert_eq!(error.code, ErrorCode::WorkspaceInvalidId);
+        assert_eq!(error.context["workspaceId"], "workspace/id");
+        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]

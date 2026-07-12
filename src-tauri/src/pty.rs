@@ -1,3 +1,4 @@
+use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -38,11 +39,11 @@ impl PtyManager {
         opts: SpawnOptions,
         on_output: impl Fn(Vec<u8>) + Send + 'static,
         on_exit: impl FnOnce(Option<i32>) + Send + 'static,
-    ) -> Result<(), String> {
+    ) -> CommandResult<()> {
         {
             let sessions = self.sessions.lock().unwrap();
             if sessions.contains_key(&opts.id) {
-                return Err(format!("терминал {} уже существует", opts.id));
+                return Err(terminal_error(ErrorCode::TerminalAlreadyExists, &opts.id));
             }
         }
 
@@ -53,13 +54,16 @@ impl PtyManager {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| format!("не удалось открыть PTY: {e}"))?;
+            .map_err(|error| {
+                terminal_error(ErrorCode::TerminalPtyOpenFailed, &opts.id).with_debug(error)
+            })?;
 
         let shell = opts.shell.unwrap_or_else(default_shell);
         // fork/exec не сообщает об отсутствии бинарника синхронно — проверяем сами,
         // чтобы фронт получил внятный Err, а не мгновенно «умерший» терминал.
         if !shell_exists(&shell) {
-            return Err(format!("шелл не найден: {shell}"));
+            return Err(terminal_error(ErrorCode::TerminalShellNotFound, &opts.id)
+                .with_context("shell", &shell));
         }
         let mut cmd = CommandBuilder::new(&shell);
         // Логин-шелл на macOS, иначе PATH из LaunchServices без Homebrew и пр.
@@ -70,26 +74,26 @@ impl PtyManager {
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
         if !opts.cwd.is_dir() {
-            return Err(format!("папка недоступна: {}", opts.cwd.display()));
+            return Err(terminal_error(ErrorCode::TerminalCwdUnavailable, &opts.id)
+                .with_context("path", opts.cwd.display()));
         }
         cmd.cwd(&opts.cwd);
 
-        let mut child = pty
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| format!("не удалось запустить {shell}: {e}"))?;
+        let mut child = pty.slave.spawn_command(cmd).map_err(|error| {
+            terminal_error(ErrorCode::TerminalSpawnFailed, &opts.id)
+                .with_context("shell", &shell)
+                .with_debug(error)
+        })?;
         // Слейв закрываем сразу: EOF ридера тогда означает завершение шелла.
         drop(pty.slave);
 
         let killer = child.clone_killer();
-        let mut reader = pty
-            .master
-            .try_clone_reader()
-            .map_err(|e| format!("не удалось получить поток вывода: {e}"))?;
-        let writer = pty
-            .master
-            .take_writer()
-            .map_err(|e| format!("не удалось получить поток ввода: {e}"))?;
+        let mut reader = pty.master.try_clone_reader().map_err(|error| {
+            terminal_error(ErrorCode::TerminalOutputStreamFailed, &opts.id).with_debug(error)
+        })?;
+        let writer = pty.master.take_writer().map_err(|error| {
+            terminal_error(ErrorCode::TerminalInputStreamFailed, &opts.id).with_debug(error)
+        })?;
 
         self.sessions.lock().unwrap().insert(
             opts.id.clone(),
@@ -149,22 +153,22 @@ impl PtyManager {
         Ok(())
     }
 
-    pub fn write(&self, id: &str, data: &[u8]) -> Result<(), String> {
+    pub fn write(&self, id: &str, data: &[u8]) -> CommandResult<()> {
         let mut sessions = self.sessions.lock().unwrap();
         let session = sessions
             .get_mut(id)
-            .ok_or_else(|| format!("терминал {id} не найден"))?;
+            .ok_or_else(|| terminal_error(ErrorCode::TerminalNotFound, id))?;
         session
             .writer
             .write_all(data)
-            .map_err(|e| format!("ошибка записи в терминал {id}: {e}"))
+            .map_err(|error| terminal_error(ErrorCode::TerminalWriteFailed, id).with_debug(error))
     }
 
-    pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
+    pub fn resize(&self, id: &str, cols: u16, rows: u16) -> CommandResult<()> {
         let sessions = self.sessions.lock().unwrap();
         let session = sessions
             .get(id)
-            .ok_or_else(|| format!("терминал {id} не найден"))?;
+            .ok_or_else(|| terminal_error(ErrorCode::TerminalNotFound, id))?;
         session
             .master
             .resize(PtySize {
@@ -173,18 +177,18 @@ impl PtyManager {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| format!("ошибка ресайза терминала {id}: {e}"))
+            .map_err(|error| terminal_error(ErrorCode::TerminalResizeFailed, id).with_debug(error))
     }
 
     /// Убивает процесс и снимает сессию. Закрытие мастера обрывает ридер.
-    pub fn kill(&self, id: &str) -> Result<(), String> {
+    pub fn kill(&self, id: &str) -> CommandResult<()> {
         let session = self.sessions.lock().unwrap().remove(id);
         match session {
             Some(mut session) => {
                 let _ = session.killer.kill();
                 Ok(())
             }
-            None => Err(format!("терминал {id} не найден")),
+            None => Err(terminal_error(ErrorCode::TerminalNotFound, id)),
         }
     }
 
@@ -216,6 +220,10 @@ impl PtyManager {
             let _ = session.killer.kill();
         }
     }
+}
+
+fn terminal_error(code: ErrorCode, terminal_id: &str) -> CommandError {
+    CommandError::new(code).with_context("terminalId", terminal_id)
 }
 
 fn default_shell() -> String {
@@ -348,7 +356,10 @@ mod tests {
         exit_rx
             .recv_timeout(Duration::from_secs(10))
             .expect("после kill процесс должен завершиться");
-        assert!(manager.write("t2", b"x").is_err(), "сессия должна быть снята");
+        assert!(
+            manager.write("t2", b"x").is_err(),
+            "сессия должна быть снята"
+        );
     }
 
     /// Стресс приёмки: 50 МБ сплошного вывода не должны идти по байту —
@@ -493,7 +504,9 @@ mod tests {
             |_| {},
         );
         let error = result.expect_err("несуществующая папка должна давать ошибку");
-        assert!(error.contains("папка недоступна"), "ошибка: {error}");
+        assert_eq!(error.code, ErrorCode::TerminalCwdUnavailable);
+        assert_eq!(error.context["terminalId"], "cwd");
+        assert_eq!(error.context["path"], "/nonexistent/workspace/folder");
     }
 
     #[test]
@@ -510,6 +523,24 @@ mod tests {
             |_| {},
             |_| {},
         );
-        assert!(result.is_err());
+        let error = result.expect_err("несуществующий шелл должен давать ошибку");
+        assert_eq!(error.code, ErrorCode::TerminalShellNotFound);
+        assert_eq!(error.context["terminalId"], "t3");
+        assert_eq!(error.context["shell"], "/nonexistent/shell");
+    }
+
+    #[test]
+    fn missing_terminal_has_stable_code() {
+        let manager = PtyManager::default();
+
+        let write_error = manager.write("missing", b"x").unwrap_err();
+        assert_eq!(write_error.code, ErrorCode::TerminalNotFound);
+        assert_eq!(write_error.context["terminalId"], "missing");
+
+        let resize_error = manager.resize("missing", 80, 24).unwrap_err();
+        assert_eq!(resize_error.code, ErrorCode::TerminalNotFound);
+
+        let kill_error = manager.kill("missing").unwrap_err();
+        assert_eq!(kill_error.code, ErrorCode::TerminalNotFound);
     }
 }

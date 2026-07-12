@@ -1,6 +1,8 @@
+mod command_error;
 mod pty;
 mod workspace_roots;
 
+use command_error::{CommandError, CommandResult, ErrorCode};
 use pty::{PtyManager, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -18,6 +20,45 @@ struct PtyExitPayload {
 struct PtyTitlePayload {
     id: String,
     title: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppLocale {
+    Ru,
+    En,
+}
+
+impl AppLocale {
+    fn parse(locale: &str) -> CommandResult<Self> {
+        match locale {
+            "ru" => Ok(Self::Ru),
+            "en" => Ok(Self::En),
+            _ => Err(CommandError::new(ErrorCode::InvalidLocale).with_context("locale", locale)),
+        }
+    }
+
+    fn project_picker_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Папка проекта для воркспейса",
+            Self::En => "Project folder for workspace",
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn edit_menu_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Правка",
+            Self::En => "Edit",
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn window_menu_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Окно",
+            Self::En => "Window",
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -46,11 +87,11 @@ impl From<BindOutcome> for WorkspaceRootResult {
     }
 }
 
-fn ensure_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn ensure_main_window(window: &tauri::WebviewWindow) -> CommandResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
-        Err("эта команда доступна только главному окну".into())
+        Err(CommandError::new(ErrorCode::MainWindowOnly))
     }
 }
 
@@ -139,7 +180,7 @@ fn pty_create(
     cols: u16,
     rows: u16,
     on_output: Channel<InvokeResponseBody>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     ensure_main_window(&window)?;
     let cwd = roots.resolve(&workspace_id)?;
     let exit_app = app.clone();
@@ -157,11 +198,7 @@ fn pty_create(
         },
         move |code| {
             exit_app.state::<PtyManager>().remove(&exit_id);
-            let _ = exit_app.emit_to(
-                "main",
-                "pty-exit",
-                PtyExitPayload { id: exit_id, code },
-            );
+            let _ = exit_app.emit_to("main", "pty-exit", PtyExitPayload { id: exit_id, code });
         },
     )
 }
@@ -172,7 +209,7 @@ fn pty_write(
     state: tauri::State<'_, PtyManager>,
     id: String,
     data: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     ensure_main_window(&window)?;
     state.write(&id, data.as_bytes())
 }
@@ -184,7 +221,7 @@ fn pty_resize(
     id: String,
     cols: u16,
     rows: u16,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     ensure_main_window(&window)?;
     state.resize(&id, cols, rows)
 }
@@ -194,7 +231,7 @@ fn pty_kill(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, PtyManager>,
     id: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     ensure_main_window(&window)?;
     state.kill(&id)
 }
@@ -205,7 +242,7 @@ fn workspace_register_root(
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
-) -> Result<WorkspaceRootResult, String> {
+) -> CommandResult<WorkspaceRootResult> {
     ensure_main_window(&window)?;
     state
         .bind(&workspace_id, std::path::Path::new(&path))
@@ -217,7 +254,7 @@ fn workspace_reconcile_roots(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_ids: Vec<String>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     ensure_main_window(&window)?;
     state.retain_only(&workspace_ids)
 }
@@ -227,12 +264,13 @@ fn workspace_validate_root(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     ensure_main_window(&window)?;
     state.resolve(&workspace_id).and_then(|path| {
-        path.to_str()
-            .map(str::to_owned)
-            .ok_or_else(|| "путь проекта содержит неподдерживаемые символы".into())
+        path.to_str().map(str::to_owned).ok_or_else(|| {
+            CommandError::new(ErrorCode::WorkspacePathUnsupported)
+                .with_context("path", path.to_string_lossy())
+        })
     })
 }
 
@@ -241,19 +279,21 @@ async fn workspace_pick_root(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
-) -> Result<WorkspaceRootResult, String> {
+    locale: String,
+) -> CommandResult<WorkspaceRootResult> {
     ensure_main_window(&window)?;
+    let locale = AppLocale::parse(&locale)?;
     let selected = window
         .dialog()
         .file()
-        .set_title("Папка проекта для воркспейса")
+        .set_title(locale.project_picker_title())
         .blocking_pick_folder();
     let Some(selected) = selected else {
         return Ok(WorkspaceRootResult::Cancelled);
     };
-    let path = selected
-        .into_path()
-        .map_err(|error| format!("не удалось прочитать выбранный путь: {error}"))?;
+    let path = selected.into_path().map_err(|error| {
+        CommandError::new(ErrorCode::WorkspacePickerPathInvalid).with_debug(error)
+    })?;
     state
         .bind_user_selected(&workspace_id, &path)
         .map(Into::into)
@@ -264,9 +304,69 @@ fn workspace_unregister_root(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     ensure_main_window(&window)?;
     state.unbind(&workspace_id)
+}
+
+#[tauri::command]
+fn app_set_locale(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    locale: String,
+) -> CommandResult<()> {
+    ensure_main_window(&window)?;
+    let locale = AppLocale::parse(&locale)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let menu = build_macos_menu(&app, locale)
+            .map_err(|error| CommandError::new(ErrorCode::AppMenuUpdateFailed).with_debug(error))?;
+        app.set_menu(menu)
+            .map_err(|error| CommandError::new(ErrorCode::AppMenuUpdateFailed).with_debug(error))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, locale);
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_menu<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    locale: AppLocale,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
+
+    let app_menu = SubmenuBuilder::new(handle, "ModelCrew")
+        .about(Some(AboutMetadata::default()))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+    let edit_menu = SubmenuBuilder::new(handle, locale.edit_menu_title())
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let window_menu = SubmenuBuilder::new(handle, locale.window_menu_title())
+        .minimize()
+        .fullscreen()
+        .build()?;
+
+    MenuBuilder::new(handle)
+        .items(&[&app_menu, &edit_menu, &window_menu])
+        .build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -279,38 +379,7 @@ pub fn run() {
     // Cmd+W раньше веб-вью. Собираем своё меню без Close/New, оставляя
     // системные роли редактирования — без них в веб-вью не работают Cmd+C/V/A.
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(|handle| {
-        use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
-
-        let app_menu = SubmenuBuilder::new(handle, "ModelCrew")
-            .about(Some(AboutMetadata::default()))
-            .separator()
-            .services()
-            .separator()
-            .hide()
-            .hide_others()
-            .show_all()
-            .separator()
-            .quit()
-            .build()?;
-        let edit_menu = SubmenuBuilder::new(handle, "Edit")
-            .undo()
-            .redo()
-            .separator()
-            .cut()
-            .copy()
-            .paste()
-            .select_all()
-            .build()?;
-        let window_menu = SubmenuBuilder::new(handle, "Window")
-            .minimize()
-            .fullscreen()
-            .build()?;
-
-        MenuBuilder::new(handle)
-            .items(&[&app_menu, &edit_menu, &window_menu])
-            .build()
-    });
+    let builder = builder.menu(|handle| build_macos_menu(handle, AppLocale::Ru));
 
     builder
         .manage(PtyManager::default())
@@ -328,7 +397,8 @@ pub fn run() {
             workspace_register_root,
             workspace_validate_root,
             workspace_pick_root,
-            workspace_unregister_root
+            workspace_unregister_root,
+            app_set_locale
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -355,5 +425,30 @@ mod tests {
         assert_eq!(value["status"], "bound");
         assert_eq!(value["workspaceId"], "workspace-1");
         assert!(value.get("workspace_id").is_none());
+    }
+
+    #[test]
+    fn app_locale_is_strict_and_picker_title_is_localized() {
+        assert_eq!(
+            AppLocale::parse("ru").unwrap().project_picker_title(),
+            "Папка проекта для воркспейса"
+        );
+        assert_eq!(
+            AppLocale::parse("en").unwrap().project_picker_title(),
+            "Project folder for workspace"
+        );
+
+        let error = AppLocale::parse("ru-RU").unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidLocale);
+        assert_eq!(error.context["locale"], "ru-RU");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_menu_titles_follow_app_locale() {
+        assert_eq!(AppLocale::Ru.edit_menu_title(), "Правка");
+        assert_eq!(AppLocale::Ru.window_menu_title(), "Окно");
+        assert_eq!(AppLocale::En.edit_menu_title(), "Edit");
+        assert_eq!(AppLocale::En.window_menu_title(), "Window");
     }
 }
