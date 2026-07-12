@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DockviewApi,
   DockviewGroupPanel,
@@ -15,6 +15,7 @@ import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
 import {
   destroyTerminal,
+  applyTerminalTheme,
   getAutoTitle,
   isManualTitle,
   rememberAutoTitle,
@@ -33,7 +34,13 @@ import {
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { useCmdDrag } from "./hotkeys/useCmdDrag";
-import { applyAccent, loadAccent, saveAccent } from "./theme";
+import {
+  getAppTheme,
+  loadAccent,
+  loadTheme,
+  saveAccent,
+  saveTheme,
+} from "./theme";
 import {
   closeGroupAnimated,
   flipGroups,
@@ -93,7 +100,11 @@ function addPanel(
             ...(options.direction ? { direction: options.direction } : {}),
           },
         }
-      : {}),
+      : options.direction
+        ? // Absolute-позиция: панель встаёт у края всего грида
+          // (полноширинная строка/колонка).
+          { position: { direction: options.direction } }
+        : {}),
   });
 }
 
@@ -110,27 +121,55 @@ function addTerminalAutoGrid(
     addPanel(api, workspaceId);
     return;
   }
-  let target = groups[0];
-  for (const group of groups) {
-    if (group.width * group.height > target.width * target.height) {
-      target = group;
+
+  // Раскладка строится СТРОКАМИ: новая панель встаёт в самую короткую
+  // строку, а когда строки заполнены — полноширинной строкой снизу.
+  // У строчного дерева вертикальные разделители соседних строк
+  // независимы: перетаскивание границы в одной строке не двигает другую.
+  const sorted = [...groups].sort((a, b) => {
+    const rectA = a.element.getBoundingClientRect();
+    const rectB = b.element.getBoundingClientRect();
+    if (Math.abs(rectA.top - rectB.top) > 30) {
+      return rectA.top - rectB.top;
+    }
+    return rectA.left - rectB.left;
+  });
+  const rows: DockviewGroupPanel[][] = [];
+  let currentTop = Number.NEGATIVE_INFINITY;
+  for (const group of sorted) {
+    const top = group.element.getBoundingClientRect().top;
+    if (Math.abs(top - currentTop) > 30) {
+      rows.push([]);
+      currentTop = top;
+    }
+    rows[rows.length - 1].push(group);
+  }
+
+  let shortest = rows[0];
+  for (const row of rows) {
+    if (row.length < shortest.length) {
+      shortest = row;
     }
   }
-  const canRight = target.width / 2 >= PANEL_MIN_WIDTH;
-  const canBelow = target.height / 2 >= PANEL_MIN_HEIGHT;
-  let direction: "right" | "below" | undefined;
-  if (canRight && (target.width >= target.height || !canBelow)) {
-    direction = "right";
-  } else if (canBelow) {
-    direction = "below";
-  }
-  if (!direction) {
+  const targetColumns = Math.ceil(Math.sqrt(groups.length + 1));
+  const rowWidth = shortest.reduce((width, group) => width + group.width, 0);
+  const widenFits = rowWidth / (shortest.length + 1) >= PANEL_MIN_WIDTH;
+  const gridHeight = rows.reduce((height, row) => height + row[0].height, 0);
+  const newRowFits = gridHeight / (rows.length + 1) >= PANEL_MIN_HEIGHT;
+
+  // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
+  const before = snapshotGroupRects(api);
+  if (widenFits && (shortest.length < targetColumns || !newRowFits)) {
+    addPanel(api, workspaceId, {
+      group: shortest[shortest.length - 1],
+      direction: "right",
+    });
+  } else if (newRowFits) {
+    addPanel(api, workspaceId, { direction: "below" });
+  } else {
     onNoSpace?.();
     return;
   }
-  // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
-  const before = snapshotGroupRects(api);
-  addPanel(api, workspaceId, { group: target, direction });
   flipGroups(api, before, 200);
 }
 
@@ -252,7 +291,14 @@ export default function App() {
   const [closeGroupRequest, setCloseGroupRequest] =
     useState<DockviewGroupPanel | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Панель развёрнута на всё окно (⌘↩ / кнопка) — показываем индикатор.
+  const [zoomed, setZoomed] = useState(false);
   const [accent, setAccent] = useState(loadAccent);
+  const [themeId, setThemeId] = useState(loadTheme);
+  const dockviewTheme = useMemo<DockviewTheme>(
+    () => ({ ...modelcrewTheme, colorScheme: getAppTheme(themeId).scheme }),
+    [themeId],
+  );
   const [workspaces, setWorkspaces] = useState<WorkspacesState>(() => {
     // Первый запуск — без воркспейсов: пользователь начинает с выбора
     // папки проекта на welcome-экране.
@@ -271,7 +317,7 @@ export default function App() {
   const persistTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    applyAccent(accent);
+    applyTerminalTheme(themeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -754,6 +800,9 @@ export default function App() {
     event.api.onDidLayoutChange(() => {
       schedulePersist();
     });
+    event.api.onDidMaximizedGroupChange(() => {
+      setZoomed(event.api.hasMaximizedGroup());
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -805,7 +854,7 @@ export default function App() {
               watermarkComponent={Welcome}
               rightHeaderActionsComponent={GroupActions}
               onReady={onReady}
-              theme={modelcrewTheme}
+              theme={dockviewTheme}
             />
           ) : (
             <div className="workspace-loading">Проверяем папки проектов…</div>
@@ -813,6 +862,19 @@ export default function App() {
         </main>
       </div>
       {toast && <div className="toast">{toast}</div>}
+      {zoomed && (
+        <button
+          type="button"
+          className="zoom-indicator"
+          title="Вернуть раскладку"
+          onClick={() => apiRef.current?.exitMaximizedGroup()}
+        >
+          <MaximizeIcon /> Терминал развёрнут
+          <span className="zoom-indicator-hint">
+            <kbd>⌘↩</kbd> вернуть
+          </span>
+        </button>
+      )}
       {badges && (
         <div className="quick-badges">
           {badges.map((badge) => (
@@ -857,7 +919,13 @@ export default function App() {
       )}
       {settingsOpen && (
         <Settings
+          themeId={themeId}
           accent={accent}
+          onSelectTheme={(nextThemeId) => {
+            setThemeId(nextThemeId);
+            saveTheme(nextThemeId);
+            applyTerminalTheme(nextThemeId);
+          }}
           onSelectAccent={(color) => {
             setAccent(color);
             saveAccent(color);

@@ -105,18 +105,18 @@ export function swapFlight(element: HTMLElement, from: DOMRect): void {
       {
         transformOrigin: "top left",
         transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
-        boxShadow: "0 0 0 rgba(0, 0, 0, 0)",
+        boxShadow: "0 0 0 transparent",
       },
       {
         offset: 0.45,
         transformOrigin: "top left",
         transform: `translate(${dx * 0.5}px, ${dy * 0.5}px) scale(${midScaleX}, ${midScaleY})`,
-        boxShadow: "0 22px 56px rgba(0, 0, 0, 0.55)",
+        boxShadow: "0 22px 56px var(--mc-shadow)",
       },
       {
         transformOrigin: "top left",
         transform: "none",
-        boxShadow: "0 0 0 rgba(0, 0, 0, 0)",
+        boxShadow: "0 0 0 transparent",
       },
     ],
     { duration: 360, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" },

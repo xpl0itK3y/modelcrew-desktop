@@ -1,44 +1,24 @@
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import "@xterm/xterm/css/xterm.css";
 
 // Инстансы xterm живут вне React: панель при монтировании подключает
 // готовый container-div к своему DOM-узлу. Перенос/своп панелей тогда
 // не трогает ни буфер терминала, ни PTY-сессию.
 
-const RESIZE_DEBOUNCE_MS = 100;
+// PTY получает новый размер один раз по окончании перетаскивания.
+// Чем чаще SIGWINCH, тем больше zsh перерисовывает промпт — при
+// «дёргании» разделителя дубли промпта копятся в буфере.
+const RESIZE_DEBOUNCE_MS = 250;
 
 // В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
 const isTauri = "__TAURI_INTERNALS__" in window;
 
-export const TERMINAL_BACKGROUND = "#16181d";
-
-const terminalTheme: ITheme = {
-  background: TERMINAL_BACKGROUND,
-  foreground: "#c9ced8",
-  cursor: "#e8eaf0",
-  cursorAccent: TERMINAL_BACKGROUND,
-  selectionBackground: "rgba(148, 163, 184, 0.28)",
-  black: "#20242c",
-  red: "#ff7285",
-  green: "#4ade80",
-  yellow: "#f5c451",
-  blue: "#6cabf5",
-  magenta: "#c792ea",
-  cyan: "#38d1e0",
-  white: "#ccd2dd",
-  brightBlack: "#59606e",
-  brightRed: "#ff8fa3",
-  brightGreen: "#71f0ac",
-  brightYellow: "#ffd77a",
-  brightBlue: "#8fc2ff",
-  brightMagenta: "#dcb0ff",
-  brightCyan: "#6fe3f0",
-  brightWhite: "#eef1f6",
-};
+let currentTerminalTheme = getAppTheme(loadTheme()).terminal;
 
 export type TerminalEntry = {
   id: string;
@@ -55,6 +35,14 @@ export type TerminalEntry = {
 };
 
 const registry = new Map<string, TerminalEntry>();
+
+export function applyTerminalTheme(themeId: ThemeId): void {
+  currentTerminalTheme = getAppTheme(themeId).terminal;
+  for (const entry of registry.values()) {
+    entry.term.options.theme = { ...currentTerminalTheme };
+    entry.term.refresh(0, Math.max(0, entry.term.rows - 1));
+  }
+}
 
 // Статус терминала для UI (точка в табе): running → exited.
 export type TerminalStatus = "running" | "exited";
@@ -95,7 +83,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
       '"SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace',
     lineHeight: 1.25,
     scrollback: 5000,
-    theme: terminalTheme,
+    theme: { ...currentTerminalTheme },
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
