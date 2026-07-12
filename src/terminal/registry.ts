@@ -4,6 +4,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
+import { localizeBackendError, translate } from "../i18n";
 import "@xterm/xterm/css/xterm.css";
 
 // Инстансы xterm живут вне React: панель при монтировании подключает
@@ -149,7 +150,9 @@ export async function ensureSpawned(
   if (!workspaceId) {
     markExited(entry);
     entry.term.write(
-      "\x1b[31mНе удалось запустить шелл: панель не связана с воркспейсом\x1b[0m\r\n",
+      `\x1b[31m${translate("terminal.shellStartFailed", {
+        error: translate("terminal.workspaceMissing"),
+      })}\x1b[0m\r\n`,
     );
     return;
   }
@@ -157,7 +160,7 @@ export async function ensureSpawned(
   if (!isTauri) {
     markExited(entry);
     entry.term.write(
-      "\x1b[2m[веб-превью: шелл работает только в приложении]\x1b[0m\r\n",
+      `\x1b[2m[${translate("terminal.webPreview")}]\x1b[0m\r\n`,
     );
     return;
   }
@@ -198,7 +201,11 @@ export async function ensureSpawned(
     });
   } catch (error) {
     markExited(entry);
-    entry.term.write(`\x1b[31mНе удалось запустить шелл: ${String(error)}\x1b[0m\r\n`);
+    entry.term.write(
+      `\x1b[31m${translate("terminal.shellStartFailed", {
+        error: localizeBackendError(error),
+      })}\x1b[0m\r\n`,
+    );
   }
 }
 
@@ -230,8 +237,10 @@ if (isTauri) {
   if (entry && !entry.exited) {
     markExited(entry);
     const code = event.payload.code;
+    const codeLabel =
+      code !== null ? ` · ${translate("terminal.exitCode", { code })}` : "";
     entry.term.write(
-      `\r\n\x1b[2m[процесс завершён${code !== null ? ` · код ${code}` : ""}]\x1b[0m\r\n`,
+      `\r\n\x1b[2m[${translate("terminal.processExited")}${codeLabel}]\x1b[0m\r\n`,
     );
   }
   }).catch(() => {

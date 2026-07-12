@@ -1,11 +1,11 @@
 import {
   BellIcon,
-  GearIcon,
   GridIcon,
   PlusIcon,
   SidebarIcon,
   SlidersIcon,
 } from "./Icons";
+import { useI18n } from "../i18n";
 
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -24,6 +24,11 @@ function collapseHome(path: string): string {
 }
 
 export function Titlebar(props: TitlebarProps) {
+  const { t } = useI18n();
+  const toggleSidebarLabel = t("titlebar.toggleSidebar");
+  const newTerminalLabel = t("titlebar.newTerminal");
+  const settingsLabel = t("titlebar.settings");
+
   return (
     <header className="titlebar" data-tauri-drag-region="deep">
       <div className="titlebar-side titlebar-left">
@@ -31,7 +36,9 @@ export function Titlebar(props: TitlebarProps) {
         <button
           type="button"
           className={`icon-button ${props.sidebarVisible ? "" : "is-off"}`}
-          title="Показать/скрыть сайдбар"
+          title={toggleSidebarLabel}
+          aria-label={toggleSidebarLabel}
+          aria-pressed={props.sidebarVisible}
           onClick={props.onToggleSidebar}
         >
           <SidebarIcon />
@@ -49,27 +56,38 @@ export function Titlebar(props: TitlebarProps) {
         <button
           type="button"
           className="icon-button"
-          title="Новый терминал в сетку"
+          title={newTerminalLabel}
+          aria-label={newTerminalLabel}
           onClick={props.onNewTerminal}
         >
           <PlusIcon />
         </button>
-        <button type="button" className="icon-button is-disabled" title="Раскладки — скоро">
+        <button
+          type="button"
+          className="icon-button is-disabled"
+          title={t("titlebar.layoutsSoon")}
+          aria-label={t("titlebar.layoutsSoon")}
+          disabled
+        >
           <GridIcon />
         </button>
-        <button type="button" className="icon-button is-disabled" title="Уведомления — скоро">
+        <button
+          type="button"
+          className="icon-button is-disabled"
+          title={t("titlebar.notificationsSoon")}
+          aria-label={t("titlebar.notificationsSoon")}
+          disabled
+        >
           <BellIcon />
-        </button>
-        <button type="button" className="icon-button is-disabled" title="Активность — скоро">
-          <SlidersIcon />
         </button>
         <button
           type="button"
           className="icon-button"
-          title="Настройки"
+          title={settingsLabel}
+          aria-label={settingsLabel}
           onClick={props.onOpenSettings}
         >
-          <GearIcon />
+          <SlidersIcon />
         </button>
       </div>
     </header>

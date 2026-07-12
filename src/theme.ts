@@ -1,29 +1,47 @@
 import type { ITheme } from "@xterm/xterm";
 
 export type AccentColor = {
-  name: string;
+  id:
+    | "pink"
+    | "rose"
+    | "red"
+    | "orange"
+    | "amber"
+    | "yellow"
+    | "lime"
+    | "green"
+    | "emerald"
+    | "teal"
+    | "sky"
+    | "blue"
+    | "indigo"
+    | "violet"
+    | "purple"
+    | "fuchsia"
+    | "white"
+    | "gray";
   value: string;
 };
 
 export const ACCENT_COLORS: AccentColor[] = [
-  { name: "Розовый", value: "#f471b5" },
-  { name: "Малиновый", value: "#fb7185" },
-  { name: "Красный", value: "#ef4444" },
-  { name: "Оранжевый", value: "#fb923c" },
-  { name: "Янтарный", value: "#fbbf24" },
-  { name: "Жёлтый", value: "#facc15" },
-  { name: "Лаймовый", value: "#a3e635" },
-  { name: "Зелёный", value: "#4ade80" },
-  { name: "Изумрудный", value: "#34d399" },
-  { name: "Бирюзовый", value: "#2dd4bf" },
-  { name: "Голубой", value: "#38bdf8" },
-  { name: "Синий", value: "#60a5fa" },
-  { name: "Индиго", value: "#818cf8" },
-  { name: "Фиолетовый", value: "#a78bfa" },
-  { name: "Пурпурный", value: "#c084fc" },
-  { name: "Фуксия", value: "#e879f9" },
-  { name: "Белый", value: "#e8ebf2" },
-  { name: "Серый", value: "#9ca3af" },
+  { id: "pink", value: "#f471b5" },
+  { id: "rose", value: "#fb7185" },
+  { id: "red", value: "#ef4444" },
+  { id: "orange", value: "#fb923c" },
+  { id: "amber", value: "#fbbf24" },
+  { id: "yellow", value: "#facc15" },
+  { id: "lime", value: "#a3e635" },
+  { id: "green", value: "#4ade80" },
+  { id: "emerald", value: "#34d399" },
+  { id: "teal", value: "#2dd4bf" },
+  { id: "sky", value: "#38bdf8" },
+  { id: "blue", value: "#60a5fa" },
+  { id: "indigo", value: "#818cf8" },
+  { id: "violet", value: "#a78bfa" },
+  { id: "purple", value: "#c084fc" },
+  { id: "fuchsia", value: "#e879f9" },
+  { id: "white", value: "#e8ebf2" },
+  { id: "gray", value: "#9ca3af" },
 ];
 
 export type ThemeId =
@@ -66,8 +84,6 @@ type ThemeColors = {
 
 export type AppTheme = {
   id: ThemeId;
-  name: string;
-  description: string;
   scheme: "dark" | "light";
   colors: ThemeColors;
   terminal: ITheme;
@@ -131,8 +147,6 @@ const lightTerminal: ITheme = {
 export const APP_THEMES: readonly AppTheme[] = [
   {
     id: "midnight",
-    name: "Полночь",
-    description: "Исходная тёмная",
     scheme: "dark",
     colors: {
       bg: "#101216",
@@ -172,8 +186,6 @@ export const APP_THEMES: readonly AppTheme[] = [
   },
   {
     id: "graphite",
-    name: "Графит",
-    description: "Спокойный монохром",
     scheme: "dark",
     colors: {
       bg: "#151516",
@@ -213,8 +225,6 @@ export const APP_THEMES: readonly AppTheme[] = [
   },
   {
     id: "ocean",
-    name: "Океан",
-    description: "Глубокий сине-чёрный",
     scheme: "dark",
     colors: {
       bg: "#0b111a",
@@ -254,8 +264,6 @@ export const APP_THEMES: readonly AppTheme[] = [
   },
   {
     id: "forest",
-    name: "Лес",
-    description: "Тёмный хвойный",
     scheme: "dark",
     colors: {
       bg: "#0c1412",
@@ -295,8 +303,6 @@ export const APP_THEMES: readonly AppTheme[] = [
   },
   {
     id: "aubergine",
-    name: "Аметист",
-    description: "Приглушённый фиолетовый",
     scheme: "dark",
     colors: {
       bg: "#141018",
@@ -336,8 +342,6 @@ export const APP_THEMES: readonly AppTheme[] = [
   },
   {
     id: "porcelain",
-    name: "Фарфор",
-    description: "Светлая сланцевая",
     scheme: "light",
     colors: {
       bg: "#e6e9ef",

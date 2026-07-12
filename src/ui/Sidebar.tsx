@@ -1,5 +1,6 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { CloseIcon, PlusIcon, TerminalGlyphIcon } from "./Icons";
+import { useI18n } from "../i18n";
 
 export type WorkspaceItem = {
   id: string;
@@ -18,6 +19,7 @@ type SidebarProps = {
 };
 
 export function Sidebar(props: SidebarProps) {
+  const { t } = useI18n();
   const [editingId, setEditingId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -39,13 +41,14 @@ export function Sidebar(props: SidebarProps) {
     <aside className="sidebar">
       <div className="sidebar-header">
         <span className="sidebar-title">
-          Workspaces{" "}
+          {t("sidebar.title")}{" "}
           <span className="sidebar-count">{props.workspaces.length}</span>
         </span>
         <button
           type="button"
           className="icon-button"
-          title="Новый воркспейс"
+          title={t("sidebar.newWorkspace")}
+          aria-label={t("sidebar.newWorkspace")}
           onClick={props.onCreate}
         >
           <PlusIcon />
@@ -68,6 +71,7 @@ export function Sidebar(props: SidebarProps) {
                 ref={inputRef}
                 className="workspace-rename-input"
                 defaultValue={workspace.name}
+                aria-label={t("sidebar.renameWorkspace")}
                 onClick={(event) => event.stopPropagation()}
                 onBlur={() => commitRename(workspace.id)}
                 onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
@@ -82,7 +86,7 @@ export function Sidebar(props: SidebarProps) {
             ) : (
               <span
                 className="workspace-name"
-                title={workspace.folder ?? "домашняя папка"}
+                title={workspace.folder ?? t("sidebar.homeFolder")}
               >
                 {workspace.name}
               </span>
@@ -93,7 +97,8 @@ export function Sidebar(props: SidebarProps) {
             <button
               type="button"
               className="workspace-delete"
-              title="Удалить воркспейс"
+              title={t("sidebar.deleteWorkspace")}
+              aria-label={t("sidebar.deleteWorkspace")}
               onClick={(event) => {
                 event.stopPropagation();
                 props.onDelete(workspace.id);

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
+import { useI18n } from "../i18n";
 
 type ConfirmDialogProps = {
   text: string;
@@ -8,7 +9,9 @@ type ConfirmDialogProps = {
 };
 
 export function ConfirmDialog(props: ConfirmDialogProps) {
+  const { t } = useI18n();
   const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const textId = useId();
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -28,11 +31,19 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
   return (
     <div className="dialog-backdrop" onClick={props.onCancel}>
-      <div className="dialog" onClick={(event) => event.stopPropagation()}>
-        <p className="dialog-text">{props.text}</p>
+      <div
+        className="dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={textId}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p id={textId} className="dialog-text">
+          {props.text}
+        </p>
         <div className="dialog-actions">
           <button type="button" className="dialog-button" onClick={props.onCancel}>
-            Отмена
+            {t("common.cancel")}
           </button>
           <button
             ref={confirmRef}

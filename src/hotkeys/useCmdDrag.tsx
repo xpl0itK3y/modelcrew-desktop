@@ -3,6 +3,7 @@ import { DockviewApi, DockviewGroupPanel } from "dockview";
 import { isMac } from "../constants";
 import { flipGroups, snapshotGroupRects } from "../animations";
 import { swapPanels } from "../layoutOps";
+import { translate } from "../i18n";
 
 // ⌘-драг: зажал Mod, схватил терминал за любое место — под курсором
 // призрак панели; дроп на другой терминал меняет их местами, дроп у
@@ -186,7 +187,7 @@ export function useCmdDrag(options: CmdDragOptions): void {
         const ghost = document.createElement("div");
         ghost.className = "cmd-drag-ghost";
         ghost.textContent =
-          session.sourceGroup.activePanel?.title ?? "терминал";
+          session.sourceGroup.activePanel?.title ?? translate("terminal.defaultTitle");
         document.body.appendChild(ghost);
         session.ghost = ghost;
         session.sourceGroup.element.classList.add("cmd-drag-source");

@@ -7,6 +7,7 @@ import {
   DockviewTheme,
   IDockviewHeaderActionsProps,
   IWatermarkPanelProps,
+  SerializedDockview,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { invoke } from "@tauri-apps/api/core";
@@ -47,12 +48,34 @@ import {
   snapshotGroupRects,
 } from "./animations";
 import {
+  folderBaseName,
   loadWorkspacesState,
   saveWorkspacesState,
+  type FolderRuntimeStatus,
   type Workspace,
   type WorkspacesState,
 } from "./persist";
-import { PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, WORKSPACE_NAME } from "./constants";
+import {
+  backendErrorReason,
+  formatTerminalCount,
+  localizeBackendError,
+  translate,
+  useI18n,
+} from "./i18n";
+import {
+  isMac,
+  PANEL_MIN_HEIGHT,
+  PANEL_MIN_WIDTH,
+  WORKSPACE_NAME,
+} from "./constants";
+
+function unavailable(error: unknown): FolderRuntimeStatus {
+  return {
+    kind: "unavailable",
+    reason: backendErrorReason(error),
+    message: localizeBackendError(error),
+  };
+}
 import "./App.css";
 
 const components = { terminal: TerminalPanel };
@@ -74,6 +97,30 @@ const modelcrewTheme: DockviewTheme = {
   tabGroupIndicator: "none",
 };
 
+const defaultTerminalTitles = new Set(["терминал", "terminal"]);
+
+function localizeDefaultPanelTitles(
+  layout: SerializedDockview | null,
+): SerializedDockview | null {
+  if (!layout) {
+    return null;
+  }
+  const title = translate("terminal.defaultTitle");
+  return {
+    ...layout,
+    panels: Object.fromEntries(
+      Object.entries(layout.panels).map(([panelId, panel]) => {
+        const titleKind = panel.params?.titleKind;
+        const isDefaultTitle =
+          titleKind === "default" ||
+          (titleKind === undefined &&
+            defaultTerminalTitles.has(panel.title ?? ""));
+        return [panelId, isDefaultTitle ? { ...panel, title } : panel];
+      }),
+    ),
+  };
+}
+
 function addPanel(
   api: DockviewApi,
   workspaceId: string,
@@ -88,9 +135,9 @@ function addPanel(
     tabComponent: "terminal",
     // Placeholder до первого тика вотчера, который подпишет панель
     // именем процесса (zsh, codex, vim, …).
-    title: "терминал",
+    title: translate("terminal.defaultTitle"),
     // В layout сохраняется только владелец панели. cwd разрешает Rust.
-    params: { workspaceId },
+    params: { workspaceId, titleKind: "default" },
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
     ...(options.group
@@ -174,12 +221,16 @@ function addTerminalAutoGrid(
 }
 
 function GroupActions(props: IDockviewHeaderActionsProps) {
+  const { t } = useI18n();
+  const maximizeShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
+  const closeShortcut = isMac ? "⌘⇧W" : "Ctrl+Shift+W";
   return (
     <div className="group-actions">
       <button
         type="button"
         className="icon-button"
-        title="Сплит вправо"
+        title={t("group.splitRight")}
+        aria-label={t("group.splitRight")}
         onClick={() => {
           const workspaceId = appActions.getActiveWorkspaceId();
           if (!workspaceId) {
@@ -198,7 +249,8 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
       <button
         type="button"
         className="icon-button"
-        title="Развернуть/вернуть (⌘↩)"
+        title={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
+        aria-label={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
         onClick={() => {
           if (props.containerApi.hasMaximizedGroup()) {
             props.containerApi.exitMaximizedGroup();
@@ -212,7 +264,8 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
       <button
         type="button"
         className="icon-button"
-        title="Закрыть группу (⌘⇧W)"
+        title={t("group.close", { shortcut: closeShortcut })}
+        aria-label={t("group.close", { shortcut: closeShortcut })}
         onClick={() => appActions.requestCloseGroup(props.group)}
       >
         <CloseIcon />
@@ -222,25 +275,29 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
 }
 
 function Welcome(props: IWatermarkPanelProps) {
+  const { t } = useI18n();
+  const newTerminalShortcut = isMac ? "⌘T" : "Ctrl+T";
+  const panelNumbersShortcut = isMac ? "⌘⌥" : "Ctrl+Alt";
+  const zoomShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
   // Первый запуск (воркспейса нет) — онбординг через выбор папки проекта.
   if (!appActions.hasActiveWorkspace()) {
     return (
       <div className="welcome">
         <div className="welcome-badge">MODELCREW</div>
-        <h1 className="welcome-title">Собери свою команду.</h1>
+        <h1 className="welcome-title">{t("welcome.title")}</h1>
         <p className="welcome-subtitle">
-          Выбери папку проекта — в ней будут жить терминалы воркспейса.
+          {t("welcome.chooseProject")}
         </p>
         <button
           type="button"
           className="welcome-button"
           onClick={() => appActions.requestCreateWorkspace()}
         >
-          <FolderIcon /> Открыть папку проекта
+          <FolderIcon /> {t("welcome.openProject")}
         </button>
         <div className="welcome-hints">
           <span>
-            <kbd>⌘T</kbd> тоже откроет выбор папки
+            <kbd>{newTerminalShortcut}</kbd> {t("welcome.openProjectShortcut")}
           </span>
         </div>
       </div>
@@ -250,8 +307,8 @@ function Welcome(props: IWatermarkPanelProps) {
   return (
     <div className="welcome">
       <div className="welcome-badge">MODELCREW</div>
-      <h1 className="welcome-title">Собери свою команду.</h1>
-      <p className="welcome-subtitle">Терминалы для агентов — в одном окне.</p>
+      <h1 className="welcome-title">{t("welcome.title")}</h1>
+      <p className="welcome-subtitle">{t("welcome.terminalsTogether")}</p>
       <button
         type="button"
         className="welcome-button"
@@ -262,17 +319,17 @@ function Welcome(props: IWatermarkPanelProps) {
           }
         }}
       >
-        <PlusIcon /> Новый терминал
+        <PlusIcon /> {t("welcome.newTerminal")}
       </button>
       <div className="welcome-hints">
         <span>
-          <kbd>⌘T</kbd> новый терминал
+          <kbd>{newTerminalShortcut}</kbd> {t("welcome.newTerminalShortcut")}
         </span>
         <span>
-          <kbd>⌘⌥</kbd> номера панелей
+          <kbd>{panelNumbersShortcut}</kbd> {t("welcome.panelNumbersShortcut")}
         </span>
         <span>
-          <kbd>⌘↩</kbd> зум
+          <kbd>{zoomShortcut}</kbd> {t("welcome.zoomShortcut")}
         </span>
       </div>
     </div>
@@ -280,6 +337,7 @@ function Welcome(props: IWatermarkPanelProps) {
 }
 
 export default function App() {
+  const { locale, t } = useI18n();
   const apiRef = useRef<DockviewApi | null>(null);
   const [terminalCount, setTerminalCount] = useState(0);
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -307,7 +365,9 @@ export default function App() {
   // Dockview не монтируется, пока Rust не зарегистрировал корни: иначе
   // восстановленные панели успеют запросить PTY раньше workspace roots.
   const [rootRegistryReady, setRootRegistryReady] = useState(!isTauri);
-  const [rootErrors, setRootErrors] = useState<Record<string, string>>({});
+  const [rootErrors, setRootErrors] = useState<
+    Record<string, FolderRuntimeStatus>
+  >({});
   const rootErrorsRef = useRef(rootErrors);
   rootErrorsRef.current = rootErrors;
   const [deleteWorkspaceRequest, setDeleteWorkspaceRequest] =
@@ -315,6 +375,44 @@ export default function App() {
   const workspacesRef = useRef(workspaces);
   workspacesRef.current = workspaces;
   const persistTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    setToast(null);
+    if (toastTimer.current !== undefined) {
+      window.clearTimeout(toastTimer.current);
+      toastTimer.current = undefined;
+    }
+    if (isTauri) {
+      void invoke("app_set_locale", { locale }).catch((error) => {
+        console.error("Could not update native locale", error);
+      });
+    }
+
+    const localizedTitle = translate("terminal.defaultTitle");
+    for (const panel of apiRef.current?.panels ?? []) {
+      const titleKind = panel.api.getParameters<{ titleKind?: string }>()
+        .titleKind;
+      if (
+        (titleKind === "default" ||
+          (titleKind === undefined &&
+            defaultTerminalTitles.has(panel.title ?? ""))) &&
+        !isManualTitle(panel.id)
+      ) {
+        panel.api.setTitle(localizedTitle);
+      }
+    }
+    setWorkspaces((previous) => {
+      const next = {
+        ...previous,
+        list: previous.list.map((workspace) => ({
+          ...workspace,
+          layout: localizeDefaultPanelTitles(workspace.layout),
+        })),
+      };
+      workspacesRef.current = next;
+      return next;
+    });
+  }, [locale]);
 
   useEffect(() => {
     applyTerminalTheme(themeId);
@@ -328,7 +426,7 @@ export default function App() {
     const api = apiRef.current;
     const snapshot = list.map((workspace) =>
       workspace.id === activeId && api
-        ? { ...workspace, layout: api.toJSON(), count: api.panels.length }
+        ? { ...workspace, layout: api.toJSON() }
         : workspace,
     );
     saveWorkspacesState({ list: snapshot, activeId });
@@ -371,7 +469,11 @@ export default function App() {
         });
       } catch (error) {
         if (!cancelled) {
-          showToast(`Не удалось синхронизировать папки: ${String(error)}`);
+          showToast(
+            translate("workspace.syncFailed", {
+              error: localizeBackendError(error),
+            }),
+          );
         }
       }
 
@@ -380,13 +482,13 @@ export default function App() {
           if (!workspace.folder) {
             return {
               id: workspace.id,
-              error: "Выберите папку проекта заново",
+              status: { kind: "unbound" } as FolderRuntimeStatus,
             };
           }
           try {
             const result = await invoke<WorkspaceRootResult>(
               "workspace_register_root",
-              { workspaceId: workspace.id, path: workspace.folder },
+              { workspaceId: workspace.id, path: workspace.folder.canonicalPath },
             );
             if (result.status === "bound") {
               return { id: workspace.id, path: result.path };
@@ -394,12 +496,21 @@ export default function App() {
             if (result.status === "alreadyOpen") {
               return {
                 id: workspace.id,
-                error: `Папка уже принадлежит воркспейсу ${result.workspaceId}`,
+                status: {
+                  kind: "unavailable",
+                  reason: "unknown",
+                  message: translate("workspace.rootOwnedBy", {
+                    workspaceId: result.workspaceId,
+                  }),
+                } as FolderRuntimeStatus,
               };
             }
-            return { id: workspace.id, error: "Папка проекта не выбрана" };
+            return {
+              id: workspace.id,
+              status: { kind: "unbound" } as FolderRuntimeStatus,
+            };
           } catch (error) {
-            return { id: workspace.id, error: String(error) };
+            return { id: workspace.id, status: unavailable(error) };
           }
         }),
       );
@@ -417,18 +528,24 @@ export default function App() {
       const errors = Object.fromEntries(
         results
           .filter(
-            (result): result is { id: string; error: string } =>
-              "error" in result,
+            (result): result is { id: string; status: FolderRuntimeStatus } =>
+              "status" in result,
           )
-          .map((result) => [result.id, result.error]),
+          .map((result) => [result.id, result.status]),
       );
       setWorkspaces((previous) => {
         const next = {
           ...previous,
-          list: previous.list.map((workspace) => ({
-            ...workspace,
-            folder: canonicalPaths.get(workspace.id) ?? workspace.folder,
-          })),
+          list: previous.list.map((workspace) => {
+            const canonicalPath = canonicalPaths.get(workspace.id);
+            if (!canonicalPath || !workspace.folder) {
+              return workspace;
+            }
+            return {
+              ...workspace,
+              folder: { ...workspace.folder, canonicalPath },
+            };
+          }),
         };
         workspacesRef.current = next;
         return next;
@@ -461,7 +578,7 @@ export default function App() {
       return;
     }
     if (!rootRegistryReady) {
-      showToast("Папка проекта ещё проверяется");
+      showToast(translate("workspace.folderChecking"));
       return;
     }
     const addToGrid = () => {
@@ -469,7 +586,7 @@ export default function App() {
         return;
       }
       addTerminalAutoGrid(apiRef.current, active.id, () =>
-        showToast("Нет места для сплита"),
+        showToast(translate("layout.noSplitSpace")),
       );
     };
     if (!isTauri) {
@@ -481,11 +598,11 @@ export default function App() {
       .catch((error) => {
         const nextErrors = {
           ...rootErrorsRef.current,
-          [active.id]: String(error),
+          [active.id]: unavailable(error),
         };
         rootErrorsRef.current = nextErrors;
         setRootErrors(nextErrors);
-        showToast(String(error));
+        showToast(localizeBackendError(error));
         appActions.requestCreateWorkspace();
       });
   }, [rootRegistryReady, showToast]);
@@ -510,6 +627,10 @@ export default function App() {
       const title = getAutoTitle(panel.id);
       if (title && !isManualTitle(panel.id)) {
         panel.api.setTitle(title);
+        panel.api.updateParameters({
+          ...panel.api.getParameters(),
+          titleKind: "process",
+        });
       }
     }
   }, []);
@@ -522,9 +643,8 @@ export default function App() {
         return list;
       }
       const layout = api.toJSON();
-      const count = api.panels.length;
       return list.map((workspace) =>
-        workspace.id === activeId ? { ...workspace, layout, count } : workspace,
+        workspace.id === activeId ? { ...workspace, layout } : workspace,
       );
     },
     [],
@@ -543,7 +663,7 @@ export default function App() {
           !rootErrorsRef.current[workspace.id] &&
           workspace.layout
         ) {
-          api.fromJSON(workspace.layout);
+          api.fromJSON(localizeDefaultPanelTitles(workspace.layout)!);
         } else {
           api.closeAllGroups();
         }
@@ -573,7 +693,12 @@ export default function App() {
         if (!target) {
           return prev;
         }
-        const list = snapshotActive(prev.list, prev.activeId);
+        const list = snapshotActive(prev.list, prev.activeId).map(
+          (workspace) =>
+            workspace.id === id
+              ? { ...workspace, lastOpenedAt: Date.now() }
+              : workspace,
+        );
         // Папка нового активного воркспейса должна быть видна addPanel
         // уже в момент восстановления его раскладки.
         workspacesRef.current = { list, activeId: id };
@@ -586,7 +711,7 @@ export default function App() {
 
   const createWorkspace = useCallback(async () => {
     if (!isTauri) {
-      showToast("Выбор папки доступен в приложении ModelCrew");
+      showToast(translate("workspace.folderPickerDesktopOnly"));
       return;
     }
     const current = workspacesRef.current;
@@ -595,7 +720,11 @@ export default function App() {
         workspaceIds: current.list.map((workspace) => workspace.id),
       });
     } catch (error) {
-      showToast(`Не удалось подготовить папки: ${String(error)}`);
+      showToast(
+        translate("workspace.prepareFailed", {
+          error: localizeBackendError(error),
+        }),
+      );
       return;
     }
     const active = current.list.find(
@@ -613,9 +742,10 @@ export default function App() {
     try {
       result = await invoke<WorkspaceRootResult>("workspace_pick_root", {
         workspaceId,
+        locale,
       });
     } catch (error) {
-      showToast(String(error));
+      showToast(localizeBackendError(error));
       return;
     }
     if (result.status === "cancelled") {
@@ -626,21 +756,27 @@ export default function App() {
         (workspace) => workspace.id === result.workspaceId,
       );
       if (existing) {
-        showToast(`Папка уже открыта в «${existing.name}»`);
+        showToast(
+          translate("workspace.alreadyOpen", { name: existing.displayName }),
+        );
         selectWorkspace(existing.id);
       } else {
-        showToast("Папка уже зарегистрирована другим воркспейсом");
+        showToast(translate("workspace.alreadyRegistered"));
       }
       return;
     }
     if (result.workspaceId !== workspaceId) {
-      showToast("Backend вернул чужой идентификатор воркспейса");
+      showToast(translate("workspace.invalidBackendId"));
       return;
     }
 
-    const folder = result.path;
-    const baseName =
-      folder.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "workspace";
+    const folder = {
+      // Бэкенд-диалог отдаёт уже канонический путь — он же «выбранный».
+      selectedPath: result.path,
+      canonicalPath: result.path,
+      identityKey: null,
+    };
+    const baseName = folderBaseName(result.path);
     const nextErrors = { ...rootErrorsRef.current };
     delete nextErrors[workspaceId];
     rootErrorsRef.current = nextErrors;
@@ -648,14 +784,24 @@ export default function App() {
 
     setWorkspaces((prev) => {
       const existing = prev.list.find((workspace) => workspace.id === workspaceId);
+      const now = Date.now();
       const fresh: Workspace = existing
-        ? { ...existing, folder }
+        ? {
+            ...existing,
+            folder,
+            lastOpenedAt: now,
+            // Автоимя следует за новой папкой; ручное имя не трогаем.
+            displayName:
+              existing.nameMode === "folder" ? baseName : existing.displayName,
+          }
         : {
             id: workspaceId,
-            name: baseName,
+            displayName: baseName,
+            nameMode: "folder",
             folder,
             layout: null,
-            count: 0,
+            createdAt: now,
+            lastOpenedAt: now,
           };
       const list = existing
         ? prev.list.map((workspace) =>
@@ -666,7 +812,7 @@ export default function App() {
       loadWorkspace(fresh);
       return workspacesRef.current;
     });
-  }, [loadWorkspace, snapshotActive, selectWorkspace, showToast]);
+  }, [loadWorkspace, locale, snapshotActive, selectWorkspace, showToast]);
 
   useEffect(() => {
     appActions.requestCloseGroup = setCloseGroupRequest;
@@ -693,7 +839,10 @@ export default function App() {
     setWorkspaces((prev) => ({
       ...prev,
       list: prev.list.map((workspace) =>
-        workspace.id === id ? { ...workspace, name } : workspace,
+        workspace.id === id
+          ? // Ручное имя фиксируется: перепривязка папки его не перезапишет.
+            { ...workspace, displayName: name, nameMode: "custom" as const }
+          : workspace,
       ),
     }));
   }, []);
@@ -701,11 +850,11 @@ export default function App() {
   const workspacePanelCount = useCallback(
     (workspace: Workspace): number => {
       if (workspace.id === workspaces.activeId) {
-        return apiRef.current?.panels.length ?? workspace.count;
+        return apiRef.current?.panels.length ?? 0;
       }
       return workspace.layout
         ? Object.keys(workspace.layout.panels).length
-        : workspace.count;
+        : 0;
     },
     [workspaces.activeId],
   );
@@ -716,7 +865,7 @@ export default function App() {
       if (isTauri) {
         void invoke("workspace_unregister_root", {
           workspaceId: workspace.id,
-        }).catch((error) => showToast(String(error)));
+        }).catch((error) => showToast(localizeBackendError(error)));
       }
       const nextErrors = { ...rootErrorsRef.current };
       delete nextErrors[workspace.id];
@@ -780,6 +929,10 @@ export default function App() {
         const panel = event.api.getPanel(titleEvent.payload.id);
         if (panel && !isManualTitle(titleEvent.payload.id)) {
           panel.api.setTitle(titleEvent.payload.title);
+          panel.api.updateParameters({
+            ...panel.api.getParameters(),
+            titleKind: "process",
+          });
         }
       }).catch(() => {});
     }
@@ -789,7 +942,7 @@ export default function App() {
     const active = list.find((workspace) => workspace.id === activeId);
     if (active?.folder && !rootErrorsRef.current[active.id] && active.layout) {
       try {
-        event.api.fromJSON(active.layout);
+        event.api.fromJSON(localizeDefaultPanelTitles(active.layout)!);
       } catch {
         addPanel(event.api, active.id);
       }
@@ -813,8 +966,8 @@ export default function App() {
   return (
     <div className={`app-shell ${sidebarVisible ? "" : "sidebar-hidden"}`}>
       <Titlebar
-        workspaceName={activeWorkspace?.name ?? WORKSPACE_NAME}
-        workspaceFolder={activeWorkspace?.folder ?? null}
+        workspaceName={activeWorkspace?.displayName ?? WORKSPACE_NAME}
+        workspaceFolder={activeWorkspace?.folder?.selectedPath ?? null}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
@@ -825,8 +978,8 @@ export default function App() {
           <Sidebar
             workspaces={workspaces.list.map((workspace) => ({
               id: workspace.id,
-              name: workspace.name,
-              folder: workspace.folder,
+              name: workspace.displayName,
+              folder: workspace.folder?.selectedPath ?? null,
               count:
                 workspace.id === workspaces.activeId
                   ? terminalCount
@@ -857,21 +1010,27 @@ export default function App() {
               theme={dockviewTheme}
             />
           ) : (
-            <div className="workspace-loading">Проверяем папки проектов…</div>
+            <div className="workspace-loading">{t("workspace.checking")}</div>
           )}
         </main>
       </div>
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className="toast" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
       {zoomed && (
         <button
           type="button"
           className="zoom-indicator"
-          title="Вернуть раскладку"
+          title={t("layout.restore")}
+          aria-label={t("layout.restore")}
           onClick={() => apiRef.current?.exitMaximizedGroup()}
         >
-          <MaximizeIcon /> Терминал развёрнут
+          <MaximizeIcon /> {t("layout.terminalExpanded")}
           <span className="zoom-indicator-hint">
-            <kbd>⌘↩</kbd> вернуть
+            <kbd>{isMac ? "⌘↩" : "Ctrl+Enter"}</kbd>{" "}
+            {t("layout.restoreShortcut")}
           </span>
         </button>
       )}
@@ -890,8 +1049,8 @@ export default function App() {
       )}
       {closeGroupRequest && (
         <ConfirmDialog
-          text="Закрытие терминала"
-          confirmLabel="Закрыть"
+          text={t("confirm.closeTerminal")}
+          confirmLabel={t("common.close")}
           onConfirm={() => {
             closeGroupAnimated(closeGroupRequest);
             setCloseGroupRequest(null);
@@ -901,15 +1060,14 @@ export default function App() {
       )}
       {deleteWorkspaceRequest && (
         <ConfirmDialog
-          text={`Удалить воркспейс «${deleteWorkspaceRequest.name}» и закрыть ${workspacePanelCount(
-            deleteWorkspaceRequest,
-          )} ${plural(
-            workspacePanelCount(deleteWorkspaceRequest),
-            "терминал",
-            "терминала",
-            "терминалов",
-          )}?`}
-          confirmLabel="Удалить"
+          text={t("confirm.deleteWorkspace", {
+            name: deleteWorkspaceRequest.displayName,
+            terminals: formatTerminalCount(
+              workspacePanelCount(deleteWorkspaceRequest),
+              locale,
+            ),
+          })}
+          confirmLabel={t("common.delete")}
           onConfirm={() => {
             deleteWorkspace(deleteWorkspaceRequest);
             setDeleteWorkspaceRequest(null);
@@ -935,16 +1093,4 @@ export default function App() {
       )}
     </div>
   );
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) {
-    return one;
-  }
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return few;
-  }
-  return many;
 }

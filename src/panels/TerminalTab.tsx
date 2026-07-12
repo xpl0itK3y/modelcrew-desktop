@@ -6,8 +6,10 @@ import {
   onTerminalStatus,
   type TerminalStatus,
 } from "../terminal/registry";
+import { useI18n } from "../i18n";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
+  const { t } = useI18n();
   const [title, setTitle] = useState(props.api.title ?? "");
   const [status, setStatus] = useState<TerminalStatus>(() =>
     getTerminalStatus(props.api.id),
@@ -42,6 +44,10 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     const value = inputRef.current?.value.trim();
     if (value) {
       props.api.setTitle(value);
+      props.api.updateParameters({
+        ...props.api.getParameters(),
+        titleKind: "manual",
+      });
       markManualTitle(props.api.id);
     }
     setEditing(false);
@@ -58,12 +64,26 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
 
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
-      <span className={`tab-dot is-${status}`} />
+      <span
+        className={`tab-dot is-${status}`}
+        role="img"
+        title={
+          status === "running"
+            ? t("terminal.statusRunning")
+            : t("terminal.statusExited")
+        }
+        aria-label={
+          status === "running"
+            ? t("terminal.statusRunning")
+            : t("terminal.statusExited")
+        }
+      />
       {editing ? (
         <input
           ref={inputRef}
           className="tab-rename-input"
           defaultValue={title}
+          aria-label={t("terminal.rename")}
           onBlur={commitRename}
           onKeyDown={onInputKeyDown}
           onPointerDown={(event) => event.stopPropagation()}

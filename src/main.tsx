@@ -1,11 +1,13 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { applyAccent, applyTheme, loadAccent, loadTheme } from "./theme";
+import { initializeLocale } from "./i18n";
 
 // Применяем сохранённый внешний вид до первого React-render, чтобы при старте
 // не было вспышки стандартной тёмной темы.
 applyTheme(loadTheme());
 applyAccent(loadAccent());
+initializeLocale();
 
 // Без StrictMode: его двойное монтирование эффектов в dev-режиме плодит
 // побочные эффекты у имеющих внешнее состояние панелей (PTY, xterm).

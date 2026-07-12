@@ -157,6 +157,10 @@ body {
   cursor: default;
 }
 
+.icon-button:disabled {
+  pointer-events: none;
+}
+
 .icon-button.is-disabled:hover {
   background: transparent;
   color: var(--mc-text-muted);
@@ -914,6 +918,45 @@ body.cmd-dragging * {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--mc-text-faint);
+}
+
+.language-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.language-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-button);
+  color: var(--mc-text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.language-option:hover {
+  background: var(--mc-button-hover);
+}
+
+.language-option.is-selected {
+  border-color: var(--mc-accent);
+  color: var(--mc-text-bright);
+  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+}
+
+.language-option-code {
+  color: var(--mc-text-faint);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
 }
 
 .theme-grid {
