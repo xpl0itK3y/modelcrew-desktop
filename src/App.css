@@ -97,6 +97,16 @@ body {
   letter-spacing: 0.02em;
 }
 
+.titlebar-path {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--mc-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 340px;
+}
+
 /* ---------- Кнопки-иконки ---------- */
 
 .icon-button {

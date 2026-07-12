@@ -68,6 +68,11 @@ impl PtyManager {
         cmd.env("COLORTERM", "truecolor");
         let cwd = opts.cwd.or_else(home_dir);
         if let Some(cwd) = cwd {
+            // Папка воркспейса могла исчезнуть (переименована, флешка вынута):
+            // не запускаем процесс, отдаём внятную причину во фронт.
+            if !std::path::Path::new(&cwd).is_dir() {
+                return Err(format!("папка недоступна: {cwd}"));
+            }
             cmd.cwd(cwd);
         }
 
@@ -474,6 +479,24 @@ mod tests {
                 .recv_timeout(Duration::from_secs(10))
                 .expect("после kill_all каждая сессия должна завершиться");
         }
+    }
+
+    #[test]
+    fn spawn_in_missing_cwd_fails() {
+        let manager = PtyManager::default();
+        let result = manager.spawn(
+            SpawnOptions {
+                id: "cwd".into(),
+                shell: Some("/bin/sh".into()),
+                cwd: Some("/nonexistent/workspace/folder".into()),
+                cols: 80,
+                rows: 24,
+            },
+            |_| {},
+            |_| {},
+        );
+        let error = result.expect_err("несуществующая папка должна давать ошибку");
+        assert!(error.contains("папка недоступна"), "ошибка: {error}");
     }
 
     #[test]

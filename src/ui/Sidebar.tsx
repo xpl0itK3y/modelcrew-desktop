@@ -4,6 +4,7 @@ import { CloseIcon, PlusIcon, TerminalGlyphIcon } from "./Icons";
 export type WorkspaceItem = {
   id: string;
   name: string;
+  folder: string | null;
   count: number;
 };
 
@@ -79,7 +80,12 @@ export function Sidebar(props: SidebarProps) {
                 }}
               />
             ) : (
-              <span className="workspace-name">{workspace.name}</span>
+              <span
+                className="workspace-name"
+                title={workspace.folder ?? "домашняя папка"}
+              >
+                {workspace.name}
+              </span>
             )}
             {workspace.count > 0 && (
               <span className="workspace-badge">{workspace.count}</span>

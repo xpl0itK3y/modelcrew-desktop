@@ -7,6 +7,9 @@ import { SerializedDockview } from "dockview";
 export type Workspace = {
   id: string;
   name: string;
+  // Папка проекта: единственный источник стартового cwd терминалов.
+  // null — воркспейс без привязки, шеллы стартуют в домашней папке.
+  folder: string | null;
   layout: SerializedDockview | null;
   count: number;
 };
@@ -35,7 +38,14 @@ export function loadWorkspacesState(): WorkspacesState | null {
     ) {
       return null;
     }
-    return { list: parsed.list, activeId: parsed.activeId };
+    return {
+      // Записи старых версий не имели поля folder.
+      list: parsed.list.map((workspace) => ({
+        ...workspace,
+        folder: workspace.folder ?? null,
+      })),
+      activeId: parsed.activeId,
+    };
   } catch {
     return null;
   }

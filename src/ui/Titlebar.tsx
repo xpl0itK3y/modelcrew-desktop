@@ -11,11 +11,17 @@ const isMac = navigator.userAgent.includes("Mac");
 
 type TitlebarProps = {
   workspaceName: string;
+  workspaceFolder: string | null;
   sidebarVisible: boolean;
   onToggleSidebar: () => void;
   onNewTerminal: () => void;
   onOpenSettings: () => void;
 };
+
+// /Users/denis/github/proj → ~/github/proj
+function collapseHome(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+/, "~");
+}
 
 export function Titlebar(props: TitlebarProps) {
   return (
@@ -33,6 +39,11 @@ export function Titlebar(props: TitlebarProps) {
       </div>
       <div className="titlebar-center">
         <span className="titlebar-workspace">{props.workspaceName}</span>
+        {props.workspaceFolder && (
+          <span className="titlebar-path" title={props.workspaceFolder}>
+            › {collapseHome(props.workspaceFolder)}
+          </span>
+        )}
       </div>
       <div className="titlebar-side titlebar-right">
         <button

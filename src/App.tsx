@@ -10,6 +10,7 @@ import {
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
 import {
@@ -68,6 +69,9 @@ function addPanel(
     // Placeholder до первого тика вотчера, который подпишет панель
     // именем процесса (zsh, codex, vim, …).
     title: "терминал",
+    // Стартовый cwd — папка активного воркспейса; фиксируется в params,
+    // чтобы восстановление после рестарта подняло шелл там же.
+    params: { cwd: appActions.getActiveFolder() },
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
     ...(options.group
@@ -207,6 +211,7 @@ export default function App() {
     const first: Workspace = {
       id: crypto.randomUUID(),
       name: WORKSPACE_NAME,
+      folder: null,
       layout: null,
       count: 0,
     };
@@ -291,8 +296,15 @@ export default function App() {
 
   useEffect(() => {
     appActions.requestCloseGroup = setCloseGroupRequest;
+    appActions.getActiveFolder = () => {
+      const { list, activeId } = workspacesRef.current;
+      return (
+        list.find((workspace) => workspace.id === activeId)?.folder ?? null
+      );
+    };
     return () => {
       appActions.requestCloseGroup = () => {};
+      appActions.getActiveFolder = () => null;
     };
   }, []);
 
@@ -358,24 +370,45 @@ export default function App() {
           return prev;
         }
         const list = snapshotActive(prev.list, prev.activeId);
+        // Папка нового активного воркспейса должна быть видна addPanel
+        // уже в момент восстановления его раскладки.
+        workspacesRef.current = { list, activeId: id };
         loadWorkspace(target);
-        return { list, activeId: id };
+        return workspacesRef.current;
       });
     },
     [loadWorkspace, snapshotActive],
   );
 
-  const createWorkspace = useCallback(() => {
+  const createWorkspace = useCallback(async () => {
+    // Воркспейс = папка проекта: создание начинается с её выбора.
+    let folder: string | null = null;
+    if ("__TAURI_INTERNALS__" in window) {
+      const picked = await openFolderDialog({
+        directory: true,
+        multiple: false,
+        title: "Папка проекта для воркспейса",
+      });
+      if (typeof picked !== "string") {
+        return; // отменил выбор — воркспейс не создаём
+      }
+      folder = picked;
+    }
+    const baseName =
+      folder?.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || null;
     setWorkspaces((prev) => {
       const fresh: Workspace = {
         id: crypto.randomUUID(),
-        name: `workspace ${prev.list.length + 1}`,
+        name: baseName ?? `workspace ${prev.list.length + 1}`,
+        folder,
         layout: null,
         count: 0,
       };
       const list = snapshotActive(prev.list, prev.activeId);
+      // Папка должна быть видна addPanel уже при создании первого терминала.
+      workspacesRef.current = { list: [...list, fresh], activeId: fresh.id };
       loadWorkspace(fresh);
-      return { list: [...list, fresh], activeId: fresh.id };
+      return workspacesRef.current;
     });
   }, [loadWorkspace, snapshotActive]);
 
@@ -413,8 +446,9 @@ export default function App() {
           // Закрываем без подавления — PTY этих панелей должны умереть.
           api?.closeAllGroups();
           const next = remaining[0];
+          workspacesRef.current = { list: remaining, activeId: next.id };
           loadWorkspace(next);
-          return { list: remaining, activeId: next.id };
+          return workspacesRef.current;
         }
         for (const panelId of Object.keys(workspace.layout?.panels ?? {})) {
           void destroyTerminal(panelId);
@@ -487,6 +521,7 @@ export default function App() {
     <div className={`app-shell ${sidebarVisible ? "" : "sidebar-hidden"}`}>
       <Titlebar
         workspaceName={activeWorkspace?.name ?? WORKSPACE_NAME}
+        workspaceFolder={activeWorkspace?.folder ?? null}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
@@ -498,6 +533,7 @@ export default function App() {
             workspaces={workspaces.list.map((workspace) => ({
               id: workspace.id,
               name: workspace.name,
+              folder: workspace.folder,
               count:
                 workspace.id === workspaces.activeId
                   ? terminalCount

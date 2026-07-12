@@ -149,7 +149,10 @@ export function getAutoTitle(id: string): string | undefined {
   return autoTitles.get(id);
 }
 
-export async function ensureSpawned(entry: TerminalEntry): Promise<void> {
+export async function ensureSpawned(
+  entry: TerminalEntry,
+  cwd: string | null = null,
+): Promise<void> {
   if (entry.spawned) {
     return;
   }
@@ -193,7 +196,7 @@ export async function ensureSpawned(entry: TerminalEntry): Promise<void> {
     await invoke("pty_create", {
       id: entry.id,
       shell: null,
-      cwd: null,
+      cwd,
       cols: entry.term.cols,
       rows: entry.term.rows,
       onOutput: output,

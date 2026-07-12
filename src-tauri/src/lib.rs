@@ -143,7 +143,9 @@ fn pty_kill(state: tauri::State<'_, PtyManager>, id: String) -> Result<(), Strin
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     // На macOS Tauri ставит дефолтное меню, чей пункт Close Window съедает
     // Cmd+W раньше веб-вью. Собираем своё меню без Close/New, оставляя

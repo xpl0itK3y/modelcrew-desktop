@@ -4,4 +4,6 @@ import { DockviewGroupPanel } from "dockview";
 // и состоянием App (диалоги и т.п.) — без завязки на React-контекст.
 export const appActions = {
   requestCloseGroup: (_group: DockviewGroupPanel): void => {},
+  // Папка активного воркспейса — стартовый cwd новых терминалов.
+  getActiveFolder: (): string | null => null,
 };

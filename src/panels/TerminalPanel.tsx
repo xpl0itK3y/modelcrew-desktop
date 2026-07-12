@@ -8,7 +8,9 @@ import {
 
 export { destroyTerminal };
 
-export function TerminalPanel(props: IDockviewPanelProps) {
+export function TerminalPanel(
+  props: IDockviewPanelProps<{ cwd?: string | null }>,
+) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -20,7 +22,9 @@ export function TerminalPanel(props: IDockviewPanelProps) {
     const entry = getOrCreateTerminal(props.api.id);
     host.appendChild(entry.container);
     entry.fit.fit();
-    void ensureSpawned(entry);
+    // Стартовый cwd зафиксирован в params панели при создании — он же
+    // используется при восстановлении раскладки после рестарта.
+    void ensureSpawned(entry, props.params?.cwd ?? null);
 
     // Появление нового терминала: fade + scale только при первом маунте,
     // переносы/свопы того же инстанса не мигают.
