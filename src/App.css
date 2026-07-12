@@ -310,23 +310,46 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Крестик всегда в потоке, но схлопнут: на ховере плавно раскрывается,
+   а бейдж со счётчиком мягко съезжает, освобождая место. */
 .workspace-delete {
   flex: none;
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 0;
   height: 18px;
+  margin-left: -9px; /* компенсирует gap строки в схлопнутом виде */
   padding: 0;
   border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--mc-text-faint);
   cursor: pointer;
+  opacity: 0;
+  transform: scale(0.6);
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    width 160ms cubic-bezier(0.2, 0, 0.13, 1),
+    margin-left 160ms cubic-bezier(0.2, 0, 0.13, 1),
+    opacity 130ms ease,
+    transform 160ms cubic-bezier(0.2, 0, 0.13, 1);
 }
 
-.workspace-item:hover .workspace-delete {
-  display: inline-flex;
+.workspace-item:hover .workspace-delete,
+.workspace-delete:focus-visible {
+  width: 18px;
+  margin-left: 0;
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-delete {
+    transition: none;
+  }
 }
 
 .workspace-delete:hover {
