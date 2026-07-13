@@ -1,8 +1,14 @@
 mod command_error;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+mod linux_updater;
 mod pty;
 mod workspace_roots;
 
 use command_error::{CommandError, CommandResult, ErrorCode};
+use linux_updater::{
+    updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
+    LinuxUpdaterState,
+};
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -411,35 +417,6 @@ fn app_set_locale(
     Ok(())
 }
 
-/// Способ установки обновления зависит не только от ОС, но и от формата
-/// установленного Linux-пакета. AppImage можно безопасно заменить через
-/// Tauri updater; DEB/RPM/AUR принадлежат системному пакетному менеджеру.
-#[tauri::command]
-fn updater_install_mode() -> &'static str {
-    if cfg!(debug_assertions) {
-        return "development";
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if std::env::var_os("APPIMAGE").is_some() {
-            "selfUpdate"
-        } else {
-            "packageManaged"
-        }
-    }
-
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
-    {
-        "selfUpdate"
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    {
-        "packageManaged"
-    }
-}
-
 #[cfg(target_os = "macos")]
 fn build_macos_menu<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
@@ -571,6 +548,7 @@ pub fn run() {
         })
         .manage(PtyManager::default())
         .manage(WorkspaceRoots::default())
+        .manage(LinuxUpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
@@ -584,7 +562,9 @@ pub fn run() {
             workspace_pick_root,
             workspace_unregister_root,
             app_set_locale,
-            updater_install_mode
+            updater_install_target,
+            updater_prepare_linux_package,
+            updater_install_linux_package
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

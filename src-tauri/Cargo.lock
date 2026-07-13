@@ -2091,14 +2091,17 @@ name = "modelcrew-desktop"
 version = "0.0.1"
 dependencies = [
  "portable-pty",
+ "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tempfile",
 ]
 
 [[package]]
