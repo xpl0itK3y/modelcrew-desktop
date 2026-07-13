@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import {
   check,
   type DownloadEvent,
@@ -11,9 +11,10 @@ import type { Locale } from "../i18n";
 import { releaseDetails } from "./releaseNotes";
 import type {
   AppUpdaterController,
-  InstallUpdateMode,
+  InstallUpdateTarget,
   NotificationItem,
   NotificationCenterState,
+  UpdateInstallKind,
   UpdateNotification,
   UpdateNotificationPhase,
 } from "./types";
@@ -42,11 +43,99 @@ type UseAppUpdaterOptions = {
   beforeInstall: () => void | Promise<void>;
 };
 
-function isInstallMode(value: unknown): value is InstallUpdateMode {
+type LinuxPackageDownloadProgress =
+  | {
+      phase: "downloading";
+      downloaded: number;
+      total?: number;
+    }
+  | { phase: "verifying" };
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSafeTarget(value: unknown): value is string {
   return (
-    value === "selfUpdate" ||
-    value === "packageManaged" ||
-    value === "development"
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    /^[0-9A-Za-z_-]+$/.test(value)
+  );
+}
+
+function isInstallTarget(value: unknown): value is InstallUpdateTarget {
+  if (!isPlainObject(value) || typeof value.mode !== "string") {
+    return false;
+  }
+  if (value.mode === "development" || value.mode === "manual") {
+    return true;
+  }
+  if (value.mode === "selfUpdate") {
+    return value.target === undefined || isSafeTarget(value.target);
+  }
+  return (
+    value.mode === "nativePackage" &&
+    (value.packageKind === "deb" ||
+      value.packageKind === "rpm" ||
+      value.packageKind === "pacman") &&
+    isSafeTarget(value.target)
+  );
+}
+
+function installKindFrom(target: InstallUpdateTarget): UpdateInstallKind | null {
+  switch (target.mode) {
+    case "selfUpdate":
+      return "selfUpdate";
+    case "nativePackage":
+      return "nativePackage";
+    case "manual":
+      return "manual";
+    case "development":
+      return null;
+  }
+}
+
+function isLinuxPackageDownloadProgress(
+  value: unknown,
+): value is LinuxPackageDownloadProgress {
+  if (!isPlainObject(value) || typeof value.phase !== "string") {
+    return false;
+  }
+  if (value.phase === "verifying") {
+    return true;
+  }
+  return (
+    value.phase === "downloading" &&
+    typeof value.downloaded === "number" &&
+    Number.isFinite(value.downloaded) &&
+    value.downloaded >= 0 &&
+    (value.total === undefined ||
+      (typeof value.total === "number" &&
+        Number.isFinite(value.total) &&
+        value.total > 0))
+  );
+}
+
+function isAuthorizationCancelled(error: unknown): boolean {
+  if (!isPlainObject(error) || typeof error.code !== "string") {
+    return false;
+  }
+  return (
+    error.code === "authorization_cancelled" ||
+    error.code.endsWith("_authorization_cancelled") ||
+    error.code.endsWith("_auth_cancelled")
+  );
+}
+
+function isRecoverableLinuxPackageCacheError(error: unknown): boolean {
+  if (!isPlainObject(error) || typeof error.code !== "string") {
+    return false;
+  }
+  return (
+    error.code === "updater_cache_missing" ||
+    error.code === "updater_cache_invalid" ||
+    error.code === "updater_install_target_changed"
   );
 }
 
@@ -61,6 +150,7 @@ function releaseSource(update: Update): ReleaseDetailsSource {
 function notificationFrom(
   source: ReleaseDetailsSource,
   locale: Locale,
+  installKind: UpdateInstallKind,
   phase: UpdateNotificationPhase,
   progress: Pick<UpdateNotification, "downloaded" | "total"> = {},
 ): UpdateNotification {
@@ -68,6 +158,7 @@ function notificationFrom(
   return {
     id: `update:${details.version}`,
     kind: "update",
+    installKind,
     phase,
     ...details,
     ...progress,
@@ -96,8 +187,11 @@ function blocksBackgroundCheck(
 ) {
   return (
     notification?.phase === "downloading" ||
+    notification?.phase === "verifying" ||
+    notification?.phase === "authorizing" ||
     notification?.phase === "installing" ||
-    (notification?.phase === "installFailed" &&
+    notification?.phase === "restarting" ||
+    (notification?.phase === "restartFailed" &&
       notification.id === restartPendingId)
   );
 }
@@ -105,8 +199,10 @@ function blocksBackgroundCheck(
 function isDurableNotification(notification: UpdateNotification | undefined) {
   return (
     notification?.phase === "ready" ||
-    notification?.phase === "packageManaged" ||
-    notification?.phase === "installFailed"
+    notification?.phase === "manual" ||
+    notification?.phase === "authorizationCancelled" ||
+    notification?.phase === "installFailed" ||
+    notification?.phase === "restartFailed"
   );
 }
 
@@ -177,7 +273,8 @@ export function useAppUpdater({
   const updateRef = useRef<Update | null>(null);
   const updateSourceRef = useRef<ReleaseDetailsSource | null>(null);
   const restartPendingIdRef = useRef<string | null>(null);
-  const installModeRef = useRef<InstallUpdateMode | null>(null);
+  const restartPreparedIdRef = useRef<string | null>(null);
+  const installTargetRef = useRef<InstallUpdateTarget | null>(null);
   const operationInProgressRef = useRef(false);
   const operationGenerationRef = useRef(0);
   const lastCheckAtRef = useRef<number | null>(null);
@@ -239,17 +336,22 @@ export function useAppUpdater({
     await update.close().catch(() => {});
   }, []);
 
-  const resolveInstallMode = useCallback(async (): Promise<InstallUpdateMode> => {
-    if (installModeRef.current) {
-      return installModeRef.current;
-    }
-    const mode = await invoke<unknown>("updater_install_mode");
-    if (!isInstallMode(mode)) {
-      throw new Error("The application returned an unsupported update mode");
-    }
-    installModeRef.current = mode;
-    return mode;
-  }, []);
+  const resolveInstallTarget = useCallback(
+    async (): Promise<InstallUpdateTarget> => {
+      if (installTargetRef.current) {
+        return installTargetRef.current;
+      }
+      const target = await invoke<unknown>("updater_install_target");
+      if (!isInstallTarget(target)) {
+        throw new Error(
+          "The application returned an unsupported update target",
+        );
+      }
+      installTargetRef.current = target;
+      return target;
+    },
+    [],
+  );
 
   const checkForUpdates = useCallback(async () => {
     if (
@@ -284,15 +386,16 @@ export function useAppUpdater({
     let stage: "check" | "download" = "check";
     let operationUpdate: Update | null = null;
     let operationSource: ReleaseDetailsSource | null = null;
+    let operationInstallKind: UpdateInstallKind | null = null;
     let downloaded = 0;
     let total: number | undefined;
 
     try {
-      const installMode = await resolveInstallMode();
+      const installTarget = await resolveInstallTarget();
       if (!isCurrentGeneration(generation)) {
         return;
       }
-      if (installMode === "development") {
+      if (installTarget.mode === "development") {
         const retainedUpdate = updateRef.current;
         updateRef.current = null;
         if (retainedUpdate) {
@@ -300,6 +403,7 @@ export function useAppUpdater({
         }
         updateSourceRef.current = null;
         restartPendingIdRef.current = null;
+        restartPreparedIdRef.current = null;
         resetRetrySchedule();
         setCenter((current) => ({
           sync: "settled",
@@ -308,7 +412,12 @@ export function useAppUpdater({
         return;
       }
 
-      const update = await check({ timeout: 30_000 });
+      const update = await check({
+        timeout: 30_000,
+        ...("target" in installTarget && installTarget.target !== undefined
+          ? { target: installTarget.target }
+          : {}),
+      });
       operationUpdate = update;
       if (!isCurrentGeneration(generation)) {
         if (update) {
@@ -320,6 +429,7 @@ export function useAppUpdater({
         if (!isDurableNotification(currentNotification)) {
           updateSourceRef.current = null;
           restartPendingIdRef.current = null;
+          restartPreparedIdRef.current = null;
         }
         resetRetrySchedule();
         setCenter((current) => ({
@@ -347,7 +457,14 @@ export function useAppUpdater({
       }
 
       const source = releaseSource(update);
+      const installKind = installKindFrom(installTarget);
+      if (!installKind) {
+        await closeUpdateResource(update);
+        operationUpdate = null;
+        return;
+      }
       operationSource = source;
+      operationInstallKind = installKind;
       const retainedUpdate = updateRef.current;
       updateRef.current = null;
       if (retainedUpdate && retainedUpdate !== update) {
@@ -360,9 +477,10 @@ export function useAppUpdater({
       }
       updateSourceRef.current = source;
       restartPendingIdRef.current = null;
+      restartPreparedIdRef.current = null;
       updateRef.current = update;
 
-      if (installMode === "packageManaged") {
+      if (installTarget.mode === "manual") {
         await closeUpdateResource(update);
         operationUpdate = null;
         if (!isCurrentGeneration(generation)) {
@@ -373,24 +491,31 @@ export function useAppUpdater({
           sync: "settled",
           items: withUpdateNotification(
             current.items,
-            notificationFrom(source, localeRef.current, "packageManaged"),
+            notificationFrom(source, localeRef.current, installKind, "manual"),
           ),
         }));
         return;
       }
 
       stage = "download";
-      let lastPublishedAt = 0;
+      let lastPublishedAt = Number.NEGATIVE_INFINITY;
       setCenter((current) => ({
         sync: "settled",
         items: withUpdateNotification(
           current.items,
-          notificationFrom(source, localeRef.current, "downloading", {
-            downloaded,
-          }),
+          notificationFrom(
+            source,
+            localeRef.current,
+            installKind,
+            "downloading",
+            { downloaded },
+          ),
         ),
       }));
-      const publishProgress = (force = false) => {
+      const publishProgress = (
+        phase: "downloading" | "verifying" = "downloading",
+        force = false,
+      ) => {
         if (!isCurrentGeneration(generation)) {
           return;
         }
@@ -403,27 +528,70 @@ export function useAppUpdater({
           sync: "settled",
           items: withUpdateNotification(
             current.items,
-            notificationFrom(source, localeRef.current, "downloading", {
-              downloaded,
-              ...(total === undefined ? {} : { total }),
-            }),
+            notificationFrom(
+              source,
+              localeRef.current,
+              installKind,
+              phase,
+              {
+                downloaded,
+                ...(total === undefined ? {} : { total }),
+              },
+            ),
           ),
         }));
       };
-      const onDownload = (event: DownloadEvent) => {
-        if (event.event === "Started") {
-          total = event.data.contentLength;
-          publishProgress(true);
-        } else if (event.event === "Progress") {
-          downloaded += event.data.chunkLength;
-          publishProgress();
-        } else {
-          publishProgress(true);
-        }
-      };
-      await update.download(onDownload, { timeout: 10 * 60 * 1_000 });
-      if (!isCurrentGeneration(generation)) {
+
+      if (installTarget.mode === "nativePackage") {
         await closeUpdateResource(update);
+        operationUpdate = null;
+        if (!isCurrentGeneration(generation)) {
+          return;
+        }
+        const onProgress = new Channel<unknown>();
+        let acceptProgress = true;
+        onProgress.onmessage = (event) => {
+          if (!acceptProgress || !isLinuxPackageDownloadProgress(event)) {
+            return;
+          }
+          if (event.phase === "verifying") {
+            publishProgress("verifying", true);
+            return;
+          }
+          downloaded = event.downloaded;
+          if (event.total !== undefined) {
+            total = event.total;
+          }
+          publishProgress("downloading");
+        };
+        try {
+          await invoke("updater_prepare_linux_package", {
+            version: source.version,
+            onProgress,
+          });
+        } finally {
+          // A queued IPC Channel message can arrive after invoke settles. It
+          // must not move a ready/retry notification back to progress state.
+          acceptProgress = false;
+        }
+      } else {
+        const onDownload = (event: DownloadEvent) => {
+          if (event.event === "Started") {
+            total = event.data.contentLength;
+            publishProgress("downloading", true);
+          } else if (event.event === "Progress") {
+            downloaded += event.data.chunkLength;
+            publishProgress();
+          } else {
+            publishProgress("downloading", true);
+          }
+        };
+        await update.download(onDownload, { timeout: 10 * 60 * 1_000 });
+      }
+      if (!isCurrentGeneration(generation)) {
+        if (updateRef.current === update) {
+          await closeUpdateResource(update);
+        }
         return;
       }
 
@@ -432,7 +600,7 @@ export function useAppUpdater({
         sync: "settled",
         items: withUpdateNotification(
           current.items,
-          notificationFrom(source, localeRef.current, "ready"),
+          notificationFrom(source, localeRef.current, installKind, "ready"),
         ),
       }));
     } catch (error) {
@@ -445,8 +613,9 @@ export function useAppUpdater({
 
       // Background transport failures are diagnostics, not notifications.
       console.error(`Updater ${stage} failed`, error);
-      if (stage === "download" && operationSource) {
+      if (stage === "download" && operationSource && operationInstallKind) {
         const downloadSource = operationSource;
+        const downloadInstallKind = operationInstallKind;
         updateSourceRef.current = downloadSource;
         setCenter((current) => ({
           sync: "retrying",
@@ -455,6 +624,7 @@ export function useAppUpdater({
             notificationFrom(
               downloadSource,
               localeRef.current,
+              downloadInstallKind,
               "downloadRetry",
               {
                 downloaded,
@@ -483,7 +653,7 @@ export function useAppUpdater({
     enabled,
     isCurrentGeneration,
     resetRetrySchedule,
-    resolveInstallMode,
+    resolveInstallTarget,
     scheduleRetry,
     setCenter,
   ]);
@@ -500,15 +670,22 @@ export function useAppUpdater({
   const installUpdate = useCallback(async () => {
     const update = updateRef.current;
     const notification = findUpdateNotification(centerRef.current.items);
-    const restartOnly =
-      notification?.id === restartPendingIdRef.current;
+    const installTarget = installTargetRef.current;
+    const restartOnly = notification?.id === restartPendingIdRef.current;
+    const canInstallSelfUpdate =
+      notification?.installKind === "selfUpdate" && update !== null;
+    const canInstallNativePackage =
+      notification?.installKind === "nativePackage" &&
+      installTarget?.mode === "nativePackage";
     if (
       !enabled ||
       !notification ||
-      (!update && !restartOnly) ||
+      (!restartOnly && !canInstallSelfUpdate && !canInstallNativePackage) ||
       operationInProgressRef.current ||
       (notification.phase !== "ready" &&
-        notification.phase !== "installFailed")
+        notification.phase !== "authorizationCancelled" &&
+        notification.phase !== "installFailed" &&
+        notification.phase !== "restartFailed")
     ) {
       return;
     }
@@ -520,25 +697,54 @@ export function useAppUpdater({
       ...current,
       items: current.items.map((item) =>
         item.kind === "update" && item.id === notification.id
-          ? { ...item, phase: "installing" }
+          ? {
+              ...item,
+              phase: restartOnly ? "restarting" : "installing",
+            }
           : item,
       ),
     }));
     try {
       if (!restartOnly) {
-        await beforeInstallRef.current();
-        if (!isCurrentGeneration(generation)) {
-          if (update) {
-            await closeUpdateResource(update);
+        if (notification.installKind === "nativePackage") {
+          await invoke("updater_install_linux_package", {
+            version: notification.version,
+          });
+          if (!isCurrentGeneration(generation)) {
+            return;
           }
-          return;
+          restartPendingIdRef.current = notification.id;
+        } else {
+          await beforeInstallRef.current();
+          if (!isCurrentGeneration(generation)) {
+            if (update) {
+              await closeUpdateResource(update);
+            }
+            return;
+          }
+          restartPreparedIdRef.current = notification.id;
+          await update!.install();
+          updateRef.current = null;
+          restartPendingIdRef.current = notification.id;
         }
-        await update!.install();
-        updateRef.current = null;
-        restartPendingIdRef.current = notification.id;
       }
       if (!isCurrentGeneration(generation)) {
         return;
+      }
+      setCenter((current) => ({
+        ...current,
+        items: current.items.map((item) =>
+          item.kind === "update" && item.id === notification.id
+            ? { ...item, phase: "restarting" }
+            : item,
+        ),
+      }));
+      if (restartPreparedIdRef.current !== notification.id) {
+        await beforeInstallRef.current();
+        if (!isCurrentGeneration(generation)) {
+          return;
+        }
+        restartPreparedIdRef.current = notification.id;
       }
       await relaunch();
     } catch (error) {
@@ -549,11 +755,39 @@ export function useAppUpdater({
         return;
       }
       console.error("Updater install or relaunch failed", error);
+      const recoverNativePackage =
+        notification.installKind === "nativePackage" &&
+        restartPendingIdRef.current !== notification.id &&
+        isRecoverableLinuxPackageCacheError(error);
+      if (recoverNativePackage) {
+        if (
+          isPlainObject(error) &&
+          error.code === "updater_install_target_changed"
+        ) {
+          installTargetRef.current = null;
+        }
+        setCenter((current) => ({
+          sync: "retrying",
+          items: current.items.map((item) =>
+            item.kind === "update" && item.id === notification.id
+              ? { ...item, phase: "downloadRetry" }
+              : item,
+          ),
+        }));
+        scheduleRetry();
+        return;
+      }
+      const phase: UpdateNotificationPhase =
+        restartPendingIdRef.current === notification.id
+          ? "restartFailed"
+          : isAuthorizationCancelled(error)
+            ? "authorizationCancelled"
+            : "installFailed";
       setCenter((current) => ({
         ...current,
         items: current.items.map((item) =>
           item.kind === "update" && item.id === notification.id
-            ? { ...item, phase: "installFailed" }
+            ? { ...item, phase }
             : item,
         ),
       }));
@@ -565,6 +799,7 @@ export function useAppUpdater({
     closeUpdateResource,
     enabled,
     isCurrentGeneration,
+    scheduleRetry,
     setCenter,
   ]);
 
@@ -591,12 +826,18 @@ export function useAppUpdater({
         if (item.kind !== "update") {
           return item;
         }
-        const localized = notificationFrom(source, locale, item.phase, {
-          ...(item.downloaded === undefined
-            ? {}
-            : { downloaded: item.downloaded }),
-          ...(item.total === undefined ? {} : { total: item.total }),
-        });
+        const localized = notificationFrom(
+          source,
+          locale,
+          item.installKind,
+          item.phase,
+          {
+            ...(item.downloaded === undefined
+              ? {}
+              : { downloaded: item.downloaded }),
+            ...(item.total === undefined ? {} : { total: item.total }),
+          },
+        );
         return item.id === localized.id ? localized : item;
       }),
     }));

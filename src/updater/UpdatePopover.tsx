@@ -25,6 +25,16 @@ function itemTitle(item: UpdateNotification, fallback: string): string {
   return item.title.trim() || fallback;
 }
 
+function canConfirmInstall(item: UpdateNotification): boolean {
+  return (
+    item.installKind !== "manual" &&
+    (item.phase === "ready" ||
+      item.phase === "authorizationCancelled" ||
+      item.phase === "installFailed" ||
+      item.phase === "restartFailed")
+  );
+}
+
 export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
   function UpdatePopover(props, ref) {
     const { locale, t } = useI18n();
@@ -54,10 +64,13 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
       : undefined;
 
     useEffect(() => {
-      if (confirmingInstall && confirmingItem?.phase !== "ready") {
+      if (
+        confirmingInstall &&
+        (!confirmingItem || !canConfirmInstall(confirmingItem))
+      ) {
         setConfirmingInstall(null);
       }
-    }, [confirmingInstall, confirmingItem?.phase]);
+    }, [confirmingInstall, confirmingItem]);
 
     useEffect(() => {
       const focusTimer = window.requestAnimationFrame(() => {
@@ -176,9 +189,20 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                       downloaded: formatBytes(downloaded, locale),
                     });
                 const isConfirming = confirmingInstall === item.id;
+                const confirmable = canConfirmInstall(item);
+                const installInteractionDisabled =
+                  props.center.sync === "checking" ||
+                  props.center.sync === "initial";
+                const actionLabel =
+                  item.phase === "restartFailed"
+                    ? t("update.retryRestart")
+                    : item.phase === "ready"
+                      ? t("update.restartAndInstall")
+                      : t("update.retryInstall");
                 const showHighlights =
                   item.highlights.length > 0 &&
                   item.phase !== "downloading" &&
+                  item.phase !== "verifying" &&
                   item.phase !== "downloadRetry";
 
                 return (
@@ -252,10 +276,20 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                       </div>
                     )}
 
-                    {item.phase === "packageManaged" && (
+                    {item.phase === "verifying" && (
+                      <div className="update-status-block" role="status">
+                        <span className="update-spinner" aria-hidden="true" />
+                        <div>
+                          <strong>{t("update.verifying")}</strong>
+                          <p>{t("update.verifyingDescription")}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {item.phase === "manual" && (
                       <>
                         <p className="update-package-note">
-                          {t("update.packageManagedHelp")}
+                          {t("update.manualPackageHelp")}
                         </p>
                         <button
                           type="button"
@@ -267,11 +301,75 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                       </>
                     )}
 
-                    {item.phase === "ready" &&
+                    {item.phase === "authorizing" && (
+                      <div className="update-status-block" role="status">
+                        <span className="update-spinner" aria-hidden="true" />
+                        <div>
+                          <strong>{t("update.authorizing")}</strong>
+                          <p>{t("update.authorizingDescription")}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {item.phase === "authorizationCancelled" && (
+                      <div className="update-notice" role="status">
+                        <strong>{t("update.authorizationCancelledTitle")}</strong>
+                        <p>{t("update.authorizationCancelledDescription")}</p>
+                      </div>
+                    )}
+
+                    {item.phase === "installing" && (
+                      <div className="update-status-block" role="status">
+                        <span className="update-spinner" aria-hidden="true" />
+                        <div>
+                          <strong>
+                            {t("update.installing", { version: item.version })}
+                          </strong>
+                          <p>
+                            {item.installKind === "nativePackage"
+                              ? t("update.nativeInstallingDescription")
+                              : t("update.installingDescription")}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {item.phase === "restarting" && (
+                      <div className="update-status-block" role="status">
+                        <span className="update-spinner" aria-hidden="true" />
+                        <div>
+                          <strong>
+                            {t("update.restarting", { version: item.version })}
+                          </strong>
+                          <p>{t("update.restartingDescription")}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {item.phase === "installFailed" && (
+                      <div className="update-failure" role="alert">
+                        <strong>{t("update.installFailedTitle")}</strong>
+                        <p>{t("update.installFailedDescription")}</p>
+                      </div>
+                    )}
+
+                    {item.phase === "restartFailed" && (
+                      <div className="update-failure" role="alert">
+                        <strong>{t("update.restartFailedTitle")}</strong>
+                        <p>{t("update.restartFailedDescription")}</p>
+                      </div>
+                    )}
+
+                    {confirmable &&
                       (isConfirming ? (
                         <div className="update-confirmation">
                           <strong>{t("update.confirmTitle")}</strong>
-                          <p>{t("update.confirmWarning")}</p>
+                          <p>
+                            {item.installKind === "nativePackage" &&
+                            item.phase !== "restartFailed"
+                              ? t("update.nativeConfirmWarning")
+                              : t("update.confirmWarning")}
+                          </p>
                           <div className="update-actions">
                             <button
                               ref={confirmationCancelRef}
@@ -284,6 +382,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                             <button
                               type="button"
                               className="update-action update-action-primary"
+                              disabled={installInteractionDisabled}
                               onClick={props.onInstall}
                             >
                               {t("update.confirmRestart")}
@@ -292,59 +391,25 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                         </div>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            className="update-action update-action-link update-details-link"
-                            onClick={props.onOpenRelease}
-                          >
-                            {t("update.details")}
-                          </button>
+                          {item.phase === "ready" && (
+                            <button
+                              type="button"
+                              className="update-action update-action-link update-details-link"
+                              onClick={props.onOpenRelease}
+                            >
+                              {t("update.details")}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="update-action update-action-primary update-action-full"
+                            disabled={installInteractionDisabled}
                             onClick={() => setConfirmingInstall(item.id)}
                           >
-                            {t("update.restartAndInstall")}
+                            {actionLabel}
                           </button>
                         </>
                       ))}
-
-                    {item.phase === "installing" && (
-                      <div className="update-status-block" role="status">
-                        <span className="update-spinner" aria-hidden="true" />
-                        <div>
-                          <strong>
-                            {t("update.installing", { version: item.version })}
-                          </strong>
-                          <p>{t("update.installingDescription")}</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {item.phase === "installFailed" && (
-                      <>
-                        <div className="update-failure" role="alert">
-                          <strong>{t("update.installFailedTitle")}</strong>
-                          <p>{t("update.installFailedDescription")}</p>
-                        </div>
-                        <div className="update-actions update-actions-links">
-                          <button
-                            type="button"
-                            className="update-action update-action-link"
-                            onClick={props.onOpenRelease}
-                          >
-                            {t("update.details")}
-                          </button>
-                          <button
-                            type="button"
-                            className="update-action update-action-primary"
-                            onClick={props.onInstall}
-                          >
-                            {t("update.retryInstall")}
-                          </button>
-                        </div>
-                      </>
-                    )}
                   </article>
                 );
               })}

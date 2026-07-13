@@ -50,7 +50,7 @@ export function Titlebar(props: TitlebarProps) {
   const attentionItems = props.updater.center.items.filter(
     (item): item is UpdateNotification =>
       item.kind === "update" &&
-      (item.phase === "ready" || item.phase === "packageManaged"),
+      (item.phase === "ready" || item.phase === "manual"),
   );
   const latestAttentionItem = attentionItems[attentionItems.length - 1];
   const hasUnreadUpdate = attentionItems.some(
@@ -61,7 +61,8 @@ export function Titlebar(props: TitlebarProps) {
     : t("titlebar.notifications");
   const downloadingItem = props.updater.center.items.find(
     (item): item is UpdateNotification =>
-      item.kind === "update" && item.phase === "downloading",
+      item.kind === "update" &&
+      (item.phase === "downloading" || item.phase === "verifying"),
   );
   const downloadPercent =
     downloadingItem?.total && downloadingItem.total > 0
@@ -90,13 +91,23 @@ export function Titlebar(props: TitlebarProps) {
         return t("update.downloading", { version: latestItem.version });
       case "downloadRetry":
         return t("update.downloadRetry");
+      case "verifying":
+        return t("update.verifying");
       case "ready":
-      case "packageManaged":
+      case "manual":
         return t("titlebar.updateReady", { version: latestItem.version });
+      case "authorizing":
+        return t("update.authorizing");
       case "installing":
         return t("update.installing", { version: latestItem.version });
+      case "restarting":
+        return t("update.restarting", { version: latestItem.version });
+      case "authorizationCancelled":
+        return t("update.authorizationCancelledTitle");
       case "installFailed":
         return t("update.installFailedTitle");
+      case "restartFailed":
+        return t("update.restartFailedTitle");
     }
   })();
 

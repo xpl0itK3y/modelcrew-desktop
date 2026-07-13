@@ -15,6 +15,7 @@ function notification(
   return {
     id: "update:0.0.2",
     kind: "update",
+    installKind: "selfUpdate",
     phase,
     version: "0.0.2",
     title: "Тихие обновления",
@@ -103,10 +104,82 @@ describe("UpdatePopover", () => {
     expect(callbacks.onInstall).toHaveBeenCalledTimes(1);
   });
 
+  it("disables install actions during a background refresh", () => {
+    renderPopover({
+      sync: "checking",
+      items: [notification("ready")],
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Перезапустить и обновить" }),
+    ).toBeDisabled();
+  });
+
+  it("explains native Linux authorization before a package install", () => {
+    const callbacks = renderPopover({
+      sync: "settled",
+      items: [notification("ready", { installKind: "nativePackage" })],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Перезапустить и обновить" }),
+    );
+    expect(
+      screen.getByText(/Linux запросит системную авторизацию/),
+    ).toBeInTheDocument();
+    expect(callbacks.onInstall).not.toHaveBeenCalled();
+  });
+
   it.each([
+    ["authorizationCancelled", "Повторить установку"],
+    ["installFailed", "Повторить установку"],
+    ["restartFailed", "Повторить перезапуск"],
+  ] as const)(
+    "requires fresh restart confirmation when retrying %s",
+    (phase, action) => {
+      const callbacks = renderPopover({
+        sync: "settled",
+        items: [notification(phase, { installKind: "nativePackage" })],
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      expect(callbacks.onInstall).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Перезапустить" }));
+      expect(callbacks.onInstall).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not promise another Linux authorization when only relaunch failed", () => {
+    renderPopover({
+      sync: "settled",
+      items: [
+        notification("restartFailed", { installKind: "nativePackage" }),
+      ],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Повторить перезапуск" }),
+    );
+    expect(
+      screen.queryByText(/Linux запросит системную авторизацию/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Терминалы и запущенные процессы будут закрыты/),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["verifying", "Проверяем загруженное обновление"],
     ["downloadRetry", "Загрузка не завершилась. Повторим автоматически."],
+    ["authorizing", "Ожидаем системное подтверждение"],
     ["installing", "Устанавливаем ModelCrew 0.0.2"],
+    ["restarting", "Перезапускаем ModelCrew 0.0.2"],
+    ["authorizationCancelled", "Установка не подтверждена"],
     ["installFailed", "Не удалось установить обновление"],
+    [
+      "restartFailed",
+      "Обновление установлено, но ModelCrew не перезапустился",
+    ],
   ] as const)("renders the %s phase with localized copy", (phase, copy) => {
     renderPopover({ sync: "retrying", items: [notification(phase)] });
     expect(screen.getByText(copy)).toBeInTheDocument();
@@ -115,10 +188,10 @@ describe("UpdatePopover", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens the release page for package-managed installations", () => {
+  it("opens the release page only for manual installations", () => {
     const callbacks = renderPopover({
       sync: "settled",
-      items: [notification("packageManaged")],
+      items: [notification("manual", { installKind: "manual" })],
     });
     fireEvent.click(
       screen.getByRole("button", { name: "Открыть страницу загрузки" }),
@@ -150,10 +223,15 @@ describe("UpdatePopover", () => {
 
   it("uses the English catalog", () => {
     setLocale("en");
-    renderPopover({ sync: "settled", items: [] });
+    renderPopover({
+      sync: "settled",
+      items: [notification("authorizing", { installKind: "nativePackage" })],
+    });
     expect(
       screen.getByRole("heading", { name: "Notifications" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("No notifications yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Waiting for system authorization"),
+    ).toBeInTheDocument();
   });
 });

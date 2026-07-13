@@ -4,14 +4,23 @@ import type { UpdateNotification } from "./types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  check: vi.fn<() => Promise<Update | null>>(),
-  invoke: vi.fn<(command: string) => Promise<unknown>>(),
+  check: vi.fn<
+    (options?: { timeout?: number; target?: string }) => Promise<Update | null>
+  >(),
+  invoke: vi.fn<
+    (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  >(),
   relaunch: vi.fn<() => Promise<void>>(),
   openUrl: vi.fn<(url: string) => Promise<void>>(),
 }));
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: mocks.check }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
+  Channel: class<T> {
+    onmessage: (message: T) => void = () => {};
+  },
+}));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: mocks.relaunch }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
 
@@ -96,7 +105,7 @@ describe("useAppUpdater", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-13T00:00:00Z"));
-    mocks.invoke.mockResolvedValue("selfUpdate");
+    mocks.invoke.mockResolvedValue({ mode: "selfUpdate" });
     mocks.relaunch.mockResolvedValue();
     mocks.openUrl.mockResolvedValue();
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -120,9 +129,21 @@ describe("useAppUpdater", () => {
     expect(mocks.check).not.toHaveBeenCalled();
 
     await advance(1);
-    expect(mocks.invoke).toHaveBeenCalledWith("updater_install_mode");
+    expect(mocks.invoke).toHaveBeenCalledWith("updater_install_target");
     expect(mocks.check).toHaveBeenCalledWith({ timeout: 30_000 });
     expect(result.current.center).toEqual({ sync: "settled", items: [] });
+  });
+
+  it("rejects a legacy or malformed install target before checking", async () => {
+    mocks.invoke.mockResolvedValue("selfUpdate");
+    const { result } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall: vi.fn() }),
+    );
+
+    await advance(INITIAL_DELAY);
+
+    expect(mocks.check).not.toHaveBeenCalled();
+    expect(result.current.center).toEqual({ sync: "retrying", items: [] });
   });
 
   it("checks immediately when the center opens before the first attempt", async () => {
@@ -363,8 +384,140 @@ describe("useAppUpdater", () => {
     );
   });
 
-  it("does not download package-managed Linux updates", async () => {
-    mocks.invoke.mockResolvedValue("packageManaged");
+  it("downloads and verifies a native Linux package in the background", async () => {
+    const prepared = deferred<void>();
+    let progress:
+      | { onmessage: (message: unknown) => void }
+      | undefined;
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === "updater_install_target") {
+        return {
+          mode: "nativePackage",
+          packageKind: "deb",
+          target: "linux-x86_64-deb",
+        };
+      }
+      if (command === "updater_prepare_linux_package") {
+        progress = args?.onProgress as typeof progress;
+        return prepared.promise;
+      }
+    });
+    const candidate = makeUpdate();
+    mocks.check.mockResolvedValue(candidate.update);
+    const { result } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall: vi.fn() }),
+    );
+
+    await advance(INITIAL_DELAY);
+
+    expect(candidate.download).not.toHaveBeenCalled();
+    expect(candidate.close).toHaveBeenCalledTimes(1);
+    expect(mocks.check).toHaveBeenCalledWith({
+      timeout: 30_000,
+      target: "linux-x86_64-deb",
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "updater_prepare_linux_package",
+      expect.objectContaining({ version: "0.0.2", onProgress: expect.anything() }),
+    );
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({
+        installKind: "nativePackage",
+        phase: "downloading",
+      }),
+    );
+
+    await act(async () => {
+      progress?.onmessage({
+        phase: "downloading",
+        downloaded: 25,
+        total: 100,
+      });
+    });
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({
+        phase: "downloading",
+        downloaded: 25,
+        total: 100,
+      }),
+    );
+
+    await advance(100);
+    await act(async () => {
+      progress?.onmessage({
+        phase: "downloading",
+        downloaded: 50,
+      });
+    });
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({
+        phase: "downloading",
+        downloaded: 50,
+        total: 100,
+      }),
+    );
+
+    await act(async () => {
+      progress?.onmessage({ phase: "verifying" });
+    });
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "verifying" }),
+    );
+
+    await act(async () => {
+      prepared.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "ready", version: "0.0.2" }),
+    );
+
+    await act(async () => {
+      progress?.onmessage({ phase: "downloading", downloaded: 100 });
+    });
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "ready", version: "0.0.2" }),
+    );
+  });
+
+  it("ignores queued native progress after a failed preparation", async () => {
+    let progress:
+      | { onmessage: (message: unknown) => void }
+      | undefined;
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === "updater_install_target") {
+        return {
+          mode: "nativePackage",
+          packageKind: "rpm",
+          target: "linux-x86_64-rpm",
+        };
+      }
+      if (command === "updater_prepare_linux_package") {
+        progress = args?.onProgress as typeof progress;
+        throw new Error("temporary native download failure");
+      }
+    });
+    const candidate = makeUpdate();
+    mocks.check.mockResolvedValue(candidate.update);
+    const { result } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall: vi.fn() }),
+    );
+
+    await advance(INITIAL_DELAY);
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "downloadRetry" }),
+    );
+
+    await act(async () => {
+      progress?.onmessage({ phase: "verifying" });
+    });
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "downloadRetry" }),
+    );
+  });
+
+  it("keeps a manual fallback only for unsupported installations", async () => {
+    mocks.invoke.mockResolvedValue({ mode: "manual" });
     const candidate = makeUpdate();
     mocks.check.mockResolvedValue(candidate.update);
     const { result } = renderHook(() =>
@@ -376,7 +529,159 @@ describe("useAppUpdater", () => {
     expect(candidate.download).not.toHaveBeenCalled();
     expect(candidate.close).toHaveBeenCalledTimes(1);
     expect(result.current.center.items[0]).toEqual(
-      expect.objectContaining({ phase: "packageManaged", version: "0.0.2" }),
+      expect.objectContaining({
+        installKind: "manual",
+        phase: "manual",
+        version: "0.0.2",
+      }),
+    );
+  });
+
+  it("keeps PTYs running when native authorization is cancelled", async () => {
+    const rawMessage = "private polkit diagnostic";
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === "updater_install_target") {
+        return {
+          mode: "nativePackage",
+          packageKind: "deb",
+          target: "linux-x86_64-deb",
+        };
+      }
+      if (command === "updater_install_linux_package") {
+        throw {
+          code: "updater_authorization_cancelled",
+          debug: rawMessage,
+        };
+      }
+    });
+    const candidate = makeUpdate();
+    mocks.check.mockResolvedValue(candidate.update);
+    const beforeInstall = vi.fn(async () => {});
+    const { result } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall }),
+    );
+    await advance(INITIAL_DELAY);
+
+    await act(async () => {
+      await result.current.installUpdate();
+    });
+
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "updater_install_linux_package",
+      { version: "0.0.2" },
+    );
+    expect(beforeInstall).not.toHaveBeenCalled();
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+    expect(candidate.install).not.toHaveBeenCalled();
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "authorizationCancelled" }),
+    );
+    expect(JSON.stringify(result.current.center)).not.toContain(rawMessage);
+  });
+
+  it("redownloads a native package when its prepared cache disappears", async () => {
+    let prepareCalls = 0;
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === "updater_install_target") {
+        return {
+          mode: "nativePackage",
+          packageKind: "deb",
+          target: "linux-x86_64-deb",
+        };
+      }
+      if (command === "updater_prepare_linux_package") {
+        prepareCalls += 1;
+      }
+      if (command === "updater_install_linux_package") {
+        throw { code: "updater_cache_missing" };
+      }
+    });
+    mocks.check.mockResolvedValue(makeUpdate().update);
+    const beforeInstall = vi.fn(async () => {});
+    const { result } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall }),
+    );
+    await advance(INITIAL_DELAY);
+
+    await act(async () => {
+      await result.current.installUpdate();
+    });
+    expect(beforeInstall).not.toHaveBeenCalled();
+    expect(result.current.center).toEqual(
+      expect.objectContaining({
+        sync: "retrying",
+        items: [expect.objectContaining({ phase: "downloadRetry" })],
+      }),
+    );
+
+    await advance(MINUTE);
+    expect(prepareCalls).toBe(2);
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "ready" }),
+    );
+  });
+
+  it("installs a native package before stopping PTYs and never reinstalls on restart retry", async () => {
+    const order: string[] = [];
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === "updater_install_target") {
+        return {
+          mode: "nativePackage",
+          packageKind: "pacman",
+          target: "linux-x86_64-pacman",
+        };
+      }
+      if (command === "updater_install_linux_package") {
+        order.push("native-install");
+      }
+    });
+    const candidate = makeUpdate();
+    mocks.check.mockResolvedValue(candidate.update);
+    const beforeInstall = vi.fn(async () => {
+      order.push("prepare-restart");
+    });
+    mocks.relaunch
+      .mockImplementationOnce(async () => {
+        order.push("relaunch-1");
+        throw new Error("relaunch failed");
+      })
+      .mockImplementationOnce(async () => {
+        order.push("relaunch-2");
+      });
+    const { result } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall }),
+    );
+    await advance(INITIAL_DELAY);
+
+    await act(async () => {
+      await result.current.installUpdate();
+    });
+
+    expect(order).toEqual(["native-install", "prepare-restart", "relaunch-1"]);
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "restartFailed" }),
+    );
+
+    await act(async () => {
+      await result.current.installUpdate();
+    });
+
+    expect(order).toEqual([
+      "native-install",
+      "prepare-restart",
+      "relaunch-1",
+      "relaunch-2",
+    ]);
+    expect(beforeInstall).toHaveBeenCalledTimes(1);
+    expect(candidate.download).not.toHaveBeenCalled();
+    expect(candidate.install).not.toHaveBeenCalled();
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "updater_install_linux_package",
+      ),
+    ).toHaveLength(1);
+    expect(result.current.center.items[0]).toEqual(
+      expect.objectContaining({ phase: "restarting" }),
     );
   });
 
@@ -398,7 +703,7 @@ describe("useAppUpdater", () => {
     expect(candidate.install).toHaveBeenCalledTimes(1);
     expect(mocks.relaunch).toHaveBeenCalledTimes(1);
     expect(result.current.center.items[0]).toEqual(
-      expect.objectContaining({ phase: "installing", version: "0.0.2" }),
+      expect.objectContaining({ phase: "restarting", version: "0.0.2" }),
     );
   });
 
@@ -434,7 +739,7 @@ describe("useAppUpdater", () => {
     });
     expect(result.current.center.items[0]).toEqual(
       expect.objectContaining({
-        phase: "installFailed",
+        phase: "restartFailed",
         title: "Обновление готово",
         summary: "Локализованное описание",
       }),
@@ -450,7 +755,7 @@ describe("useAppUpdater", () => {
     expect(candidate.install).toHaveBeenCalledTimes(1);
     expect(mocks.relaunch).toHaveBeenCalledTimes(2);
     expect((result.current.center.items[0] as UpdateNotification)?.phase).toBe(
-      "installing",
+      "restarting",
     );
   });
 
@@ -602,6 +907,47 @@ describe("useAppUpdater", () => {
       await Promise.resolve();
     });
 
+    expect(candidate.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores native package progress delivered after unmount", async () => {
+    const prepared = deferred<void>();
+    let progress:
+      | { onmessage: (message: unknown) => void }
+      | undefined;
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === "updater_install_target") {
+        return {
+          mode: "nativePackage",
+          packageKind: "deb",
+          target: "linux-aarch64-deb",
+        };
+      }
+      if (command === "updater_prepare_linux_package") {
+        progress = args?.onProgress as typeof progress;
+        return prepared.promise;
+      }
+    });
+    const candidate = makeUpdate();
+    mocks.check.mockResolvedValue(candidate.update);
+    const { result, unmount } = renderHook(() =>
+      useAppUpdater({ locale: "ru", beforeInstall: vi.fn() }),
+    );
+    await advance(INITIAL_DELAY);
+    expect((result.current.center.items[0] as UpdateNotification).phase).toBe(
+      "downloading",
+    );
+
+    unmount();
+    await act(async () => {
+      progress?.onmessage({ phase: "verifying" });
+      prepared.resolve();
+      await Promise.resolve();
+    });
+
+    expect((result.current.center.items[0] as UpdateNotification).phase).toBe(
+      "downloading",
+    );
     expect(candidate.close).toHaveBeenCalledTimes(1);
   });
 

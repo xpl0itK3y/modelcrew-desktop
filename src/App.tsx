@@ -490,8 +490,10 @@ export default function App() {
   }, []);
 
   const prepareForUpdate = useCallback(async () => {
-    // Сначала фиксируем Dockview/Workspace, затем явно гасим процессы. Если
-    // backend не подтвердит остановку PTY, updater не начинает установку.
+    // Фиксируем Dockview/Workspace и явно гасим процессы перед заменой
+    // self-update или перед перезапуском уже установленного Linux-пакета.
+    // Native Linux install идёт раньше, чтобы отмена системной авторизации
+    // не закрывала пользовательские терминалы.
     persistNow();
     if (isTauri) {
       try {

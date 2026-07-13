@@ -18,6 +18,7 @@ import { Titlebar } from "./Titlebar";
 const readyUpdate: UpdateNotification = {
   id: "update:0.0.2",
   kind: "update",
+  installKind: "selfUpdate",
   phase: "ready",
   version: "0.0.2",
   title: "Тихий центр уведомлений",
@@ -144,5 +145,26 @@ describe("Titlebar notification center", () => {
     );
     expect(document.querySelector(".notification-download")).toBeInTheDocument();
     expect(document.querySelector(".notification-dot")).not.toBeInTheDocument();
+  });
+
+  it("announces native authorization without exposing backend details", () => {
+    render(
+      titlebar(
+        controller({
+          sync: "settled",
+          items: [
+            {
+              ...readyUpdate,
+              installKind: "nativePackage",
+              phase: "authorizing",
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(
+      document.querySelector(".update-live-region"),
+    ).toHaveTextContent("Ожидаем системное подтверждение");
   });
 });

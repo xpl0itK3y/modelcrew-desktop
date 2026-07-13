@@ -1,7 +1,19 @@
-export type InstallUpdateMode =
+export type LinuxPackageKind = "deb" | "rpm" | "pacman";
+
+export type InstallUpdateTarget =
+  | { mode: "selfUpdate"; target?: string }
+  | {
+      mode: "nativePackage";
+      packageKind: LinuxPackageKind;
+      target: string;
+    }
+  | { mode: "manual" }
+  | { mode: "development" };
+
+export type UpdateInstallKind =
   | "selfUpdate"
-  | "packageManaged"
-  | "development";
+  | "nativePackage"
+  | "manual";
 
 export type UpdateDetails = {
   version: string;
@@ -19,15 +31,21 @@ export type NotificationSyncState =
 
 export type UpdateNotificationPhase =
   | "downloading"
+  | "verifying"
   | "downloadRetry"
   | "ready"
-  | "packageManaged"
+  | "manual"
+  | "authorizing"
   | "installing"
-  | "installFailed";
+  | "restarting"
+  | "authorizationCancelled"
+  | "installFailed"
+  | "restartFailed";
 
 export type UpdateNotification = UpdateDetails & {
   id: `update:${string}`;
   kind: "update";
+  installKind: UpdateInstallKind;
   phase: UpdateNotificationPhase;
   downloaded?: number;
   total?: number;

@@ -35,12 +35,15 @@ const ru = {
   "update.downloadProgress": "Прогресс загрузки обновления",
   "update.downloaded": "Загружено {downloaded}",
   "update.downloadedOf": "{downloaded} из {total}",
+  "update.verifying": "Проверяем загруженное обновление",
+  "update.verifyingDescription":
+    "Проверяем подпись и целостность системного пакета.",
   "update.version": "Обновление {version} готово",
   "update.readyTitle": "Обновление ModelCrew {version}",
   "update.fallbackSummary":
     "Доступна новая версия ModelCrew. Подробности опубликованы на странице релиза.",
-  "update.packageManagedHelp":
-    "Эта установка обновляется через пакетный менеджер. Откройте страницу загрузки и обновите пакет обычным способом.",
+  "update.manualPackageHelp":
+    "ModelCrew не смог безопасно определить формат этой установки. Откройте страницу загрузки и выберите подходящий пакет вручную.",
   "update.details": "Подробнее",
   "update.later": "Позже",
   "update.openDownloads": "Открыть страницу загрузки",
@@ -48,10 +51,23 @@ const ru = {
   "update.confirmTitle": "Перезапустить ModelCrew?",
   "update.confirmWarning":
     "Терминалы и запущенные процессы будут закрыты. Проекты, сессии и раскладка сохранятся.",
+  "update.nativeConfirmWarning":
+    "Linux запросит системную авторизацию. После установки терминалы и запущенные процессы будут закрыты. Проекты, сессии и раскладка сохранятся.",
   "update.confirmRestart": "Перезапустить",
+  "update.authorizing": "Ожидаем системное подтверждение",
+  "update.authorizingDescription":
+    "Подтвердите установку в системном окне Linux. После подтверждения она продолжится автоматически.",
+  "update.authorizationCancelledTitle": "Установка не подтверждена",
+  "update.authorizationCancelledDescription":
+    "Системная авторизация отменена. Обновление не установлено, терминалы продолжают работать.",
   "update.installing": "Устанавливаем ModelCrew {version}",
   "update.installingDescription":
     "Приложение перезапустится после установки обновления.",
+  "update.nativeInstallingDescription":
+    "Подтвердите системное окно, если оно появится. Linux установит пакет автоматически — не закрывайте ModelCrew.",
+  "update.restarting": "Перезапускаем ModelCrew {version}",
+  "update.restartingDescription":
+    "Обновление установлено. Сохраняем рабочее состояние и перезапускаем приложение.",
   "update.errorTitle": "Не удалось обновить ModelCrew",
   "update.errorCheck": "Не удалось проверить наличие новой версии.",
   "update.errorDownload": "Не удалось загрузить обновление.",
@@ -66,8 +82,13 @@ const ru = {
     "Загрузка не завершилась. Повторим автоматически.",
   "update.installFailedTitle": "Не удалось установить обновление",
   "update.installFailedDescription":
-    "Попробуйте установить его ещё раз. Терминалы останутся открыты до подтверждения перезапуска.",
+    "Попробуйте установить его ещё раз. Перед новой попыткой ModelCrew снова попросит подтвердить перезапуск.",
   "update.retryInstall": "Повторить установку",
+  "update.restartFailedTitle":
+    "Обновление установлено, но ModelCrew не перезапустился",
+  "update.restartFailedDescription":
+    "Повторная установка не нужна. Попробуйте перезапустить приложение ещё раз.",
+  "update.retryRestart": "Повторить перезапуск",
 
   "sidebar.title": "Проекты",
   "sidebar.newWorkspace": "Новый проект",
@@ -253,12 +274,15 @@ const en: Record<MessageKey, string> = {
   "update.downloadProgress": "Update download progress",
   "update.downloaded": "Downloaded {downloaded}",
   "update.downloadedOf": "{downloaded} of {total}",
+  "update.verifying": "Verifying the downloaded update",
+  "update.verifyingDescription":
+    "Checking the system package signature and integrity.",
   "update.version": "Update {version} is ready",
   "update.readyTitle": "ModelCrew {version} update",
   "update.fallbackSummary":
     "A new ModelCrew version is available. Full details are on the release page.",
-  "update.packageManagedHelp":
-    "This installation is updated through its package manager. Open the downloads page and update the package in the usual way.",
+  "update.manualPackageHelp":
+    "ModelCrew could not safely identify this installation format. Open the downloads page and choose the matching package manually.",
   "update.details": "Details",
   "update.later": "Later",
   "update.openDownloads": "Open download page",
@@ -266,10 +290,23 @@ const en: Record<MessageKey, string> = {
   "update.confirmTitle": "Restart ModelCrew?",
   "update.confirmWarning":
     "Terminals and running processes will close. Your projects, sessions and layout will be saved.",
+  "update.nativeConfirmWarning":
+    "Linux will request system authorization. After installation, terminals and running processes will close. Your projects, sessions and layout will be saved.",
   "update.confirmRestart": "Restart",
+  "update.authorizing": "Waiting for system authorization",
+  "update.authorizingDescription":
+    "Approve the installation in the Linux system dialog. It will then continue automatically.",
+  "update.authorizationCancelledTitle": "Installation was not authorized",
+  "update.authorizationCancelledDescription":
+    "System authorization was cancelled. The update was not installed and your terminals are still running.",
   "update.installing": "Installing ModelCrew {version}",
   "update.installingDescription":
     "The application will restart after the update is installed.",
+  "update.nativeInstallingDescription":
+    "Approve the system dialog if it appears. Linux will install the package automatically — keep ModelCrew open.",
+  "update.restarting": "Restarting ModelCrew {version}",
+  "update.restartingDescription":
+    "The update is installed. Saving your workspace state and restarting the application.",
   "update.errorTitle": "ModelCrew could not be updated",
   "update.errorCheck": "Could not check for a new version.",
   "update.errorDownload": "Could not download the update.",
@@ -284,8 +321,13 @@ const en: Record<MessageKey, string> = {
     "The download did not finish. We’ll retry automatically.",
   "update.installFailedTitle": "The update could not be installed",
   "update.installFailedDescription":
-    "Try installing it again. Your terminals will stay open until you confirm the restart.",
+    "Try installing it again. ModelCrew will ask you to confirm the restart before another attempt.",
   "update.retryInstall": "Retry installation",
+  "update.restartFailedTitle":
+    "The update was installed, but ModelCrew did not restart",
+  "update.restartFailedDescription":
+    "You do not need to install it again. Try restarting the application once more.",
+  "update.retryRestart": "Retry restart",
 
   "sidebar.title": "Projects",
   "sidebar.newWorkspace": "New project",
