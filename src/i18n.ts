@@ -14,7 +14,7 @@ const ru = {
   "titlebar.newTerminal": "Новый терминал в сетку",
   "titlebar.layoutsSoon": "Раскладки — скоро",
   "titlebar.notificationsSoon": "Уведомления — скоро",
-  "titlebar.notifications": "Обновления и уведомления",
+  "titlebar.notifications": "Уведомления",
   "titlebar.updateReady": "Обновление {version} готово",
   "titlebar.updatesUnavailable":
     "Обновления доступны в установленной версии приложения",
@@ -43,7 +43,7 @@ const ru = {
     "Эта установка обновляется через пакетный менеджер. Откройте страницу загрузки и обновите пакет обычным способом.",
   "update.details": "Подробнее",
   "update.later": "Позже",
-  "update.openDownloads": "Открыть загрузки",
+  "update.openDownloads": "Открыть страницу загрузки",
   "update.restartAndInstall": "Перезапустить и обновить",
   "update.confirmTitle": "Перезапустить ModelCrew?",
   "update.confirmWarning":
@@ -58,6 +58,16 @@ const ru = {
   "update.errorInstall": "Не удалось установить загруженное обновление.",
   "update.retry": "Повторить",
   "update.close": "Закрыть уведомления",
+  "update.notificationsTitle": "Уведомления",
+  "update.refreshingNotifications": "Обновляем уведомления…",
+  "update.empty": "Пока нет уведомлений",
+  "update.versionLabel": "ModelCrew {version}",
+  "update.downloadRetry":
+    "Загрузка не завершилась. Повторим автоматически.",
+  "update.installFailedTitle": "Не удалось установить обновление",
+  "update.installFailedDescription":
+    "Попробуйте установить его ещё раз. Терминалы останутся открыты до подтверждения перезапуска.",
+  "update.retryInstall": "Повторить установку",
 
   "sidebar.title": "Проекты",
   "sidebar.newWorkspace": "Новый проект",
@@ -222,7 +232,7 @@ const en: Record<MessageKey, string> = {
   "titlebar.newTerminal": "Add terminal to grid",
   "titlebar.layoutsSoon": "Layouts — coming soon",
   "titlebar.notificationsSoon": "Notifications — coming soon",
-  "titlebar.notifications": "Updates and notifications",
+  "titlebar.notifications": "Notifications",
   "titlebar.updateReady": "Update {version} is ready",
   "titlebar.updatesUnavailable":
     "Updates are available in the installed application",
@@ -251,7 +261,7 @@ const en: Record<MessageKey, string> = {
     "This installation is updated through its package manager. Open the downloads page and update the package in the usual way.",
   "update.details": "Details",
   "update.later": "Later",
-  "update.openDownloads": "Open downloads",
+  "update.openDownloads": "Open download page",
   "update.restartAndInstall": "Restart and update",
   "update.confirmTitle": "Restart ModelCrew?",
   "update.confirmWarning":
@@ -266,6 +276,16 @@ const en: Record<MessageKey, string> = {
   "update.errorInstall": "Could not install the downloaded update.",
   "update.retry": "Try again",
   "update.close": "Close update notifications",
+  "update.notificationsTitle": "Notifications",
+  "update.refreshingNotifications": "Refreshing notifications…",
+  "update.empty": "No notifications yet",
+  "update.versionLabel": "ModelCrew {version}",
+  "update.downloadRetry":
+    "The download did not finish. We’ll retry automatically.",
+  "update.installFailedTitle": "The update could not be installed",
+  "update.installFailedDescription":
+    "Try installing it again. Your terminals will stay open until you confirm the restart.",
+  "update.retryInstall": "Retry installation",
 
   "sidebar.title": "Projects",
   "sidebar.newWorkspace": "New project",

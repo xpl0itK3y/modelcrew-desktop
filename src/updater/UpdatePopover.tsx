@@ -1,18 +1,19 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
-import { CloseIcon } from "../ui/Icons";
-import type { UpdateState } from "./types";
+import { BellIcon, CloseIcon } from "../ui/Icons";
+import type { AppUpdaterController, UpdateNotification } from "./types";
+
+type NotificationCenterState = AppUpdaterController["center"];
 
 type UpdatePopoverProps = {
-  state: UpdateState;
-  onCheck: () => void;
+  center: NotificationCenterState;
   onInstall: () => void;
   onOpenRelease: () => void;
   onClose: () => void;
 };
 
 function formatBytes(bytes: number, locale: string): string {
-  if (bytes <= 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0 MB";
   }
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(
@@ -20,10 +21,16 @@ function formatBytes(bytes: number, locale: string): string {
   )} MB`;
 }
 
+function itemTitle(item: UpdateNotification, fallback: string): string {
+  return item.title.trim() || fallback;
+}
+
 export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
   function UpdatePopover(props, ref) {
     const { locale, t } = useI18n();
-    const [confirmingInstall, setConfirmingInstall] = useState(false);
+    const [confirmingInstall, setConfirmingInstall] = useState<string | null>(
+      null,
+    );
     const dialogRef = useRef<HTMLDivElement | null>(null);
     const confirmationCancelRef = useRef<HTMLButtonElement | null>(null);
 
@@ -39,11 +46,18 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
       [ref],
     );
 
+    const confirmingItem = confirmingInstall
+      ? props.center.items.find(
+          (item): item is UpdateNotification =>
+            item.kind === "update" && item.id === confirmingInstall,
+        )
+      : undefined;
+
     useEffect(() => {
-      if (props.state.status !== "ready") {
-        setConfirmingInstall(false);
+      if (confirmingInstall && confirmingItem?.phase !== "ready") {
+        setConfirmingInstall(null);
       }
-    }, [props.state.status]);
+    }, [confirmingInstall, confirmingItem?.phase]);
 
     useEffect(() => {
       const focusTimer = window.requestAnimationFrame(() => {
@@ -54,29 +68,37 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
         }
       });
       return () => window.cancelAnimationFrame(focusTimer);
-    }, [confirmingInstall, props.state.status]);
+    }, [confirmingInstall]);
 
-    const errorText =
-      props.state.status === "error"
-        ? props.state.stage === "check"
-          ? t("update.errorCheck")
-          : props.state.stage === "download"
-            ? t("update.errorDownload")
-            : t("update.errorInstall")
-        : "";
+    const showInitialLoading =
+      props.center.items.length === 0 && props.center.sync === "initial";
 
     return (
       <div
+        id="notification-center"
         ref={setDialogRef}
         className="update-popover"
         data-tauri-drag-region="false"
         role="dialog"
         aria-modal="false"
-        aria-labelledby="update-popover-title"
+        aria-labelledby="notification-center-title"
         tabIndex={-1}
       >
         <div className="update-popover-header">
-          <span className="update-popover-eyebrow">MODELCREW</span>
+          <div className="update-popover-title-row">
+            <h2 id="notification-center-title" className="update-popover-title">
+              {t("update.notificationsTitle")}
+            </h2>
+            {props.center.sync === "checking" && !showInitialLoading && (
+              <span
+                className="update-header-sync"
+                title={t("update.refreshingNotifications")}
+                aria-hidden="true"
+              >
+                <span className="update-header-spinner" />
+              </span>
+            )}
+          </div>
           <button
             type="button"
             className="icon-button update-popover-close"
@@ -89,210 +111,244 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
         </div>
 
         <div className="update-popover-content">
-          {props.state.status === "idle" && (
-            <>
-              <h2 id="update-popover-title">{t("update.title")}</h2>
-              <p>{t("update.idleDescription")}</p>
-              <button
-                type="button"
-                className="update-action update-action-primary"
-                onClick={props.onCheck}
-              >
-                {t("update.checkNow")}
-              </button>
-            </>
-          )}
-
-          {props.state.status === "checking" && (
-            <div className="update-status-block">
+          {showInitialLoading ? (
+            <div className="update-empty-state" role="status" aria-live="polite">
               <span className="update-spinner" aria-hidden="true" />
-              <div>
-                <h2 id="update-popover-title">{t("update.title")}</h2>
-                <p>{t("update.checking")}</p>
-              </div>
+              <span className="update-empty-title">
+                {t("update.refreshingNotifications")}
+              </span>
             </div>
-          )}
-
-          {props.state.status === "upToDate" && (
-            <>
-              <h2 id="update-popover-title">{t("update.upToDate")}</h2>
-              <p>{t("update.upToDateDescription")}</p>
-              <button
-                type="button"
-                className="update-action update-action-secondary"
-                onClick={props.onCheck}
-              >
-                {t("update.checkAgain")}
-              </button>
-            </>
-          )}
-
-          {props.state.status === "downloading" && (
-            <>
-              <h2 id="update-popover-title">
-                {t("update.downloading", { version: props.state.version })}
-              </h2>
-              <p>{t("update.downloadingDescription")}</p>
-              <div
-                className={`update-progress-track ${
-                  props.state.total ? "" : "is-indeterminate"
-                }`}
-                role="progressbar"
-                aria-label={t("update.downloadProgress")}
-                {...(props.state.total
-                  ? {
-                      "aria-valuemin": 0,
-                      "aria-valuemax": props.state.total,
-                      "aria-valuenow": Math.min(
-                        props.state.downloaded,
-                        props.state.total,
-                      ),
-                    }
-                  : {})}
-              >
-                <span
-                  style={
-                    props.state.total
-                      ? {
-                          width: `${Math.min(
-                            100,
-                            (props.state.downloaded / props.state.total) * 100,
-                          )}%`,
-                        }
-                      : undefined
-                  }
-                />
-              </div>
-              <div className="update-progress-copy">
-                {props.state.total
+          ) : props.center.items.length === 0 ? (
+            <div className="update-empty-state" role="status">
+              <span className="update-empty-icon" aria-hidden="true">
+                <BellIcon />
+              </span>
+              <span className="update-empty-title">{t("update.empty")}</span>
+            </div>
+          ) : (
+            <div className="update-notification-list">
+              {props.center.items.map((item, index) => {
+                const titleId = `update-notification-${index}-title`;
+                if (item.kind === "announcement") {
+                  return (
+                    <article
+                      key={item.id}
+                      className="update-card is-announcement"
+                      aria-labelledby={titleId}
+                    >
+                      <div className="update-card-header">
+                        <span className="update-card-icon" aria-hidden="true">
+                          <BellIcon />
+                        </span>
+                        <div className="update-card-heading">
+                          <h3 id={titleId}>{item.title}</h3>
+                        </div>
+                      </div>
+                      {item.summary && <p>{item.summary}</p>}
+                      {item.highlights.length > 0 && (
+                        <ul className="update-highlights">
+                          {item.highlights
+                            .slice(0, 5)
+                            .map((highlight, highlightIndex) => (
+                              <li key={`${highlightIndex}-${highlight}`}>
+                                {highlight}
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                    </article>
+                  );
+                }
+                const downloaded = Math.max(0, item.downloaded ?? 0);
+                const total =
+                  item.total !== undefined && item.total > 0
+                    ? item.total
+                    : undefined;
+                const progress = total
+                  ? Math.min(100, (downloaded / total) * 100)
+                  : null;
+                const progressText = total
                   ? t("update.downloadedOf", {
-                      downloaded: formatBytes(props.state.downloaded, locale),
-                      total: formatBytes(props.state.total, locale),
+                      downloaded: formatBytes(downloaded, locale),
+                      total: formatBytes(total, locale),
                     })
                   : t("update.downloaded", {
-                      downloaded: formatBytes(props.state.downloaded, locale),
-                    })}
-              </div>
-            </>
-          )}
+                      downloaded: formatBytes(downloaded, locale),
+                    });
+                const isConfirming = confirmingInstall === item.id;
+                const showHighlights =
+                  item.highlights.length > 0 &&
+                  item.phase !== "downloading" &&
+                  item.phase !== "downloadRetry";
 
-          {(props.state.status === "ready" ||
-            props.state.status === "packageManaged") && (
-            <>
-              <span className="update-version">
-                {t("update.version", { version: props.state.version })}
-              </span>
-              <h2 id="update-popover-title">{props.state.title}</h2>
-              <p>{props.state.summary}</p>
-              {props.state.highlights.length > 0 && (
-                <ul className="update-highlights">
-                  {props.state.highlights.map((highlight, index) => (
-                    <li key={`${index}-${highlight}`}>{highlight}</li>
-                  ))}
-                </ul>
-              )}
-
-              {props.state.status === "packageManaged" ? (
-                <>
-                  <p className="update-package-note">
-                    {t("update.packageManagedHelp")}
-                  </p>
-                  <div className="update-actions">
-                    <button
-                      type="button"
-                      className="update-action update-action-secondary"
-                      onClick={props.onClose}
-                    >
-                      {t("update.later")}
-                    </button>
-                    <button
-                      type="button"
-                      className="update-action update-action-primary"
-                      onClick={props.onOpenRelease}
-                    >
-                      {t("update.openDownloads")}
-                    </button>
-                  </div>
-                </>
-              ) : confirmingInstall ? (
-                <div className="update-confirmation">
-                  <strong>{t("update.confirmTitle")}</strong>
-                  <p>{t("update.confirmWarning")}</p>
-                  <div className="update-actions">
-                    <button
-                      ref={confirmationCancelRef}
-                      type="button"
-                      className="update-action update-action-secondary"
-                      onClick={() => setConfirmingInstall(false)}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      type="button"
-                      className="update-action update-action-primary"
-                      onClick={props.onInstall}
-                    >
-                      {t("update.confirmRestart")}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="update-actions update-actions-links">
-                    <button
-                      type="button"
-                      className="update-action update-action-link"
-                      onClick={props.onOpenRelease}
-                    >
-                      {t("update.details")}
-                    </button>
-                    <button
-                      type="button"
-                      className="update-action update-action-link"
-                      onClick={props.onClose}
-                    >
-                      {t("update.later")}
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="update-action update-action-primary update-action-full"
-                    onClick={() => setConfirmingInstall(true)}
+                return (
+                  <article
+                    key={item.id}
+                    className={`update-card is-${item.phase}`}
+                    aria-labelledby={titleId}
                   >
-                    {t("update.restartAndInstall")}
-                  </button>
-                </>
-              )}
-            </>
-          )}
+                    <div className="update-card-header">
+                      <span className="update-card-icon" aria-hidden="true">
+                        <BellIcon />
+                      </span>
+                      <div className="update-card-heading">
+                        <span className="update-version">
+                          {t("update.versionLabel", { version: item.version })}
+                        </span>
+                        <h3 id={titleId}>
+                          {itemTitle(
+                            item,
+                            t("update.readyTitle", { version: item.version }),
+                          )}
+                        </h3>
+                      </div>
+                    </div>
 
-          {props.state.status === "installing" && (
-            <div className="update-status-block">
-              <span className="update-spinner" aria-hidden="true" />
-              <div>
-                <h2 id="update-popover-title">
-                  {t("update.installing", { version: props.state.version })}
-                </h2>
-                <p>{t("update.installingDescription")}</p>
-              </div>
+                    {item.summary && <p>{item.summary}</p>}
+
+                    {showHighlights && (
+                      <ul className="update-highlights">
+                        {item.highlights.slice(0, 5).map((highlight, highlightIndex) => (
+                          <li key={`${highlightIndex}-${highlight}`}>{highlight}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {item.phase === "downloading" && (
+                      <div className="update-download-status">
+                        <p className="update-status-copy">
+                          {t("update.downloadingDescription")}
+                        </p>
+                        <div
+                          className={`update-progress-track ${
+                            progress === null ? "is-indeterminate" : ""
+                          }`}
+                          role="progressbar"
+                          aria-label={t("update.downloadProgress")}
+                          aria-valuetext={progressText}
+                          {...(progress === null
+                            ? {}
+                            : {
+                                "aria-valuemin": 0,
+                                "aria-valuemax": 100,
+                                "aria-valuenow": Math.round(progress),
+                              })}
+                        >
+                          <span
+                            style={
+                              progress === null
+                                ? undefined
+                                : { width: `${progress}%` }
+                            }
+                          />
+                        </div>
+                        <div className="update-progress-copy">{progressText}</div>
+                      </div>
+                    )}
+
+                    {item.phase === "downloadRetry" && (
+                      <div className="update-status-note" role="status">
+                        {t("update.downloadRetry")}
+                      </div>
+                    )}
+
+                    {item.phase === "packageManaged" && (
+                      <>
+                        <p className="update-package-note">
+                          {t("update.packageManagedHelp")}
+                        </p>
+                        <button
+                          type="button"
+                          className="update-action update-action-primary update-action-full"
+                          onClick={props.onOpenRelease}
+                        >
+                          {t("update.openDownloads")}
+                        </button>
+                      </>
+                    )}
+
+                    {item.phase === "ready" &&
+                      (isConfirming ? (
+                        <div className="update-confirmation">
+                          <strong>{t("update.confirmTitle")}</strong>
+                          <p>{t("update.confirmWarning")}</p>
+                          <div className="update-actions">
+                            <button
+                              ref={confirmationCancelRef}
+                              type="button"
+                              className="update-action update-action-secondary"
+                              onClick={() => setConfirmingInstall(null)}
+                            >
+                              {t("common.cancel")}
+                            </button>
+                            <button
+                              type="button"
+                              className="update-action update-action-primary"
+                              onClick={props.onInstall}
+                            >
+                              {t("update.confirmRestart")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="update-action update-action-link update-details-link"
+                            onClick={props.onOpenRelease}
+                          >
+                            {t("update.details")}
+                          </button>
+                          <button
+                            type="button"
+                            className="update-action update-action-primary update-action-full"
+                            onClick={() => setConfirmingInstall(item.id)}
+                          >
+                            {t("update.restartAndInstall")}
+                          </button>
+                        </>
+                      ))}
+
+                    {item.phase === "installing" && (
+                      <div className="update-status-block" role="status">
+                        <span className="update-spinner" aria-hidden="true" />
+                        <div>
+                          <strong>
+                            {t("update.installing", { version: item.version })}
+                          </strong>
+                          <p>{t("update.installingDescription")}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {item.phase === "installFailed" && (
+                      <>
+                        <div className="update-failure" role="alert">
+                          <strong>{t("update.installFailedTitle")}</strong>
+                          <p>{t("update.installFailedDescription")}</p>
+                        </div>
+                        <div className="update-actions update-actions-links">
+                          <button
+                            type="button"
+                            className="update-action update-action-link"
+                            onClick={props.onOpenRelease}
+                          >
+                            {t("update.details")}
+                          </button>
+                          <button
+                            type="button"
+                            className="update-action update-action-primary"
+                            onClick={props.onInstall}
+                          >
+                            {t("update.retryInstall")}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                );
+              })}
             </div>
-          )}
-
-          {props.state.status === "error" && (
-            <>
-              <h2 id="update-popover-title">{t("update.errorTitle")}</h2>
-              <p>{errorText}</p>
-              <p className="update-error-detail" title={props.state.message}>
-                {props.state.message}
-              </p>
-              <button
-                type="button"
-                className="update-action update-action-secondary"
-                onClick={props.onCheck}
-              >
-                {t("update.retry")}
-              </button>
-            </>
           )}
         </div>
       </div>

@@ -11,26 +11,47 @@ export type UpdateDetails = {
   releaseUrl: string;
 };
 
-export type UpdateState =
-  | { status: "idle" | "checking" | "upToDate" }
-  | {
-      status: "downloading";
-      version: string;
-      downloaded: number;
-      total?: number;
-    }
-  | ({ status: "ready" | "packageManaged" } & UpdateDetails)
-  | { status: "installing"; version: string }
-  | {
-      status: "error";
-      stage: "check" | "download" | "install";
-      message: string;
-    };
+export type NotificationSyncState =
+  | "initial"
+  | "checking"
+  | "settled"
+  | "retrying";
+
+export type UpdateNotificationPhase =
+  | "downloading"
+  | "downloadRetry"
+  | "ready"
+  | "packageManaged"
+  | "installing"
+  | "installFailed";
+
+export type UpdateNotification = UpdateDetails & {
+  id: `update:${string}`;
+  kind: "update";
+  phase: UpdateNotificationPhase;
+  downloaded?: number;
+  total?: number;
+};
+
+export type AnnouncementNotification = {
+  id: `announcement:${string}`;
+  kind: "announcement";
+  title: string;
+  summary: string;
+  highlights: string[];
+};
+
+export type NotificationItem = UpdateNotification | AnnouncementNotification;
+
+export type NotificationCenterState = {
+  sync: NotificationSyncState;
+  items: NotificationItem[];
+};
 
 export type AppUpdaterController = {
   enabled: boolean;
-  state: UpdateState;
-  checkForUpdates: () => Promise<void>;
+  center: NotificationCenterState;
+  ensureChecked: () => Promise<void>;
   installUpdate: () => Promise<void>;
   openRelease: () => Promise<void>;
 };

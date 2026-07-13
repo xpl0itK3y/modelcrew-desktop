@@ -9,6 +9,7 @@ const MAX_SUMMARY_LENGTH = 200;
 const MAX_HIGHLIGHT_LENGTH = 120;
 
 type PlainObject = Record<string, unknown>;
+type ReleaseDetailsSource = Pick<Update, "version" | "body" | "rawJson">;
 
 function isPlainObject(value: unknown): value is PlainObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -101,7 +102,10 @@ function localizedMetadata(
   return { title, summary, highlights: highlights as string[] };
 }
 
-export function releaseDetails(update: Update, locale: Locale): UpdateDetails {
+export function releaseDetails(
+  update: ReleaseDetailsSource,
+  locale: Locale,
+): UpdateDetails {
   const rawJson = isPlainObject(update.rawJson) ? update.rawJson : {};
   const localized = localizedMetadata(rawJson, locale);
   const fallbackSummary =
@@ -119,12 +123,4 @@ export function releaseDetails(update: Update, locale: Locale): UpdateDetails {
     highlights: localized?.highlights ?? [],
     releaseUrl: safeReleaseUrl(modelcrew.releaseUrl, update.version),
   };
-}
-
-export function sanitizeUpdateError(error: unknown): string {
-  const source = error instanceof Error ? error.message : String(error);
-  return (
-    shortenPlainText(source, 300) ??
-    "The update operation failed without an error message"
-  );
 }

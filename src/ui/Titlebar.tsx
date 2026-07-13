@@ -8,7 +8,14 @@ import {
 } from "./Icons";
 import { useI18n } from "../i18n";
 import { UpdatePopover } from "../updater/UpdatePopover";
-import type { AppUpdaterController } from "../updater/types";
+import {
+  loadReadNotificationIds,
+  markNotificationIdsRead,
+} from "../updater/readNotifications";
+import type {
+  AppUpdaterController,
+  UpdateNotification,
+} from "../updater/types";
 
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -30,56 +37,68 @@ function collapseHome(path: string): string {
 export function Titlebar(props: TitlebarProps) {
   const { t } = useI18n();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [readVersion, setReadVersion] = useState<string | null>(null);
+  const [readNotificationIds, setReadNotificationIds] = useState(() =>
+    loadReadNotificationIds(),
+  );
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const bellRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const toggleSidebarLabel = t("titlebar.toggleSidebar");
   const newTerminalLabel = t("titlebar.newTerminal");
   const settingsLabel = t("titlebar.settings");
-  const attentionVersion =
-    props.updater.state.status === "ready" ||
-    props.updater.state.status === "packageManaged"
-      ? props.updater.state.version
-      : null;
-  const hasUnreadUpdate = Boolean(
-    attentionVersion && attentionVersion !== readVersion,
+
+  const attentionItems = props.updater.center.items.filter(
+    (item): item is UpdateNotification =>
+      item.kind === "update" &&
+      (item.phase === "ready" || item.phase === "packageManaged"),
   );
-  const notificationLabel = attentionVersion
-    ? t("titlebar.updateReady", { version: attentionVersion })
+  const latestAttentionItem = attentionItems[attentionItems.length - 1];
+  const hasUnreadUpdate = attentionItems.some(
+    (item) => !readNotificationIds.includes(item.id),
+  );
+  const notificationLabel = latestAttentionItem
+    ? t("titlebar.updateReady", { version: latestAttentionItem.version })
     : t("titlebar.notifications");
-  const updateAnnouncement = (() => {
-    switch (props.updater.state.status) {
-      case "checking":
-        return t("update.checking");
-      case "upToDate":
-        return t("update.upToDate");
-      case "downloading":
-        return t("update.downloading", {
-          version: props.updater.state.version,
-        });
-      case "ready":
-      case "packageManaged":
-        return t("titlebar.updateReady", {
-          version: props.updater.state.version,
-        });
-      case "installing":
-        return t("update.installing", {
-          version: props.updater.state.version,
-        });
-      case "error":
-        return t("update.errorTitle");
-      default:
-        return "";
-    }
-  })();
+  const downloadingItem = props.updater.center.items.find(
+    (item): item is UpdateNotification =>
+      item.kind === "update" && item.phase === "downloading",
+  );
   const downloadPercent =
-    props.updater.state.status === "downloading" && props.updater.state.total
+    downloadingItem?.total && downloadingItem.total > 0
       ? Math.min(
           100,
-          (props.updater.state.downloaded / props.updater.state.total) * 100,
+          ((downloadingItem.downloaded ?? 0) / downloadingItem.total) * 100,
         )
       : null;
+  const latestItem =
+    props.updater.center.items[props.updater.center.items.length - 1];
+  const updateAnnouncement = (() => {
+    if (!latestItem) {
+      if (
+        props.updater.center.sync === "initial" ||
+        props.updater.center.sync === "checking"
+      ) {
+        return t("update.refreshingNotifications");
+      }
+      return t("update.empty");
+    }
+    if (latestItem.kind === "announcement") {
+      return latestItem.title;
+    }
+    switch (latestItem.phase) {
+      case "downloading":
+        return t("update.downloading", { version: latestItem.version });
+      case "downloadRetry":
+        return t("update.downloadRetry");
+      case "ready":
+      case "packageManaged":
+        return t("titlebar.updateReady", { version: latestItem.version });
+      case "installing":
+        return t("update.installing", { version: latestItem.version });
+      case "installFailed":
+        return t("update.installFailedTitle");
+    }
+  })();
 
   const closeNotifications = useCallback((restoreFocus = true) => {
     setNotificationsOpen(false);
@@ -88,13 +107,36 @@ export function Titlebar(props: TitlebarProps) {
     }
   }, []);
 
+  const toggleNotifications = useCallback(() => {
+    if (notificationsOpen) {
+      setNotificationsOpen(false);
+      return;
+    }
+    setNotificationsOpen(true);
+    void props.updater.ensureChecked();
+  }, [notificationsOpen, props.updater]);
+
   useEffect(() => {
     if (!notificationsOpen) {
       return;
     }
-    if (attentionVersion) {
-      setReadVersion(attentionVersion);
+
+    const visibleIds = props.updater.center.items.map((item) => item.id);
+    if (visibleIds.length > 0) {
+      setReadNotificationIds((currentIds) => {
+        if (visibleIds.every((id) => currentIds.includes(id))) {
+          return currentIds;
+        }
+        return markNotificationIdsRead(currentIds, visibleIds);
+      });
     }
+  }, [notificationsOpen, props.updater.center.items]);
+
+  useEffect(() => {
+    if (!notificationsOpen) {
+      return;
+    }
+
     const focusTimer = window.requestAnimationFrame(() => {
       popoverRef.current?.focus();
     });
@@ -119,7 +161,7 @@ export function Titlebar(props: TitlebarProps) {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [attentionVersion, closeNotifications, notificationsOpen]);
+  }, [closeNotifications, notificationsOpen]);
 
   return (
     <header className="titlebar" data-tauri-drag-region="deep">
@@ -169,23 +211,19 @@ export function Titlebar(props: TitlebarProps) {
             type="button"
             className={`icon-button notification-button ${
               notificationsOpen ? "is-active" : ""
-            } ${props.updater.enabled ? "" : "is-disabled"}`}
-            title={
-              props.updater.enabled
-                ? t("titlebar.notifications")
-                : t("titlebar.updatesUnavailable")
-            }
+            }`}
+            title={t("titlebar.notifications")}
             aria-label={notificationLabel}
             aria-haspopup="dialog"
+            aria-controls="notification-center"
             aria-expanded={notificationsOpen}
-            disabled={!props.updater.enabled}
-            onClick={() => setNotificationsOpen((open) => !open)}
+            onClick={toggleNotifications}
           >
             <BellIcon />
             {hasUnreadUpdate && (
               <span className="notification-dot" aria-hidden="true" />
             )}
-            {props.updater.state.status === "downloading" && (
+            {downloadingItem && (
               <span
                 className={`notification-download ${
                   downloadPercent === null ? "is-indeterminate" : ""
@@ -205,8 +243,7 @@ export function Titlebar(props: TitlebarProps) {
           {notificationsOpen && (
             <UpdatePopover
               ref={popoverRef}
-              state={props.updater.state}
-              onCheck={() => void props.updater.checkForUpdates()}
+              center={props.updater.center}
               onInstall={() => void props.updater.installUpdate()}
               onOpenRelease={() => void props.updater.openRelease()}
               onClose={() => closeNotifications()}
