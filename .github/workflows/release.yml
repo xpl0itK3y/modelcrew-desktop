@@ -216,11 +216,90 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
 
+  build-arch:
+    name: Arch Linux ${{ matrix.arch }}
+    needs:
+      - prepare-release
+      - build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    container: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            deb_artifact: stable-linux-x86_64
+          - arch: aarch64
+            deb_artifact: stable-linux-aarch64
+    steps:
+      # nodejs is required for the artifact actions that run inside the container.
+      - name: Install packaging tools
+        run: pacman -Syu --needed --noconfirm base-devel nodejs
+
+      - name: Download Linux deb
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ matrix.deb_artifact }}
+          path: deb-input
+
+      - name: Repackage deb into a pacman package
+        env:
+          PKG_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          deb="$(find deb-input -name '*.deb' -print -quit)"
+          test -n "$deb" || { echo "No .deb found in ${{ matrix.deb_artifact }}" >&2; exit 1; }
+          pkgver="$(basename "$deb" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+          test -n "$pkgver" || { echo "Could not derive version from $deb" >&2; exit 1; }
+          # makepkg refuses to run as root, so build under an unprivileged user.
+          useradd -m builder
+          work=/home/builder/work
+          install -d -o builder -g builder "$work"
+          install -o builder -g builder "$deb" "$work/modelcrew.deb"
+          # Only a prebuilt .deb is unpacked (no compilation), so CARCH just
+          # labels the package for the target architecture.
+          sed -i "s/^CARCH=.*/CARCH=\"$PKG_ARCH\"/" /etc/makepkg.conf
+          cat > "$work/PKGBUILD" <<'PKGBUILD'
+          pkgname=modelcrew-bin
+          pkgver=__VERSION__
+          pkgrel=1
+          pkgdesc='Desktop workspace for projects, sessions, and multiple terminals'
+          arch=('__ARCH__')
+          url='https://github.com/xpl0itK3y/modelcrew-desktop'
+          license=('MIT')
+          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gtk3' 'hicolor-icon-theme' 'libsoup3' 'openssl' 'pango' 'webkit2gtk-4.1')
+          provides=('modelcrew')
+          conflicts=('modelcrew')
+          options=('!strip')
+          source=('modelcrew.deb')
+          sha256sums=('SKIP')
+          package() {
+          cd "$srcdir"
+          ar x modelcrew.deb
+          bsdtar -xf data.tar.* -C "$pkgdir"
+          }
+          PKGBUILD
+          sed -i "s/__VERSION__/$pkgver/; s/__ARCH__/$PKG_ARCH/" "$work/PKGBUILD"
+          chown builder:builder "$work/PKGBUILD"
+          su builder -c "cd '$work' && makepkg -f --nodeps --clean"
+          mkdir -p arch-out
+          cp "$work"/*.pkg.tar.zst arch-out/
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stable-arch-${{ matrix.arch }}
+          retention-days: 7
+          if-no-files-found: error
+          path: arch-out/*.pkg.tar.zst
+
   finalize-release:
     name: Verify and publish public release
     needs:
       - prepare-release
       - build
+      - build-arch
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:

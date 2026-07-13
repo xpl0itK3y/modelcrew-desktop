@@ -97,5 +97,17 @@ for (const arch of ["x86_64", "aarch64"]) {
   };
 }
 
+// Arch Linux pacman package (repackaged from the .deb by the build-arch job).
+// pacman handles its own updates, so there is no updater signature/manifest entry.
+for (const arch of ["x86_64", "aarch64"]) {
+  const files = await platformFiles(`stable-arch-${arch}`);
+  const pkg = one(
+    files,
+    (file) => file.endsWith(".pkg.tar.zst"),
+    `Arch ${arch} package`,
+  );
+  await copy(pkg, `ModelCrew_${version}_linux_${arch}.pkg.tar.zst`);
+}
+
 await writeJson(manifestPath, manifest);
 console.log(`Prepared release assets in ${output}`);

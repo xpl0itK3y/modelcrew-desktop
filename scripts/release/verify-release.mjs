@@ -33,6 +33,8 @@ const expected = [
   `ModelCrew_${version}_linux_aarch64.AppImage.sig`,
   `ModelCrew_${version}_linux_aarch64.deb`,
   `ModelCrew_${version}_linux_aarch64.rpm`,
+  `ModelCrew_${version}_linux_x86_64.pkg.tar.zst`,
+  `ModelCrew_${version}_linux_aarch64.pkg.tar.zst`,
   "PKGBUILD",
   ".SRCINFO",
   "latest.json",

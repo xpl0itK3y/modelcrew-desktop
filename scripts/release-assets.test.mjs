@@ -40,6 +40,11 @@ function createFixture({ includeMsiSignature = true } = {}) {
     write(path.join(linux, "ModelCrew.rpm"));
   }
 
+  for (const arch of ["x86_64", "aarch64"]) {
+    const archLinux = path.join(input, `stable-arch-${arch}`);
+    write(path.join(archLinux, "modelcrew-bin.pkg.tar.zst"));
+  }
+
   return fixture;
 }
 
