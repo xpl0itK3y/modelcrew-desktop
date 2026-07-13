@@ -63,7 +63,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="$(node -e "console.log(JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version)")"
-          latest_tag="$(gh api "repos/$RELEASE_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          latest_tag=""
+          if value="$(gh api "repos/$RELEASE_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)"; then
+            latest_tag="$value"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
 
@@ -92,7 +95,10 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.metadata.outputs.version }}
         run: |
-          existing="$(gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)"
+          existing=""
+          if value="$(gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" 2>/dev/null)"; then
+            existing="$value"
+          fi
           if test -n "$existing"; then
             if test "$(jq -r .draft <<<"$existing")" != "true"; then
               if test "$(jq -r .prerelease <<<"$existing")" != "true"; then
