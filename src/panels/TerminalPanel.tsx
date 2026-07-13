@@ -10,7 +10,7 @@ import {
 export { destroyTerminal };
 
 export function TerminalPanel(
-  props: IDockviewPanelProps<{ workspaceId?: string }>,
+  props: IDockviewPanelProps<{ workspaceId?: string; sessionId?: string }>,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 

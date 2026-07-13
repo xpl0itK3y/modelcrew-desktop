@@ -6,11 +6,15 @@ export const appActions = {
   requestCloseGroup: (_group: DockviewGroupPanel): void => {},
   // Панели передают только владельца; cwd остаётся внутри Rust-реестра.
   getActiveWorkspaceId: (): string | null => null,
+  // Видимая Dockview-сетка принадлежит одной виртуальной сессии проекта.
+  getActiveSessionId: (): string | null => null,
   hasActiveWorkspace: (): boolean => false,
   // Онбординг: создать воркспейс через выбор папки проекта.
   requestCreateWorkspace: (): void => {},
+  // Watermark и хоткеи используют единый путь создания терминала/сессии.
+  requestNewTerminal: (): void => {},
   // Сетке некуда расти по месту — то же уведомление, что и у ⌘T.
   notifyNoSpace: (): void => {},
-  // Достигнут жёсткий предел числа терминалов на воркспейс.
+  // Достигнут жёсткий предел числа терминалов в текущей сессии.
   notifyLimit: (): void => {},
 };

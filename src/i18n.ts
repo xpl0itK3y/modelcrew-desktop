@@ -21,6 +21,14 @@ const ru = {
   "sidebar.deleteWorkspace": "Удалить проект",
   "sidebar.homeFolder": "Домашняя папка",
   "sidebar.renameWorkspace": "Переименовать проект",
+  "sidebar.expandWorkspace": "Развернуть проект «{name}»",
+  "sidebar.collapseWorkspace": "Свернуть проект «{name}»",
+  "sidebar.workspaceActions": "Действия с проектом «{name}»",
+  "sidebar.newSessionIn": "Новая сессия в проекте «{name}»",
+  "sidebar.renameSession": "Переименовать сессию",
+  "sidebar.deleteSession": "Удалить сессию",
+  "sidebar.sessionActions": "Действия с сессией «{name}»",
+  "sidebar.newTerminalIn": "Новый терминал в сессии «{name}»",
 
   "settings.title": "Настройки",
   "settings.language": "Язык интерфейса",
@@ -99,6 +107,11 @@ const ru = {
   "confirm.closeTerminal": "Закрытие терминала",
   "confirm.deleteWorkspace":
     "Удалить проект «{name}» и закрыть {terminals}?",
+  "confirm.deleteSession":
+    "Удалить сессию «{name}» и закрыть {terminals}?",
+
+  "session.defaultName": "Сессия {index}",
+  "session.cannotDeleteLast": "Нельзя удалить единственную сессию проекта",
 
   "terminal.defaultTitle": "терминал",
   "terminal.statusRunning": "Терминал работает",
@@ -157,6 +170,14 @@ const en: Record<MessageKey, string> = {
   "sidebar.deleteWorkspace": "Delete project",
   "sidebar.homeFolder": "Home folder",
   "sidebar.renameWorkspace": "Rename project",
+  "sidebar.expandWorkspace": "Expand project “{name}”",
+  "sidebar.collapseWorkspace": "Collapse project “{name}”",
+  "sidebar.workspaceActions": "Actions for project “{name}”",
+  "sidebar.newSessionIn": "New session in project “{name}”",
+  "sidebar.renameSession": "Rename session",
+  "sidebar.deleteSession": "Delete session",
+  "sidebar.sessionActions": "Actions for session “{name}”",
+  "sidebar.newTerminalIn": "New terminal in session “{name}”",
 
   "settings.title": "Settings",
   "settings.language": "Interface language",
@@ -237,6 +258,11 @@ const en: Record<MessageKey, string> = {
   "confirm.closeTerminal": "Close terminal?",
   "confirm.deleteWorkspace":
     "Delete workspace “{name}” and close {terminals}?",
+  "confirm.deleteSession":
+    "Delete session “{name}” and close {terminals}?",
+
+  "session.defaultName": "Session {index}",
+  "session.cannotDeleteLast": "A project’s only session can’t be deleted",
 
   "terminal.defaultTitle": "terminal",
   "terminal.statusRunning": "Terminal is running",

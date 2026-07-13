@@ -66,6 +66,24 @@ export function FolderIcon(props: IconProps) {
   );
 }
 
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="m6 3.5 4.5 4.5L6 12.5" />
+    </svg>
+  );
+}
+
+export function MoreIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="3.5" cy="8" r="0.75" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="0.75" fill="currentColor" stroke="none" />
+      <circle cx="12.5" cy="8" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function SidebarIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

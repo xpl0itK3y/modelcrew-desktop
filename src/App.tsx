@@ -48,10 +48,15 @@ import {
   snapshotGroupRects,
 } from "./animations";
 import {
+  createDefaultSession,
+  createTerminalSession,
   folderBaseName,
   loadWorkspacesState,
+  nextSessionDefaultIndex,
   saveWorkspacesState,
+  sessionDisplayName,
   type FolderRuntimeStatus,
+  type TerminalSession,
   type Workspace,
   type WorkspacesState,
 } from "./persist";
@@ -87,6 +92,54 @@ type WorkspaceRootResult =
   | { status: "cancelled" }
   | { status: "bound"; workspaceId: string; path: string }
   | { status: "alreadyOpen"; workspaceId: string; path: string };
+
+type SessionDeleteRequest = {
+  workspaceId: string;
+  sessionId: string;
+};
+
+function activeSession(workspace: Workspace): TerminalSession | undefined {
+  return (
+    workspace.sessions.find(
+      (session) => session.id === workspace.activeSessionId,
+    ) ?? workspace.sessions[0]
+  );
+}
+
+function snapshotActiveSessionLayout(
+  list: Workspace[],
+  activeWorkspaceId: string | null,
+  api: DockviewApi | null,
+): Workspace[] {
+  if (!api || !activeWorkspaceId) {
+    return list;
+  }
+  const layout = api.toJSON();
+  return list.map((workspace) =>
+    workspace.id !== activeWorkspaceId
+      ? workspace
+      : {
+          ...workspace,
+          sessions: workspace.sessions.map((session) =>
+            session.id === workspace.activeSessionId
+              ? { ...session, layout }
+              : session,
+          ),
+        },
+  );
+}
+
+function isActiveSession(
+  state: WorkspacesState,
+  workspaceId: string,
+  sessionId: string,
+): boolean {
+  const workspace = state.list.find((item) => item.id === workspaceId);
+  return (
+    state.activeId === workspaceId &&
+    workspace?.activeSessionId === sessionId
+  );
+}
 
 const modelcrewTheme: DockviewTheme = {
   name: "modelcrew",
@@ -125,6 +178,7 @@ function localizeDefaultPanelTitles(
 function addPanel(
   api: DockviewApi,
   workspaceId: string,
+  sessionId: string,
   options: {
     group?: DockviewGroupPanel;
     direction?: "left" | "right" | "above" | "below";
@@ -138,7 +192,7 @@ function addPanel(
     // именем процесса (zsh, codex, vim, …).
     title: translate("terminal.defaultTitle"),
     // В layout сохраняется только владелец панели. cwd разрешает Rust.
-    params: { workspaceId, titleKind: "default" },
+    params: { workspaceId, sessionId, titleKind: "default" },
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
     ...(options.group
@@ -162,16 +216,17 @@ function addPanel(
 function addTerminalAutoGrid(
   api: DockviewApi,
   workspaceId: string,
+  sessionId: string,
   onBlocked?: (reason: "limit" | "space") => void,
 ) {
-  // Жёсткий предел раньше пространственного: 12 терминалов на воркспейс.
+  // Жёсткий предел раньше пространственного: 12 терминалов на сессию.
   if (api.panels.length >= MAX_TERMINALS) {
     onBlocked?.("limit");
     return;
   }
   const groups = api.groups;
   if (groups.length === 0) {
-    addPanel(api, workspaceId);
+    addPanel(api, workspaceId, sessionId);
     return;
   }
 
@@ -213,12 +268,12 @@ function addTerminalAutoGrid(
   // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
   const before = snapshotGroupRects(api);
   if (widenFits && (shortest.length < targetColumns || !newRowFits)) {
-    addPanel(api, workspaceId, {
+    addPanel(api, workspaceId, sessionId, {
       group: shortest[shortest.length - 1],
       direction: "right",
     });
   } else if (newRowFits) {
-    addPanel(api, workspaceId, { direction: "below" });
+    addPanel(api, workspaceId, sessionId, { direction: "below" });
   } else {
     onBlocked?.("space");
     return;
@@ -239,7 +294,8 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
         aria-label={t("group.splitRight")}
         onClick={() => {
           const workspaceId = appActions.getActiveWorkspaceId();
-          if (!workspaceId) {
+          const sessionId = appActions.getActiveSessionId();
+          if (!workspaceId || !sessionId) {
             return;
           }
           // Жёсткий предел числа терминалов — тот же, что и у ⌘T.
@@ -254,7 +310,7 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
             return;
           }
           const before = snapshotGroupRects(props.containerApi);
-          addPanel(props.containerApi, workspaceId, {
+          addPanel(props.containerApi, workspaceId, sessionId, {
             group: props.group,
             direction: "right",
           });
@@ -291,7 +347,7 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
-function Welcome(props: IWatermarkPanelProps) {
+function Welcome(_props: IWatermarkPanelProps) {
   const { t } = useI18n();
   const newTerminalShortcut = isMac ? "⌘T" : "Ctrl+T";
   const panelNumbersShortcut = isMac ? "⌘⌥" : "Ctrl+Alt";
@@ -329,12 +385,7 @@ function Welcome(props: IWatermarkPanelProps) {
       <button
         type="button"
         className="welcome-button"
-        onClick={() => {
-          const workspaceId = appActions.getActiveWorkspaceId();
-          if (workspaceId) {
-            addTerminalAutoGrid(props.containerApi, workspaceId);
-          }
-        }}
+        onClick={() => appActions.requestNewTerminal()}
       >
         <PlusIcon /> {t("welcome.newTerminal")}
       </button>
@@ -356,7 +407,7 @@ function Welcome(props: IWatermarkPanelProps) {
 export default function App() {
   const { locale, t } = useI18n();
   const apiRef = useRef<DockviewApi | null>(null);
-  const [terminalCount, setTerminalCount] = useState(0);
+  const [, setTerminalCount] = useState(0);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -389,9 +440,14 @@ export default function App() {
   rootErrorsRef.current = rootErrors;
   const [deleteWorkspaceRequest, setDeleteWorkspaceRequest] =
     useState<Workspace | null>(null);
+  const [deleteSessionRequest, setDeleteSessionRequest] =
+    useState<SessionDeleteRequest | null>(null);
   const workspacesRef = useRef(workspaces);
   workspacesRef.current = workspaces;
   const persistTimer = useRef<number | undefined>(undefined);
+  const dockviewDisposablesRef = useRef<Array<{ dispose(): void }>>([]);
+  const ptyTitleUnlistenRef = useRef<(() => void) | null>(null);
+  const dockviewDisposedRef = useRef(false);
 
   useEffect(() => {
     setToast(null);
@@ -423,7 +479,10 @@ export default function App() {
         ...previous,
         list: previous.list.map((workspace) => ({
           ...workspace,
-          layout: localizeDefaultPanelTitles(workspace.layout),
+          sessions: workspace.sessions.map((session) => ({
+            ...session,
+            layout: localizeDefaultPanelTitles(session.layout),
+          })),
         })),
       };
       workspacesRef.current = next;
@@ -440,12 +499,7 @@ export default function App() {
   // с живой раскладкой из dockview.
   const persistNow = useCallback(() => {
     const { list, activeId } = workspacesRef.current;
-    const api = apiRef.current;
-    const snapshot = list.map((workspace) =>
-      workspace.id === activeId && api
-        ? { ...workspace, layout: api.toJSON() }
-        : workspace,
-    );
+    const snapshot = snapshotActiveSessionLayout(list, activeId, apiRef.current);
     saveWorkspacesState({ list: snapshot, activeId });
   }, []);
 
@@ -586,47 +640,304 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    dockviewDisposedRef.current = false;
+    return () => {
+      dockviewDisposedRef.current = true;
+      ptyTitleUnlistenRef.current?.();
+      ptyTitleUnlistenRef.current = null;
+      for (const disposable of dockviewDisposablesRef.current) {
+        disposable.dispose();
+      }
+      dockviewDisposablesRef.current = [];
+      apiRef.current = null;
+    };
+  }, []);
+
+  // Панели скрытых воркспейсов не получают pty-title: доводим имена из кэша.
+  const applyAutoTitles = useCallback((api: DockviewApi) => {
+    for (const panel of api.panels) {
+      const title = getAutoTitle(panel.id);
+      const titleKind = panel.api.getParameters<{ titleKind?: string }>()
+        .titleKind;
+      if (title && titleKind !== "manual" && !isManualTitle(panel.id)) {
+        panel.api.setTitle(title);
+        panel.api.updateParameters({
+          ...panel.api.getParameters(),
+          titleKind: "process",
+        });
+      }
+    }
+  }, []);
+
+  // Dockview содержит только активную сессию. Перед любым переключением
+  // сохраняем её layout, не затрагивая скрытые сессии и их живые PTY.
+  const snapshotActiveSession = useCallback(
+    (list: Workspace[], activeId: string | null): Workspace[] => {
+      return snapshotActiveSessionLayout(list, activeId, apiRef.current);
+    },
+    [],
+  );
+
+  const loadSession = useCallback(
+    (workspace: Workspace, session: TerminalSession) => {
+      const api = apiRef.current;
+      if (!api) {
+        return;
+      }
+      const rootAvailable = Boolean(
+        workspace.folder && !rootErrorsRef.current[workspace.id],
+      );
+      const previousPanelIds = new Set(api.panels.map((panel) => panel.id));
+      let restored = false;
+      suppressCleanupRef.current = true;
+      try {
+        if (rootAvailable && session.layout) {
+          try {
+            api.fromJSON(localizeDefaultPanelTitles(session.layout)!);
+            restored = true;
+          } catch {
+            // Повреждённая сохранённая раскладка не должна блокировать вход
+            // в сессию. Частично созданные панели убираем, прежние PTY при
+            // этом остаются в registry как у обычной скрытой сессии.
+            const partialPanelIds = api.panels
+              .map((panel) => panel.id)
+              .filter((panelId) => !previousPanelIds.has(panelId));
+            api.closeAllGroups();
+            for (const panelId of partialPanelIds) {
+              void destroyTerminal(panelId);
+            }
+          }
+        } else {
+          api.closeAllGroups();
+        }
+      } finally {
+        suppressCleanupRef.current = false;
+      }
+      if (rootAvailable && !restored) {
+        addPanel(api, workspace.id, session.id);
+      }
+      applyAutoTitles(api);
+      setTerminalCount(api.panels.length);
+    },
+    [applyAutoTitles],
+  );
+
+  const selectWorkspace = useCallback(
+    (id: string) => {
+      const current = workspacesRef.current;
+      if (id === current.activeId) {
+        return;
+      }
+      if (!current.list.some((workspace) => workspace.id === id)) {
+        return;
+      }
+      const list = snapshotActiveSession(current.list, current.activeId).map(
+        (workspace) =>
+          workspace.id === id
+            ? { ...workspace, lastOpenedAt: Date.now() }
+            : workspace,
+      );
+      const target = list.find((workspace) => workspace.id === id)!;
+      const session = activeSession(target);
+      if (!session) {
+        return;
+      }
+      const next = { list, activeId: id };
+      workspacesRef.current = next;
+      setWorkspaces(next);
+      loadSession(target, session);
+    },
+    [loadSession, snapshotActiveSession],
+  );
+
+  const selectSession = useCallback(
+    (workspaceId: string, sessionId: string) => {
+      const current = workspacesRef.current;
+      const workspace = current.list.find((item) => item.id === workspaceId);
+      if (
+        !workspace ||
+        !workspace.sessions.some((session) => session.id === sessionId) ||
+        isActiveSession(current, workspaceId, sessionId)
+      ) {
+        return;
+      }
+      const now = Date.now();
+      const list = snapshotActiveSession(current.list, current.activeId).map(
+        (item) =>
+          item.id !== workspaceId
+            ? item
+            : {
+                ...item,
+                activeSessionId: sessionId,
+                lastOpenedAt: now,
+                sessions: item.sessions.map((session) =>
+                  session.id === sessionId
+                    ? { ...session, lastOpenedAt: now }
+                    : session,
+                ),
+              },
+      );
+      const target = list.find((item) => item.id === workspaceId)!;
+      const session = target.sessions.find((item) => item.id === sessionId)!;
+      const next = { list, activeId: workspaceId };
+      workspacesRef.current = next;
+      setWorkspaces(next);
+      loadSession(target, session);
+    },
+    [loadSession, snapshotActiveSession],
+  );
+
+  const createSessionAfterValidation = useCallback(
+    (workspaceId: string, expectedSessionId: string) => {
+      const current = workspacesRef.current;
+      if (!isActiveSession(current, workspaceId, expectedSessionId)) {
+        return;
+      }
+      const list = snapshotActiveSession(current.list, current.activeId);
+      const workspace = list.find((item) => item.id === workspaceId);
+      if (!workspace) {
+        return;
+      }
+      const now = Date.now();
+      const session = createTerminalSession(
+        workspace.id,
+        crypto.randomUUID(),
+        nextSessionDefaultIndex(workspace),
+        null,
+        now,
+      );
+      const target: Workspace = {
+        ...workspace,
+        sessions: [...workspace.sessions, session],
+        activeSessionId: session.id,
+        lastOpenedAt: now,
+      };
+      const next = {
+        list: list.map((item) => (item.id === workspaceId ? target : item)),
+        activeId: workspaceId,
+      };
+      workspacesRef.current = next;
+      setWorkspaces(next);
+      loadSession(target, session);
+    },
+    [loadSession, snapshotActiveSession],
+  );
+
+  const createSession = useCallback(
+    (workspaceId: string) => {
+      selectWorkspace(workspaceId);
+      const current = workspacesRef.current;
+      const workspace = current.list.find((item) => item.id === workspaceId);
+      const session = workspace ? activeSession(workspace) : undefined;
+      if (!workspace || !session) {
+        return;
+      }
+      if (!workspace.folder || rootErrorsRef.current[workspaceId]) {
+        appActions.requestCreateWorkspace();
+        return;
+      }
+      if (!rootRegistryReady) {
+        showToast(translate("workspace.folderChecking"));
+        return;
+      }
+      const create = () =>
+        createSessionAfterValidation(workspaceId, session.id);
+      if (!isTauri) {
+        create();
+        return;
+      }
+      void invoke("workspace_validate_root", { workspaceId })
+        .then(create)
+        .catch((error) => {
+          const nextErrors = {
+            ...rootErrorsRef.current,
+            [workspaceId]: unavailable(error),
+          };
+          rootErrorsRef.current = nextErrors;
+          setRootErrors(nextErrors);
+          showToast(localizeBackendError(error));
+          if (workspacesRef.current.activeId === workspaceId) {
+            appActions.requestCreateWorkspace();
+          }
+        });
+    },
+    [
+      createSessionAfterValidation,
+      rootRegistryReady,
+      selectWorkspace,
+      showToast,
+    ],
+  );
+
+  const newTerminalForSession = useCallback(
+    (workspaceId: string, sessionId: string) => {
+      selectSession(workspaceId, sessionId);
+      const current = workspacesRef.current;
+      const workspace = current.list.find((item) => item.id === workspaceId);
+      if (
+        !workspace ||
+        !workspace.folder ||
+        rootErrorsRef.current[workspaceId] ||
+        !isActiveSession(current, workspaceId, sessionId)
+      ) {
+        if (workspace && (!workspace.folder || rootErrorsRef.current[workspaceId])) {
+          appActions.requestCreateWorkspace();
+        }
+        return;
+      }
+      if (!rootRegistryReady) {
+        showToast(translate("workspace.folderChecking"));
+        return;
+      }
+      const addToGrid = () => {
+        if (!isActiveSession(workspacesRef.current, workspaceId, sessionId)) {
+          return;
+        }
+        const api = apiRef.current;
+        if (!api) {
+          return;
+        }
+        addTerminalAutoGrid(api, workspaceId, sessionId, (reason) =>
+          showToast(
+            reason === "limit"
+              ? translate("layout.terminalLimit", { max: MAX_TERMINALS })
+              : translate("layout.noSplitSpace"),
+          ),
+        );
+      };
+      if (!isTauri) {
+        addToGrid();
+        return;
+      }
+      void invoke("workspace_validate_root", { workspaceId })
+        .then(addToGrid)
+        .catch((error) => {
+          const nextErrors = {
+            ...rootErrorsRef.current,
+            [workspaceId]: unavailable(error),
+          };
+          rootErrorsRef.current = nextErrors;
+          setRootErrors(nextErrors);
+          showToast(localizeBackendError(error));
+          if (isActiveSession(workspacesRef.current, workspaceId, sessionId)) {
+            appActions.requestCreateWorkspace();
+          }
+        });
+    },
+    [rootRegistryReady, selectSession, showToast],
+  );
+
   const newTerminal = useCallback(() => {
-    // Терминалы живут только в воркспейсе: без него сначала выбор папки.
     const { list, activeId } = workspacesRef.current;
-    const active = list.find((workspace) => workspace.id === activeId);
-    if (!active || !active.folder || rootErrorsRef.current[active.id]) {
+    const workspace = list.find((item) => item.id === activeId);
+    const session = workspace ? activeSession(workspace) : undefined;
+    if (!workspace || !session) {
       appActions.requestCreateWorkspace();
       return;
     }
-    if (!rootRegistryReady) {
-      showToast(translate("workspace.folderChecking"));
-      return;
-    }
-    const addToGrid = () => {
-      if (!apiRef.current) {
-        return;
-      }
-      addTerminalAutoGrid(apiRef.current, active.id, (reason) =>
-        showToast(
-          reason === "limit"
-            ? translate("layout.terminalLimit", { max: MAX_TERMINALS })
-            : translate("layout.noSplitSpace"),
-        ),
-      );
-    };
-    if (!isTauri) {
-      addToGrid();
-      return;
-    }
-    void invoke("workspace_validate_root", { workspaceId: active.id })
-      .then(addToGrid)
-      .catch((error) => {
-        const nextErrors = {
-          ...rootErrorsRef.current,
-          [active.id]: unavailable(error),
-        };
-        rootErrorsRef.current = nextErrors;
-        setRootErrors(nextErrors);
-        showToast(localizeBackendError(error));
-        appActions.requestCreateWorkspace();
-      });
-  }, [rootRegistryReady, showToast]);
+    newTerminalForSession(workspace.id, session.id);
+  }, [newTerminalForSession]);
 
   const badges = useHotkeys({
     getApi: () => apiRef.current,
@@ -640,95 +951,6 @@ export default function App() {
     getApi: () => apiRef.current,
     suppressCleanupRef,
   });
-
-
-  // Панели скрытых воркспейсов не получают pty-title: доводим имена из кэша.
-  const applyAutoTitles = useCallback((api: DockviewApi) => {
-    for (const panel of api.panels) {
-      const title = getAutoTitle(panel.id);
-      if (title && !isManualTitle(panel.id)) {
-        panel.api.setTitle(title);
-        panel.api.updateParameters({
-          ...panel.api.getParameters(),
-          titleKind: "process",
-        });
-      }
-    }
-  }, []);
-
-  // Снимок активного воркспейса перед уходом с него.
-  const snapshotActive = useCallback(
-    (list: Workspace[], activeId: string | null): Workspace[] => {
-      const api = apiRef.current;
-      if (!api) {
-        return list;
-      }
-      const layout = api.toJSON();
-      return list.map((workspace) =>
-        workspace.id === activeId ? { ...workspace, layout } : workspace,
-      );
-    },
-    [],
-  );
-
-  const loadWorkspace = useCallback(
-    (workspace: Workspace) => {
-      const api = apiRef.current;
-      if (!api) {
-        return;
-      }
-      suppressCleanupRef.current = true;
-      try {
-        if (
-          workspace.folder &&
-          !rootErrorsRef.current[workspace.id] &&
-          workspace.layout
-        ) {
-          api.fromJSON(localizeDefaultPanelTitles(workspace.layout)!);
-        } else {
-          api.closeAllGroups();
-        }
-      } finally {
-        suppressCleanupRef.current = false;
-      }
-      if (
-        workspace.folder &&
-        !rootErrorsRef.current[workspace.id] &&
-        !workspace.layout
-      ) {
-        addPanel(api, workspace.id);
-      }
-      applyAutoTitles(api);
-      setTerminalCount(api.panels.length);
-    },
-    [applyAutoTitles],
-  );
-
-  const selectWorkspace = useCallback(
-    (id: string) => {
-      setWorkspaces((prev) => {
-        if (id === prev.activeId) {
-          return prev;
-        }
-        const target = prev.list.find((workspace) => workspace.id === id);
-        if (!target) {
-          return prev;
-        }
-        const list = snapshotActive(prev.list, prev.activeId).map(
-          (workspace) =>
-            workspace.id === id
-              ? { ...workspace, lastOpenedAt: Date.now() }
-              : workspace,
-        );
-        // Папка нового активного воркспейса должна быть видна addPanel
-        // уже в момент восстановления его раскладки.
-        workspacesRef.current = { list, activeId: id };
-        loadWorkspace(target);
-        return workspacesRef.current;
-      });
-    },
-    [loadWorkspace, snapshotActive],
-  );
 
   const createWorkspace = useCallback(async () => {
     if (!isTauri) {
@@ -803,41 +1025,60 @@ export default function App() {
     rootErrorsRef.current = nextErrors;
     setRootErrors(nextErrors);
 
-    setWorkspaces((prev) => {
-      const existing = prev.list.find((workspace) => workspace.id === workspaceId);
-      const now = Date.now();
-      const fresh: Workspace = existing
-        ? {
-            ...existing,
-            folder,
-            lastOpenedAt: now,
-            // Автоимя следует за новой папкой; ручное имя не трогаем.
-            displayName:
-              existing.nameMode === "folder" ? baseName : existing.displayName,
-          }
-        : {
-            id: workspaceId,
-            displayName: baseName,
-            nameMode: "folder",
-            folder,
-            layout: null,
-            createdAt: now,
-            lastOpenedAt: now,
-          };
-      const list = existing
-        ? prev.list.map((workspace) =>
-            workspace.id === workspaceId ? fresh : workspace,
-          )
-        : [...snapshotActive(prev.list, prev.activeId), fresh];
-      workspacesRef.current = { list, activeId: fresh.id };
-      loadWorkspace(fresh);
-      return workspacesRef.current;
-    });
-  }, [loadWorkspace, locale, snapshotActive, selectWorkspace, showToast]);
+    const previous = workspacesRef.current;
+    const snapshotted = snapshotActiveSession(
+      previous.list,
+      previous.activeId,
+    );
+    const existing = snapshotted.find(
+      (workspace) => workspace.id === workspaceId,
+    );
+    const now = Date.now();
+    let fresh: Workspace;
+    if (existing) {
+      fresh = {
+        ...existing,
+        folder,
+        lastOpenedAt: now,
+        // Автоимя следует за новой папкой; ручное имя не трогаем.
+        displayName:
+          existing.nameMode === "folder" ? baseName : existing.displayName,
+      };
+    } else {
+      const session = createDefaultSession(workspaceId, null, now);
+      fresh = {
+        id: workspaceId,
+        displayName: baseName,
+        nameMode: "folder",
+        folder,
+        sessions: [session],
+        activeSessionId: session.id,
+        createdAt: now,
+        lastOpenedAt: now,
+      };
+    }
+    const list = existing
+      ? snapshotted.map((workspace) =>
+          workspace.id === workspaceId ? fresh : workspace,
+        )
+      : [...snapshotted, fresh];
+    const next = { list, activeId: fresh.id };
+    workspacesRef.current = next;
+    setWorkspaces(next);
+    const session = activeSession(fresh);
+    if (session) {
+      loadSession(fresh, session);
+    }
+  }, [loadSession, locale, snapshotActiveSession, selectWorkspace, showToast]);
 
   useEffect(() => {
     appActions.requestCloseGroup = setCloseGroupRequest;
     appActions.getActiveWorkspaceId = () => workspacesRef.current.activeId;
+    appActions.getActiveSessionId = () => {
+      const { list, activeId } = workspacesRef.current;
+      return list.find((workspace) => workspace.id === activeId)
+        ?.activeSessionId ?? null;
+    };
     appActions.hasActiveWorkspace = () => {
       const { list, activeId } = workspacesRef.current;
       const active = list.find((workspace) => workspace.id === activeId);
@@ -848,18 +1089,21 @@ export default function App() {
     appActions.requestCreateWorkspace = () => {
       void createWorkspace();
     };
+    appActions.requestNewTerminal = newTerminal;
     appActions.notifyNoSpace = () => showToast(translate("layout.noSplitSpace"));
     appActions.notifyLimit = () =>
       showToast(translate("layout.terminalLimit", { max: MAX_TERMINALS }));
     return () => {
       appActions.requestCloseGroup = () => {};
       appActions.getActiveWorkspaceId = () => null;
+      appActions.getActiveSessionId = () => null;
       appActions.hasActiveWorkspace = () => false;
       appActions.requestCreateWorkspace = () => {};
+      appActions.requestNewTerminal = () => {};
       appActions.notifyNoSpace = () => {};
       appActions.notifyLimit = () => {};
     };
-  }, [createWorkspace, showToast]);
+  }, [createWorkspace, newTerminal, showToast]);
 
   const renameWorkspace = useCallback((id: string, name: string) => {
     setWorkspaces((prev) => ({
@@ -873,16 +1117,115 @@ export default function App() {
     }));
   }, []);
 
-  const workspacePanelCount = useCallback(
-    (workspace: Workspace): number => {
-      if (workspace.id === workspaces.activeId) {
+  const renameSession = useCallback(
+    (workspaceId: string, sessionId: string, name: string) => {
+      setWorkspaces((previous) => ({
+        ...previous,
+        list: previous.list.map((workspace) =>
+          workspace.id !== workspaceId
+            ? workspace
+            : {
+                ...workspace,
+                sessions: workspace.sessions.map((session) =>
+                  session.id === sessionId
+                    ? {
+                        ...session,
+                        displayName: name,
+                        nameMode: "custom" as const,
+                      }
+                    : session,
+                ),
+              },
+        ),
+      }));
+    },
+    [],
+  );
+
+  const sessionPanelCount = useCallback(
+    (workspace: Workspace, session: TerminalSession): number => {
+      if (
+        workspace.id === workspaces.activeId &&
+        session.id === workspace.activeSessionId
+      ) {
         return apiRef.current?.panels.length ?? 0;
       }
-      return workspace.layout
-        ? Object.keys(workspace.layout.panels).length
+      return session.layout
+        ? Object.keys(session.layout.panels).length
         : 0;
     },
     [workspaces.activeId],
+  );
+
+  const workspacePanelCount = useCallback(
+    (workspace: Workspace): number =>
+      workspace.sessions.reduce(
+        (total, session) => total + sessionPanelCount(workspace, session),
+        0,
+      ),
+    [sessionPanelCount],
+  );
+
+  const deleteSession = useCallback(
+    (workspaceId: string, sessionId: string) => {
+      const current = workspacesRef.current;
+      const currentWorkspace = current.list.find(
+        (workspace) => workspace.id === workspaceId,
+      );
+      if (!currentWorkspace) {
+        return;
+      }
+      if (currentWorkspace.sessions.length <= 1) {
+        showToast(translate("session.cannotDeleteLast"));
+        return;
+      }
+
+      const list = snapshotActiveSession(current.list, current.activeId);
+      const workspace = list.find((item) => item.id === workspaceId)!;
+      const sessionIndex = workspace.sessions.findIndex(
+        (session) => session.id === sessionId,
+      );
+      if (sessionIndex < 0) {
+        return;
+      }
+      const session = workspace.sessions[sessionIndex];
+      const deletingSelectedSession =
+        workspace.activeSessionId === sessionId;
+      const deletingVisibleSession =
+        current.activeId === workspaceId && deletingSelectedSession;
+
+      if (deletingVisibleSession) {
+        // Без suppress: закрытие сессии должно завершить только её PTY.
+        apiRef.current?.closeAllGroups();
+      } else {
+        for (const panelId of Object.keys(session.layout?.panels ?? {})) {
+          void destroyTerminal(panelId);
+        }
+      }
+
+      const remainingSessions = workspace.sessions.filter(
+        (item) => item.id !== sessionId,
+      );
+      const fallback =
+        remainingSessions[Math.min(sessionIndex, remainingSessions.length - 1)];
+      const target: Workspace = {
+        ...workspace,
+        sessions: remainingSessions,
+        activeSessionId: deletingSelectedSession
+          ? fallback.id
+          : workspace.activeSessionId,
+      };
+      const next = {
+        list: list.map((item) => (item.id === workspaceId ? target : item)),
+        activeId: current.activeId,
+      };
+      workspacesRef.current = next;
+      setWorkspaces(next);
+      if (deletingVisibleSession) {
+        loadSession(target, fallback);
+      }
+    },
+    [loadSession, showToast, snapshotActiveSession],
   );
 
   // Удаление воркспейса: все его терминалы убиваются.
@@ -897,97 +1240,192 @@ export default function App() {
       delete nextErrors[workspace.id];
       rootErrorsRef.current = nextErrors;
       setRootErrors(nextErrors);
-      setWorkspaces((prev) => {
-        const remaining = prev.list.filter((item) => item.id !== workspace.id);
-        if (workspace.id === prev.activeId) {
-          const api = apiRef.current;
-          // Закрываем без подавления — PTY этих панелей должны умереть.
-          api?.closeAllGroups();
-          // Последний воркспейс удалён — возврат к онбордингу.
-          if (remaining.length === 0) {
-            workspacesRef.current = { list: [], activeId: null };
-            setTerminalCount(0);
-            return workspacesRef.current;
-          }
-          const next = remaining[0];
-          workspacesRef.current = { list: remaining, activeId: next.id };
-          loadWorkspace(next);
-          return workspacesRef.current;
-        }
-        for (const panelId of Object.keys(workspace.layout?.panels ?? {})) {
+      const current = workspacesRef.current;
+      const deletingActive = workspace.id === current.activeId;
+      if (deletingActive) {
+        // Активная сессия закрывается обычным путём и убивает свои PTY.
+        apiRef.current?.closeAllGroups();
+      }
+      for (const session of workspace.sessions) {
+        for (const panelId of Object.keys(session.layout?.panels ?? {})) {
           void destroyTerminal(panelId);
         }
-        return { list: remaining, activeId: prev.activeId };
-      });
+      }
+      const remaining = current.list.filter(
+        (item) => item.id !== workspace.id,
+      );
+      if (remaining.length === 0) {
+        const next = { list: [], activeId: null };
+        workspacesRef.current = next;
+        setWorkspaces(next);
+        setTerminalCount(0);
+        return;
+      }
+      if (!deletingActive) {
+        const next = { list: remaining, activeId: current.activeId };
+        workspacesRef.current = next;
+        setWorkspaces(next);
+        return;
+      }
+      const target = remaining[0];
+      const session = activeSession(target);
+      const next = { list: remaining, activeId: target.id };
+      workspacesRef.current = next;
+      setWorkspaces(next);
+      if (session) {
+        loadSession(target, session);
+      }
     },
-    [loadWorkspace, showToast],
+    [loadSession, showToast],
   );
 
-  const onReady = useCallback((event: DockviewReadyEvent) => {
-    apiRef.current = event.api;
-    // Закрытие панели любым путём (крестик, группа, хоткей) должно
-    // убивать процесс — единая точка уборки.
-    event.api.onDidRemovePanel((panel) => {
-      if (!suppressCleanupRef.current) {
-        void destroyTerminal(panel.id);
+  const onReady = useCallback(
+    (event: DockviewReadyEvent) => {
+      for (const disposable of dockviewDisposablesRef.current) {
+        disposable.dispose();
       }
-      setTerminalCount(event.api.panels.length);
-    });
-    event.api.onDidAddPanel(() => {
-      setTerminalCount(event.api.panels.length);
-    });
-    // Вкладок нет: перетаскивание может целиться только в сплиты,
-    // дроп в центр/таббар чужой группы запрещён.
-    event.api.onWillShowOverlay((overlay) => {
+      dockviewDisposablesRef.current = [];
+      ptyTitleUnlistenRef.current?.();
+      ptyTitleUnlistenRef.current = null;
+      apiRef.current = event.api;
+      const keep = (disposable: { dispose(): void }) => {
+        dockviewDisposablesRef.current.push(disposable);
+      };
+
+      // Закрытие панели любым путём (крестик, группа, хоткей) должно
+      // убивать процесс — кроме временного swap между сессиями.
+      keep(
+        event.api.onDidRemovePanel((panel) => {
+          if (!suppressCleanupRef.current) {
+            void destroyTerminal(panel.id);
+          }
+          setTerminalCount(event.api.panels.length);
+        }),
+      );
+      keep(
+        event.api.onDidAddPanel(() => {
+          setTerminalCount(event.api.panels.length);
+        }),
+      );
+      // Вкладок нет: перетаскивание может целиться только в сплиты,
+      // дроп в центр/таббар чужой группы запрещён.
+      keep(
+        event.api.onWillShowOverlay((overlay) => {
+          if (
+            overlay.kind === "tab" ||
+            overlay.kind === "header_space" ||
+            (overlay.kind === "content" && overlay.position === "center")
+          ) {
+            overlay.preventDefault();
+          }
+        }),
+      );
+
+      if ("__TAURI_INTERNALS__" in window) {
+        void listen<{ id: string; title: string }>(
+          "pty-title",
+          (titleEvent) => {
+            rememberAutoTitle(titleEvent.payload.id, titleEvent.payload.title);
+            const panel = event.api.getPanel(titleEvent.payload.id);
+            const titleKind = panel?.api.getParameters<{
+              titleKind?: string;
+            }>().titleKind;
+            if (
+              panel &&
+              titleKind !== "manual" &&
+              !isManualTitle(titleEvent.payload.id)
+            ) {
+              panel.api.setTitle(titleEvent.payload.title);
+              panel.api.updateParameters({
+                ...panel.api.getParameters(),
+                titleKind: "process",
+              });
+            }
+          },
+        )
+          .then((unlisten) => {
+            if (
+              dockviewDisposedRef.current ||
+              apiRef.current !== event.api
+            ) {
+              unlisten();
+              return;
+            }
+            ptyTitleUnlistenRef.current?.();
+            ptyTitleUnlistenRef.current = unlisten;
+          })
+          .catch(() => {});
+      }
+
+      // Восстанавливаем только последнюю активную сессию проекта.
+      const { list, activeId } = workspacesRef.current;
+      const workspace = list.find((item) => item.id === activeId);
+      const session = workspace ? activeSession(workspace) : undefined;
       if (
-        overlay.kind === "tab" ||
-        overlay.kind === "header_space" ||
-        (overlay.kind === "content" && overlay.position === "center")
+        workspace?.folder &&
+        session &&
+        !rootErrorsRef.current[workspace.id] &&
+        session.layout
       ) {
-        overlay.preventDefault();
-      }
-    });
-    // Панель подписывается именем процесса переднего плана из PTY,
-    // пока пользователь не переименовал её руками.
-    if ("__TAURI_INTERNALS__" in window) {
-      void listen<{ id: string; title: string }>("pty-title", (titleEvent) => {
-        rememberAutoTitle(titleEvent.payload.id, titleEvent.payload.title);
-        const panel = event.api.getPanel(titleEvent.payload.id);
-        if (panel && !isManualTitle(titleEvent.payload.id)) {
-          panel.api.setTitle(titleEvent.payload.title);
-          panel.api.updateParameters({
-            ...panel.api.getParameters(),
-            titleKind: "process",
-          });
+        try {
+          event.api.fromJSON(localizeDefaultPanelTitles(session.layout)!);
+        } catch {
+          event.api.closeAllGroups();
+          addPanel(event.api, workspace.id, session.id);
         }
-      }).catch(() => {});
-    }
-    // Восстановление раскладки прошлого запуска; шеллы поднимутся свежие.
-    // Без воркспейса терминалы не создаём — welcome ведёт через выбор папки.
-    const { list, activeId } = workspacesRef.current;
-    const active = list.find((workspace) => workspace.id === activeId);
-    if (active?.folder && !rootErrorsRef.current[active.id] && active.layout) {
-      try {
-        event.api.fromJSON(localizeDefaultPanelTitles(active.layout)!);
-      } catch {
-        addPanel(event.api, active.id);
+      } else if (
+        workspace?.folder &&
+        session &&
+        !rootErrorsRef.current[workspace.id]
+      ) {
+        addPanel(event.api, workspace.id, session.id);
       }
+      applyAutoTitles(event.api);
       setTerminalCount(event.api.panels.length);
-    } else if (active?.folder && !rootErrorsRef.current[active.id]) {
-      addPanel(event.api, active.id);
-    }
-    event.api.onDidLayoutChange(() => {
-      schedulePersist();
-    });
-    event.api.onDidMaximizedGroupChange(() => {
-      setZoomed(event.api.hasMaximizedGroup());
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+      keep(event.api.onDidLayoutChange(schedulePersist));
+      keep(
+        event.api.onDidMaximizedGroupChange(() => {
+          setZoomed(event.api.hasMaximizedGroup());
+        }),
+      );
+    },
+    [applyAutoTitles, schedulePersist],
+  );
 
   const activeWorkspace = workspaces.list.find(
     (workspace) => workspace.id === workspaces.activeId,
   );
+  const sidebarWorkspaces = workspaces.list.map((workspace) => {
+    const sessions = workspace.sessions.map((session) => ({
+      id: session.id,
+      name: sessionDisplayName(session, (index) =>
+        t("session.defaultName", { index }),
+      ),
+      count: sessionPanelCount(workspace, session),
+      isActive:
+        workspace.id === workspaces.activeId &&
+        session.id === workspace.activeSessionId,
+    }));
+    return {
+      id: workspace.id,
+      name: workspace.displayName,
+      folder: workspace.folder?.selectedPath ?? null,
+      count: sessions.reduce((total, session) => total + session.count, 0),
+      sessions,
+    };
+  });
+  const deleteSessionWorkspace = deleteSessionRequest
+    ? workspaces.list.find(
+        (workspace) => workspace.id === deleteSessionRequest.workspaceId,
+      )
+    : undefined;
+  const deleteSessionTarget =
+    deleteSessionWorkspace && deleteSessionRequest
+      ? deleteSessionWorkspace.sessions.find(
+          (session) => session.id === deleteSessionRequest.sessionId,
+        )
+      : undefined;
 
   return (
     <div className={`app-shell ${sidebarVisible ? "" : "sidebar-hidden"}`}>
@@ -1002,20 +1440,29 @@ export default function App() {
       <div className="app-body">
         <div className="sidebar-rail" aria-hidden={!sidebarVisible}>
           <Sidebar
-            workspaces={workspaces.list.map((workspace) => ({
-              id: workspace.id,
-              name: workspace.displayName,
-              folder: workspace.folder?.selectedPath ?? null,
-              count:
-                workspace.id === workspaces.activeId
-                  ? terminalCount
-                  : workspacePanelCount(workspace),
-            }))}
+            workspaces={sidebarWorkspaces}
             activeId={workspaces.activeId}
-            onSelect={selectWorkspace}
-            onCreate={createWorkspace}
-            onRename={renameWorkspace}
-            onDelete={(id) => {
+            onSelectWorkspace={selectWorkspace}
+            onSelectSession={selectSession}
+            onCreateProject={createWorkspace}
+            onCreateSession={createSession}
+            onCreateTerminal={newTerminalForSession}
+            onRenameWorkspace={renameWorkspace}
+            onRenameSession={renameSession}
+            onDeleteSession={(workspaceId, sessionId) => {
+              const workspace = workspaces.list.find(
+                (item) => item.id === workspaceId,
+              );
+              if (!workspace) {
+                return;
+              }
+              if (workspace.sessions.length <= 1) {
+                showToast(t("session.cannotDeleteLast"));
+                return;
+              }
+              setDeleteSessionRequest({ workspaceId, sessionId });
+            }}
+            onDeleteWorkspace={(id) => {
               const workspace = workspaces.list.find(
                 (item) => item.id === id,
               );
@@ -1082,6 +1529,28 @@ export default function App() {
             setCloseGroupRequest(null);
           }}
           onCancel={() => setCloseGroupRequest(null)}
+        />
+      )}
+      {deleteSessionRequest && deleteSessionWorkspace && deleteSessionTarget && (
+        <ConfirmDialog
+          text={t("confirm.deleteSession", {
+            name: sessionDisplayName(deleteSessionTarget, (index) =>
+              t("session.defaultName", { index }),
+            ),
+            terminals: formatTerminalCount(
+              sessionPanelCount(deleteSessionWorkspace, deleteSessionTarget),
+              locale,
+            ),
+          })}
+          confirmLabel={t("common.delete")}
+          onConfirm={() => {
+            deleteSession(
+              deleteSessionRequest.workspaceId,
+              deleteSessionRequest.sessionId,
+            );
+            setDeleteSessionRequest(null);
+          }}
+          onCancel={() => setDeleteSessionRequest(null)}
         />
       )}
       {deleteWorkspaceRequest && (
