@@ -30,7 +30,6 @@ import {
   FolderIcon,
   MaximizeIcon,
   PlusIcon,
-  SplitIcon,
 } from "./ui/Icons";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
@@ -287,38 +286,6 @@ function GroupActions(props: IDockviewHeaderActionsProps) {
   const closeShortcut = isMac ? "⌘⇧W" : "Ctrl+Shift+W";
   return (
     <div className="group-actions">
-      <button
-        type="button"
-        className="icon-button"
-        title={t("group.splitRight")}
-        aria-label={t("group.splitRight")}
-        onClick={() => {
-          const workspaceId = appActions.getActiveWorkspaceId();
-          const sessionId = appActions.getActiveSessionId();
-          if (!workspaceId || !sessionId) {
-            return;
-          }
-          // Жёсткий предел числа терминалов — тот же, что и у ⌘T.
-          if (props.containerApi.panels.length >= MAX_TERMINALS) {
-            appActions.notifyLimit();
-            return;
-          }
-          // И пространственный: не дробим группу, если половинки станут уже
-          // минимума — иначе ⊞ плодит нечитаемые панели.
-          if (props.group.width < PANEL_MIN_WIDTH * 2) {
-            appActions.notifyNoSpace();
-            return;
-          }
-          const before = snapshotGroupRects(props.containerApi);
-          addPanel(props.containerApi, workspaceId, sessionId, {
-            group: props.group,
-            direction: "right",
-          });
-          flipGroups(props.containerApi, before, 200);
-        }}
-      >
-        <SplitIcon />
-      </button>
       <button
         type="button"
         className="icon-button"
