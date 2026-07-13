@@ -81,6 +81,7 @@ import {
   loadTerminalFontSize,
   saveTerminalFontSize,
 } from "./terminal/preferences";
+import { useAppUpdater } from "./updater/useAppUpdater";
 
 function unavailable(error: unknown): FolderRuntimeStatus {
   return {
@@ -487,6 +488,23 @@ export default function App() {
     const snapshot = snapshotActiveSessionLayout(list, activeId, apiRef.current);
     saveWorkspacesState({ list: snapshot, activeId });
   }, []);
+
+  const prepareForUpdate = useCallback(async () => {
+    // Фиксируем Dockview/Workspace и явно гасим процессы перед заменой
+    // self-update или перед перезапуском уже установленного Linux-пакета.
+    // Native Linux install идёт раньше, чтобы отмена системной авторизации
+    // не закрывала пользовательские терминалы.
+    persistNow();
+    if (isTauri) {
+      try {
+        await invoke("pty_kill_all");
+      } catch (error) {
+        throw new Error(localizeBackendError(error));
+      }
+    }
+  }, [persistNow]);
+
+  const updater = useAppUpdater({ locale, beforeInstall: prepareForUpdate });
 
   const schedulePersist = useCallback(() => {
     if (persistTimer.current !== undefined) {
@@ -1473,6 +1491,7 @@ export default function App() {
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
         onOpenSettings={() => setSettingsOpen(true)}
+        updater={updater}
       />
       <div className="app-body">
         <div className="sidebar-rail" aria-hidden={!sidebarVisible}>

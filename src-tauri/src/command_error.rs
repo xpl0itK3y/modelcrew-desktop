@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 /// diagnostic context and must not be rendered directly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum ErrorCode {
     MainWindowOnly,
     InvalidLocale,
@@ -29,6 +30,23 @@ pub enum ErrorCode {
     TerminalNotFound,
     TerminalWriteFailed,
     TerminalResizeFailed,
+    TerminalKillFailed,
+    UpdaterUnsupportedPlatform,
+    UpdaterInvalidVersion,
+    UpdaterOperationInProgress,
+    UpdaterInstallTargetChanged,
+    UpdaterCheckFailed,
+    UpdaterVersionUnavailable,
+    UpdaterDownloadFailed,
+    UpdaterCacheWriteFailed,
+    UpdaterCacheMissing,
+    UpdaterCacheInvalid,
+    UpdaterPackageMetadataUnavailable,
+    UpdaterPackageMetadataInvalid,
+    UpdaterPackageVersionMismatch,
+    UpdaterAuthorizationUnavailable,
+    UpdaterAuthorizationCancelled,
+    UpdaterInstallFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

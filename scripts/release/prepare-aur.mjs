@@ -1,0 +1,77 @@
+#!/usr/bin/env node
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  assertNonEmptyFile,
+  parseArgs,
+  releaseAssetUrl,
+  requireArg,
+  sha256,
+} from "./lib.mjs";
+
+const args = parseArgs(process.argv.slice(2));
+const version = requireArg(args, "version");
+const repository = requireArg(args, "repository");
+const dist = path.resolve(requireArg(args, "dist"));
+const templatePath = path.resolve(
+  typeof args.template === "string"
+    ? args.template
+    : "packaging/aur/PKGBUILD.template",
+);
+const x86Name = `ModelCrew_${version}_linux_x86_64.deb`;
+const armName = `ModelCrew_${version}_linux_aarch64.deb`;
+const x86Path = path.join(dist, x86Name);
+const armPath = path.join(dist, armName);
+await assertNonEmptyFile(x86Path);
+await assertNonEmptyFile(armPath);
+const x86Sha = await sha256(x86Path);
+const armSha = await sha256(armPath);
+const x86Url = releaseAssetUrl(repository, version, x86Name);
+const armUrl = releaseAssetUrl(repository, version, armName);
+
+let pkgbuild = await readFile(templatePath, "utf8");
+for (const [token, value] of Object.entries({
+  "@VERSION@": version,
+  "@REPOSITORY_URL@": `https://github.com/${repository}`,
+  "@X86_URL@": x86Url,
+  "@X86_SHA256@": x86Sha,
+  "@ARM64_URL@": armUrl,
+  "@ARM64_SHA256@": armSha,
+})) {
+  pkgbuild = pkgbuild.replaceAll(token, value);
+}
+if (/@[A-Z0-9_]+@/u.test(pkgbuild)) {
+  throw new Error("PKGBUILD template still contains unresolved tokens");
+}
+await writeFile(path.join(dist, "PKGBUILD"), pkgbuild, "utf8");
+
+const srcinfo = `pkgbase = modelcrew-bin
+\tpkgdesc = Desktop workspace for projects, sessions, and multiple terminals
+\tpkgver = ${version}
+\tpkgrel = 1
+\turl = https://github.com/${repository}
+\tarch = x86_64
+\tarch = aarch64
+\tlicense = MIT
+\tdepends = cairo
+\tdepends = desktop-file-utils
+\tdepends = gdk-pixbuf2
+\tdepends = glib2
+\tdepends = gtk3
+\tdepends = hicolor-icon-theme
+\tdepends = libsoup3
+\tdepends = openssl
+\tdepends = pango
+\tdepends = webkit2gtk-4.1
+\tprovides = modelcrew
+\tconflicts = modelcrew
+\toptions = !strip
+\tsource_x86_64 = modelcrew-bin-${version}-x86_64.deb::${x86Url}
+\tsha256sums_x86_64 = ${x86Sha}
+\tsource_aarch64 = modelcrew-bin-${version}-aarch64.deb::${armUrl}
+\tsha256sums_aarch64 = ${armSha}
+
+pkgname = modelcrew-bin
+`;
+await writeFile(path.join(dist, ".SRCINFO"), srcinfo, "utf8");
+console.log(`Prepared AUR metadata for ${version}`);

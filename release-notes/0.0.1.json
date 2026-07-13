@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "ru": {
+    "title": "Первый публичный релиз ModelCrew",
+    "summary": "Приложение для работы с проектами, сессиями и несколькими терминалами в одном окне.",
+    "highlights": [
+      "Проекты с отдельными рабочими папками",
+      "Несколько независимых сессий внутри проекта",
+      "До 12 терминалов в каждой сессии",
+      "Сохранение раскладок и восстановление после перезапуска",
+      "Русский и английский интерфейс"
+    ]
+  },
+  "en": {
+    "title": "First public ModelCrew release",
+    "summary": "A desktop workspace for projects, sessions and multiple terminals in one window.",
+    "highlights": [
+      "Projects with dedicated working folders",
+      "Multiple independent sessions per project",
+      "Up to 12 terminals in each session",
+      "Persistent layouts restored after restart",
+      "Russian and English interface"
+    ]
+  }
+}

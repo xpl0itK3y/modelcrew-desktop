@@ -21,6 +21,31 @@ npm run tauri build   # релизная сборка (.app / установщи
 cd src-tauri && cargo test
 ```
 
+## Релизы и обновления
+
+Первая публичная версия — `0.0.1`. Версия меняется одной командой:
+
+```bash
+npm run version:set -- 0.0.2
+```
+
+Команда синхронизирует npm и Cargo, создаёт двуязычный шаблон в
+`release-notes/` и секцию в `CHANGELOG.md`, но не создаёт Git tag.
+Перед тегом проверяются метаданные:
+
+```bash
+npm run release-scripts:test
+npm run release-notes:validate
+npm run changelog:validate
+npm run release:validate
+```
+
+Каждый push в `main` собирает nightly artifacts, а tag `vX.Y.Z` запускает
+stable workflow. Установщики и `latest.json` публикуются в разделе
+[Releases](https://github.com/xpl0itK3y/modelcrew-desktop/releases) этого репозитория.
+Настройка ключей, форматы пакетов и ручная проверка описаны в
+[`packaging/README.md`](packaging/README.md).
+
 ## Хоткеи
 
 | Комбинация (⌘ = Ctrl вне macOS) | Действие |

@@ -1,8 +1,14 @@
 mod command_error;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+mod linux_updater;
 mod pty;
 mod workspace_roots;
 
 use command_error::{CommandError, CommandResult, ErrorCode};
+use linux_updater::{
+    updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
+    LinuxUpdaterState,
+};
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -41,6 +47,20 @@ impl AppLocale {
         match self {
             Self::Ru => "Папка проекта для воркспейса",
             Self::En => "Project folder for workspace",
+        }
+    }
+
+    fn tray_show_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Показать ModelCrew",
+            Self::En => "Show ModelCrew",
+        }
+    }
+
+    fn tray_quit_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Выход",
+            Self::En => "Quit",
         }
     }
 
@@ -289,6 +309,18 @@ fn pty_kill(
     state.kill(&id)
 }
 
+/// Явно завершает все PTY перед установкой обновления. Раскладка к этому
+/// моменту уже сохранена frontend-ом; команда не закрывает само окно, чтобы
+/// updater мог завершить установку и контролируемый relaunch.
+#[tauri::command]
+fn pty_kill_all(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, PtyManager>,
+) -> CommandResult<()> {
+    ensure_main_window(&window)?;
+    state.kill_all()
+}
+
 #[tauri::command]
 fn workspace_register_root(
     window: tauri::WebviewWindow,
@@ -422,11 +454,81 @@ fn build_macos_menu<R: tauri::Runtime>(
         .build()
 }
 
+#[cfg(desktop)]
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+// Трей на всех десктопах: логотип приложения в системном лотке, меню
+// «Показать/Выход», клик ЛКМ разворачивает спрятанное окно.
+#[cfg(desktop)]
+fn setup_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let locale = AppLocale::Ru;
+    let show = MenuItem::with_id(
+        app,
+        "tray_show",
+        locale.tray_show_title(),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "tray_quit",
+        locale.tray_quit_title(),
+        true,
+        None::<&str>,
+    )?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut builder = TrayIconBuilder::with_id("main")
+        .tooltip("ModelCrew")
+        .menu(&menu)
+        // Меню — по правой кнопке (на macOS по клику), ЛКМ разворачивает окно.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_show" => show_main_window(app),
+            "tray_quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            spawn_title_watcher(app.handle().clone());
+            #[cfg(desktop)]
+            setup_tray(app)?;
+            Ok(())
+        });
 
     // На macOS Tauri ставит дефолтное меню, чей пункт Close Window съедает
     // Cmd+W раньше веб-вью. Собираем своё меню без Close/New, оставляя
@@ -435,32 +537,46 @@ pub fn run() {
     let builder = builder.menu(|handle| build_macos_menu(handle, AppLocale::Ru));
 
     builder
+        .on_window_event(|window, event| {
+            // Закрытие окна не выходит из приложения — прячем в трей (фон).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .manage(PtyManager::default())
         .manage(WorkspaceRoots::default())
-        .setup(|app| {
-            spawn_title_watcher(app.handle().clone());
-            Ok(())
-        })
+        .manage(LinuxUpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
             pty_write,
             pty_resize,
             pty_kill,
+            pty_kill_all,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,
             workspace_pick_root,
             workspace_unregister_root,
-            app_set_locale
+            app_set_locale,
+            updater_install_target,
+            updater_prepare_linux_package,
+            updater_install_linux_package
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // Гарантированная уборка шеллов при любом пути выхода — иначе зомби.
-            if let RunEvent::Exit = event {
-                app.state::<PtyManager>().kill_all();
+            RunEvent::Exit => {
+                let _ = app.state::<PtyManager>().kill_all();
             }
+            // Клик по иконке в доке (macOS) при спрятанном окне — вернуть его.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_main_window(app),
+            _ => {}
         });
 }
 

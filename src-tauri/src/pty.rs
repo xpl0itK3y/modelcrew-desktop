@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Вывод копится и уходит во фронт пачками: либо раз в BATCH_WINDOW,
 /// либо при достижении MAX_BATCH_BYTES. Побайтовая отправка через IPC —
@@ -14,6 +14,7 @@ use std::time::Duration;
 const BATCH_WINDOW: Duration = Duration::from_millis(8);
 const MAX_BATCH_BYTES: usize = 32 * 1024;
 const READ_BUF_BYTES: usize = 8 * 1024;
+const KILL_ALL_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct SpawnOptions {
     pub id: String,
@@ -27,6 +28,9 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    // child.wait() подтверждает через этот канал, что процесс уже завершился.
+    // Одного успешного killer.kill() недостаточно перед установкой обновления.
+    exit_rx: mpsc::Receiver<Result<(), String>>,
     // Поколение сессии под этим id. Растёт при каждом spawn, чтобы
     // exit-хендлер вытесненной сессии узнал, что его уже заменили.
     epoch: u64,
@@ -99,6 +103,7 @@ impl PtyManager {
         let writer = pty.master.take_writer().map_err(|error| {
             terminal_error(ErrorCode::TerminalInputStreamFailed, &opts.id).with_debug(error)
         })?;
+        let (process_exit_tx, process_exit_rx) = mpsc::channel::<Result<(), String>>();
 
         let previous = self.sessions.lock().unwrap().insert(
             opts.id.clone(),
@@ -106,6 +111,7 @@ impl PtyManager {
                 master: pty.master,
                 writer,
                 killer,
+                exit_rx: process_exit_rx,
                 epoch,
             },
         );
@@ -159,7 +165,19 @@ impl PtyManager {
         let exit_sessions = Arc::clone(&self.sessions);
         let exit_id = opts.id.clone();
         std::thread::spawn(move || {
-            let code = child.wait().ok().map(|status| status.exit_code() as i32);
+            let status = match child.wait() {
+                Ok(status) => status,
+                Err(error) => {
+                    // Не выдаём ошибку wait() за завершение процесса. Сессию
+                    // оставляем в реестре, поэтому updater останется fail-closed.
+                    let _ = process_exit_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
+            let code = Some(status.exit_code() as i32);
+            // Подтверждение отправляем до блокировки sessions: kill_all держит
+            // её, пока ждёт завершения каждого дочернего процесса.
+            let _ = process_exit_tx.send(Ok(()));
             // Молчим, только если нас вытеснила новая сессия того же id
             // (reload). Своё завершение снимаем сами; при явном kill / kill_all
             // сессии в карте уже нет — тогда тоже сообщаем.
@@ -235,13 +253,71 @@ impl PtyManager {
             .collect()
     }
 
-    pub fn kill_all(&self) {
-        let sessions: Vec<PtySession> = {
-            let mut map = self.sessions.lock().unwrap();
-            map.drain().map(|(_, s)| s).collect()
-        };
-        for mut session in sessions {
-            let _ = session.killer.kill();
+    /// Завершает все PTY и возвращается только после подтверждения child.wait().
+    /// При ошибке незавершённые сессии остаются в реестре, чтобы штатная уборка
+    /// при выходе приложения могла повторить попытку.
+    pub fn kill_all(&self) -> CommandResult<()> {
+        let deadline = Instant::now() + KILL_ALL_TIMEOUT;
+        let mut sessions = self.sessions.lock().unwrap();
+        let ids = sessions.keys().cloned().collect::<Vec<_>>();
+        let mut kill_errors = HashMap::<String, String>::new();
+
+        for id in &ids {
+            if let Some(session) = sessions.get_mut(id) {
+                if let Err(error) = session.killer.kill() {
+                    kill_errors.insert(id.clone(), error.to_string());
+                }
+            }
+        }
+
+        let mut stopped = Vec::with_capacity(ids.len());
+        let mut failures = Vec::new();
+        for id in ids {
+            let Some(session) = sessions.get(&id) else {
+                continue;
+            };
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let exit_result = if remaining.is_zero() {
+                Err(RecvTimeoutError::Timeout)
+            } else {
+                session.exit_rx.recv_timeout(remaining)
+            };
+            match exit_result {
+                Ok(Ok(())) => stopped.push(id),
+                Ok(Err(wait_error)) => {
+                    let reason = match kill_errors.remove(&id) {
+                        Some(kill_error) => {
+                            format!("kill failed: {kill_error}; child.wait failed: {wait_error}")
+                        }
+                        None => format!("child.wait failed: {wait_error}"),
+                    };
+                    failures.push(format!("{id}: {reason}"));
+                }
+                Err(wait_error) => {
+                    let reason = kill_errors.remove(&id).unwrap_or_else(|| match wait_error {
+                        RecvTimeoutError::Timeout => {
+                            "timed out waiting for the process to exit".to_string()
+                        }
+                        RecvTimeoutError::Disconnected => {
+                            "process exit watcher disconnected".to_string()
+                        }
+                    });
+                    failures.push(format!("{id}: {reason}"));
+                }
+            }
+        }
+
+        for id in stopped {
+            sessions.remove(&id);
+        }
+        drop(sessions);
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(CommandError::new(ErrorCode::TerminalKillFailed)
+                .with_context("failed", failures.len())
+                .with_debug(failures.join("; ")))
         }
     }
 }
@@ -610,7 +686,9 @@ mod tests {
             .expect("сессия должна ответить");
         }
 
-        manager.kill_all();
+        manager
+            .kill_all()
+            .expect("kill_all должен дождаться завершения всех сессий");
         for _ in 0..SESSIONS {
             exit_rx
                 .recv_timeout(Duration::from_secs(10))

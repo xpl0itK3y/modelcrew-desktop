@@ -1,0 +1,5 @@
+# actionlint v1.7.7 does not yet list GitHub's macos-15-intel hosted image.
+# Declaring the label here only teaches the static checker about that hosted runner.
+self-hosted-runner:
+  labels:
+    - macos-15-intel
