@@ -180,7 +180,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             patchelf \
-            rpm
+            rpm \
+            xdg-utils
 
       - name: Install JavaScript dependencies
         run: npm ci
