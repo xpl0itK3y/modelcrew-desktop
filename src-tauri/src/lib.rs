@@ -28,6 +28,12 @@ struct PtyTitlePayload {
     title: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PtyCreateResult {
+    title: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppLocale {
     Ru,
@@ -246,12 +252,12 @@ fn pty_create(
     rows: u16,
     shell: Option<String>,
     on_output: Channel<InvokeResponseBody>,
-) -> CommandResult<()> {
+) -> CommandResult<PtyCreateResult> {
     ensure_main_window(&window)?;
     let cwd = roots.resolve(&workspace_id)?;
     let exit_app = app.clone();
     let exit_id = id.clone();
-    state.spawn(
+    let shell = state.spawn(
         SpawnOptions {
             id,
             // Пусто/None — оболочка по умолчанию для ОС (см. default_shell).
@@ -268,7 +274,10 @@ fn pty_create(
             // чтобы вытеснённый reload'ом терминал не «завершил» новый.
             let _ = exit_app.emit_to("main", "pty-exit", PtyExitPayload { id: exit_id, code });
         },
-    )
+    )?;
+    Ok(PtyCreateResult {
+        title: friendly_name(&shell, &[]),
+    })
 }
 
 #[tauri::command]
@@ -604,6 +613,8 @@ mod tests {
         assert_eq!(friendly_name("vim", &["vim", "file.txt"]), "vim");
         // Логин-шелл «-zsh» → zsh.
         assert_eq!(friendly_name("-zsh", &["-zsh"]), "zsh");
+        // pty_create получает полный путь фактически запущенной оболочки.
+        assert_eq!(friendly_name("/bin/zsh", &[]), "zsh");
         // Голый REPL интерпретатора остаётся собой.
         assert_eq!(friendly_name("node", &["node"]), "node");
     }

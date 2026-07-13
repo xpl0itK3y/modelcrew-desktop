@@ -48,7 +48,7 @@ impl PtyManager {
         opts: SpawnOptions,
         on_output: impl Fn(Vec<u8>) + Send + 'static,
         on_exit: impl FnOnce(Option<i32>) + Send + 'static,
-    ) -> CommandResult<()> {
+    ) -> CommandResult<String> {
         // Один id — один живой терминал. Reload webview поднимает фронт
         // заново с теми же id, пока backend-процесс ещё жив: не конфликтуем,
         // а заменяем прежнюю сессию свежей (сессии перезагрузку не переживают).
@@ -197,7 +197,10 @@ impl PtyManager {
             }
         });
 
-        Ok(())
+        // Возвращаем именно фактически разрешённую оболочку. Фронтенду больше
+        // не нужно ждать первый тик process watcher, чтобы заменить временное
+        // «терминал» на zsh/bash/PowerShell.
+        Ok(shell)
     }
 
     pub fn write(&self, id: &str, data: &[u8]) -> CommandResult<()> {
@@ -441,7 +444,7 @@ mod tests {
         let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
         let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
 
-        manager
+        let spawned_shell = manager
             .spawn(
                 SpawnOptions {
                     id: "t1".into(),
@@ -458,6 +461,7 @@ mod tests {
                 },
             )
             .expect("шелл должен запуститься");
+        assert_eq!(spawned_shell, "/bin/sh");
 
         manager
             .write("t1", b"echo MARKER_$((40 + 2))\n")

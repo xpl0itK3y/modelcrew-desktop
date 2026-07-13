@@ -196,8 +196,8 @@ function addPanel(
     id: crypto.randomUUID(),
     component: "terminal",
     tabComponent: "terminal",
-    // Placeholder до первого тика вотчера, который подпишет панель
-    // именем процесса (zsh, codex, vim, …).
+    // Короткий placeholder только на время запуска PTY. pty_create сразу
+    // вернёт имя оболочки, дальше watcher отслеживает codex/vim/другие процессы.
     title: translate("terminal.defaultTitle"),
     // В layout сохраняется только владелец панели. cwd разрешает Rust.
     params: { workspaceId, sessionId, titleKind: "default" },

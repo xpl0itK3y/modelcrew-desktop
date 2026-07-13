@@ -4,7 +4,9 @@ import {
   destroyTerminal,
   ensureSpawned,
   fitTerminal,
+  getAutoTitle,
   getOrCreateTerminal,
+  isManualTitle,
 } from "../terminal/registry";
 
 export { destroyTerminal };
@@ -21,11 +23,29 @@ export function TerminalPanel(
     }
 
     const entry = getOrCreateTerminal(props.api.id);
+    let mounted = true;
     host.appendChild(entry.container);
     fitTerminal(entry);
     // Панель знает только владельца. Фактический cwd разрешает Rust-реестр,
     // поэтому восстановленные панели одного воркспейса не могут разъехаться.
-    void ensureSpawned(entry, props.params?.workspaceId ?? "");
+    void ensureSpawned(entry, props.params?.workspaceId ?? "").then(() => {
+      if (!mounted) {
+        return;
+      }
+      const title = getAutoTitle(entry.id);
+      const parameters = props.api.getParameters<{ titleKind?: string }>();
+      if (
+        title &&
+        parameters.titleKind !== "manual" &&
+        !isManualTitle(entry.id)
+      ) {
+        props.api.setTitle(title);
+        props.api.updateParameters({
+          ...parameters,
+          titleKind: "process",
+        });
+      }
+    });
 
     // Появление нового терминала: fade + scale только при первом маунте,
     // переносы/свопы того же инстанса не мигают.
@@ -56,6 +76,7 @@ export function TerminalPanel(
     }
 
     return () => {
+      mounted = false;
       observer.disconnect();
       activeDisposable.dispose();
       // Инстанс остаётся в реестре: при переносе панели тот же container

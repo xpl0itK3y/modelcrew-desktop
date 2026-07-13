@@ -33,6 +33,9 @@ export type TerminalEntry = {
   fit: FitAddon;
   container: HTMLDivElement;
   spawned: boolean;
+  // Общий promise нужен при быстром remount панели: второй mount должен
+  // дождаться того же pty_create, а не потерять раннее имя оболочки.
+  spawnPromise: Promise<void> | null;
   exited: boolean;
   workspaceId: string | null;
   outputGeneration: number;
@@ -121,6 +124,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     fit,
     container,
     spawned: false,
+    spawnPromise: null,
     exited: false,
     workspaceId: null,
     outputGeneration: 0,
@@ -168,6 +172,10 @@ export function getAutoTitle(id: string): string | undefined {
 }
 
 type PtyOutput = ArrayBuffer | string;
+
+type PtyCreateResult = {
+  title: string;
+};
 
 function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   entry.term.write(typeof data === "string" ? data : new Uint8Array(data));
@@ -264,16 +272,28 @@ export async function restartRunningTerminals(
   };
 }
 
-export async function ensureSpawned(
+export function ensureSpawned(
   entry: TerminalEntry,
   workspaceId: string,
 ): Promise<void> {
+  if (entry.spawnPromise) {
+    return entry.spawnPromise;
+  }
   if (entry.spawned) {
-    return;
+    return Promise.resolve();
   }
   entry.spawned = true;
   entry.workspaceId = workspaceId || null;
 
+  const spawnPromise = spawnTerminal(entry, workspaceId);
+  entry.spawnPromise = spawnPromise;
+  return spawnPromise;
+}
+
+async function spawnTerminal(
+  entry: TerminalEntry,
+  workspaceId: string,
+): Promise<void> {
   if (!workspaceId) {
     markExited(entry);
     entry.term.write(
@@ -316,7 +336,7 @@ export async function ensureSpawned(
   });
 
   try {
-    await invoke("pty_create", {
+    const result = await invoke<PtyCreateResult>("pty_create", {
       id: entry.id,
       workspaceId,
       cols: entry.term.cols,
@@ -325,6 +345,17 @@ export async function ensureSpawned(
       shell: loadShell(),
       onOutput: output,
     });
+    const title = result.title.trim();
+    // Watcher мог успеть прислать более свежее имя foreground-процесса
+    // (например, codex) раньше ответа pty_create. Начальное имя оболочки
+    // заполняет только пустой кэш и никогда не откатывает свежее значение.
+    if (
+      title &&
+      registry.get(entry.id) === entry &&
+      getAutoTitle(entry.id) === undefined
+    ) {
+      rememberAutoTitle(entry.id, title);
+    }
   } catch (error) {
     markExited(entry);
     entry.term.write(
