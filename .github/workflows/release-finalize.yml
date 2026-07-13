@@ -1,0 +1,191 @@
+name: Finalize stable release
+
+on:
+  workflow_call:
+    inputs:
+      release-id:
+        description: Draft GitHub Release identifier
+        required: true
+        type: string
+      version:
+        description: Validated application version
+        required: true
+        type: string
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    name: Verify and publish public release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Download every platform bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: stable-*
+          path: release-input
+
+      - name: Install signature verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends minisign
+
+      - name: Normalize and verify release files
+        env:
+          VERSION: ${{ inputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          node scripts/release/prepare-assets.mjs \
+            --input release-input \
+            --output release-dist \
+            --manifest release-work/assets.json \
+            --version "$VERSION"
+          node scripts/release/prepare-aur.mjs \
+            --dist release-dist \
+            --version "$VERSION" \
+            --repository "$RELEASE_REPOSITORY"
+          for package in \
+            release-dist/*.deb \
+            release-dist/*.rpm \
+            release-dist/*.pkg.tar.zst; do
+            npm run tauri -- signer sign "$package"
+          done
+          node scripts/release/generate-latest.mjs \
+            --dist release-dist \
+            --manifest release-work/assets.json \
+            --version "$VERSION" \
+            --repository "$RELEASE_REPOSITORY"
+          node scripts/release/verify-signatures.mjs \
+            --dist release-dist \
+            --manifest release-work/assets.json
+          node scripts/release/checksums.mjs --dist release-dist
+          node scripts/release/verify-release.mjs \
+            --dist release-dist \
+            --version "$VERSION" \
+            --repository "$RELEASE_REPOSITORY"
+
+      - name: Remove old draft assets and upload verified files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release-id }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          while read -r asset_id; do
+            test -z "$asset_id" || gh api --method DELETE \
+              "repos/$RELEASE_REPOSITORY/releases/assets/$asset_id"
+          done < <(gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --jq '.[].id')
+          mapfile -d '' assets < <(find release-dist -maxdepth 1 -type f -print0)
+          gh release upload "$TAG" "${assets[@]}" \
+            --repo "$RELEASE_REPOSITORY" \
+            --clobber
+
+      - name: Verify uploaded asset inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release-id }}
+        run: |
+          mkdir -p release-work
+          gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            > release-work/remote-assets.json
+          node scripts/release/verify-remote-assets.mjs \
+            --dist release-dist \
+            --remote release-work/remote-assets.json
+
+      - name: Save generated AUR metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aur-metadata-${{ inputs.version }}
+          retention-days: 14
+          include-hidden-files: true
+          path: |
+            release-dist/PKGBUILD
+            release-dist/.SRCINFO
+
+      - name: Publish candidate prerelease without changing latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release-id }}
+        run: |
+          gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=true \
+            --raw-field make_latest=false >/dev/null
+
+      - name: Verify anonymous direct downloads or restore draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release-id }}
+        run: |
+          failed=0
+          urls_file="release-work/public-asset-urls.txt"
+          if ! gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq '.[].browser_download_url' > "$urls_file"; then
+            failed=1
+            : > "$urls_file"
+          fi
+          expected_count="$(find release-dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          public_count="$(sed '/^[[:space:]]*$/d' "$urls_file" | wc -l | tr -d ' ')"
+          if test "$public_count" != "$expected_count"; then
+            echo "Expected $expected_count public asset URLs, found $public_count" >&2
+            failed=1
+          fi
+          while IFS= read -r url; do
+            test -n "$url" || continue
+            curl --fail --silent --show-error --location --head \
+              --retry 10 --retry-delay 3 --retry-all-errors "$url" || failed=1
+          done < "$urls_file"
+          if test "$failed" -ne 0; then
+            gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+              -F draft=true \
+              -F prerelease=false \
+              --raw-field make_latest=false >/dev/null || true
+            echo "Public URL verification failed; release returned to draft" >&2
+            exit 1
+          fi
+
+      - name: Promote verified release to stable latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release-id }}
+        run: |
+          gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=false \
+            --raw-field make_latest=true >/dev/null
+
+      - name: Restore failed candidate to draft
+        if: ${{ failure() || cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release-id }}
+        run: |
+          gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=true \
+            -F prerelease=false \
+            --raw-field make_latest=false >/dev/null || true
