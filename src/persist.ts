@@ -19,10 +19,12 @@ export type SessionNameMode = "default" | "custom";
 
 export type TerminalSession = {
   id: string;
-  // Для custom — пользовательское имя. Для default строка намеренно пустая:
-  // интерфейс локализует «Сессия N» / «Session N» по defaultIndex.
+  // Для custom — пользовательское имя. Для default строка намеренно пустая.
   displayName: string;
   nameMode: SessionNameMode;
+  // Случайное имя-кодовое (amber-lynx): выдаётся при создании и живёт с
+  // сессией — имя по умолчанию, пока пользователь не переименует.
+  generatedName: string;
   defaultIndex: number;
   layout: SerializedDockview | null;
   createdAt: number;
@@ -74,6 +76,24 @@ const STORAGE_KEY = "modelcrew.workspaces";
 
 export const DEFAULT_SESSION_DISPLAY_NAME = "";
 
+// Имена сессий по умолчанию — случайные кодовые (amber-lynx), а не «Сессия N».
+const SESSION_NAME_ADJECTIVES = [
+  "amber", "azure", "brisk", "calm", "cobalt", "crimson", "dusky", "eager",
+  "fern", "gilded", "hazel", "indigo", "jolly", "keen", "lunar", "misty",
+  "noble", "olive", "quiet", "russet", "swift", "teal", "umber", "vivid",
+] as const;
+const SESSION_NAME_NOUNS = [
+  "lynx", "falcon", "otter", "cedar", "harbor", "comet", "willow", "raven",
+  "quartz", "meadow", "ember", "brook", "heron", "maple", "drift", "flint",
+  "cove", "birch", "sparrow", "pine", "reef", "fox", "wren", "aspen",
+] as const;
+
+export function randomSessionName(): string {
+  const pick = (list: readonly string[]) =>
+    list[Math.floor(Math.random() * list.length)];
+  return `${pick(SESSION_NAME_ADJECTIVES)}-${pick(SESSION_NAME_NOUNS)}`;
+}
+
 export function folderBaseName(path: string): string {
   return path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "workspace";
 }
@@ -95,8 +115,11 @@ export function sessionDisplayName(
   session: TerminalSession,
   formatDefault: (index: number) => string,
 ): string {
-  return session.nameMode === "custom" && session.displayName.trim().length > 0
-    ? session.displayName
+  if (session.nameMode === "custom" && session.displayName.trim().length > 0) {
+    return session.displayName;
+  }
+  return session.generatedName.trim().length > 0
+    ? session.generatedName
     : formatDefault(session.defaultIndex);
 }
 
@@ -112,6 +135,7 @@ export function createTerminalSession(
     id: sessionId,
     displayName: DEFAULT_SESSION_DISPLAY_NAME,
     nameMode: "default",
+    generatedName: randomSessionName(),
     defaultIndex: safeIndex,
     layout: bindLayoutToSession(layout, workspaceId, sessionId),
     createdAt: now,
@@ -242,6 +266,12 @@ function normalizeSession(
     id: value.id,
     displayName: nameMode === "custom" ? customName : DEFAULT_SESSION_DISPLAY_NAME,
     nameMode,
+    // Старые сессии без кодового имени получают его один раз при загрузке.
+    generatedName:
+      typeof value.generatedName === "string" &&
+      value.generatedName.trim().length > 0
+        ? value.generatedName
+        : randomSessionName(),
     defaultIndex,
     layout,
     createdAt: normalizeTimestamp(value.createdAt, now),
