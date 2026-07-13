@@ -163,6 +163,9 @@ export function useCmdDrag(options: CmdDragOptions): void {
         target: null,
         edge: null,
       };
+      // Курсор-хват сразу по ⌘-нажатию — ощущение, что терминал уже взяли,
+      // ещё до начала движения.
+      document.body.classList.add("cmd-dragging");
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -184,14 +187,25 @@ export function useCmdDrag(options: CmdDragOptions): void {
           return;
         }
         session.active = true;
+        // Призрак — «поднятая» карточка терминала: внешний слой возит за
+        // курсором (JS-transform), внутренняя карточка проигрывает pop-эффект
+        // (CSS), поэтому одно другому не мешает.
         const ghost = document.createElement("div");
         ghost.className = "cmd-drag-ghost";
-        ghost.textContent =
-          session.sourceGroup.activePanel?.title ?? translate("terminal.defaultTitle");
+        const card = document.createElement("div");
+        card.className = "cmd-drag-ghost-card";
+        const dot = document.createElement("span");
+        dot.className = "cmd-drag-ghost-dot";
+        const label = document.createElement("span");
+        label.className = "cmd-drag-ghost-title";
+        label.textContent =
+          session.sourceGroup.activePanel?.title ??
+          translate("terminal.defaultTitle");
+        card.append(dot, label);
+        ghost.appendChild(card);
         document.body.appendChild(ghost);
         session.ghost = ghost;
         session.sourceGroup.element.classList.add("cmd-drag-source");
-        document.body.classList.add("cmd-dragging");
       }
 
       if (session.ghost) {
