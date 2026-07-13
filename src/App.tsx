@@ -77,6 +77,7 @@ import {
   WORKSPACE_NAME,
 } from "./constants";
 import { loadShell, saveShell } from "./shell";
+import { playNotificationSound } from "./sound";
 import {
   loadTerminalFontSize,
   saveTerminalFontSize,
@@ -505,6 +506,33 @@ export default function App() {
   }, [persistNow]);
 
   const updater = useAppUpdater({ locale, beforeInstall: prepareForUpdate });
+
+  // Chime when a new attention-worthy notification appears. The set of ids seen
+  // so far is seeded silently on first run so restored notifications stay quiet.
+  const chimedNotificationIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const attentionIds = new Set(
+      updater.center.items
+        .filter(
+          (item) =>
+            item.kind === "announcement" ||
+            item.phase === "ready" ||
+            item.phase === "manual",
+        )
+        .map((item) => item.id),
+    );
+    const seen = chimedNotificationIds.current;
+    chimedNotificationIds.current = attentionIds;
+    if (seen === null) {
+      return;
+    }
+    for (const id of attentionIds) {
+      if (!seen.has(id)) {
+        playNotificationSound();
+        break;
+      }
+    }
+  }, [updater.center.items]);
 
   const schedulePersist = useCallback(() => {
     if (persistTimer.current !== undefined) {
