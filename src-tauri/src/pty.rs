@@ -240,6 +240,7 @@ impl PtyManager {
     }
 
     /// PID процесса переднего плана каждого живого терминала (для имён панелей).
+    #[cfg(unix)]
     pub fn foreground_processes(&self) -> Vec<(String, i32)> {
         let sessions = self.sessions.lock().unwrap();
         sessions
@@ -251,6 +252,13 @@ impl PtyManager {
                     .map(|pid| (id.clone(), pid as i32))
             })
             .collect()
+    }
+
+    /// Windows пока не запрашивает имена foreground-процессов: реализация
+    /// process_names на этой платформе всё равно возвращает пустой набор.
+    #[cfg(not(unix))]
+    pub fn foreground_processes(&self) -> Vec<(String, i32)> {
+        Vec::new()
     }
 
     /// Завершает все PTY и возвращается только после подтверждения child.wait().
