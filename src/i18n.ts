@@ -72,7 +72,7 @@ const ru = {
   "accent.white": "Белый",
   "accent.gray": "Серый",
 
-  "welcome.title": "Собери свою команду.",
+  "welcome.title": "Собери свой флот.",
   "welcome.chooseProject":
     "Выбери папку проекта — в ней будут жить терминалы рабочего пространства.",
   "welcome.terminalsTogether": "Терминалы для агентов — в одном окне.",
@@ -221,7 +221,7 @@ const en: Record<MessageKey, string> = {
   "accent.white": "White",
   "accent.gray": "Gray",
 
-  "welcome.title": "Build your crew.",
+  "welcome.title": "Build your fleet.",
   "welcome.chooseProject":
     "Choose a project folder — your workspace terminals will run there.",
   "welcome.terminalsTogether": "Agent terminals, together in one window.",

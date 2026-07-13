@@ -516,7 +516,7 @@ body {
 }
 
 .session-item.is-active {
-  background: var(--mc-accent-soft);
+  background: var(--mc-surface-active);
   color: var(--mc-text-bright);
 }
 

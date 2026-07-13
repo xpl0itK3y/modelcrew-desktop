@@ -1,5 +1,11 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ChevronRightIcon, FolderIcon, MoreIcon, PlusIcon } from "./Icons";
+import {
+  ChevronRightIcon,
+  FolderIcon,
+  MoreIcon,
+  PlusIcon,
+  TerminalGlyphIcon,
+} from "./Icons";
 import { formatTerminalCount, useI18n } from "../i18n";
 
 export type SessionNavItem = {
@@ -442,7 +448,7 @@ export function Sidebar(props: SidebarProps) {
                           >
                             {sameTarget(editing, sessionTarget) ? (
                               <div className="session-main is-editing">
-                                <FolderIcon className="session-icon" />
+                                <TerminalGlyphIcon className="session-icon" />
                                 <input
                                   ref={inputRef}
                                   className="session-rename-input"
@@ -472,7 +478,7 @@ export function Sidebar(props: SidebarProps) {
                                 }
                                 onDoubleClick={() => beginRename(sessionTarget)}
                               >
-                                <FolderIcon className="session-icon" />
+                                <TerminalGlyphIcon className="session-icon" />
                                 <span className="session-name">
                                   {session.name}
                                 </span>
