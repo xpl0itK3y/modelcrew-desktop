@@ -26,8 +26,13 @@ const expectedPlatforms = [
   "windows-x86_64-msi",
   "darwin-x86_64",
   "darwin-aarch64",
-  "linux-x86_64",
-  "linux-aarch64",
+  ...["x86_64", "aarch64"].flatMap((arch) => [
+    `linux-${arch}`,
+    `linux-${arch}-appimage`,
+    `linux-${arch}-deb`,
+    `linux-${arch}-rpm`,
+    `linux-${arch}-pacman`,
+  ]),
 ];
 
 const platforms = {};

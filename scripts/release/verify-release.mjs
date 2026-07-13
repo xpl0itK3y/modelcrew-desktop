@@ -28,13 +28,19 @@ const expected = [
   `ModelCrew_${version}_linux_x86_64.AppImage`,
   `ModelCrew_${version}_linux_x86_64.AppImage.sig`,
   `ModelCrew_${version}_linux_x86_64.deb`,
+  `ModelCrew_${version}_linux_x86_64.deb.sig`,
   `ModelCrew_${version}_linux_x86_64.rpm`,
+  `ModelCrew_${version}_linux_x86_64.rpm.sig`,
   `ModelCrew_${version}_linux_aarch64.AppImage`,
   `ModelCrew_${version}_linux_aarch64.AppImage.sig`,
   `ModelCrew_${version}_linux_aarch64.deb`,
+  `ModelCrew_${version}_linux_aarch64.deb.sig`,
   `ModelCrew_${version}_linux_aarch64.rpm`,
+  `ModelCrew_${version}_linux_aarch64.rpm.sig`,
   `ModelCrew_${version}_linux_x86_64.pkg.tar.zst`,
+  `ModelCrew_${version}_linux_x86_64.pkg.tar.zst.sig`,
   `ModelCrew_${version}_linux_aarch64.pkg.tar.zst`,
+  `ModelCrew_${version}_linux_aarch64.pkg.tar.zst.sig`,
   "PKGBUILD",
   ".SRCINFO",
   "latest.json",
@@ -51,7 +57,15 @@ const platformFiles = {
   "darwin-x86_64": `ModelCrew_${version}_macos_x86_64.app.tar.gz`,
   "darwin-aarch64": `ModelCrew_${version}_macos_aarch64.app.tar.gz`,
   "linux-x86_64": `ModelCrew_${version}_linux_x86_64.AppImage`,
+  "linux-x86_64-appimage": `ModelCrew_${version}_linux_x86_64.AppImage`,
+  "linux-x86_64-deb": `ModelCrew_${version}_linux_x86_64.deb`,
+  "linux-x86_64-rpm": `ModelCrew_${version}_linux_x86_64.rpm`,
+  "linux-x86_64-pacman": `ModelCrew_${version}_linux_x86_64.pkg.tar.zst`,
   "linux-aarch64": `ModelCrew_${version}_linux_aarch64.AppImage`,
+  "linux-aarch64-appimage": `ModelCrew_${version}_linux_aarch64.AppImage`,
+  "linux-aarch64-deb": `ModelCrew_${version}_linux_aarch64.deb`,
+  "linux-aarch64-rpm": `ModelCrew_${version}_linux_aarch64.rpm`,
+  "linux-aarch64-pacman": `ModelCrew_${version}_linux_aarch64.pkg.tar.zst`,
 };
 for (const [key, filename] of Object.entries(platformFiles)) {
   const item = latest.platforms?.[key];
@@ -63,6 +77,11 @@ for (const [key, filename] of Object.entries(platformFiles)) {
     fail(`latest.json ${key} points to ${item.url}, expected ${expectedUrl}`);
   }
   if (!item.signature.trim()) fail(`latest.json ${key} has an empty signature`);
+  const signature = (await readFile(path.join(dist, `${filename}.sig`), "utf8")).trim();
+  if (!signature) fail(`${filename}.sig is empty`);
+  if (item.signature.trim() !== signature) {
+    fail(`latest.json ${key} signature does not match ${filename}.sig`);
+  }
 }
 
 const checksumLines = (await readFile(path.join(dist, "SHA256SUMS"), "utf8"))

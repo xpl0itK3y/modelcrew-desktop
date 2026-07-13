@@ -88,17 +88,28 @@ for (const arch of ["x86_64", "aarch64"]) {
   const deb = one(files, (file) => file.endsWith(".deb"), `Linux ${arch} deb`);
   const rpm = one(files, (file) => file.endsWith(".rpm"), `Linux ${arch} rpm`);
   const appImageName = await copy(appImage, `ModelCrew_${version}_linux_${arch}.AppImage`);
-  const signatureName = await copySignature(files, appImage, appImageName);
-  await copy(deb, `ModelCrew_${version}_linux_${arch}.deb`);
-  await copy(rpm, `ModelCrew_${version}_linux_${arch}.rpm`);
-  manifest.platforms[`linux-${arch}`] = {
+  const appImageSignatureName = await copySignature(files, appImage, appImageName);
+  const debName = await copy(deb, `ModelCrew_${version}_linux_${arch}.deb`);
+  const rpmName = await copy(rpm, `ModelCrew_${version}_linux_${arch}.rpm`);
+  const appImageArtifact = {
     file: appImageName,
-    signatureFile: signatureName,
+    signatureFile: appImageSignatureName,
+  };
+  // Keep the legacy target for Tauri's default Linux updater target and expose
+  // an explicit alias for package-aware clients.
+  manifest.platforms[`linux-${arch}`] = appImageArtifact;
+  manifest.platforms[`linux-${arch}-appimage`] = appImageArtifact;
+  manifest.platforms[`linux-${arch}-deb`] = {
+    file: debName,
+    signatureFile: `${debName}.sig`,
+  };
+  manifest.platforms[`linux-${arch}-rpm`] = {
+    file: rpmName,
+    signatureFile: `${rpmName}.sig`,
   };
 }
 
 // Arch Linux pacman package (repackaged from the .deb by the build-arch job).
-// pacman handles its own updates, so there is no updater signature/manifest entry.
 for (const arch of ["x86_64", "aarch64"]) {
   const files = await platformFiles(`stable-arch-${arch}`);
   const pkg = one(
@@ -106,7 +117,11 @@ for (const arch of ["x86_64", "aarch64"]) {
     (file) => file.endsWith(".pkg.tar.zst"),
     `Arch ${arch} package`,
   );
-  await copy(pkg, `ModelCrew_${version}_linux_${arch}.pkg.tar.zst`);
+  const pkgName = await copy(pkg, `ModelCrew_${version}_linux_${arch}.pkg.tar.zst`);
+  manifest.platforms[`linux-${arch}-pacman`] = {
+    file: pkgName,
+    signatureFile: `${pkgName}.sig`,
+  };
 }
 
 await writeJson(manifestPath, manifest);
