@@ -267,6 +267,42 @@ fn default_shell() -> String {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ShellInfo {
+    pub id: String,
+    pub label: String,
+    pub command: String,
+}
+
+/// Оболочки, реально доступные на этой ОС — фронт покажет только их, чтобы
+/// пользователь не выбрал отсутствующую. Кроссплатформенно: unix и windows
+/// перебирают разные наборы.
+pub fn available_shells() -> Vec<ShellInfo> {
+    #[cfg(windows)]
+    let candidates: &[(&str, &str, &str)] = &[
+        ("powershell", "PowerShell", "powershell.exe"),
+        ("pwsh", "PowerShell 7", "pwsh.exe"),
+        ("cmd", "Command Prompt", "cmd.exe"),
+        ("bash", "Bash", "bash.exe"),
+    ];
+    #[cfg(not(windows))]
+    let candidates: &[(&str, &str, &str)] = &[
+        ("zsh", "Zsh", "zsh"),
+        ("bash", "Bash", "bash"),
+        ("sh", "Sh", "sh"),
+        ("fish", "Fish", "fish"),
+    ];
+    candidates
+        .iter()
+        .filter(|(_, _, command)| shell_exists(command))
+        .map(|(id, label, command)| ShellInfo {
+            id: (*id).to_string(),
+            label: (*label).to_string(),
+            command: (*command).to_string(),
+        })
+        .collect()
+}
+
 fn shell_exists(shell: &str) -> bool {
     let path = std::path::Path::new(shell);
     if path.is_absolute() || shell.contains(std::path::MAIN_SEPARATOR) {

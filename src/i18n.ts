@@ -39,6 +39,10 @@ const ru = {
   "settings.customColor": "Свой цвет",
   "settings.selectTheme": "Выбрать тему «{name}»",
   "settings.selectAccent": "Выбрать цвет «{name}»",
+  "settings.shell": "Оболочка",
+  "settings.shellDefault": "Системная",
+  "settings.shellNote": "Применяется к новым терминалам",
+  "settings.selectShell": "Выбрать оболочку «{name}»",
 
   "theme.midnight.name": "Полночь",
   "theme.midnight.description": "Исходная тёмная",
@@ -188,6 +192,10 @@ const en: Record<MessageKey, string> = {
   "settings.customColor": "Custom color",
   "settings.selectTheme": "Select the “{name}” theme",
   "settings.selectAccent": "Select the “{name}” color",
+  "settings.shell": "Shell",
+  "settings.shellDefault": "System default",
+  "settings.shellNote": "Applies to new terminals",
+  "settings.selectShell": "Select the “{name}” shell",
 
   "theme.midnight.name": "Midnight",
   "theme.midnight.description": "Original dark theme",

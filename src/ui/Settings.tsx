@@ -1,4 +1,5 @@
-import { useEffect, useId } from "react";
+import { useEffect, useId, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   ACCENT_COLORS,
   APP_THEMES,
@@ -6,6 +7,9 @@ import {
   type ThemeId,
 } from "../theme";
 import { type MessageKey, type Locale, useI18n } from "../i18n";
+import { loadShell, saveShell, type ShellOption } from "../shell";
+
+const isTauri = "__TAURI_INTERNALS__" in window;
 
 const themeMessageKeys: Record<
   ThemeId,
@@ -69,6 +73,30 @@ type SettingsProps = {
 export function Settings(props: SettingsProps) {
   const { locale, setLocale, t } = useI18n();
   const titleId = useId();
+  const [shells, setShells] = useState<ShellOption[]>([]);
+  const [shell, setShell] = useState<string | null>(() => loadShell());
+
+  useEffect(() => {
+    if (!isTauri) {
+      return;
+    }
+    let cancelled = false;
+    void invoke<ShellOption[]>("list_shells")
+      .then((list) => {
+        if (!cancelled) {
+          setShells(list);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectShell = (command: string | null) => {
+    saveShell(command);
+    setShell(command);
+  };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -136,6 +164,42 @@ export function Settings(props: SettingsProps) {
             })}
           </div>
         </div>
+
+        {isTauri && shells.length > 0 && (
+          <div className="settings-section">
+            <div className="settings-label">{t("settings.shell")}</div>
+            <div
+              className="shell-options"
+              role="group"
+              aria-label={t("settings.shell")}
+            >
+              <button
+                type="button"
+                aria-pressed={shell === null}
+                className={`shell-option ${shell === null ? "is-selected" : ""}`}
+                onClick={() => selectShell(null)}
+              >
+                {t("settings.shellDefault")}
+              </button>
+              {shells.map((option) => (
+                <button
+                  key={option.command}
+                  type="button"
+                  title={t("settings.selectShell", { name: option.label })}
+                  aria-label={t("settings.selectShell", { name: option.label })}
+                  aria-pressed={shell === option.command}
+                  className={`shell-option ${
+                    shell === option.command ? "is-selected" : ""
+                  }`}
+                  onClick={() => selectShell(option.command)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="settings-note">{t("settings.shellNote")}</p>
+          </div>
+        )}
 
         <div className="settings-section">
           <div className="settings-label">{t("settings.theme")}</div>

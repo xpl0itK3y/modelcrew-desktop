@@ -5,6 +5,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
+import { loadShell } from "../shell";
 import "@xterm/xterm/css/xterm.css";
 
 // Инстансы xterm живут вне React: панель при монтировании подключает
@@ -223,6 +224,8 @@ export async function ensureSpawned(
       workspaceId,
       cols: entry.term.cols,
       rows: entry.term.rows,
+      // null → бэкенд возьмёт оболочку по умолчанию для ОС.
+      shell: loadShell(),
       onOutput: output,
     });
   } catch (error) {

@@ -3,7 +3,7 @@ mod pty;
 mod workspace_roots;
 
 use command_error::{CommandError, CommandResult, ErrorCode};
-use pty::{PtyManager, SpawnOptions};
+use pty::{PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Emitter, Manager, RunEvent};
@@ -224,6 +224,7 @@ fn pty_create(
     workspace_id: String,
     cols: u16,
     rows: u16,
+    shell: Option<String>,
     on_output: Channel<InvokeResponseBody>,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
@@ -233,7 +234,8 @@ fn pty_create(
     state.spawn(
         SpawnOptions {
             id,
-            shell: None,
+            // Пусто/None — оболочка по умолчанию для ОС (см. default_shell).
+            shell: shell.filter(|value| !value.trim().is_empty()),
             cwd,
             cols,
             rows,
@@ -247,6 +249,11 @@ fn pty_create(
             let _ = exit_app.emit_to("main", "pty-exit", PtyExitPayload { id: exit_id, code });
         },
     )
+}
+
+#[tauri::command]
+fn list_shells() -> Vec<ShellInfo> {
+    pty::available_shells()
 }
 
 #[tauri::command]
@@ -436,6 +443,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             pty_create,
+            list_shells,
             pty_write,
             pty_resize,
             pty_kill,
