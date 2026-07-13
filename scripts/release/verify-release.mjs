@@ -42,7 +42,7 @@ const expected = [
   `ModelCrew_${version}_linux_aarch64.pkg.tar.zst`,
   `ModelCrew_${version}_linux_aarch64.pkg.tar.zst.sig`,
   "PKGBUILD",
-  ".SRCINFO",
+  "modelcrew-bin.SRCINFO",
   "latest.json",
   "SHA256SUMS",
 ];

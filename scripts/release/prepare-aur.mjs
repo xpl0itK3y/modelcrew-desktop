@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   assertNonEmptyFile,
@@ -13,6 +13,10 @@ const args = parseArgs(process.argv.slice(2));
 const version = requireArg(args, "version");
 const repository = requireArg(args, "repository");
 const dist = path.resolve(requireArg(args, "dist"));
+const aurOutput = path.resolve(requireArg(args, "aur-output"));
+if (aurOutput === dist) {
+  throw new Error("--aur-output must be different from --dist");
+}
 const templatePath = path.resolve(
   typeof args.template === "string"
     ? args.template
@@ -43,8 +47,6 @@ for (const [token, value] of Object.entries({
 if (/@[A-Z0-9_]+@/u.test(pkgbuild)) {
   throw new Error("PKGBUILD template still contains unresolved tokens");
 }
-await writeFile(path.join(dist, "PKGBUILD"), pkgbuild, "utf8");
-
 const srcinfo = `pkgbase = modelcrew-bin
 \tpkgdesc = Desktop workspace for projects, sessions, and multiple terminals
 \tpkgver = ${version}
@@ -73,5 +75,14 @@ const srcinfo = `pkgbase = modelcrew-bin
 
 pkgname = modelcrew-bin
 `;
-await writeFile(path.join(dist, ".SRCINFO"), srcinfo, "utf8");
+await rm(path.join(dist, ".SRCINFO"), { force: true });
+await rm(path.join(dist, "default.SRCINFO"), { force: true });
+await rm(aurOutput, { recursive: true, force: true });
+await mkdir(aurOutput, { recursive: true });
+await Promise.all([
+  writeFile(path.join(dist, "PKGBUILD"), pkgbuild, "utf8"),
+  writeFile(path.join(dist, "modelcrew-bin.SRCINFO"), srcinfo, "utf8"),
+  writeFile(path.join(aurOutput, "PKGBUILD"), pkgbuild, "utf8"),
+  writeFile(path.join(aurOutput, ".SRCINFO"), srcinfo, "utf8"),
+]);
 console.log(`Prepared AUR metadata for ${version}`);

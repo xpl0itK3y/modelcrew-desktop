@@ -114,6 +114,8 @@ function prepareAur(fixture) {
       path.join(rootDirectory, "scripts/release/prepare-aur.mjs"),
       "--dist",
       path.join(fixture, "dist"),
+      "--aur-output",
+      path.join(fixture, "aur-metadata"),
       "--version",
       VERSION,
       "--repository",
@@ -287,6 +289,39 @@ test("generate-latest rejects a native Linux target without its normalized signa
     assert.match(
       result.stderr,
       new RegExp(`ModelCrew_${VERSION.replaceAll(".", "\\.")}_linux_x86_64\\.deb\\.sig`, "u"),
+    );
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("prepare-aur keeps .SRCINFO in the AUR artifact and uses a public-safe release name", () => {
+  const fixture = createFixture();
+  try {
+    const prepareResult = prepareAssets(fixture);
+    assert.equal(prepareResult.status, 0, prepareResult.stderr);
+    write(path.join(fixture, "dist", ".SRCINFO"), "stale-hidden-metadata");
+    write(path.join(fixture, "dist", "default.SRCINFO"), "stale-sanitized-metadata");
+
+    const aurResult = prepareAur(fixture);
+    assert.equal(aurResult.status, 0, aurResult.stderr);
+
+    const publicSrcinfo = path.join(fixture, "dist", "modelcrew-bin.SRCINFO");
+    const aurSrcinfo = path.join(fixture, "aur-metadata", ".SRCINFO");
+    assert.equal(fs.existsSync(path.join(fixture, "dist", ".SRCINFO")), false);
+    assert.equal(fs.existsSync(path.join(fixture, "dist", "default.SRCINFO")), false);
+    assert.equal(fs.existsSync(publicSrcinfo), true);
+    assert.deepEqual(fs.readdirSync(path.join(fixture, "aur-metadata")).sort(), [
+      ".SRCINFO",
+      "PKGBUILD",
+    ]);
+    assert.equal(
+      fs.readFileSync(publicSrcinfo, "utf8"),
+      fs.readFileSync(aurSrcinfo, "utf8"),
+    );
+    assert.equal(
+      fs.readFileSync(path.join(fixture, "dist", "PKGBUILD"), "utf8"),
+      fs.readFileSync(path.join(fixture, "aur-metadata", "PKGBUILD"), "utf8"),
     );
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });

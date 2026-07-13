@@ -68,6 +68,7 @@ jobs:
             --version "$VERSION"
           node scripts/release/prepare-aur.mjs \
             --dist release-dist \
+            --aur-output release-aur \
             --version "$VERSION" \
             --repository "$RELEASE_REPOSITORY"
           for package in \
@@ -122,10 +123,11 @@ jobs:
         with:
           name: aur-metadata-${{ inputs.version }}
           retention-days: 14
+          if-no-files-found: error
           include-hidden-files: true
           path: |
-            release-dist/PKGBUILD
-            release-dist/.SRCINFO
+            release-aur/PKGBUILD
+            release-aur/.SRCINFO
 
       - name: Publish candidate prerelease without changing latest
         env:
