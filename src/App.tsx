@@ -16,10 +16,13 @@ import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
 import {
   destroyTerminal,
+  applyTerminalFontSize,
   applyTerminalTheme,
   getAutoTitle,
+  getRunningTerminalCount,
   isManualTitle,
   rememberAutoTitle,
+  restartRunningTerminals,
 } from "./terminal/registry";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
@@ -73,6 +76,11 @@ import {
   PANEL_MIN_WIDTH,
   WORKSPACE_NAME,
 } from "./constants";
+import { loadShell, saveShell } from "./shell";
+import {
+  loadTerminalFontSize,
+  saveTerminalFontSize,
+} from "./terminal/preferences";
 
 function unavailable(error: unknown): FolderRuntimeStatus {
   return {
@@ -388,6 +396,16 @@ export default function App() {
   const [zoomed, setZoomed] = useState(false);
   const [accent, setAccent] = useState(loadAccent);
   const [themeId, setThemeId] = useState(loadTheme);
+  const [terminalFontSize, setTerminalFontSize] = useState(
+    loadTerminalFontSize,
+  );
+  const [shell, setShell] = useState<string | null>(loadShell);
+  const [pendingShell, setPendingShell] = useState<{
+    command: string | null;
+    label: string;
+    count: number;
+  } | null>(null);
+  const [shellBusy, setShellBusy] = useState(false);
   const dockviewTheme = useMemo<DockviewTheme>(
     () => ({ ...modelcrewTheme, colorScheme: getAppTheme(themeId).scheme }),
     [themeId],
@@ -493,6 +511,58 @@ export default function App() {
     }
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  const requestShellChange = useCallback(
+    (command: string | null, label: string) => {
+      if (shellBusy || command === shell) {
+        return;
+      }
+      const count = getRunningTerminalCount();
+      if (count === 0) {
+        saveShell(command);
+        setShell(command);
+        showToast(translate("settings.shellChanged"));
+        return;
+      }
+      setPendingShell({ command, label, count });
+    },
+    [shell, shellBusy, showToast],
+  );
+
+  const confirmShellChange = useCallback(() => {
+    const request = pendingShell;
+    if (!request || shellBusy) {
+      return;
+    }
+
+    setShellBusy(true);
+    saveShell(request.command);
+    setShell(request.command);
+    void restartRunningTerminals(request.command)
+      .then((result) => {
+        if (result.failures.length > 0) {
+          showToast(
+            translate("settings.shellRestartFailed", {
+              failed: result.failures.length,
+              total: result.total,
+            }),
+          );
+        } else if (result.restarted > 0) {
+          showToast(
+            translate("settings.shellRestarted", {
+              terminals: formatTerminalCount(result.restarted),
+            }),
+          );
+        } else {
+          showToast(translate("settings.shellChanged"));
+        }
+      })
+      .catch((error) => showToast(localizeBackendError(error)))
+      .finally(() => {
+        setShellBusy(false);
+        setPendingShell(null);
+      });
+  }, [pendingShell, shellBusy, showToast]);
 
   useEffect(() => {
     if (!isTauri) {
@@ -1541,6 +1611,9 @@ export default function App() {
         <Settings
           themeId={themeId}
           accent={accent}
+          shell={shell}
+          shellBusy={shellBusy}
+          terminalFontSize={terminalFontSize}
           onSelectTheme={(nextThemeId) => {
             setThemeId(nextThemeId);
             saveTheme(nextThemeId);
@@ -1550,7 +1623,33 @@ export default function App() {
             setAccent(color);
             saveAccent(color);
           }}
-          onClose={() => setSettingsOpen(false)}
+          onSelectShell={requestShellChange}
+          onSelectTerminalFontSize={(size) => {
+            setTerminalFontSize(size);
+            saveTerminalFontSize(size);
+            applyTerminalFontSize(size);
+          }}
+          onClose={() => {
+            if (!pendingShell && !shellBusy) {
+              setSettingsOpen(false);
+            }
+          }}
+        />
+      )}
+      {pendingShell && (
+        <ConfirmDialog
+          text={t("settings.confirmShellChange", {
+            name: pendingShell.label,
+            terminals: formatTerminalCount(pendingShell.count, locale),
+          })}
+          confirmLabel={
+            shellBusy
+              ? t("settings.shellApplying")
+              : t("settings.shellRestart")
+          }
+          busy={shellBusy}
+          onConfirm={confirmShellChange}
+          onCancel={() => setPendingShell(null)}
         />
       )}
     </div>

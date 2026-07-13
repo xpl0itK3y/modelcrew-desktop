@@ -6,6 +6,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
+import {
+  loadTerminalFontSize,
+  normalizeTerminalFontSize,
+} from "./preferences";
 import "@xterm/xterm/css/xterm.css";
 
 // Инстансы xterm живут вне React: панель при монтировании подключает
@@ -17,20 +21,11 @@ import "@xterm/xterm/css/xterm.css";
 // «дёргании» разделителя дубли промпта копятся в буфере.
 const RESIZE_DEBOUNCE_MS = 250;
 
-// Плотная сетка → мелкий шрифт. Кегль подбираем от ширины ячейки под
-// целевое число колонок и зажимаем в читаемый диапазон: длинный промпт
-// перестаёт разворачиваться в лапшу на «максимально много» терминалов, а
-// на паре открытых терминалов текст, наоборот, крупнее.
-const MIN_FONT_PX = 12;
-const MAX_FONT_PX = 14;
-const TARGET_COLS = 50;
-// Шаг моноширинного глифа ≈ 0.6 кегля (SF Mono / JetBrains Mono).
-const CHAR_ADVANCE_RATIO = 0.6;
-
 // В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
 const isTauri = "__TAURI_INTERNALS__" in window;
 
 let currentTerminalTheme = getAppTheme(loadTheme()).terminal;
+let currentTerminalFontSize = loadTerminalFontSize();
 
 export type TerminalEntry = {
   id: string;
@@ -39,6 +34,8 @@ export type TerminalEntry = {
   container: HTMLDivElement;
   spawned: boolean;
   exited: boolean;
+  workspaceId: string | null;
+  outputGeneration: number;
   resizeTimer: number | undefined;
   // Панель переименована руками — автоимя от процесса больше не трогаем.
   manualTitle: boolean;
@@ -53,6 +50,14 @@ export function applyTerminalTheme(themeId: ThemeId): void {
   for (const entry of registry.values()) {
     entry.term.options.theme = { ...currentTerminalTheme };
     entry.term.refresh(0, Math.max(0, entry.term.rows - 1));
+  }
+}
+
+export function applyTerminalFontSize(size: number): void {
+  currentTerminalFontSize = normalizeTerminalFontSize(size);
+  for (const entry of registry.values()) {
+    entry.term.options.fontSize = currentTerminalFontSize;
+    fitTerminal(entry);
   }
 }
 
@@ -90,7 +95,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 
   const term = new Terminal({
     cursorBlink: true,
-    fontSize: 13,
+    fontSize: currentTerminalFontSize,
     fontFamily:
       '"SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace',
     lineHeight: 1.25,
@@ -117,6 +122,8 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     container,
     spawned: false,
     exited: false,
+    workspaceId: null,
+    outputGeneration: 0,
     resizeTimer: undefined,
     manualTitle: false,
     everAttached: false,
@@ -125,18 +132,13 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   return entry;
 }
 
-// Единая точка ресайза терминала: сначала подбираем кегль под текущую
-// ширину ячейки, затем пересчитываем cols/rows. Скрытый контейнер
-// (clientWidth 0) пропускаем — ResizeObserver позовёт снова с размерами.
+// Единая точка ресайза терминала. Пользовательский кегль фиксирован,
+// здесь только пересчитываем cols/rows. Скрытый контейнер (clientWidth 0)
+// пропускаем — ResizeObserver позовёт снова после монтирования.
 export function fitTerminal(entry: TerminalEntry): void {
   const width = entry.container.clientWidth;
   if (width <= 0) {
     return;
-  }
-  const ideal = Math.round(width / (TARGET_COLS * CHAR_ADVANCE_RATIO));
-  const fontSize = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, ideal));
-  if (entry.term.options.fontSize !== fontSize) {
-    entry.term.options.fontSize = fontSize;
   }
   entry.fit.fit();
 }
@@ -165,6 +167,103 @@ export function getAutoTitle(id: string): string | undefined {
   return autoTitles.get(id);
 }
 
+type PtyOutput = ArrayBuffer | string;
+
+function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
+  entry.term.write(typeof data === "string" ? data : new Uint8Array(data));
+}
+
+function createLiveOutputChannel(
+  entry: TerminalEntry,
+  generation: number,
+): Channel<PtyOutput> {
+  const output = new Channel<PtyOutput>();
+  output.onmessage = (data) => {
+    if (entry.outputGeneration === generation) {
+      writePtyOutput(entry, data);
+    }
+  };
+  return output;
+}
+
+function runningEntries(): TerminalEntry[] {
+  return [...registry.values()].filter(
+    (entry) => entry.spawned && !entry.exited && entry.workspaceId !== null,
+  );
+}
+
+export function getRunningTerminalCount(): number {
+  return runningEntries().length;
+}
+
+export type RestartTerminalsResult = {
+  total: number;
+  restarted: number;
+  failures: Array<{ id: string; error: unknown }>;
+};
+
+async function restartTerminal(
+  entry: TerminalEntry,
+  shell: string | null,
+): Promise<void> {
+  const workspaceId = entry.workspaceId;
+  if (!workspaceId) {
+    throw new Error("Terminal workspace is unavailable");
+  }
+
+  // Пока invoke не подтвердил успешный spawn, вывод новой оболочки держим
+  // отдельно. Старый PTY остаётся активным и видимым при любой ошибке.
+  const generation = entry.outputGeneration + 1;
+  const pending: PtyOutput[] = [];
+  let committed = false;
+  const output = new Channel<PtyOutput>();
+  output.onmessage = (data) => {
+    if (!committed) {
+      pending.push(data);
+    } else if (entry.outputGeneration === generation) {
+      writePtyOutput(entry, data);
+    }
+  };
+
+  await invoke("pty_create", {
+    id: entry.id,
+    workspaceId,
+    cols: entry.term.cols,
+    rows: entry.term.rows,
+    shell,
+    onOutput: output,
+  });
+
+  // С этого момента старый канал игнорируется. reset очищает и viewport, и
+  // scrollback, после чего стартовый вывод нового PTY воспроизводится по порядку.
+  entry.outputGeneration = generation;
+  entry.term.reset();
+  committed = true;
+  for (const data of pending) {
+    writePtyOutput(entry, data);
+  }
+}
+
+export async function restartRunningTerminals(
+  shell: string | null,
+): Promise<RestartTerminalsResult> {
+  const entries = runningEntries();
+  const settled = await Promise.allSettled(
+    entries.map((entry) => restartTerminal(entry, shell)),
+  );
+  const failures: RestartTerminalsResult["failures"] = [];
+  settled.forEach((result, index) => {
+    if (result.status === "rejected") {
+      failures.push({ id: entries[index].id, error: result.reason });
+    }
+  });
+  return {
+    total: entries.length,
+    restarted: entries.length - failures.length,
+    failures,
+  };
+}
+
 export async function ensureSpawned(
   entry: TerminalEntry,
   workspaceId: string,
@@ -173,6 +272,7 @@ export async function ensureSpawned(
     return;
   }
   entry.spawned = true;
+  entry.workspaceId = workspaceId || null;
 
   if (!workspaceId) {
     markExited(entry);
@@ -192,12 +292,9 @@ export async function ensureSpawned(
     return;
   }
 
-  const output = new Channel<ArrayBuffer | string>();
-  output.onmessage = (data) => {
-    entry.term.write(
-      typeof data === "string" ? data : new Uint8Array(data),
-    );
-  };
+  const generation = entry.outputGeneration + 1;
+  entry.outputGeneration = generation;
+  const output = createLiveOutputChannel(entry, generation);
 
   entry.term.onData((data) => {
     if (!entry.exited) {
@@ -245,6 +342,7 @@ export async function destroyTerminal(id: string): Promise<void> {
   }
   registry.delete(id);
   autoTitles.delete(id);
+  entry.outputGeneration += 1;
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
   }

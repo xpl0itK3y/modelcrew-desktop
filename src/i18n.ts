@@ -41,8 +41,18 @@ const ru = {
   "settings.selectAccent": "Выбрать цвет «{name}»",
   "settings.shell": "Оболочка",
   "settings.shellDefault": "Системная",
-  "settings.shellNote": "Применяется к новым терминалам",
+  "settings.shellNote": "Смена перезапустит все работающие терминалы",
   "settings.selectShell": "Выбрать оболочку «{name}»",
+  "settings.confirmShellChange":
+    "Сменить оболочку на «{name}» и перезапустить {terminals}? Текущие процессы будут остановлены.",
+  "settings.shellRestart": "Перезапустить",
+  "settings.shellApplying": "Перезапуск…",
+  "settings.shellChanged": "Оболочка изменена",
+  "settings.shellRestarted": "Оболочка изменена: перезапущено {terminals}",
+  "settings.shellRestartFailed":
+    "Не удалось перезапустить {failed} из {total} терминалов — они продолжают работать в прежней оболочке",
+  "settings.terminalFontSize": "Размер шрифта терминала",
+  "settings.terminalFontSizeValue": "{size} px",
 
   "theme.midnight.name": "Полночь",
   "theme.midnight.description": "Исходная тёмная",
@@ -194,8 +204,18 @@ const en: Record<MessageKey, string> = {
   "settings.selectAccent": "Select the “{name}” color",
   "settings.shell": "Shell",
   "settings.shellDefault": "System default",
-  "settings.shellNote": "Applies to new terminals",
+  "settings.shellNote": "Changing it restarts all running terminals",
   "settings.selectShell": "Select the “{name}” shell",
+  "settings.confirmShellChange":
+    "Switch to “{name}” and restart {terminals}? Current processes will be stopped.",
+  "settings.shellRestart": "Restart",
+  "settings.shellApplying": "Restarting…",
+  "settings.shellChanged": "Shell changed",
+  "settings.shellRestarted": "Shell changed: restarted {terminals}",
+  "settings.shellRestartFailed":
+    "Could not restart {failed} of {total} terminals — they are still running in the previous shell",
+  "settings.terminalFontSize": "Terminal font size",
+  "settings.terminalFontSizeValue": "{size} px",
 
   "theme.midnight.name": "Midnight",
   "theme.midnight.description": "Original dark theme",

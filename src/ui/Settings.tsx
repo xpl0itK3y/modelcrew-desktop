@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ACCENT_COLORS,
@@ -7,7 +7,11 @@ import {
   type ThemeId,
 } from "../theme";
 import { type MessageKey, type Locale, useI18n } from "../i18n";
-import { loadShell, saveShell, type ShellOption } from "../shell";
+import { type ShellOption } from "../shell";
+import {
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+} from "../terminal/preferences";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -65,8 +69,13 @@ const accentMessageKeys: Record<AccentColor["id"], MessageKey> = {
 type SettingsProps = {
   themeId: ThemeId;
   accent: string;
+  shell: string | null;
+  shellBusy: boolean;
+  terminalFontSize: number;
   onSelectTheme: (themeId: ThemeId) => void;
   onSelectAccent: (color: string) => void;
+  onSelectShell: (command: string | null, label: string) => void;
+  onSelectTerminalFontSize: (size: number) => void;
   onClose: () => void;
 };
 
@@ -74,7 +83,10 @@ export function Settings(props: SettingsProps) {
   const { locale, setLocale, t } = useI18n();
   const titleId = useId();
   const [shells, setShells] = useState<ShellOption[]>([]);
-  const [shell, setShell] = useState<string | null>(() => loadShell());
+  const fontSizeProgress =
+    ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
+      (MAX_TERMINAL_FONT_SIZE - MIN_TERMINAL_FONT_SIZE)) *
+    100;
 
   useEffect(() => {
     if (!isTauri) {
@@ -92,11 +104,6 @@ export function Settings(props: SettingsProps) {
       cancelled = true;
     };
   }, []);
-
-  const selectShell = (command: string | null) => {
-    saveShell(command);
-    setShell(command);
-  };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -172,12 +179,16 @@ export function Settings(props: SettingsProps) {
               className="shell-options"
               role="group"
               aria-label={t("settings.shell")}
+              aria-busy={props.shellBusy}
             >
               <button
                 type="button"
-                aria-pressed={shell === null}
-                className={`shell-option ${shell === null ? "is-selected" : ""}`}
-                onClick={() => selectShell(null)}
+                disabled={props.shellBusy}
+                aria-pressed={props.shell === null}
+                className={`shell-option ${props.shell === null ? "is-selected" : ""}`}
+                onClick={() =>
+                  props.onSelectShell(null, t("settings.shellDefault"))
+                }
               >
                 {t("settings.shellDefault")}
               </button>
@@ -185,21 +196,61 @@ export function Settings(props: SettingsProps) {
                 <button
                   key={option.command}
                   type="button"
+                  disabled={props.shellBusy}
                   title={t("settings.selectShell", { name: option.label })}
                   aria-label={t("settings.selectShell", { name: option.label })}
-                  aria-pressed={shell === option.command}
+                  aria-pressed={props.shell === option.command}
                   className={`shell-option ${
-                    shell === option.command ? "is-selected" : ""
+                    props.shell === option.command ? "is-selected" : ""
                   }`}
-                  onClick={() => selectShell(option.command)}
+                  onClick={() =>
+                    props.onSelectShell(option.command, option.label)
+                  }
                 >
                   {option.label}
                 </button>
               ))}
             </div>
-            <p className="settings-note">{t("settings.shellNote")}</p>
+            <p className="settings-note">
+              {props.shellBusy
+                ? t("settings.shellApplying")
+                : t("settings.shellNote")}
+            </p>
           </div>
         )}
+
+        <div className="settings-section">
+          <div className="settings-label">
+            {t("settings.terminalFontSize")}
+          </div>
+          <div className="terminal-font-size-control">
+            <input
+              type="range"
+              className="terminal-font-size-slider"
+              min={MIN_TERMINAL_FONT_SIZE}
+              max={MAX_TERMINAL_FONT_SIZE}
+              step={1}
+              value={props.terminalFontSize}
+              aria-label={t("settings.terminalFontSize")}
+              aria-valuetext={t("settings.terminalFontSizeValue", {
+                size: props.terminalFontSize,
+              })}
+              style={
+                {
+                  "--terminal-font-size-progress": `${fontSizeProgress}%`,
+                } as CSSProperties
+              }
+              onChange={(event) =>
+                props.onSelectTerminalFontSize(Number(event.target.value))
+              }
+            />
+            <output className="terminal-font-size-value" aria-live="polite">
+              {t("settings.terminalFontSizeValue", {
+                size: props.terminalFontSize,
+              })}
+            </output>
+          </div>
+        </div>
 
         <div className="settings-section">
           <div className="settings-label">{t("settings.theme")}</div>
