@@ -1,0 +1,156 @@
+name: Nightly installers
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Validate nightly inputs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Validate version and release notes
+        run: node scripts/release/validate-release.mjs
+
+      - name: Require updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+
+  build:
+    name: ${{ matrix.label }}
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x64
+            artifact: windows-x64
+            bundles: nsis,msi
+          - label: macOS Apple Silicon
+            os: macos-15
+            target: aarch64-apple-darwin
+            platform: macos
+            arch: aarch64
+            artifact: macos-aarch64
+            bundles: app,dmg
+          - label: macOS Intel
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos
+            arch: x86_64
+            artifact: macos-x86_64
+            bundles: app,dmg
+          - label: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x86_64
+            artifact: linux-x86_64
+            bundles: appimage,deb,rpm
+          - label: Linux ARM64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux
+            arch: aarch64
+            artifact: linux-aarch64
+            bundles: appimage,deb,rpm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust target
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            rpm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build macOS bundles with ad-hoc signing
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+
+      - name: Build Windows or Linux bundles
+        if: runner.os != 'macOS'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+
+      - name: Create build metadata
+        id: metadata
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA:0:7}"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          node scripts/release/build-info.mjs \
+            --output release-work/BUILD_INFO.json \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}"
+
+      - name: Upload nightly installer artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-${{ matrix.artifact }}-${{ steps.metadata.outputs.short_sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            release-work/BUILD_INFO.json

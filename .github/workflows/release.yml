@@ -1,0 +1,428 @@
+name: Stable release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPOSITORY: ${{ github.repository }}
+
+jobs:
+  prepare-release:
+    name: Validate and create draft release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.draft.outputs.release_id }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check required signing secrets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+
+      - name: Check repository is public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api "repos/$RELEASE_REPOSITORY" --jq .private)" = "false"
+
+      - name: Read version and previous public release
+        id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -e "console.log(JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version)")"
+          latest_tag="$(gh api "repos/$RELEASE_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release metadata and monotonic version
+        run: >-
+          node scripts/release/validate-release.mjs
+          --tag "${{ github.ref_name }}"
+          --latest-tag "${{ steps.metadata.outputs.latest_tag }}"
+
+      - name: Require tagged commit to be in main
+        run: |
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Generate localized release body
+        run: >-
+          node scripts/release/release-body.mjs
+          --version "${{ steps.metadata.outputs.version }}"
+          --output release-work/RELEASE_BODY.md
+          --aur-enabled "${{ vars.AUR_ENABLED || 'false' }}"
+
+      - name: Create or refresh draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          existing="$(gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)"
+          if test -n "$existing"; then
+            if test "$(jq -r .draft <<<"$existing")" != "true"; then
+              if test "$(jq -r .prerelease <<<"$existing")" != "true"; then
+                echo "A stable published release already exists for $TAG" >&2
+                exit 1
+              fi
+              echo "Recovering an interrupted prerelease for $TAG as a draft"
+            fi
+            release_id="$(jq -r .id <<<"$existing")"
+            gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$release_id" \
+              --raw-field name="ModelCrew v$VERSION" \
+              --raw-field body="$(cat release-work/RELEASE_BODY.md)" \
+              -F draft=true \
+              -F prerelease=false \
+              --raw-field make_latest=false >/dev/null
+          else
+            created="$(gh api --method POST "repos/$RELEASE_REPOSITORY/releases" \
+              --raw-field tag_name="$TAG" \
+              --raw-field name="ModelCrew v$VERSION" \
+              --raw-field body="$(cat release-work/RELEASE_BODY.md)" \
+              -F draft=true \
+              -F prerelease=false)"
+            release_id="$(jq -r .id <<<"$created")"
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.label }}
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x64
+            bundles: nsis,msi
+          - label: macOS Apple Silicon
+            os: macos-15
+            target: aarch64-apple-darwin
+            artifact: macos-aarch64
+            bundles: app,dmg
+          - label: macOS Intel
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: macos-x86_64
+            bundles: app,dmg
+          - label: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+            bundles: appimage,deb,rpm
+          - label: Linux ARM64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: linux-aarch64
+            bundles: appimage,deb,rpm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust target
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            rpm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build macOS bundles with ad-hoc signing
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+
+      - name: Build Windows or Linux bundles
+        if: runner.os != 'macOS'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+
+      - name: Upload signed platform bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stable-${{ matrix.artifact }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+
+  finalize-release:
+    name: Verify and publish public release
+    needs:
+      - prepare-release
+      - build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Download every platform bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: stable-*
+          path: release-input
+
+      - name: Install signature verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends minisign
+
+      - name: Normalize and verify release files
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          node scripts/release/prepare-assets.mjs \
+            --input release-input \
+            --output release-dist \
+            --manifest release-work/assets.json \
+            --version "$VERSION"
+          node scripts/release/prepare-aur.mjs \
+            --dist release-dist \
+            --version "$VERSION" \
+            --repository "$RELEASE_REPOSITORY"
+          node scripts/release/generate-latest.mjs \
+            --dist release-dist \
+            --manifest release-work/assets.json \
+            --version "$VERSION" \
+            --repository "$RELEASE_REPOSITORY"
+          node scripts/release/verify-signatures.mjs \
+            --dist release-dist \
+            --manifest release-work/assets.json
+          node scripts/release/checksums.mjs --dist release-dist
+          node scripts/release/verify-release.mjs \
+            --dist release-dist \
+            --version "$VERSION" \
+            --repository "$RELEASE_REPOSITORY"
+
+      - name: Remove old draft assets and upload verified files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          while read -r asset_id; do
+            test -z "$asset_id" || gh api --method DELETE \
+              "repos/$RELEASE_REPOSITORY/releases/assets/$asset_id"
+          done < <(gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --jq '.[].id')
+          mapfile -d '' assets < <(find release-dist -maxdepth 1 -type f -print0)
+          gh release upload "$TAG" "${assets[@]}" \
+            --repo "$RELEASE_REPOSITORY" \
+            --clobber
+
+      - name: Verify uploaded asset inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        run: |
+          mkdir -p release-work
+          gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            > release-work/remote-assets.json
+          node scripts/release/verify-remote-assets.mjs \
+            --dist release-dist \
+            --remote release-work/remote-assets.json
+
+      - name: Save generated AUR metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aur-metadata-${{ needs.prepare-release.outputs.version }}
+          retention-days: 14
+          include-hidden-files: true
+          path: |
+            release-dist/PKGBUILD
+            release-dist/.SRCINFO
+
+      - name: Publish candidate prerelease without changing latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        run: |
+          gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=true \
+            --raw-field make_latest=false >/dev/null
+
+      - name: Verify anonymous direct downloads or restore draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        run: |
+          failed=0
+          urls_file="release-work/public-asset-urls.txt"
+          if ! gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq '.[].browser_download_url' > "$urls_file"; then
+            failed=1
+            : > "$urls_file"
+          fi
+          expected_count="$(find release-dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          public_count="$(sed '/^[[:space:]]*$/d' "$urls_file" | wc -l | tr -d ' ')"
+          if test "$public_count" != "$expected_count"; then
+            echo "Expected $expected_count public asset URLs, found $public_count" >&2
+            failed=1
+          fi
+          while IFS= read -r url; do
+            test -n "$url" || continue
+            curl --fail --silent --show-error --location --head \
+              --retry 10 --retry-delay 3 --retry-all-errors "$url" || failed=1
+          done < "$urls_file"
+          if test "$failed" -ne 0; then
+            gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+              -F draft=true \
+              -F prerelease=false \
+              --raw-field make_latest=false >/dev/null || true
+            echo "Public URL verification failed; release returned to draft" >&2
+            exit 1
+          fi
+
+      - name: Promote verified release to stable latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        run: |
+          gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=false \
+            --raw-field make_latest=true >/dev/null
+
+      - name: Restore failed candidate to draft
+        if: ${{ failure() || cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        run: |
+          gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=true \
+            -F prerelease=false \
+            --raw-field make_latest=false >/dev/null || true
+
+  publish-aur:
+    name: Publish modelcrew-bin to AUR
+    if: ${{ vars.AUR_ENABLED == 'true' }}
+    needs:
+      - prepare-release
+      - finalize-release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download generated AUR metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aur-metadata-${{ needs.prepare-release.outputs.version }}
+          path: aur-metadata
+
+      - name: Publish AUR package metadata
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          test -n "$AUR_SSH_PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          expected_host_fingerprint='SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4'
+          actual_host_fingerprint="$(ssh-keygen -lf packaging/aur/aur.archlinux.org_known_hosts -E sha256 | awk '{print $2}')"
+          test "$actual_host_fingerprint" = "$expected_host_fingerprint"
+          install -m 600 packaging/aur/aur.archlinux.org_known_hosts ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            HostKeyAlgorithms ssh-ed25519
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            GlobalKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+          git clone ssh://aur@aur.archlinux.org/modelcrew-bin.git aur-package
+          cp aur-metadata/PKGBUILD aur-package/PKGBUILD
+          cp aur-metadata/.SRCINFO aur-package/.SRCINFO
+          git -C aur-package config user.name "ModelCrew Release Bot"
+          git -C aur-package config user.email "releases@modelcrew.app"
+          git -C aur-package add PKGBUILD .SRCINFO
+          if ! git -C aur-package diff --cached --quiet; then
+            git -C aur-package commit -m "Update modelcrew-bin to $VERSION"
+            git -C aur-package push origin master
+          fi
