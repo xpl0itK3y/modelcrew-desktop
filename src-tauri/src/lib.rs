@@ -289,6 +289,18 @@ fn pty_kill(
     state.kill(&id)
 }
 
+/// Явно завершает все PTY перед установкой обновления. Раскладка к этому
+/// моменту уже сохранена frontend-ом; команда не закрывает само окно, чтобы
+/// updater мог завершить установку и контролируемый relaunch.
+#[tauri::command]
+fn pty_kill_all(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, PtyManager>,
+) -> CommandResult<()> {
+    ensure_main_window(&window)?;
+    state.kill_all()
+}
+
 #[tauri::command]
 fn workspace_register_root(
     window: tauri::WebviewWindow,
@@ -385,6 +397,35 @@ fn app_set_locale(
     Ok(())
 }
 
+/// Способ установки обновления зависит не только от ОС, но и от формата
+/// установленного Linux-пакета. AppImage можно безопасно заменить через
+/// Tauri updater; DEB/RPM/AUR принадлежат системному пакетному менеджеру.
+#[tauri::command]
+fn updater_install_mode() -> &'static str {
+    if cfg!(debug_assertions) {
+        return "development";
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("APPIMAGE").is_some() {
+            "selfUpdate"
+        } else {
+            "packageManaged"
+        }
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        "selfUpdate"
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        "packageManaged"
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn build_macos_menu<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
@@ -426,7 +467,15 @@ fn build_macos_menu<R: tauri::Runtime>(
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            spawn_title_watcher(app.handle().clone());
+            Ok(())
+        });
 
     // На macOS Tauri ставит дефолтное меню, чей пункт Close Window съедает
     // Cmd+W раньше веб-вью. Собираем своё меню без Close/New, оставляя
@@ -437,29 +486,27 @@ pub fn run() {
     builder
         .manage(PtyManager::default())
         .manage(WorkspaceRoots::default())
-        .setup(|app| {
-            spawn_title_watcher(app.handle().clone());
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
             pty_write,
             pty_resize,
             pty_kill,
+            pty_kill_all,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,
             workspace_pick_root,
             workspace_unregister_root,
-            app_set_locale
+            app_set_locale,
+            updater_install_mode
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
             // Гарантированная уборка шеллов при любом пути выхода — иначе зомби.
             if let RunEvent::Exit = event {
-                app.state::<PtyManager>().kill_all();
+                let _ = app.state::<PtyManager>().kill_all();
             }
         });
 }

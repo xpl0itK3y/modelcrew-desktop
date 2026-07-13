@@ -14,7 +14,50 @@ const ru = {
   "titlebar.newTerminal": "Новый терминал в сетку",
   "titlebar.layoutsSoon": "Раскладки — скоро",
   "titlebar.notificationsSoon": "Уведомления — скоро",
+  "titlebar.notifications": "Обновления и уведомления",
+  "titlebar.updateReady": "Обновление {version} готово",
+  "titlebar.updatesUnavailable":
+    "Обновления доступны в установленной версии приложения",
   "titlebar.settings": "Настройки",
+
+  "update.title": "Обновления",
+  "update.idleDescription":
+    "ModelCrew проверяет и загружает обновления в фоне.",
+  "update.checkNow": "Проверить обновления",
+  "update.checking": "Проверяем новую версию…",
+  "update.upToDate": "Установлена последняя версия",
+  "update.upToDateDescription":
+    "Новых стабильных обновлений сейчас нет.",
+  "update.checkAgain": "Проверить ещё раз",
+  "update.downloading": "Загружаем ModelCrew {version}",
+  "update.downloadingDescription":
+    "Можно продолжать работать — терминалы не будут закрыты.",
+  "update.downloadProgress": "Прогресс загрузки обновления",
+  "update.downloaded": "Загружено {downloaded}",
+  "update.downloadedOf": "{downloaded} из {total}",
+  "update.version": "Обновление {version} готово",
+  "update.readyTitle": "Обновление ModelCrew {version}",
+  "update.fallbackSummary":
+    "Доступна новая версия ModelCrew. Подробности опубликованы на странице релиза.",
+  "update.packageManagedHelp":
+    "Эта установка обновляется через пакетный менеджер. Откройте страницу загрузки и обновите пакет обычным способом.",
+  "update.details": "Подробнее",
+  "update.later": "Позже",
+  "update.openDownloads": "Открыть загрузки",
+  "update.restartAndInstall": "Перезапустить и обновить",
+  "update.confirmTitle": "Перезапустить ModelCrew?",
+  "update.confirmWarning":
+    "Терминалы и запущенные процессы будут закрыты. Проекты, сессии и раскладка сохранятся.",
+  "update.confirmRestart": "Перезапустить",
+  "update.installing": "Устанавливаем ModelCrew {version}",
+  "update.installingDescription":
+    "Приложение перезапустится после установки обновления.",
+  "update.errorTitle": "Не удалось обновить ModelCrew",
+  "update.errorCheck": "Не удалось проверить наличие новой версии.",
+  "update.errorDownload": "Не удалось загрузить обновление.",
+  "update.errorInstall": "Не удалось установить загруженное обновление.",
+  "update.retry": "Повторить",
+  "update.close": "Закрыть уведомления",
 
   "sidebar.title": "Проекты",
   "sidebar.newWorkspace": "Новый проект",
@@ -163,6 +206,8 @@ const ru = {
   "error.terminalInputStreamFailed": "Не удалось открыть поток ввода",
   "error.terminalWriteFailed": "Не удалось записать данные в терминал",
   "error.terminalResizeFailed": "Не удалось изменить размер терминала",
+  "error.terminalKillFailed":
+    "Не удалось завершить все терминалы перед обновлением",
   "error.unknown": "Произошла неизвестная ошибка",
 } as const;
 
@@ -177,7 +222,50 @@ const en: Record<MessageKey, string> = {
   "titlebar.newTerminal": "Add terminal to grid",
   "titlebar.layoutsSoon": "Layouts — coming soon",
   "titlebar.notificationsSoon": "Notifications — coming soon",
+  "titlebar.notifications": "Updates and notifications",
+  "titlebar.updateReady": "Update {version} is ready",
+  "titlebar.updatesUnavailable":
+    "Updates are available in the installed application",
   "titlebar.settings": "Settings",
+
+  "update.title": "Updates",
+  "update.idleDescription":
+    "ModelCrew checks for and downloads updates in the background.",
+  "update.checkNow": "Check for updates",
+  "update.checking": "Checking for a new version…",
+  "update.upToDate": "You’re up to date",
+  "update.upToDateDescription":
+    "There are no new stable updates right now.",
+  "update.checkAgain": "Check again",
+  "update.downloading": "Downloading ModelCrew {version}",
+  "update.downloadingDescription":
+    "You can keep working — your terminals will stay open.",
+  "update.downloadProgress": "Update download progress",
+  "update.downloaded": "Downloaded {downloaded}",
+  "update.downloadedOf": "{downloaded} of {total}",
+  "update.version": "Update {version} is ready",
+  "update.readyTitle": "ModelCrew {version} update",
+  "update.fallbackSummary":
+    "A new ModelCrew version is available. Full details are on the release page.",
+  "update.packageManagedHelp":
+    "This installation is updated through its package manager. Open the downloads page and update the package in the usual way.",
+  "update.details": "Details",
+  "update.later": "Later",
+  "update.openDownloads": "Open downloads",
+  "update.restartAndInstall": "Restart and update",
+  "update.confirmTitle": "Restart ModelCrew?",
+  "update.confirmWarning":
+    "Terminals and running processes will close. Your projects, sessions and layout will be saved.",
+  "update.confirmRestart": "Restart",
+  "update.installing": "Installing ModelCrew {version}",
+  "update.installingDescription":
+    "The application will restart after the update is installed.",
+  "update.errorTitle": "ModelCrew could not be updated",
+  "update.errorCheck": "Could not check for a new version.",
+  "update.errorDownload": "Could not download the update.",
+  "update.errorInstall": "Could not install the downloaded update.",
+  "update.retry": "Try again",
+  "update.close": "Close update notifications",
 
   "sidebar.title": "Projects",
   "sidebar.newWorkspace": "New project",
@@ -330,6 +418,8 @@ const en: Record<MessageKey, string> = {
   "error.terminalInputStreamFailed": "Could not open the input stream",
   "error.terminalWriteFailed": "Could not write to the terminal",
   "error.terminalResizeFailed": "Could not resize the terminal",
+  "error.terminalKillFailed":
+    "Could not stop all terminals before updating",
   "error.unknown": "An unknown error occurred",
 };
 
@@ -469,6 +559,7 @@ const backendErrorKeys: Record<string, MessageKey> = {
   terminal_input_stream_failed: "error.terminalInputStreamFailed",
   terminal_write_failed: "error.terminalWriteFailed",
   terminal_resize_failed: "error.terminalResizeFailed",
+  terminal_kill_failed: "error.terminalKillFailed",
 };
 
 export function localizeBackendError(error: unknown): string {

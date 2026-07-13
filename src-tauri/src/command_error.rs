@@ -29,6 +29,7 @@ pub enum ErrorCode {
     TerminalNotFound,
     TerminalWriteFailed,
     TerminalResizeFailed,
+    TerminalKillFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
