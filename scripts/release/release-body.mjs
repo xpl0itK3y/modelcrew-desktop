@@ -21,9 +21,7 @@ const archLine = aurEnabled
   ? "- Arch Linux: `yay -S modelcrew-bin`"
   : "- Arch Linux: use the attached `PKGBUILD` (automatic AUR publishing is not enabled yet)";
 
-const body = `# ModelCrew ${version}
-
-## Что нового
+const body = `## Что нового
 
 ${notes.ru.summary}
 

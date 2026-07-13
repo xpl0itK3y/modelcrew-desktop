@@ -151,6 +151,35 @@ function verifyRelease(fixture) {
   );
 }
 
+function generateReleaseBody(fixture) {
+  return spawnSync(
+    process.execPath,
+    [
+      path.join(rootDirectory, "scripts/release/release-body.mjs"),
+      "--version",
+      VERSION,
+      "--output",
+      path.join(fixture, "RELEASE_BODY.md"),
+      "--aur-enabled",
+      "false",
+    ],
+    { cwd: rootDirectory, encoding: "utf8" },
+  );
+}
+
+test("release body starts with the changelog instead of duplicating the release title", () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "modelcrew-release-body-"));
+  try {
+    const result = generateReleaseBody(fixture);
+    assert.equal(result.status, 0, result.stderr);
+    const body = fs.readFileSync(path.join(fixture, "RELEASE_BODY.md"), "utf8");
+    assert.ok(body.startsWith("## Что нового\n"));
+    assert.doesNotMatch(body, /^# ModelCrew/mu);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test("release metadata includes signed desktop and native Linux updater targets", () => {
   const fixture = createFixture();
   try {
