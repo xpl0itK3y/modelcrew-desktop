@@ -1846,6 +1846,12 @@ body.cmd-dragging * {
   border-bottom-color: var(--mc-accent);
 }
 
+.settings-tab:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 2px;
+  border-radius: 4px 4px 0 0;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;

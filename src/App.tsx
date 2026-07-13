@@ -77,12 +77,16 @@ import {
   WORKSPACE_NAME,
 } from "./constants";
 import { loadShell, saveShell } from "./shell";
-import { playNotificationSound } from "./sound";
+import {
+  playNotificationSound,
+  selectUnseenNotificationSoundIds,
+} from "./sound";
 import {
   loadTerminalFontSize,
   saveTerminalFontSize,
 } from "./terminal/preferences";
 import { useAppUpdater } from "./updater/useAppUpdater";
+import { loadReadNotificationIds } from "./updater/readNotifications";
 
 function unavailable(error: unknown): FolderRuntimeStatus {
   return {
@@ -507,32 +511,31 @@ export default function App() {
 
   const updater = useAppUpdater({ locale, beforeInstall: prepareForUpdate });
 
-  // Chime when a new attention-worthy notification appears. The set of ids seen
-  // so far is seeded silently on first run so restored notifications stay quiet.
-  const chimedNotificationIds = useRef<Set<string> | null>(null);
+  // Read notifications stay quiet after restart, while an unread update can
+  // still announce itself the next time the app discovers it.
+  const [handledSoundNotificationIds] = useState(
+    () => new Set(loadReadNotificationIds()),
+  );
   useEffect(() => {
-    const attentionIds = new Set(
-      updater.center.items
-        .filter(
-          (item) =>
-            item.kind === "announcement" ||
-            item.phase === "ready" ||
-            item.phase === "manual",
-        )
-        .map((item) => item.id),
+    // The notification center can mark items read without changing updater
+    // state, so refresh persistence whenever its item list changes.
+    for (const id of loadReadNotificationIds()) {
+      handledSoundNotificationIds.add(id);
+    }
+    const unseenIds = selectUnseenNotificationSoundIds(
+      updater.center.items,
+      handledSoundNotificationIds,
     );
-    const seen = chimedNotificationIds.current;
-    chimedNotificationIds.current = attentionIds;
-    if (seen === null) {
+    if (unseenIds.length === 0) {
       return;
     }
-    for (const id of attentionIds) {
-      if (!seen.has(id)) {
-        playNotificationSound();
-        break;
-      }
+    // Mark the whole batch before playback. Even a muted or rejected sound must
+    // not be retried on a later render during the same app run.
+    for (const id of unseenIds) {
+      handledSoundNotificationIds.add(id);
     }
-  }, [updater.center.items]);
+    playNotificationSound();
+  }, [handledSoundNotificationIds, updater.center.items]);
 
   const schedulePersist = useCallback(() => {
     if (persistTimer.current !== undefined) {

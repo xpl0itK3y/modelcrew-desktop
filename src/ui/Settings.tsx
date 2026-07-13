@@ -1,4 +1,10 @@
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ACCENT_COLORS,
@@ -90,6 +96,9 @@ const SETTINGS_TABS: { id: SettingsTab; label: MessageKey }[] = [
   { id: "notifications", label: "settings.tabNotifications" },
 ];
 
+const settingsTabId = (tab: SettingsTab) => `settings-tab-${tab}`;
+const settingsPanelId = (tab: SettingsTab) => `settings-panel-${tab}`;
+
 type SettingsProps = {
   themeId: ThemeId;
   accent: string;
@@ -135,9 +144,9 @@ export function Settings(props: SettingsProps) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      event.stopPropagation();
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         props.onClose();
       }
     };
@@ -152,6 +161,36 @@ export function Settings(props: SettingsProps) {
     previewNotificationSound(id);
   };
 
+  const onTabKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentTab: SettingsTab,
+  ) => {
+    const currentIndex = SETTINGS_TABS.findIndex(
+      (entry) => entry.id === currentTab,
+    );
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex =
+        (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = SETTINGS_TABS.length - 1;
+    }
+
+    if (nextIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextTab = SETTINGS_TABS[nextIndex].id;
+    setTab(nextTab);
+    document.getElementById(settingsTabId(nextTab))?.focus();
+  };
+
   return (
     <div className="dialog-backdrop" onClick={props.onClose}>
       <div
@@ -160,6 +199,7 @@ export function Settings(props: SettingsProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
       >
         <div className="settings-header">
           <span id={titleId} className="settings-title">
@@ -179,6 +219,7 @@ export function Settings(props: SettingsProps) {
         <div
           className="settings-tabs"
           role="tablist"
+          aria-orientation="horizontal"
           aria-label={t("settings.title")}
         >
           {SETTINGS_TABS.map((entry) => (
@@ -186,9 +227,13 @@ export function Settings(props: SettingsProps) {
               key={entry.id}
               type="button"
               role="tab"
+              id={settingsTabId(entry.id)}
+              aria-controls={settingsPanelId(entry.id)}
               aria-selected={tab === entry.id}
+              tabIndex={tab === entry.id ? 0 : -1}
               className={`settings-tab ${tab === entry.id ? "is-selected" : ""}`}
               onClick={() => setTab(entry.id)}
+              onKeyDown={(event) => onTabKeyDown(event, entry.id)}
             >
               {t(entry.label)}
             </button>
@@ -196,8 +241,13 @@ export function Settings(props: SettingsProps) {
         </div>
 
         <div className="settings-body">
-          {tab === "appearance" && (
-            <>
+          <div
+            id={settingsPanelId("appearance")}
+            role="tabpanel"
+            aria-labelledby={settingsTabId("appearance")}
+            hidden={tab !== "appearance"}
+            tabIndex={0}
+          >
               <div className="settings-section">
                 <div className="settings-label">{t("settings.language")}</div>
                 <div
@@ -332,11 +382,15 @@ export function Settings(props: SettingsProps) {
                   />
                 </label>
               </div>
-            </>
-          )}
+          </div>
 
-          {tab === "terminal" && (
-            <>
+          <div
+            id={settingsPanelId("terminal")}
+            role="tabpanel"
+            aria-labelledby={settingsTabId("terminal")}
+            hidden={tab !== "terminal"}
+            tabIndex={0}
+          >
               {isTauri && shells.length > 0 && (
                 <div className="settings-section">
                   <div className="settings-label">{t("settings.shell")}</div>
@@ -421,10 +475,15 @@ export function Settings(props: SettingsProps) {
                   </output>
                 </div>
               </div>
-            </>
-          )}
+          </div>
 
-          {tab === "notifications" && (
+          <div
+            id={settingsPanelId("notifications")}
+            role="tabpanel"
+            aria-labelledby={settingsTabId("notifications")}
+            hidden={tab !== "notifications"}
+            tabIndex={0}
+          >
             <div className="settings-section">
               <div className="settings-label">
                 {t("settings.notificationSound")}
@@ -464,7 +523,7 @@ export function Settings(props: SettingsProps) {
                 {t("settings.notificationSoundNote")}
               </p>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

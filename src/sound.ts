@@ -2,6 +2,8 @@
 // from the app root, so the files resolve the same way in dev and in a Tauri
 // build. Selection is persisted per-machine in localStorage, mirroring shell.ts.
 
+import type { NotificationItem } from "./updater/types";
+
 export type NotificationSoundId =
   | "off"
   | "chime"
@@ -52,6 +54,26 @@ export function saveNotificationSound(id: NotificationSoundId): void {
 
 function fileFor(id: NotificationSoundId): string | null {
   return NOTIFICATION_SOUNDS.find((sound) => sound.id === id)?.file ?? null;
+}
+
+function needsSound(item: NotificationItem): boolean {
+  return (
+    item.kind === "announcement" ||
+    item.phase === "ready" ||
+    item.phase === "manual"
+  );
+}
+
+// Returns every attention-worthy notification that has not already been
+// handled. Keeping selection pure makes read-state and repeated-check behavior
+// deterministic without coupling it to audio playback.
+export function selectUnseenNotificationSoundIds(
+  items: readonly NotificationItem[],
+  handledIds: ReadonlySet<string>,
+): string[] {
+  return items
+    .filter((item) => needsSound(item) && !handledIds.has(item.id))
+    .map((item) => item.id);
 }
 
 // A single reused element keeps rapid notifications from stacking playback.
