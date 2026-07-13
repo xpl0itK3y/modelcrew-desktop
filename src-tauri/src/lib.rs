@@ -44,6 +44,20 @@ impl AppLocale {
         }
     }
 
+    fn tray_show_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Показать ModelCrew",
+            Self::En => "Show ModelCrew",
+        }
+    }
+
+    fn tray_quit_title(self) -> &'static str {
+        match self {
+            Self::Ru => "Выход",
+            Self::En => "Quit",
+        }
+    }
+
     #[cfg(target_os = "macos")]
     fn edit_menu_title(self) -> &'static str {
         match self {
@@ -463,6 +477,56 @@ fn build_macos_menu<R: tauri::Runtime>(
         .build()
 }
 
+#[cfg(desktop)]
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+// Трей на всех десктопах: логотип приложения в системном лотке, меню
+// «Показать/Выход», клик ЛКМ разворачивает спрятанное окно.
+#[cfg(desktop)]
+fn setup_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let locale = AppLocale::Ru;
+    let show =
+        MenuItem::with_id(app, "tray_show", locale.tray_show_title(), true, None::<&str>)?;
+    let quit =
+        MenuItem::with_id(app, "tray_quit", locale.tray_quit_title(), true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut builder = TrayIconBuilder::with_id("main")
+        .tooltip("ModelCrew")
+        .menu(&menu)
+        // Меню — по правой кнопке (на macOS по клику), ЛКМ разворачивает окно.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_show" => show_main_window(app),
+            "tray_quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -474,6 +538,8 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             spawn_title_watcher(app.handle().clone());
+            #[cfg(desktop)]
+            setup_tray(app)?;
             Ok(())
         });
 
@@ -484,6 +550,15 @@ pub fn run() {
     let builder = builder.menu(|handle| build_macos_menu(handle, AppLocale::Ru));
 
     builder
+        .on_window_event(|window, event| {
+            // Закрытие окна не выходит из приложения — прячем в трей (фон).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .manage(PtyManager::default())
         .manage(WorkspaceRoots::default())
         .invoke_handler(tauri::generate_handler![
@@ -503,11 +578,15 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // Гарантированная уборка шеллов при любом пути выхода — иначе зомби.
-            if let RunEvent::Exit = event {
+            RunEvent::Exit => {
                 let _ = app.state::<PtyManager>().kill_all();
             }
+            // Клик по иконке в доке (macOS) при спрятанном окне — вернуть его.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_main_window(app),
+            _ => {}
         });
 }
 
