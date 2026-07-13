@@ -420,6 +420,32 @@ function normalizeWorkspaceList(
   return result;
 }
 
+// Инвариант «одна папка — один проект». Дубликаты по одному пути
+// (накапливались при откатах/восстановлении состояния) схлопываем в один —
+// оставляем недавно открытый. Иначе backend-регистрация корня конфликтует и
+// «Новый терминал» у проигравших дубликатов уводит на выбор папки.
+function dedupeWorkspacesByFolder(list: Workspace[]): Workspace[] {
+  const indexByPath = new Map<string, number>();
+  const result: Workspace[] = [];
+  for (const workspace of list) {
+    const key =
+      workspace.folder?.canonicalPath || workspace.folder?.selectedPath;
+    if (!key) {
+      // Непривязанные проекты уникальны сами по себе.
+      result.push(workspace);
+      continue;
+    }
+    const existing = indexByPath.get(key);
+    if (existing === undefined) {
+      indexByPath.set(key, result.length);
+      result.push(workspace);
+    } else if (workspace.lastOpenedAt > result[existing].lastOpenedAt) {
+      result[existing] = workspace;
+    }
+  }
+  return result;
+}
+
 export function loadWorkspacesState(): WorkspacesState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -449,6 +475,8 @@ export function loadWorkspacesState(): WorkspacesState | null {
     } else {
       return null;
     }
+
+    list = dedupeWorkspacesByFolder(list);
 
     if (list.length === 0) {
       return { list: [], activeId: null };
