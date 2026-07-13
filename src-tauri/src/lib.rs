@@ -494,10 +494,20 @@ fn setup_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     let locale = AppLocale::Ru;
-    let show =
-        MenuItem::with_id(app, "tray_show", locale.tray_show_title(), true, None::<&str>)?;
-    let quit =
-        MenuItem::with_id(app, "tray_quit", locale.tray_quit_title(), true, None::<&str>)?;
+    let show = MenuItem::with_id(
+        app,
+        "tray_show",
+        locale.tray_show_title(),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "tray_quit",
+        locale.tray_quit_title(),
+        true,
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
