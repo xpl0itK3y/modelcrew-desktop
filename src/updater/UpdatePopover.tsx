@@ -1,4 +1,11 @@
-import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useI18n } from "../i18n";
 import { BellIcon, CloseIcon } from "../ui/Icons";
 import type { AppUpdaterController, UpdateNotification } from "./types";
@@ -11,6 +18,21 @@ type UpdatePopoverProps = {
   onOpenRelease: () => void;
   onClose: () => void;
 };
+
+const POPOVER_HEIGHT_KEY = "modelcrew.notificationHeight";
+const MIN_POPOVER_HEIGHT = 220;
+// Bottom margin kept between the stretched popover and the window edge.
+const POPOVER_BOTTOM_GAP = 12;
+
+function loadPopoverHeight(): number | null {
+  try {
+    const raw = localStorage.getItem(POPOVER_HEIGHT_KEY);
+    const value = raw ? Number(raw) : NaN;
+    return Number.isFinite(value) && value >= MIN_POPOVER_HEIGHT ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 function formatBytes(bytes: number, locale: string): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -41,6 +63,9 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
     const [confirmingInstall, setConfirmingInstall] = useState<string | null>(
       null,
     );
+    const [height, setHeight] = useState<number | null>(() =>
+      loadPopoverHeight(),
+    );
     const dialogRef = useRef<HTMLDivElement | null>(null);
     const confirmationCancelRef = useRef<HTMLButtonElement | null>(null);
 
@@ -55,6 +80,39 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
       },
       [ref],
     );
+
+    // Grabbing the bottom handle drags the popover taller/shorter; the chosen
+    // height persists so the notification center reopens at the same size.
+    const startResize = useCallback((event: ReactPointerEvent) => {
+      const popover = dialogRef.current;
+      if (!popover || event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      const rect = popover.getBoundingClientRect();
+      const startY = event.clientY;
+      const startHeight = rect.height;
+      const maxHeight = window.innerHeight - rect.top - POPOVER_BOTTOM_GAP;
+      let current = startHeight;
+      const onMove = (moveEvent: PointerEvent) => {
+        current = Math.min(
+          maxHeight,
+          Math.max(MIN_POPOVER_HEIGHT, startHeight + moveEvent.clientY - startY),
+        );
+        setHeight(current);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        try {
+          localStorage.setItem(POPOVER_HEIGHT_KEY, String(Math.round(current)));
+        } catch {
+          // Non-fatal: the size just won't persist across restarts.
+        }
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    }, []);
 
     const confirmingItem = confirmingInstall
       ? props.center.items.find(
@@ -96,6 +154,9 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
         aria-modal="false"
         aria-labelledby="notification-center-title"
         tabIndex={-1}
+        style={
+          height === null ? undefined : { height, maxHeight: "none" }
+        }
       >
         <div className="update-popover-header">
           <div className="update-popover-title-row">
@@ -416,6 +477,15 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
             </div>
           )}
         </div>
+
+        <div
+          className="update-popover-resize"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("update.resize")}
+          title={t("update.resize")}
+          onPointerDown={startResize}
+        />
       </div>
     );
   },

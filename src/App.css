@@ -264,12 +264,6 @@ body {
   animation: update-popover-in 150ms cubic-bezier(0.2, 0, 0.13, 1);
 }
 
-.update-popover:focus-visible {
-  box-shadow:
-    0 0 0 1px var(--mc-accent-border),
-    0 18px 56px var(--mc-shadow);
-}
-
 .update-popover-header {
   display: flex;
   align-items: center;
@@ -332,6 +326,7 @@ body {
 }
 
 .update-popover-content {
+  flex: 1 1 auto;
   min-height: 0;
   padding: 0;
   overflow-x: hidden;
@@ -339,6 +334,30 @@ body {
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--mc-scrollbar) transparent;
+}
+
+/* Drag the bottom edge to make the notification center taller. */
+.update-popover-resize {
+  flex: none;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.update-popover-resize::after {
+  content: "";
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--mc-border);
+  transition: background 120ms ease;
+}
+
+.update-popover-resize:hover::after {
+  background: var(--mc-text-faint);
 }
 
 .update-notification-list {
