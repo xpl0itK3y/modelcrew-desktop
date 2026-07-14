@@ -1,6 +1,8 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -120,6 +122,11 @@ export function Settings(props: SettingsProps) {
   const [sound, setSound] = useState<NotificationSoundId>(() =>
     loadNotificationSound(),
   );
+  // The visible tab defines the body height; the rest are display:none. We track
+  // the active panel's height so the container can glide between sizes instead of
+  // snapping when the user switches tabs.
+  const bodyTrackRef = useRef<HTMLDivElement>(null);
+  const [bodyHeight, setBodyHeight] = useState<number>();
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
       (MAX_TERMINAL_FONT_SIZE - MIN_TERMINAL_FONT_SIZE)) *
@@ -140,6 +147,21 @@ export function Settings(props: SettingsProps) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Keep the animated body height in sync with whatever the active tab needs —
+  // tab switches, the async shell list arriving, locale reflow, window resizing.
+  // A ResizeObserver covers them all uniformly; the CSS transition does the glide.
+  useLayoutEffect(() => {
+    const track = bodyTrackRef.current;
+    if (!track || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const sync = () => setBodyHeight(track.offsetHeight);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(track);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -240,7 +262,11 @@ export function Settings(props: SettingsProps) {
           ))}
         </div>
 
-        <div className="settings-body">
+        <div
+          className="settings-body"
+          style={bodyHeight === undefined ? undefined : { height: bodyHeight }}
+        >
+          <div className="settings-body-track" ref={bodyTrackRef}>
           <div
             id={settingsPanelId("appearance")}
             role="tabpanel"
@@ -523,6 +549,7 @@ export function Settings(props: SettingsProps) {
                 {t("settings.notificationSoundNote")}
               </p>
             </div>
+          </div>
           </div>
         </div>
       </div>
