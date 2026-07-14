@@ -37,6 +37,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "depends": ["gstreamer1.0-plugins-good", "gstreamer1.0-pulseaudio"]
+      },
+      "rpm": {
+        "depends": ["gstreamer1-plugins-good"]
+      }
+    },
     "windows": {
       "wix": {
         "upgradeCode": "26ae1f78-ee99-53b4-9e85-f8cb6977311b"

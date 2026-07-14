@@ -59,6 +59,7 @@ const srcinfo = `pkgbase = modelcrew-bin
 \tdepends = desktop-file-utils
 \tdepends = gdk-pixbuf2
 \tdepends = glib2
+\tdepends = gst-plugins-good
 \tdepends = gtk3
 \tdepends = hicolor-icon-theme
 \tdepends = libsoup3
