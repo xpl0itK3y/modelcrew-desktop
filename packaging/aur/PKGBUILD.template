@@ -14,9 +14,11 @@ depends=(
   'gst-plugins-good'
   'gtk3'
   'hicolor-icon-theme'
+  'libayatana-appindicator'
   'libsoup3'
   'openssl'
   'pango'
+  'polkit'
   'webkit2gtk-4.1'
 )
 provides=('modelcrew')

@@ -62,9 +62,11 @@ const srcinfo = `pkgbase = modelcrew-bin
 \tdepends = gst-plugins-good
 \tdepends = gtk3
 \tdepends = hicolor-icon-theme
+\tdepends = libayatana-appindicator
 \tdepends = libsoup3
 \tdepends = openssl
 \tdepends = pango
+\tdepends = polkit
 \tdepends = webkit2gtk-4.1
 \tprovides = modelcrew
 \tconflicts = modelcrew
