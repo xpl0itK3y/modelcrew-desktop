@@ -75,11 +75,11 @@ describe("Titlebar notification center", () => {
     const bell = screen.getByRole("button", {
       name: "Обновление 0.0.2 готово",
     });
-    expect(document.querySelector(".notification-dot")).toBeInTheDocument();
+    expect(document.querySelector(".notification-badge")).toBeInTheDocument();
 
     fireEvent.click(bell);
     await waitFor(() =>
-      expect(document.querySelector(".notification-dot")).not.toBeInTheDocument(),
+      expect(document.querySelector(".notification-badge")).not.toBeInTheDocument(),
     );
     expect(
       JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY) ?? "[]"),
@@ -87,7 +87,7 @@ describe("Titlebar notification center", () => {
 
     first.unmount();
     render(titlebar(updater));
-    expect(document.querySelector(".notification-dot")).not.toBeInTheDocument();
+    expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
   });
 
   it("marks an update read when it appears while the center is open", async () => {
@@ -106,7 +106,7 @@ describe("Titlebar notification center", () => {
         JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY) ?? "[]"),
       ).toContain(readyUpdate.id),
     );
-    expect(document.querySelector(".notification-dot")).not.toBeInTheDocument();
+    expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
   });
 
   it("closes on Escape and returns focus to the bell", async () => {
@@ -127,7 +127,7 @@ describe("Titlebar notification center", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows download progress on the bell without an unread dot", () => {
+  it("shows download progress on the bell without an unread badge", () => {
     render(
       titlebar(
         controller({
@@ -144,7 +144,7 @@ describe("Titlebar notification center", () => {
       ),
     );
     expect(document.querySelector(".notification-download")).toBeInTheDocument();
-    expect(document.querySelector(".notification-dot")).not.toBeInTheDocument();
+    expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
   });
 
   it("announces native authorization without exposing backend details", () => {

@@ -53,9 +53,15 @@ export function Titlebar(props: TitlebarProps) {
       (item.phase === "ready" || item.phase === "manual"),
   );
   const latestAttentionItem = attentionItems[attentionItems.length - 1];
-  const hasUnreadUpdate = attentionItems.some(
-    (item) => !readNotificationIds.includes(item.id),
-  );
+  // Count unread attention-worthy notifications (announcements plus ready/manual
+  // updates) for the badge on the bell; opening the center marks them read.
+  const unreadCount = props.updater.center.items.filter(
+    (item) =>
+      !readNotificationIds.includes(item.id) &&
+      (item.kind === "announcement" ||
+        item.phase === "ready" ||
+        item.phase === "manual"),
+  ).length;
   const notificationLabel = latestAttentionItem
     ? t("titlebar.updateReady", { version: latestAttentionItem.version })
     : t("titlebar.notifications");
@@ -231,8 +237,10 @@ export function Titlebar(props: TitlebarProps) {
             onClick={toggleNotifications}
           >
             <BellIcon />
-            {hasUnreadUpdate && (
-              <span className="notification-dot" aria-hidden="true" />
+            {unreadCount > 0 && (
+              <span className="notification-badge" aria-hidden="true">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
             )}
             {downloadingItem && (
               <span

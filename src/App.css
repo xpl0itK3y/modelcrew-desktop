@@ -203,17 +203,27 @@ body {
   color: var(--mc-text-bright);
 }
 
-.notification-dot {
+.notification-badge {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 7px;
-  height: 7px;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--mc-bg);
-  border-radius: 50%;
+  border-radius: 999px;
   background: var(--mc-accent);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   box-shadow: 0 0 7px var(--mc-accent-glow);
+  pointer-events: none;
 }
 
 .notification-download {
