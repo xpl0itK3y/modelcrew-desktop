@@ -245,7 +245,7 @@ body {
 .update-popover {
   position: absolute;
   top: 34px;
-  right: -34px;
+  right: -4px;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
