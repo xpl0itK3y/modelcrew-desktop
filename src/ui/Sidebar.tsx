@@ -1,19 +1,15 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
-import {
-  ChevronRightIcon,
-  FolderIcon,
-  MoreIcon,
-  PlusIcon,
-  TerminalGlyphIcon,
-} from "./Icons";
+import { ChevronRightIcon, FolderIcon, MoreIcon, PlusIcon } from "./Icons";
 import { formatTerminalCount, useI18n } from "../i18n";
+import { SidebarMenu } from "./sidebar/SidebarMenu";
+import { SessionRow, type SessionNavItem } from "./sidebar/SessionRow";
+import {
+  sameTarget,
+  type EditingTarget,
+  type MenuTarget,
+} from "./sidebar/targets";
 
-export type SessionNavItem = {
-  id: string;
-  name: string;
-  count: number;
-  isActive: boolean;
-};
+export type { SessionNavItem } from "./sidebar/SessionRow";
 
 export type WorkspaceItem = {
   id: string;
@@ -40,26 +36,6 @@ type SidebarProps = {
   ) => void;
   onDeleteSession: (workspaceId: string, sessionId: string) => void;
 };
-
-type EditingTarget =
-  | { kind: "workspace"; workspaceId: string }
-  | { kind: "session"; workspaceId: string; sessionId: string };
-
-type MenuTarget = EditingTarget;
-
-function sameTarget(left: EditingTarget | null, right: EditingTarget): boolean {
-  if (
-    !left ||
-    left.kind !== right.kind ||
-    left.workspaceId !== right.workspaceId
-  ) {
-    return false;
-  }
-  if (left.kind === "workspace") {
-    return true;
-  }
-  return right.kind === "session" && left.sessionId === right.sessionId;
-}
 
 export function Sidebar(props: SidebarProps) {
   const { locale, t } = useI18n();
@@ -220,55 +196,9 @@ export function Sidebar(props: SidebarProps) {
     }
   };
 
-  const toggleMenu = (
-    target: MenuTarget,
-    trigger: HTMLButtonElement,
-  ) => {
+  const toggleMenu = (target: MenuTarget, trigger: HTMLButtonElement) => {
     menuTriggerRef.current = trigger;
     setOpenMenu((current) => (sameTarget(current, target) ? null : target));
-  };
-
-  const menuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeMenu(true);
-      return;
-    }
-    if (event.key === "Tab") {
-      closeMenu();
-      return;
-    }
-    if (
-      event.key !== "ArrowDown" &&
-      event.key !== "ArrowUp" &&
-      event.key !== "Home" &&
-      event.key !== "End"
-    ) {
-      return;
-    }
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>(
-        '[role="menuitem"]',
-      ),
-    );
-    if (items.length === 0) {
-      return;
-    }
-    const currentIndex = items.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    const nextIndex =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? items.length - 1
-          : event.key === "ArrowUp"
-            ? (currentIndex - 1 + items.length) % items.length
-            : (currentIndex + 1) % items.length;
-    event.preventDefault();
-    event.stopPropagation();
-    items[nextIndex]?.focus();
   };
 
   return (
@@ -396,31 +326,17 @@ export function Sidebar(props: SidebarProps) {
                 </div>
 
                 {sameTarget(openMenu, workspaceTarget) && (
-                  <div
-                    ref={menuRef}
-                    className="sidebar-menu"
-                    role="menu"
-                    onKeyDown={menuKeyDown}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => beginRename(workspaceTarget)}
-                    >
-                      {t("sidebar.renameWorkspace")}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="is-danger"
-                      onClick={() => {
-                        setOpenMenu(null);
-                        props.onDeleteWorkspace(workspace.id);
-                      }}
-                    >
-                      {t("sidebar.deleteWorkspace")}
-                    </button>
-                  </div>
+                  <SidebarMenu
+                    menuRef={menuRef}
+                    renameLabel={t("sidebar.renameWorkspace")}
+                    deleteLabel={t("sidebar.deleteWorkspace")}
+                    onRename={() => beginRename(workspaceTarget)}
+                    onDelete={() => {
+                      closeMenu(false);
+                      props.onDeleteWorkspace(workspace.id);
+                    }}
+                    onClose={closeMenu}
+                  />
                 )}
               </div>
 
@@ -430,144 +346,28 @@ export function Sidebar(props: SidebarProps) {
               >
                 <div className="session-list-clip">
                   <ul id={sessionsId} className="session-list">
-                    {workspace.sessions.map((session) => {
-                      const sessionTarget: EditingTarget = {
-                        kind: "session",
-                        workspaceId: workspace.id,
-                        sessionId: session.id,
-                      };
-                      return (
-                        <li key={session.id} className="session-node">
-                          <div
-                            ref={
-                              isActive && session.isActive
-                                ? activeSessionRef
-                                : undefined
-                            }
-                            className={`session-item ${session.isActive ? "is-active" : ""}`}
-                          >
-                            {sameTarget(editing, sessionTarget) ? (
-                              <div className="session-main is-editing">
-                                <TerminalGlyphIcon className="session-icon" />
-                                <input
-                                  ref={inputRef}
-                                  className="session-rename-input"
-                                  defaultValue={session.name}
-                                  aria-label={t("sidebar.renameSession")}
-                                  onBlur={() => commitRename(sessionTarget)}
-                                  onKeyDown={(event) =>
-                                    renameKeyDown(event, sessionTarget)
-                                  }
-                                />
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="session-main"
-                                tabIndex={isExpanded ? 0 : -1}
-                                title={session.name}
-                                aria-current={
-                                  session.isActive ? "page" : undefined
-                                }
-                                aria-label={`${session.name}, ${formatTerminalCount(session.count, locale)}`}
-                                onClick={() =>
-                                  props.onSelectSession(
-                                    workspace.id,
-                                    session.id,
-                                  )
-                                }
-                                onDoubleClick={() => beginRename(sessionTarget)}
-                              >
-                                <TerminalGlyphIcon className="session-icon" />
-                                <span className="session-name">
-                                  {session.name}
-                                </span>
-                              </button>
-                            )}
-
-                            <span className="session-badge" aria-hidden="true">
-                              {session.count}
-                            </span>
-                            <div className="session-row-actions">
-                              <button
-                                type="button"
-                                className="sidebar-row-action"
-                                tabIndex={isExpanded ? 0 : -1}
-                                title={t("sidebar.newTerminalIn", {
-                                  name: session.name,
-                                })}
-                                aria-label={t("sidebar.newTerminalIn", {
-                                  name: session.name,
-                                })}
-                                onClick={() =>
-                                  props.onCreateTerminal(
-                                    workspace.id,
-                                    session.id,
-                                  )
-                                }
-                              >
-                                <PlusIcon />
-                              </button>
-                              <button
-                                type="button"
-                                className="sidebar-row-action sidebar-more"
-                                tabIndex={isExpanded ? 0 : -1}
-                                title={t("sidebar.sessionActions", {
-                                  name: session.name,
-                                })}
-                                aria-label={t("sidebar.sessionActions", {
-                                  name: session.name,
-                                })}
-                                aria-haspopup="menu"
-                                aria-expanded={sameTarget(
-                                  openMenu,
-                                  sessionTarget,
-                                )}
-                                onClick={(event) =>
-                                  toggleMenu(
-                                    sessionTarget,
-                                    event.currentTarget,
-                                  )
-                                }
-                              >
-                                <MoreIcon />
-                              </button>
-                            </div>
-
-                            {sameTarget(openMenu, sessionTarget) && (
-                              <div
-                                ref={menuRef}
-                                className="sidebar-menu"
-                                role="menu"
-                                onKeyDown={menuKeyDown}
-                              >
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => beginRename(sessionTarget)}
-                                >
-                                  {t("sidebar.renameSession")}
-                                </button>
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  className="is-danger"
-                                  onClick={() => {
-                                    setOpenMenu(null);
-                                    props.onDeleteSession(
-                                      workspace.id,
-                                      session.id,
-                                    );
-                                  }}
-                                >
-                                  {t("sidebar.deleteSession")}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
+                    {workspace.sessions.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        workspaceId={workspace.id}
+                        session={session}
+                        isExpanded={isExpanded}
+                        isWorkspaceActive={isActive}
+                        editing={editing}
+                        openMenu={openMenu}
+                        inputRef={inputRef}
+                        menuRef={menuRef}
+                        activeSessionRef={activeSessionRef}
+                        onSelect={props.onSelectSession}
+                        onCreateTerminal={props.onCreateTerminal}
+                        onDelete={props.onDeleteSession}
+                        onBeginRename={beginRename}
+                        onCommitRename={commitRename}
+                        onRenameKeyDown={renameKeyDown}
+                        onToggleMenu={toggleMenu}
+                        onCloseMenu={closeMenu}
+                      />
+                    ))}
                   </ul>
                 </div>
               </div>
