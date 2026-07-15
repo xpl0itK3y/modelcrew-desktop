@@ -22,6 +22,9 @@ pub struct SpawnOptions {
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
+    // Папка изолированной истории команд панели (ZDOTDIR/HISTFILE);
+    // None — общесистемная история.
+    pub history_dir: Option<PathBuf>,
 }
 
 struct PtySession {
@@ -88,6 +91,21 @@ impl PtyManager {
             if key == "CLAUDECODE" || key == "CLAUDE_EFFORT" || key.starts_with("CLAUDE_CODE_") {
                 cmd.env_remove(&key);
             }
+        }
+        // Своя история команд у каждой панели. macOS /etc/zshrc жёстко ставит
+        // HISTFILE=$ZDOTDIR/.zsh_history — поэтому подменяем ZDOTDIR (внутри
+        // папки симлинки на реальные дотфайлы пользователя). bash уважает
+        // HISTFILE из окружения, fish — имя сессии в fish_history.
+        if let Some(history) = &opts.history_dir {
+            cmd.env("ZDOTDIR", history);
+            cmd.env("HISTFILE", history.join("shell_history"));
+            let fish_name: String = opts
+                .id
+                .chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            cmd.env("fish_history", format!("mc{fish_name}"));
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
@@ -461,6 +479,7 @@ mod tests {
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
+                    history_dir: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -501,6 +520,7 @@ mod tests {
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
+                    history_dir: None,
                 },
                 |_| {},
                 move |code| {
@@ -537,6 +557,7 @@ mod tests {
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
+                    history_dir: None,
                 },
                 move |bytes| {
                     let _ = stale_out_tx.send(bytes);
@@ -557,6 +578,7 @@ mod tests {
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
+                    history_dir: None,
                 },
                 move |bytes| {
                     let _ = fresh_out_tx.send(bytes);
@@ -607,6 +629,7 @@ mod tests {
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
+                    history_dir: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -647,6 +670,7 @@ mod tests {
                     cwd: test_cwd(),
                     cols: 120,
                     rows: 40,
+                    history_dir: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -722,6 +746,7 @@ mod tests {
                         cwd: test_cwd(),
                         cols: 80,
                         rows: 24,
+                    history_dir: None,
                     },
                     move |bytes| {
                         let _ = out_tx.send(bytes);
@@ -769,6 +794,7 @@ mod tests {
                 cwd: PathBuf::from("/nonexistent/workspace/folder"),
                 cols: 80,
                 rows: 24,
+                    history_dir: None,
             },
             |_| {},
             |_| {},
@@ -789,6 +815,7 @@ mod tests {
                 cwd: test_cwd(),
                 cols: 80,
                 rows: 24,
+                    history_dir: None,
             },
             |_| {},
             |_| {},

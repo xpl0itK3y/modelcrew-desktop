@@ -256,10 +256,24 @@ fn pty_create(
     cols: u16,
     rows: u16,
     shell: Option<String>,
+    isolated_history: Option<bool>,
     on_output: Channel<InvokeResponseBody>,
 ) -> CommandResult<PtyCreateResult> {
     ensure_main_window(&window)?;
     let cwd = roots.resolve(&workspace_id)?;
+    // Своя история команд у каждой панели (по умолчанию включено).
+    let history_dir = if isolated_history.unwrap_or(true) {
+        let home = app.path().home_dir().map_err(|error| {
+            CommandError::new(ErrorCode::TerminalSnapshotStorageFailed).with_debug(error)
+        })?;
+        Some(terminal_snapshots::prepare_panel_history(
+            &terminal_snapshots::history_base(&app)?,
+            &id,
+            &home,
+        )?)
+    } else {
+        None
+    };
     let exit_app = app.clone();
     let exit_id = id.clone();
     let shell = state.spawn(
@@ -270,6 +284,7 @@ fn pty_create(
             cwd,
             cols,
             rows,
+            history_dir,
         },
         move |bytes| {
             let _ = on_output.send(InvokeResponseBody::Raw(bytes));

@@ -13,6 +13,13 @@ const SNAPSHOT_DIR: &str = "terminal-snapshots";
 const SNAPSHOT_EXT: &str = "ans";
 const MAX_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
 
+// Своя история команд у каждой панели: папка панели служит ZDOTDIR для zsh
+// (macOS /etc/zshrc кладёт историю в $ZDOTDIR/.zsh_history) и содержит
+// HISTFILE для bash. Живёт и умирает вместе со снимком панели.
+const HISTORY_DIR: &str = "terminal-history";
+#[cfg(unix)]
+const ZSH_DOTFILES: [&str; 5] = [".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"];
+
 fn validate_snapshot_id(id: &str) -> CommandResult<()> {
     if id.is_empty()
         || id.len() > 128
@@ -107,6 +114,73 @@ pub fn prune_snapshots(dir: &Path, keep: &[String]) -> CommandResult<()> {
     Ok(())
 }
 
+/// Готовит ZDOTDIR-папку панели: симлинки на реальные zsh-дотфайлы
+/// пользователя, чтобы подменялось только расположение истории, а его
+/// конфигурация работала без изменений.
+pub fn prepare_panel_history(base: &Path, id: &str, home: &Path) -> CommandResult<PathBuf> {
+    validate_snapshot_id(id)?;
+    let dir = base.join(id);
+    fs::create_dir_all(&dir).map_err(storage_error)?;
+    #[cfg(unix)]
+    for name in ZSH_DOTFILES {
+        let target = home.join(name);
+        let link = dir.join(name);
+        if target.exists() && fs::symlink_metadata(&link).is_err() {
+            // Битый или занятый симлинк не должен ронять запуск терминала.
+            let _ = std::os::unix::fs::symlink(&target, &link);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = home;
+    Ok(dir)
+}
+
+pub fn delete_panel_history(base: &Path, id: &str) -> CommandResult<()> {
+    validate_snapshot_id(id)?;
+    match fs::remove_dir_all(base.join(id)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(storage_error(error)),
+    }
+}
+
+pub fn prune_panel_history(base: &Path, keep: &[String]) -> CommandResult<()> {
+    for id in keep {
+        validate_snapshot_id(id)?;
+    }
+    let entries = match fs::read_dir(base) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(storage_error(error)),
+    };
+    for entry in entries {
+        let entry = entry.map_err(storage_error)?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        // Трогаем только папки, похожие на наши id панелей.
+        if validate_snapshot_id(name).is_err() {
+            continue;
+        }
+        if !keep.iter().any(|id| id == name) {
+            match fs::remove_dir_all(entry.path()) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage_error(error)),
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn history_base(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
+    let base = app.path().app_data_dir().map_err(|error| {
+        CommandError::new(ErrorCode::TerminalSnapshotStorageFailed).with_debug(error)
+    })?;
+    Ok(base.join(HISTORY_DIR))
+}
+
 fn snapshots_dir(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
     let base = app.path().app_data_dir().map_err(|error| {
         CommandError::new(ErrorCode::TerminalSnapshotStorageFailed).with_debug(error)
@@ -142,7 +216,9 @@ pub fn terminal_snapshot_delete(
     id: String,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
-    delete_snapshot(&snapshots_dir(&app)?, &id)
+    delete_snapshot(&snapshots_dir(&app)?, &id)?;
+    // История команд панели разделяет её жизненный цикл.
+    delete_panel_history(&history_base(&app)?, &id)
 }
 
 #[tauri::command]
@@ -152,7 +228,8 @@ pub fn terminal_snapshots_prune(
     keep: Vec<String>,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
-    prune_snapshots(&snapshots_dir(&app)?, &keep)
+    prune_snapshots(&snapshots_dir(&app)?, &keep)?;
+    prune_panel_history(&history_base(&app)?, &keep)
 }
 
 #[cfg(test)]
@@ -233,5 +310,51 @@ mod tests {
     fn prune_of_missing_dir_is_ok() {
         let dir = temp_dir("no-dir");
         prune_snapshots(&dir, &[]).unwrap();
+        prune_panel_history(&dir, &[]).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panel_history_links_user_zsh_dotfiles() {
+        let base = temp_dir("hist-base");
+        let home = temp_dir("hist-home");
+        fs::create_dir_all(&home).unwrap();
+        fs::write(home.join(".zshrc"), "export FROM_USER_RC=1\n").unwrap();
+
+        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        assert_eq!(dir, base.join("panel-1"));
+        let link = dir.join(".zshrc");
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(&link).unwrap(), "export FROM_USER_RC=1\n");
+        // Отсутствующие дотфайлы не создают битых ссылок.
+        assert!(fs::symlink_metadata(dir.join(".zlogin")).is_err());
+        // Повторная подготовка идемпотентна.
+        prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        delete_panel_history(&base, "panel-1").unwrap();
+        assert!(!dir.exists());
+        // Пользовательский файл не тронут: удалилась только ссылка.
+        assert!(home.join(".zshrc").exists());
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn panel_history_prune_keeps_only_listed() {
+        let base = temp_dir("hist-prune");
+        let home = temp_dir("hist-prune-home");
+        fs::create_dir_all(&home).unwrap();
+        prepare_panel_history(&base, "keep-me", &home).unwrap();
+        prepare_panel_history(&base, "drop-me", &home).unwrap();
+        // Чужие папки (не похожие на id) не трогаем.
+        fs::create_dir_all(base.join("weird name")).unwrap();
+
+        prune_panel_history(&base, &["keep-me".into()]).unwrap();
+
+        assert!(base.join("keep-me").exists());
+        assert!(!base.join("drop-me").exists());
+        assert!(base.join("weird name").exists());
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
     }
 }
