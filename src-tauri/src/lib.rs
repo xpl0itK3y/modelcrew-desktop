@@ -1,5 +1,7 @@
 mod command_error;
 mod terminal_snapshots;
+#[cfg(windows)]
+mod win_proc;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod pty;
@@ -207,7 +209,35 @@ fn strip_script_ext(name: &str) -> &str {
     name
 }
 
-#[cfg(not(unix))]
+/// Имена процессов по PID из Toolhelp-снапшота (Windows). Агентские CLI на
+/// Windows — нативные exe (claude.exe, codex.exe…), поэтому достаточно имени
+/// файла без расширения; для node-шимов сработает откат friendly_name.
+#[cfg(windows)]
+fn process_names(pids: &[i32]) -> std::collections::HashMap<i32, String> {
+    let mut names = std::collections::HashMap::new();
+    if pids.is_empty() {
+        return names;
+    }
+    for entry in win_proc::snapshot() {
+        let pid = entry.pid as i32;
+        if !pids.contains(&pid) {
+            continue;
+        }
+        let stem = entry
+            .name
+            .strip_suffix(".exe")
+            .or_else(|| entry.name.strip_suffix(".EXE"))
+            .unwrap_or(&entry.name)
+            .to_ascii_lowercase();
+        let name = friendly_name(&stem, &[]);
+        if !name.is_empty() {
+            names.insert(pid, name);
+        }
+    }
+    names
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_names(_pids: &[i32]) -> std::collections::HashMap<i32, String> {
     std::collections::HashMap::new()
 }

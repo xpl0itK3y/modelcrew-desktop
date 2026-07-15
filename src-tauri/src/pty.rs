@@ -31,6 +31,10 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    // PID корневого процесса (шелла): Windows ищет foreground обходом дерева
+    // потомков; unix берёт лидера группы напрямую у PTY.
+    #[allow(dead_code)]
+    child_pid: Option<u32>,
     // child.wait() подтверждает через этот канал, что процесс уже завершился.
     // Одного успешного killer.kill() недостаточно перед установкой обновления.
     exit_rx: mpsc::Receiver<Result<(), String>>,
@@ -123,6 +127,7 @@ impl PtyManager {
                 .with_context("shell", &shell)
                 .with_debug(error)
         })?;
+        let child_pid = child.process_id();
         // Слейв закрываем сразу: EOF ридера тогда означает завершение шелла.
         drop(pty.slave);
 
@@ -141,6 +146,7 @@ impl PtyManager {
                 master: pty.master,
                 writer,
                 killer,
+                child_pid,
                 exit_rx: process_exit_rx,
                 epoch,
             },
@@ -287,11 +293,30 @@ impl PtyManager {
             .collect()
     }
 
-    /// Windows пока не запрашивает имена foreground-процессов: реализация
-    /// process_names на этой платформе всё равно возвращает пустой набор.
-    #[cfg(not(unix))]
+    /// Windows: у ConPTY нет группы переднего плана, поэтому foreground —
+    /// самый свежий «листовой» потомок корневого процесса шелла.
+    #[cfg(windows)]
     pub fn foreground_processes(&self) -> Vec<(String, i32)> {
-        Vec::new()
+        let roots: Vec<(String, u32)> = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions
+                .iter()
+                .filter_map(|(id, session)| session.child_pid.map(|pid| (id.clone(), pid)))
+                .collect()
+        };
+        if roots.is_empty() {
+            return Vec::new();
+        }
+        let procs = crate::win_proc::snapshot();
+        let edges: Vec<(u32, u32)> = procs.iter().map(|p| (p.pid, p.parent)).collect();
+        roots
+            .into_iter()
+            .map(|(id, root)| {
+                let leaves = descendant_leaves(root, &edges);
+                let pid = pick_foreground(&leaves, crate::win_proc::creation_time);
+                (id, pid as i32)
+            })
+            .collect()
     }
 
     /// Завершает все PTY и возвращается только после подтверждения child.wait().
@@ -361,6 +386,46 @@ impl PtyManager {
                 .with_debug(failures.join("; ")))
         }
     }
+}
+
+/// Листья поддерева процессов: потомки root (включая его самого, если
+/// потомков нет), у которых нет собственных детей. Чистая функция — логика
+/// Windows-детекции тестируется на любой платформе.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn descendant_leaves(root: u32, edges: &[(u32, u32)]) -> Vec<u32> {
+    use std::collections::{HashMap, HashSet};
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, parent) in edges {
+        children.entry(*parent).or_default().push(*pid);
+    }
+    let mut leaves = Vec::new();
+    let mut stack = vec![root];
+    let mut visited = HashSet::new();
+    while let Some(pid) = stack.pop() {
+        // PID в снапшоте могут переиспользоваться — защищаемся от циклов.
+        if !visited.insert(pid) {
+            continue;
+        }
+        match children.get(&pid) {
+            Some(kids) if !kids.is_empty() => stack.extend(kids.iter().copied()),
+            _ => leaves.push(pid),
+        }
+    }
+    if leaves.is_empty() {
+        leaves.push(root);
+    }
+    leaves
+}
+
+/// Из листьев выбирается самый свежий по времени создания: это то, что
+/// пользователь запустил последним (агент поверх шелла, vim поверх агента…).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn pick_foreground(leaves: &[u32], creation_time: impl Fn(u32) -> Option<u64>) -> u32 {
+    leaves
+        .iter()
+        .copied()
+        .max_by_key(|pid| creation_time(*pid).unwrap_or(0))
+        .unwrap_or(0)
 }
 
 fn terminal_error(code: ErrorCode, terminal_id: &str) -> CommandError {
@@ -615,6 +680,33 @@ mod tests {
 
     /// Стресс приёмки: 50 МБ сплошного вывода не должны идти по байту —
     /// батчер обязан отдавать крупные куски, и весь объём должен дойти.
+    #[test]
+    fn descendant_leaves_walks_the_process_tree() {
+        // shell(1) → agent(2) → tool(3); отдельная ветка shell(1) → job(4).
+        let edges = [(2, 1), (3, 2), (4, 1), (99, 98)];
+        let mut leaves = descendant_leaves(1, &edges);
+        leaves.sort_unstable();
+        assert_eq!(leaves, vec![3, 4]);
+        // Без потомков корень сам себе foreground.
+        assert_eq!(descendant_leaves(7, &edges), vec![7]);
+        // Цикл в снапшоте (переиспользованные PID) не зацикливает обход:
+        // настоящих листьев нет — безопасно откатываемся к корню.
+        let cyclic = [(2, 1), (1, 2)];
+        assert_eq!(descendant_leaves(1, &cyclic), vec![1]);
+    }
+
+    #[test]
+    fn pick_foreground_prefers_the_newest_leaf() {
+        let times = |pid: u32| match pid {
+            3 => Some(100),
+            4 => Some(500),
+            _ => None,
+        };
+        assert_eq!(pick_foreground(&[3, 4], times), 4);
+        // Без времён берётся детерминированный кандидат (последний из равных).
+        assert_eq!(pick_foreground(&[9, 8], |_| None), 8);
+    }
+
     #[test]
     fn agent_launcher_markers_do_not_leak_into_terminals() {
         // Приложение может быть запущено из-под CLI-агента; его маркеры не
