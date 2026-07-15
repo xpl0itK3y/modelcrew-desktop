@@ -8,14 +8,11 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Locale } from "../i18n";
-import { releaseDetails } from "./releaseNotes";
 import type {
   AppUpdaterController,
   InstallUpdateTarget,
-  NotificationItem,
   NotificationCenterState,
   UpdateInstallKind,
-  UpdateNotification,
   UpdateNotificationPhase,
 } from "./types";
 
@@ -33,7 +30,25 @@ const RETRY_DELAYS_MS = [
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
-type ReleaseDetailsSource = Pick<Update, "version" | "body" | "rawJson">;
+import {
+  installKindFrom,
+  isAuthorizationCancelled,
+  isInstallTarget,
+  isLinuxPackageDownloadProgress,
+  isPlainObject,
+  isRecoverableLinuxPackageCacheError,
+} from "./installTarget";
+import {
+  blocksBackgroundCheck,
+  compareSemver,
+  findUpdateNotification,
+  isDurableNotification,
+  notificationFrom,
+  releaseSource,
+  withUpdateNotification,
+  type ReleaseDetailsSource,
+} from "./notifications";
+
 type CenterUpdate =
   | NotificationCenterState
   | ((current: NotificationCenterState) => NotificationCenterState);
@@ -42,220 +57,6 @@ type UseAppUpdaterOptions = {
   locale: Locale;
   beforeInstall: () => void | Promise<void>;
 };
-
-type LinuxPackageDownloadProgress =
-  | {
-      phase: "downloading";
-      downloaded: number;
-      total?: number;
-    }
-  | { phase: "verifying" };
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isSafeTarget(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= 128 &&
-    /^[0-9A-Za-z_-]+$/.test(value)
-  );
-}
-
-function isInstallTarget(value: unknown): value is InstallUpdateTarget {
-  if (!isPlainObject(value) || typeof value.mode !== "string") {
-    return false;
-  }
-  if (value.mode === "development" || value.mode === "manual") {
-    return true;
-  }
-  if (value.mode === "selfUpdate") {
-    return value.target === undefined || isSafeTarget(value.target);
-  }
-  return (
-    value.mode === "nativePackage" &&
-    (value.packageKind === "deb" ||
-      value.packageKind === "rpm" ||
-      value.packageKind === "pacman") &&
-    isSafeTarget(value.target)
-  );
-}
-
-function installKindFrom(target: InstallUpdateTarget): UpdateInstallKind | null {
-  switch (target.mode) {
-    case "selfUpdate":
-      return "selfUpdate";
-    case "nativePackage":
-      return "nativePackage";
-    case "manual":
-      return "manual";
-    case "development":
-      return null;
-  }
-}
-
-function isLinuxPackageDownloadProgress(
-  value: unknown,
-): value is LinuxPackageDownloadProgress {
-  if (!isPlainObject(value) || typeof value.phase !== "string") {
-    return false;
-  }
-  if (value.phase === "verifying") {
-    return true;
-  }
-  return (
-    value.phase === "downloading" &&
-    typeof value.downloaded === "number" &&
-    Number.isFinite(value.downloaded) &&
-    value.downloaded >= 0 &&
-    (value.total === undefined ||
-      (typeof value.total === "number" &&
-        Number.isFinite(value.total) &&
-        value.total > 0))
-  );
-}
-
-function isAuthorizationCancelled(error: unknown): boolean {
-  if (!isPlainObject(error) || typeof error.code !== "string") {
-    return false;
-  }
-  return (
-    error.code === "authorization_cancelled" ||
-    error.code.endsWith("_authorization_cancelled") ||
-    error.code.endsWith("_auth_cancelled")
-  );
-}
-
-function isRecoverableLinuxPackageCacheError(error: unknown): boolean {
-  if (!isPlainObject(error) || typeof error.code !== "string") {
-    return false;
-  }
-  return (
-    error.code === "updater_cache_missing" ||
-    error.code === "updater_cache_invalid" ||
-    error.code === "updater_install_target_changed"
-  );
-}
-
-function releaseSource(update: Update): ReleaseDetailsSource {
-  return {
-    version: update.version,
-    body: update.body,
-    rawJson: update.rawJson,
-  };
-}
-
-function notificationFrom(
-  source: ReleaseDetailsSource,
-  locale: Locale,
-  installKind: UpdateInstallKind,
-  phase: UpdateNotificationPhase,
-  progress: Pick<UpdateNotification, "downloaded" | "total"> = {},
-): UpdateNotification {
-  const details = releaseDetails(source, locale);
-  return {
-    id: `update:${details.version}`,
-    kind: "update",
-    installKind,
-    phase,
-    ...details,
-    ...progress,
-  };
-}
-
-function findUpdateNotification(
-  items: readonly NotificationItem[],
-): UpdateNotification | undefined {
-  return items.find(
-    (item): item is UpdateNotification => item.kind === "update",
-  );
-}
-
-function withUpdateNotification(
-  items: readonly NotificationItem[],
-  notification: UpdateNotification | null,
-): NotificationItem[] {
-  const otherItems = items.filter((item) => item.kind !== "update");
-  return notification ? [...otherItems, notification] : otherItems;
-}
-
-function blocksBackgroundCheck(
-  notification: UpdateNotification | undefined,
-  restartPendingId: string | null,
-) {
-  return (
-    notification?.phase === "downloading" ||
-    notification?.phase === "verifying" ||
-    notification?.phase === "authorizing" ||
-    notification?.phase === "installing" ||
-    notification?.phase === "restarting" ||
-    (notification?.phase === "restartFailed" &&
-      notification.id === restartPendingId)
-  );
-}
-
-function isDurableNotification(notification: UpdateNotification | undefined) {
-  return (
-    notification?.phase === "ready" ||
-    notification?.phase === "manual" ||
-    notification?.phase === "authorizationCancelled" ||
-    notification?.phase === "installFailed" ||
-    notification?.phase === "restartFailed"
-  );
-}
-
-function compareSemver(left: string, right: string): number {
-  const parse = (value: string) => {
-    const match = value.match(
-      /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/,
-    );
-    if (!match) {
-      return null;
-    }
-    return {
-      core: [Number(match[1]), Number(match[2]), Number(match[3])] as const,
-      prerelease: match[4]?.split(".") ?? [],
-    };
-  };
-  const leftVersion = parse(left);
-  const rightVersion = parse(right);
-  if (!leftVersion || !rightVersion) {
-    return left === right ? 0 : -1;
-  }
-  for (let index = 0; index < leftVersion.core.length; index += 1) {
-    if (leftVersion.core[index] !== rightVersion.core[index]) {
-      return leftVersion.core[index] > rightVersion.core[index] ? 1 : -1;
-    }
-  }
-  if (leftVersion.prerelease.length === 0) {
-    return rightVersion.prerelease.length === 0 ? 0 : 1;
-  }
-  if (rightVersion.prerelease.length === 0) {
-    return -1;
-  }
-  const length = Math.max(
-    leftVersion.prerelease.length,
-    rightVersion.prerelease.length,
-  );
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = leftVersion.prerelease[index];
-    const rightPart = rightVersion.prerelease[index];
-    if (leftPart === undefined) return -1;
-    if (rightPart === undefined) return 1;
-    if (leftPart === rightPart) continue;
-    const leftNumber = /^\d+$/.test(leftPart) ? Number(leftPart) : null;
-    const rightNumber = /^\d+$/.test(rightPart) ? Number(rightPart) : null;
-    if (leftNumber !== null && rightNumber !== null) {
-      return leftNumber > rightNumber ? 1 : -1;
-    }
-    if (leftNumber !== null) return -1;
-    if (rightNumber !== null) return 1;
-    return leftPart > rightPart ? 1 : -1;
-  }
-  return 0;
-}
 
 export function useAppUpdater({
   locale,
