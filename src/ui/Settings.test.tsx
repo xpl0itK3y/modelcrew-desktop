@@ -7,6 +7,18 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => []),
 }));
 
+const { soundSuppressed } = vi.hoisted(() => ({
+  soundSuppressed: vi.fn(() => false),
+}));
+
+vi.mock("../sound", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../sound")>();
+  return {
+    ...actual,
+    isNotificationSoundSuppressed: () => soundSuppressed(),
+  };
+});
+
 function renderSettings() {
   return render(
     <Settings
@@ -119,5 +131,16 @@ describe("Settings tabs", () => {
     fireEvent.keyDown(notificationsTab, { key: "Home" });
     expect(appearanceTab).toHaveFocus();
     expect(appearanceTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("warns on the notifications tab when audio is suppressed after a hang", () => {
+    soundSuppressed.mockReturnValue(true);
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "звук временно отключён",
+    );
   });
 });

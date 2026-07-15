@@ -7,11 +7,24 @@ let playResult: Promise<void>;
 class FakeAudio {
   src = "";
   currentTime = 12;
+  preload = "";
   play = vi.fn(() => playResult);
+  pause = vi.fn();
 
   constructor() {
     audioInstances.push(this);
   }
+}
+
+const HEALTH_KEY = "modelcrew.audioHealth";
+
+function storedHealth(): { status: string; version: string } {
+  return JSON.parse(localStorage.getItem(HEALTH_KEY) ?? "null");
+}
+
+// Waits out the next-tick watchdog that confirms a playback attempt survived.
+function settleWatchdog(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 1));
 }
 
 function update(
@@ -42,6 +55,7 @@ const announcement: NotificationItem = {
 describe("notification sounds", () => {
   beforeEach(() => {
     vi.resetModules();
+    localStorage.clear();
     audioInstances = [];
     playResult = Promise.resolve();
     vi.stubGlobal("Audio", FakeAudio);
@@ -90,6 +104,99 @@ describe("notification sounds", () => {
     await Promise.resolve();
 
     expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
+  });
+
+  it("brackets an attempt with a pending marker and confirms it survived", async () => {
+    const { previewNotificationSound } = await import("./sound");
+
+    previewNotificationSound("pop");
+    expect(storedHealth().status).toBe("pending");
+
+    await settleWatchdog();
+    expect(storedHealth().status).toBe("ok");
+  });
+
+  it("keeps audio off after a previous attempt froze the process", async () => {
+    const { isNotificationSoundSuppressed, previewNotificationSound } =
+      await import("./sound");
+
+    // A healthy attempt records the running app version for us.
+    previewNotificationSound("chime");
+    await settleWatchdog();
+    const { version } = storedHealth();
+    audioInstances = [];
+
+    // Simulate the marker left behind by a run that froze mid-attempt.
+    localStorage.setItem(
+      HEALTH_KEY,
+      JSON.stringify({ status: "pending", version, session: "dead-session" }),
+    );
+
+    expect(isNotificationSoundSuppressed()).toBe(true);
+    expect(storedHealth().status).toBe("broken");
+    previewNotificationSound("chime");
+    expect(audioInstances).toHaveLength(0);
+  });
+
+  it("re-arms suppressed audio when the user selects off", async () => {
+    const {
+      isNotificationSoundSuppressed,
+      previewNotificationSound,
+      saveNotificationSound,
+    } = await import("./sound");
+
+    previewNotificationSound("chime");
+    await settleWatchdog();
+    const { version } = storedHealth();
+    localStorage.setItem(
+      HEALTH_KEY,
+      JSON.stringify({ status: "pending", version, session: "dead-session" }),
+    );
+    expect(isNotificationSoundSuppressed()).toBe(true);
+
+    saveNotificationSound("off");
+    expect(isNotificationSoundSuppressed()).toBe(false);
+    // The module reuses one cached element, so count plays rather than
+    // constructed instances.
+    const element = audioInstances[0];
+    element.play.mockClear();
+    previewNotificationSound("chime");
+    expect(element.play).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms suppressed audio after an app update", async () => {
+    const { isNotificationSoundSuppressed, previewNotificationSound } =
+      await import("./sound");
+
+    localStorage.setItem(
+      HEALTH_KEY,
+      JSON.stringify({ status: "broken", version: "0.0.0-older" }),
+    );
+
+    expect(isNotificationSoundSuppressed()).toBe(false);
+    previewNotificationSound("click");
+    expect(audioInstances).toHaveLength(1);
+  });
+
+  it("treats a long stall during playback as a hang", async () => {
+    const { isNotificationSoundSuppressed, previewNotificationSound } =
+      await import("./sound");
+    // A settable clock is sturdier than counting calls: jsdom internals also
+    // consult performance.now.
+    let mockedNow = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => mockedNow);
+
+    previewNotificationSound("chime");
+    expect(audioInstances).toHaveLength(1);
+    mockedNow = 10_000; // the watchdog wakes only after a 10s stall
+    await settleWatchdog();
+
+    expect(storedHealth().status).toBe("broken");
+    expect(isNotificationSoundSuppressed()).toBe(true);
+    const element = audioInstances[0];
+    element.play.mockClear();
+    previewNotificationSound("chime");
+    expect(element.play).not.toHaveBeenCalled();
   });
 
   it("selects unread ready, manual, and announcement notifications only", async () => {

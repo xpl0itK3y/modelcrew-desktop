@@ -2006,6 +2006,10 @@ body.cmd-dragging * {
   font-size: 11.5px;
 }
 
+.settings-note.is-warning {
+  color: var(--mc-danger);
+}
+
 .sound-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

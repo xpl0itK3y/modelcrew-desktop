@@ -134,6 +134,8 @@ const ru = {
   "settings.notificationSound": "Звук уведомления",
   "settings.notificationSoundNote":
     "Проигрывается при новом уведомлении. Нажмите, чтобы прослушать.",
+  "settings.notificationSoundSuppressed":
+    "Похоже, аудиосистема зависла при прошлой попытке, поэтому звук временно отключён. Выберите «Без звука», а затем нужный звук, чтобы попробовать снова.",
   "settings.previewSound": "Прослушать «{name}»",
   "settings.soundOff": "Без звука",
   "settings.soundChime": "Перезвон",
@@ -387,6 +389,8 @@ const en: Record<MessageKey, string> = {
   "settings.notificationSound": "Notification sound",
   "settings.notificationSoundNote":
     "Plays when a new notification arrives. Click to preview.",
+  "settings.notificationSoundSuppressed":
+    "Audio appeared to hang last time a sound played, so sound is temporarily disabled. Select “Off”, then pick a sound to try again.",
   "settings.previewSound": "Preview “{name}”",
   "settings.soundOff": "Off",
   "settings.soundChime": "Chime",

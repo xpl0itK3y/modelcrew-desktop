@@ -22,6 +22,7 @@ import {
 } from "../terminal/preferences";
 import {
   NOTIFICATION_SOUNDS,
+  isNotificationSoundSuppressed,
   loadNotificationSound,
   previewNotificationSound,
   saveNotificationSound,
@@ -122,6 +123,9 @@ export function Settings(props: SettingsProps) {
   const [sound, setSound] = useState<NotificationSoundId>(() =>
     loadNotificationSound(),
   );
+  const [soundSuppressed, setSoundSuppressed] = useState(() =>
+    isNotificationSoundSuppressed(),
+  );
   // The visible tab defines the body height; the rest are display:none. We track
   // the active panel's height so the container can glide between sizes instead of
   // snapping when the user switches tabs.
@@ -177,10 +181,13 @@ export function Settings(props: SettingsProps) {
   }, [props]);
 
   // Selecting a sound also auditions it so the choice is audible immediately.
+  // Selecting "off" clears the hang-protection verdict (see sound.ts), so the
+  // suppression note is re-read after every pick.
   const selectSound = (id: NotificationSoundId) => {
     setSound(id);
     saveNotificationSound(id);
     previewNotificationSound(id);
+    setSoundSuppressed(isNotificationSoundSuppressed());
   };
 
   const onTabKeyDown = (
@@ -548,6 +555,11 @@ export function Settings(props: SettingsProps) {
               <p className="settings-note">
                 {t("settings.notificationSoundNote")}
               </p>
+              {soundSuppressed && (
+                <p className="settings-note is-warning" role="alert">
+                  {t("settings.notificationSoundSuppressed")}
+                </p>
+              )}
             </div>
           </div>
           </div>
