@@ -16,8 +16,15 @@ export function useWorkspacePersistence(
   apiRef: RefObject<DockviewApi | null>,
 ) {
   const persistTimer = useRef<number | undefined>(undefined);
+  // Заморозка записи. Включается перед установкой обновления: снапшот,
+  // снятый до pty_kill_all, не должен быть перезаписан «опустевшим»
+  // состоянием умирающего экземпляра (beforeunload, отложенный дебаунс).
+  const suspendedRef = useRef(false);
 
   const persistNow = useCallback(() => {
+    if (suspendedRef.current) {
+      return;
+    }
     const { list, activeId } = workspacesRef.current;
     const snapshot = snapshotActiveSessionLayout(list, activeId, apiRef.current);
     saveWorkspacesState({ list: snapshot, activeId });
@@ -25,16 +32,31 @@ export function useWorkspacePersistence(
   }, []);
 
   const schedulePersist = useCallback(() => {
+    if (suspendedRef.current) {
+      return;
+    }
     if (persistTimer.current !== undefined) {
       window.clearTimeout(persistTimer.current);
     }
     persistTimer.current = window.setTimeout(persistNow, 500);
   }, [persistNow]);
 
+  const suspendPersistence = useCallback(() => {
+    suspendedRef.current = true;
+    if (persistTimer.current !== undefined) {
+      window.clearTimeout(persistTimer.current);
+      persistTimer.current = undefined;
+    }
+  }, []);
+
+  const resumePersistence = useCallback(() => {
+    suspendedRef.current = false;
+  }, []);
+
   useEffect(() => {
     window.addEventListener("beforeunload", persistNow);
     return () => window.removeEventListener("beforeunload", persistNow);
   }, [persistNow]);
 
-  return { persistNow, schedulePersist };
+  return { persistNow, schedulePersist, suspendPersistence, resumePersistence };
 }

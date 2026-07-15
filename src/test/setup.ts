@@ -28,6 +28,21 @@ Object.defineProperty(globalThis, "localStorage", {
   value: testLocalStorage,
 });
 
+if (!window.matchMedia) {
+  // jsdom не реализует matchMedia; animations.ts читает его при импорте.
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
 if (!window.requestAnimationFrame) {
   window.requestAnimationFrame = (callback: FrameRequestCallback) =>
     window.setTimeout(() => callback(performance.now()), 0);

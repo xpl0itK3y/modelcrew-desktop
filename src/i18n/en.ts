@@ -198,6 +198,8 @@ export const en: Record<MessageKey, string> = {
   "workspace.folderPickerDesktopOnly":
     "Folder selection is available in the ModelCrew app",
   "workspace.syncFailed": "Could not synchronize folders: {error}",
+  "workspace.persistReadFailed":
+    "Could not read your saved projects. Saving is paused so they are not overwritten — restart the app.",
   "workspace.prepareFailed": "Could not prepare folders: {error}",
   "workspace.rootOwnedBy":
     "The folder already belongs to workspace {workspaceId}",

@@ -125,6 +125,8 @@ export default function App() {
     rootErrorsRef,
     persistNow,
     schedulePersist,
+    suspendPersistence,
+    resumePersistence,
     applyAutoTitles,
     selectWorkspace,
     selectSession,
@@ -183,7 +185,11 @@ export default function App() {
     // self-update или перед перезапуском уже установленного Linux-пакета.
     // Native Linux install идёт раньше, чтобы отмена системной авторизации
     // не закрывала пользовательские терминалы.
+    // После снапшота запись замораживается: «опустевшее» состояние умирающего
+    // экземпляра (beforeunload, дебаунс) не должно затереть сохранённые
+    // проекты во время установки и перезапуска.
     persistNow();
+    suspendPersistence();
     if (isTauri) {
       try {
         await invoke("pty_kill_all");
@@ -191,9 +197,14 @@ export default function App() {
         throw new Error(localizeBackendError(error));
       }
     }
-  }, [persistNow]);
+  }, [persistNow, suspendPersistence]);
 
-  const updater = useAppUpdater({ locale, beforeInstall: prepareForUpdate });
+  const updater = useAppUpdater({
+    locale,
+    beforeInstall: prepareForUpdate,
+    // Установка сорвалась, приложение живёт дальше — сохранение снова нужно.
+    onInstallAborted: resumePersistence,
+  });
 
   useNotificationSounds(updater.center.items);
 

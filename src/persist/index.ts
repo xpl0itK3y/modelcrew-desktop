@@ -23,6 +23,19 @@ type PersistedStateV3 = WorkspacesState & { version: 3 };
 
 const STORAGE_KEY = "modelcrew.workspaces";
 
+// Есть ли в хранилище сохранённое состояние — даже если загрузить его не
+// удалось. Позволяет отличить настоящий первый запуск от сорванного чтения
+// (гонка при перезапуске после обновления, повреждённый JSON): во втором
+// случае записывать поверх данных пустое состояние нельзя.
+export function hasPersistedWorkspacesState(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) !== null;
+  } catch {
+    // Хранилище недоступно целиком — данные могут существовать.
+    return true;
+  }
+}
+
 export function loadWorkspacesState(): WorkspacesState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);

@@ -22,6 +22,7 @@ import {
 } from "../layoutOps";
 import {
   activeSession,
+  hasPersistedWorkspacesState,
   isActiveSession,
   loadWorkspacesState,
   type TerminalSession,
@@ -53,24 +54,42 @@ export function useWorkspaces({
   showToast,
   locale,
 }: UseWorkspacesOptions) {
-  const [workspaces, setWorkspaces] = useState<WorkspacesState>(() => {
+  const initialStateRef = useRef<WorkspacesState | null>();
+  if (initialStateRef.current === undefined) {
+    initialStateRef.current = loadWorkspacesState();
+  }
+  const [workspaces, setWorkspaces] = useState<WorkspacesState>(
     // Первый запуск — без воркспейсов: пользователь начинает с выбора
     // папки проекта на welcome-экране.
-    return loadWorkspacesState() ?? { list: [], activeId: null };
-  });
+    () => initialStateRef.current ?? { list: [], activeId: null },
+  );
   const workspacesRef = useRef(workspaces);
   workspacesRef.current = workspaces;
 
   const { rootRegistryReady, rootErrorsRef, markRootUnavailable, clearRootError } =
     useWorkspaceRoots({ workspacesRef, setWorkspaces, showToast });
-  const { persistNow, schedulePersist } = useWorkspacePersistence(
-    workspacesRef,
-    apiRef,
-  );
+  const {
+    persistNow,
+    schedulePersist,
+    suspendPersistence,
+    resumePersistence,
+  } = useWorkspacePersistence(workspacesRef, apiRef);
 
   useEffect(() => {
     schedulePersist();
   }, [workspaces, schedulePersist]);
+
+  // Данные в хранилище есть, но прочитать их не удалось (гонка чтения после
+  // перезапуска обновления, повреждённый JSON). Пустое состояние этой сессии
+  // не должно затереть их: сохранение выключается до перезапуска приложения.
+  useEffect(() => {
+    if (initialStateRef.current === null && hasPersistedWorkspacesState()) {
+      suspendPersistence();
+      showToast(translate("workspace.persistReadFailed"));
+    }
+    // Разовая проверка состояния загрузки при монтировании.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Плейсхолдерные заголовки в сохранённых раскладках следуют за языком.
   useEffect(() => {
@@ -317,6 +336,8 @@ export function useWorkspaces({
     rootErrorsRef,
     persistNow,
     schedulePersist,
+    suspendPersistence,
+    resumePersistence,
     applyAutoTitles,
     selectWorkspace,
     selectSession,

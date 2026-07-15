@@ -197,6 +197,8 @@ export const ru = {
   "workspace.folderPickerDesktopOnly":
     "Выбор папки доступен в приложении ModelCrew",
   "workspace.syncFailed": "Не удалось синхронизировать папки: {error}",
+  "workspace.persistReadFailed":
+    "Не удалось прочитать сохранённые проекты. Чтобы не затереть их, сохранение отключено — перезапустите приложение.",
   "workspace.prepareFailed": "Не удалось подготовить папки: {error}",
   "workspace.rootOwnedBy": "Папка уже принадлежит проекту {workspaceId}",
   "workspace.alreadyOpen": "Папка уже открыта в «{name}»",

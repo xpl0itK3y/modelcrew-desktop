@@ -56,11 +56,17 @@ type CenterUpdate =
 type UseAppUpdaterOptions = {
   locale: Locale;
   beforeInstall: () => void | Promise<void>;
+  // Called when an install attempt fails but the app keeps running
+  // (authorization cancelled, install failed, recoverable cache retry) so the
+  // host can undo beforeInstall preparations. Not called for restartFailed:
+  // the update is installed and a restart is imminent.
+  onInstallAborted?: () => void;
 };
 
 export function useAppUpdater({
   locale,
   beforeInstall,
+  onInstallAborted,
 }: UseAppUpdaterOptions): AppUpdaterController {
   const enabled =
     isTauri && (!import.meta.env.DEV || import.meta.env.MODE === "test");
@@ -85,10 +91,12 @@ export function useAppUpdater({
   const checkForUpdatesRef = useRef<() => Promise<void>>(async () => {});
   const localeRef = useRef(locale);
   const beforeInstallRef = useRef(beforeInstall);
+  const onInstallAbortedRef = useRef(onInstallAborted);
   const mountedRef = useRef(true);
 
   localeRef.current = locale;
   beforeInstallRef.current = beforeInstall;
+  onInstallAbortedRef.current = onInstallAborted;
 
   const isCurrentGeneration = useCallback(
     (generation: number) =>
@@ -567,6 +575,7 @@ export function useAppUpdater({
         ) {
           installTargetRef.current = null;
         }
+        onInstallAbortedRef.current?.();
         setCenter((current) => ({
           sync: "retrying",
           items: current.items.map((item) =>
@@ -584,6 +593,9 @@ export function useAppUpdater({
           : isAuthorizationCancelled(error)
             ? "authorizationCancelled"
             : "installFailed";
+      if (phase !== "restartFailed") {
+        onInstallAbortedRef.current?.();
+      }
       setCenter((current) => ({
         ...current,
         items: current.items.map((item) =>
