@@ -85,7 +85,7 @@ export const en: Record<MessageKey, string> = {
   "update.restartFailedTitle":
     "The update was installed, but ModelCrew did not restart",
   "update.restartFailedDescription":
-    "You do not need to install it again. Try restarting the application once more.",
+    "You do not need to install it again. Press “Retry restart”, or simply quit the app and open it again — the new version will start.",
   "update.retryRestart": "Retry restart",
 
   "sidebar.title": "Projects",
