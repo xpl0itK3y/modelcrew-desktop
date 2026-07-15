@@ -1,0 +1,10 @@
+/* Application styles, split by UI area. Import order matters: it preserves
+   the cascade of the original single-file stylesheet (base tokens first,
+   overlays before settings so .settings-dialog can override .dialog, etc.). */
+@import "./base.css";
+@import "./titlebar.css";
+@import "./notifications.css";
+@import "./sidebar.css";
+@import "./terminal.css";
+@import "./overlays.css";
+@import "./settings.css";

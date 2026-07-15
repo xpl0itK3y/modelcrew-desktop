@@ -1,0 +1,84 @@
+:root {
+  --mc-bg: #101216;
+  --mc-panel: #16181d;
+  --mc-panel-header: #1b1e25;
+  --mc-sidebar: #14161b;
+  --mc-border: #232833;
+  --mc-panel-border: #1f242d;
+  --mc-text: #c9ced8;
+  --mc-text-bright: #e8ebf2;
+  --mc-text-muted: #8b93a3;
+  --mc-text-faint: #5c6472;
+  --mc-accent: #f471b5;
+  --mc-accent-soft: color-mix(in srgb, var(--mc-accent) 14%, transparent);
+  --mc-accent-border: color-mix(in srgb, var(--mc-accent) 50%, transparent);
+  --mc-accent-glow: color-mix(in srgb, var(--mc-accent) 35%, transparent);
+  --mc-green: #4ade80;
+  --mc-surface-active: #1c2028;
+  --mc-surface-raised: #1a1d24;
+  --mc-button: #232833;
+  --mc-button-hover: #2a3040;
+  --mc-hover: rgba(255, 255, 255, 0.07);
+  --mc-hover-subtle: rgba(255, 255, 255, 0.04);
+  --mc-hover-strong: rgba(255, 255, 255, 0.1);
+  --mc-scrollbar: rgba(148, 163, 184, 0.25);
+  --mc-backdrop: rgba(6, 8, 10, 0.55);
+  --mc-shadow: rgba(0, 0, 0, 0.5);
+  --mc-danger: #ff8fa3;
+  --mc-danger-soft: rgba(255, 114, 133, 0.14);
+  --mc-danger-hover: rgba(255, 114, 133, 0.22);
+  --mc-danger-border: rgba(255, 114, 133, 0.5);
+  --mc-selection-ring: #ffffff;
+  --mc-terminal-bg: #16181d;
+  --mc-titlebar-height: 40px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background-color: var(--mc-bg);
+  color: var(--mc-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* ---------- Каркас окна ---------- */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.dock-area {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px 8px;
+}
+
+.dock-area > * {
+  height: 100%;
+}
+
+.workspace-loading {
+  display: grid;
+  place-items: center;
+  color: var(--mc-text-faint);
+  font-size: 12px;
+}
+

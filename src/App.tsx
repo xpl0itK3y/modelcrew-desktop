@@ -95,7 +95,7 @@ function unavailable(error: unknown): FolderRuntimeStatus {
     message: localizeBackendError(error),
   };
 }
-import "./App.css";
+import "./styles/index.css";
 
 const components = { terminal: TerminalPanel };
 const tabComponents = { terminal: TerminalTab };

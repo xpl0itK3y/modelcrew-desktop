@@ -1,0 +1,103 @@
+/* ---------- Тост ---------- */
+
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-surface-raised);
+  color: var(--mc-text);
+  font-size: 12.5px;
+  box-shadow: 0 8px 24px var(--mc-shadow);
+  z-index: 100;
+  animation: toast-in 160ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+
+/* ---------- Диалог подтверждения ---------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mc-backdrop);
+  z-index: 1000;
+}
+
+.dialog {
+  min-width: 300px;
+  padding: 18px;
+  border: 1px solid var(--mc-border);
+  border-radius: 10px;
+  background: var(--mc-surface-raised);
+  box-shadow: 0 16px 48px var(--mc-shadow);
+}
+
+.dialog-text {
+  margin: 0 0 16px;
+  color: var(--mc-text-bright);
+  font-size: 13.5px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-button {
+  padding: 7px 14px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-button);
+  color: var(--mc-text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.dialog-button:hover {
+  background: var(--mc-button-hover);
+}
+
+.dialog-button.is-danger {
+  border-color: var(--mc-danger-border);
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+}
+
+.dialog-button.is-danger:hover {
+  background: var(--mc-danger-hover);
+}
+
+.dialog-button:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 1px;
+}
+
+.dialog-button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
