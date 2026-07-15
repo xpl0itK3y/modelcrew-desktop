@@ -11,6 +11,12 @@ import {
   markSnapshotDirty,
   registerSnapshotSource,
 } from "./snapshots";
+import {
+  buildAgentResume,
+  discardAgentRecord,
+  getAgentRecord,
+  loadAgentResumeMode,
+} from "../agents";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
@@ -303,6 +309,35 @@ export function ensureSpawned(
   return spawnPromise;
 }
 
+// Один и тот же агент в одной папке: первая восстановленная панель продолжает
+// последний диалог, следующие открывают список диалогов агента.
+const resumedAgentKeys = new Set<string>();
+
+// Авто-возобновление агента после полного перезапуска приложения: запись
+// существует, только если агент был foreground-процессом панели на выходе.
+function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
+  const mode = loadAgentResumeMode();
+  if (mode === "off") {
+    return;
+  }
+  const record = getAgentRecord(entry.id);
+  if (!record) {
+    return;
+  }
+  const key = `${workspaceId}:${record.agentId}`;
+  const picker = resumedAgentKeys.has(key);
+  resumedAgentKeys.add(key);
+  const line = buildAgentResume(record, picker);
+  if (!line) {
+    return;
+  }
+  const data = mode === "auto" ? `${line}\r` : line;
+  void invoke("pty_write", { id: entry.id, data }).catch(() => {});
+  // Инъекция разовая: когда агент реально запустится, watcher запишет его
+  // заново — уже для следующего перезапуска.
+  discardAgentRecord(entry.id);
+}
+
 async function spawnTerminal(
   entry: TerminalEntry,
   workspaceId: string,
@@ -379,6 +414,7 @@ async function spawnTerminal(
     ) {
       rememberAutoTitle(entry.id, title);
     }
+    maybeResumeAgent(entry, workspaceId);
   } catch (error) {
     markExited(entry);
     entry.term.write(

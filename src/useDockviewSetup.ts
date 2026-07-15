@@ -11,6 +11,7 @@ import {
   isManualTitle,
   rememberAutoTitle,
 } from "./terminal/registry";
+import { rememberAgentProcess } from "./agents";
 import { addPanel, localizeDefaultPanelTitles } from "./layoutOps";
 import {
   activeSession,
@@ -106,6 +107,9 @@ export function useDockviewSetup({
           "pty-title",
           (titleEvent) => {
             rememberAutoTitle(titleEvent.payload.id, titleEvent.payload.title);
+            // Агент в фокусе панели — кандидат на авто-возобновление после
+            // полного перезапуска приложения.
+            rememberAgentProcess(titleEvent.payload.id, titleEvent.payload.title);
             const panel = event.api.getPanel(titleEvent.payload.id);
             const titleKind = panel?.api.getParameters<{
               titleKind?: string;

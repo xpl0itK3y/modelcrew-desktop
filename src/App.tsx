@@ -19,6 +19,7 @@ import {
   restartRunningTerminals,
 } from "./terminal/registry";
 import { flushAllSnapshots, pruneSnapshots } from "./terminal/snapshots";
+import { pruneAgentRecords } from "./agents";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -191,6 +192,7 @@ export default function App() {
       }
     }
     pruneSnapshots(keep);
+    pruneAgentRecords(keep);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

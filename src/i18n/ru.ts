@@ -122,6 +122,12 @@ export const ru = {
   "settings.shellRestarted": "Оболочка изменена: перезапущено {terminals}",
   "settings.shellRestartFailed":
     "Не удалось перезапустить {failed} из {total} терминалов — они продолжают работать в прежней оболочке",
+  "settings.agentResume": "Возобновление агентов",
+  "settings.agentResumeNote":
+    "После перезапуска приложения восстановленный терминал сам продолжит последний диалог агента (Claude, Codex, OpenCode, Kilo, Antigravity).",
+  "settings.agentResumeOff": "Выключено",
+  "settings.agentResumeInsert": "Подставить команду",
+  "settings.agentResumeAuto": "Запускать автоматически",
   "settings.terminalFontSize": "Размер шрифта терминала",
   "settings.terminalFontSizeValue": "{size} px",
   "settings.tabAppearance": "Внешний вид",

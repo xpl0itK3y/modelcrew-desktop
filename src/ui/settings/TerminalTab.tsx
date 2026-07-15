@@ -1,11 +1,24 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useI18n } from "../../i18n";
+import { type MessageKey, useI18n } from "../../i18n";
 import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
 } from "../../terminal/preferences";
+import {
+  loadAgentResumeMode,
+  saveAgentResumeMode,
+  type AgentResumeMode,
+} from "../../agents";
+
+const resumeModeMessageKeys: Record<AgentResumeMode, MessageKey> = {
+  off: "settings.agentResumeOff",
+  insert: "settings.agentResumeInsert",
+  auto: "settings.agentResumeAuto",
+};
+
+const RESUME_MODES: AgentResumeMode[] = ["auto", "insert", "off"];
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -20,6 +33,9 @@ type TerminalTabProps = {
 export function TerminalTab(props: TerminalTabProps) {
   const { t } = useI18n();
   const [shells, setShells] = useState<ShellOption[]>([]);
+  const [resumeMode, setResumeMode] = useState<AgentResumeMode>(() =>
+    loadAgentResumeMode(),
+  );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
       (MAX_TERMINAL_FONT_SIZE - MIN_TERMINAL_FONT_SIZE)) *
@@ -122,6 +138,31 @@ export function TerminalTab(props: TerminalTabProps) {
             })}
           </output>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.agentResume")}</div>
+        <div
+          className="shell-options"
+          role="group"
+          aria-label={t("settings.agentResume")}
+        >
+          {RESUME_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={resumeMode === mode}
+              className={`shell-option ${resumeMode === mode ? "is-selected" : ""}`}
+              onClick={() => {
+                setResumeMode(mode);
+                saveAgentResumeMode(mode);
+              }}
+            >
+              {t(resumeModeMessageKeys[mode])}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">{t("settings.agentResumeNote")}</p>
       </div>
     </>
   );
