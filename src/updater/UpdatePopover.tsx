@@ -378,6 +378,9 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                       <div className="update-notice" role="status">
                         <strong>{t("update.authorizationCancelledTitle")}</strong>
                         <p>{t("update.authorizationCancelledDescription")}</p>
+                        {item.installKind === "nativePackage" && (
+                          <p>{t("update.manualInstallHint")}</p>
+                        )}
                       </div>
                     )}
 
@@ -413,6 +416,9 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                       <div className="update-failure" role="alert">
                         <strong>{t("update.installFailedTitle")}</strong>
                         <p>{t("update.installFailedDescription")}</p>
+                        {item.installKind === "nativePackage" && (
+                          <p>{t("update.manualInstallHint")}</p>
+                        )}
                       </div>
                     )}
 

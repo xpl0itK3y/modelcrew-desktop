@@ -54,6 +54,8 @@ export const ru = {
   "update.authorizationCancelledTitle": "Установка не подтверждена",
   "update.authorizationCancelledDescription":
     "Системная авторизация отменена. Обновление не установлено, терминалы продолжают работать.",
+  "update.manualInstallHint":
+    "Пакет уже скачан в /tmp/modelcrew-update-…. Можно установить вручную: sudo pacman -U <файл> (deb: dpkg -i, rpm: rpm -U). Если пароль верный, но авторизация не проходит — проверьте, что в сессии запущен polkit-агент.",
   "update.installing": "Устанавливаем ModelCrew {version}",
   "update.installingDescription":
     "Приложение перезапустится после установки обновления.",

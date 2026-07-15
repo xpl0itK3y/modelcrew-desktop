@@ -55,6 +55,8 @@ export const en: Record<MessageKey, string> = {
   "update.authorizationCancelledTitle": "Installation was not authorized",
   "update.authorizationCancelledDescription":
     "System authorization was cancelled. The update was not installed and your terminals are still running.",
+  "update.manualInstallHint":
+    "The package is already downloaded to /tmp/modelcrew-update-…. You can install it manually: sudo pacman -U <file> (deb: dpkg -i, rpm: rpm -U). If your password is correct but authorization keeps failing, make sure a polkit agent is running in your session.",
   "update.installing": "Installing ModelCrew {version}",
   "update.installingDescription":
     "The application will restart after the update is installed.",
