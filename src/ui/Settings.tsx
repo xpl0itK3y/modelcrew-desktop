@@ -4,92 +4,13 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import {
-  ACCENT_COLORS,
-  APP_THEMES,
-  type AccentColor,
-  type ThemeId,
-} from "../theme";
-import { type MessageKey, type Locale, useI18n } from "../i18n";
-import { type ShellOption } from "../shell";
-import {
-  MAX_TERMINAL_FONT_SIZE,
-  MIN_TERMINAL_FONT_SIZE,
-} from "../terminal/preferences";
-import {
-  NOTIFICATION_SOUNDS,
-  isNotificationSoundSuppressed,
-  loadNotificationSound,
-  previewNotificationSound,
-  saveNotificationSound,
-  type NotificationSoundId,
-} from "../sound";
-
-const isTauri = "__TAURI_INTERNALS__" in window;
-
-const themeMessageKeys: Record<
-  ThemeId,
-  { name: MessageKey; description: MessageKey }
-> = {
-  midnight: {
-    name: "theme.midnight.name",
-    description: "theme.midnight.description",
-  },
-  graphite: {
-    name: "theme.graphite.name",
-    description: "theme.graphite.description",
-  },
-  ocean: {
-    name: "theme.ocean.name",
-    description: "theme.ocean.description",
-  },
-  forest: {
-    name: "theme.forest.name",
-    description: "theme.forest.description",
-  },
-  aubergine: {
-    name: "theme.aubergine.name",
-    description: "theme.aubergine.description",
-  },
-  porcelain: {
-    name: "theme.porcelain.name",
-    description: "theme.porcelain.description",
-  },
-};
-
-const accentMessageKeys: Record<AccentColor["id"], MessageKey> = {
-  pink: "accent.pink",
-  rose: "accent.rose",
-  red: "accent.red",
-  orange: "accent.orange",
-  amber: "accent.amber",
-  yellow: "accent.yellow",
-  lime: "accent.lime",
-  green: "accent.green",
-  emerald: "accent.emerald",
-  teal: "accent.teal",
-  sky: "accent.sky",
-  blue: "accent.blue",
-  indigo: "accent.indigo",
-  violet: "accent.violet",
-  purple: "accent.purple",
-  fuchsia: "accent.fuchsia",
-  white: "accent.white",
-  gray: "accent.gray",
-};
-
-const soundMessageKeys: Record<NotificationSoundId, MessageKey> = {
-  off: "settings.soundOff",
-  chime: "settings.soundChime",
-  click: "settings.soundClick",
-  pop: "settings.soundPop",
-  reveal: "settings.soundReveal",
-  flute: "settings.soundFlute",
-};
+import { type ThemeId } from "../theme";
+import { type MessageKey, useI18n } from "../i18n";
+import { AppearanceTab } from "./settings/AppearanceTab";
+import { TerminalTab } from "./settings/TerminalTab";
+import { NotificationsTab } from "./settings/NotificationsTab";
 
 type SettingsTab = "appearance" | "terminal" | "notifications";
 
@@ -116,42 +37,14 @@ type SettingsProps = {
 };
 
 export function Settings(props: SettingsProps) {
-  const { locale, setLocale, t } = useI18n();
+  const { t } = useI18n();
   const titleId = useId();
   const [tab, setTab] = useState<SettingsTab>("appearance");
-  const [shells, setShells] = useState<ShellOption[]>([]);
-  const [sound, setSound] = useState<NotificationSoundId>(() =>
-    loadNotificationSound(),
-  );
-  const [soundSuppressed, setSoundSuppressed] = useState(() =>
-    isNotificationSoundSuppressed(),
-  );
   // The visible tab defines the body height; the rest are display:none. We track
   // the active panel's height so the container can glide between sizes instead of
   // snapping when the user switches tabs.
   const bodyTrackRef = useRef<HTMLDivElement>(null);
   const [bodyHeight, setBodyHeight] = useState<number>();
-  const fontSizeProgress =
-    ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
-      (MAX_TERMINAL_FONT_SIZE - MIN_TERMINAL_FONT_SIZE)) *
-    100;
-
-  useEffect(() => {
-    if (!isTauri) {
-      return;
-    }
-    let cancelled = false;
-    void invoke<ShellOption[]>("list_shells")
-      .then((list) => {
-        if (!cancelled) {
-          setShells(list);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Keep the animated body height in sync with whatever the active tab needs —
   // tab switches, the async shell list arriving, locale reflow, window resizing.
@@ -179,16 +72,6 @@ export function Settings(props: SettingsProps) {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [props]);
-
-  // Selecting a sound also auditions it so the choice is audible immediately.
-  // Selecting "off" clears the hang-protection verdict (see sound.ts), so the
-  // suppression note is re-read after every pick.
-  const selectSound = (id: NotificationSoundId) => {
-    setSound(id);
-    saveNotificationSound(id);
-    previewNotificationSound(id);
-    setSoundSuppressed(isNotificationSoundSuppressed());
-  };
 
   const onTabKeyDown = (
     event: ReactKeyboardEvent<HTMLButtonElement>,
@@ -274,294 +157,46 @@ export function Settings(props: SettingsProps) {
           style={bodyHeight === undefined ? undefined : { height: bodyHeight }}
         >
           <div className="settings-body-track" ref={bodyTrackRef}>
-          <div
-            id={settingsPanelId("appearance")}
-            role="tabpanel"
-            aria-labelledby={settingsTabId("appearance")}
-            hidden={tab !== "appearance"}
-            tabIndex={0}
-          >
-              <div className="settings-section">
-                <div className="settings-label">{t("settings.language")}</div>
-                <div
-                  className="language-options"
-                  role="group"
-                  aria-label={t("settings.language")}
-                >
-                  {(["ru", "en"] as const).map((option: Locale) => {
-                    const label =
-                      option === "ru"
-                        ? t("settings.languageRussian")
-                        : t("settings.languageEnglish");
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        lang={option}
-                        aria-pressed={locale === option}
-                        className={`language-option ${
-                          locale === option ? "is-selected" : ""
-                        }`}
-                        onClick={() => setLocale(option)}
-                      >
-                        <span>{label}</span>
-                        <span className="language-option-code">
-                          {option.toUpperCase()}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <div className="settings-label">{t("settings.theme")}</div>
-                <div className="theme-grid">
-                  {APP_THEMES.map((theme) => {
-                    const name = t(themeMessageKeys[theme.id].name);
-                    const description = t(
-                      themeMessageKeys[theme.id].description,
-                    );
-                    return (
-                      <button
-                        key={theme.id}
-                        type="button"
-                        title={t("settings.selectTheme", { name })}
-                        aria-label={t("settings.selectTheme", { name })}
-                        aria-pressed={props.themeId === theme.id}
-                        className={`theme-card ${
-                          props.themeId === theme.id ? "is-selected" : ""
-                        }`}
-                        onClick={() => props.onSelectTheme(theme.id)}
-                      >
-                        <span
-                          className="theme-preview"
-                          style={{ backgroundColor: theme.colors.bg }}
-                        >
-                          <span
-                            className="theme-preview-sidebar"
-                            style={{ backgroundColor: theme.colors.sidebar }}
-                          />
-                          <span
-                            className="theme-preview-panel"
-                            style={{
-                              backgroundColor: theme.colors.panel,
-                              borderColor: theme.colors.panelBorder,
-                            }}
-                          >
-                            <span
-                              className="theme-preview-header"
-                              style={{
-                                backgroundColor: theme.colors.panelHeader,
-                              }}
-                            />
-                            <span
-                              className="theme-preview-line"
-                              style={{ backgroundColor: theme.colors.textMuted }}
-                            />
-                          </span>
-                          <span className="theme-preview-accent" />
-                        </span>
-                        <span className="theme-card-copy">
-                          <strong>{name}</strong>
-                          <small>{description}</small>
-                        </span>
-                        <span className="theme-card-check" aria-hidden="true">
-                          {props.themeId === theme.id ? "✓" : ""}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="settings-section settings-accent-section">
-                <div className="settings-label">{t("settings.accent")}</div>
-                <div className="accent-grid">
-                  {ACCENT_COLORS.map((color) => {
-                    const name = t(accentMessageKeys[color.id]);
-                    const label = t("settings.selectAccent", { name });
-                    return (
-                      <button
-                        key={color.value}
-                        type="button"
-                        title={label}
-                        aria-label={label}
-                        aria-pressed={
-                          props.accent.toLowerCase() ===
-                          color.value.toLowerCase()
-                        }
-                        className={`accent-swatch ${
-                          props.accent.toLowerCase() ===
-                          color.value.toLowerCase()
-                            ? "is-selected"
-                            : ""
-                        }`}
-                        style={{ backgroundColor: color.value }}
-                        onClick={() => props.onSelectAccent(color.value)}
-                      />
-                    );
-                  })}
-                </div>
-                <label className="accent-custom">
-                  {t("settings.customColor")}
-                  <input
-                    type="color"
-                    aria-label={t("settings.customColor")}
-                    value={props.accent}
-                    onChange={(event) =>
-                      props.onSelectAccent(event.target.value)
-                    }
-                  />
-                </label>
-              </div>
-          </div>
-
-          <div
-            id={settingsPanelId("terminal")}
-            role="tabpanel"
-            aria-labelledby={settingsTabId("terminal")}
-            hidden={tab !== "terminal"}
-            tabIndex={0}
-          >
-              {isTauri && shells.length > 0 && (
-                <div className="settings-section">
-                  <div className="settings-label">{t("settings.shell")}</div>
-                  <div
-                    className="shell-options"
-                    role="group"
-                    aria-label={t("settings.shell")}
-                    aria-busy={props.shellBusy}
-                  >
-                    <button
-                      type="button"
-                      disabled={props.shellBusy}
-                      aria-pressed={props.shell === null}
-                      className={`shell-option ${props.shell === null ? "is-selected" : ""}`}
-                      onClick={() =>
-                        props.onSelectShell(null, t("settings.shellDefault"))
-                      }
-                    >
-                      {t("settings.shellDefault")}
-                    </button>
-                    {shells.map((option) => (
-                      <button
-                        key={option.command}
-                        type="button"
-                        disabled={props.shellBusy}
-                        title={t("settings.selectShell", { name: option.label })}
-                        aria-label={t("settings.selectShell", {
-                          name: option.label,
-                        })}
-                        aria-pressed={props.shell === option.command}
-                        className={`shell-option ${
-                          props.shell === option.command ? "is-selected" : ""
-                        }`}
-                        onClick={() =>
-                          props.onSelectShell(option.command, option.label)
-                        }
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="settings-note">
-                    {props.shellBusy
-                      ? t("settings.shellApplying")
-                      : t("settings.shellNote")}
-                  </p>
-                </div>
-              )}
-
-              <div className="settings-section">
-                <div className="settings-label">
-                  {t("settings.terminalFontSize")}
-                </div>
-                <div className="terminal-font-size-control">
-                  <input
-                    type="range"
-                    className="terminal-font-size-slider"
-                    min={MIN_TERMINAL_FONT_SIZE}
-                    max={MAX_TERMINAL_FONT_SIZE}
-                    step={1}
-                    value={props.terminalFontSize}
-                    aria-label={t("settings.terminalFontSize")}
-                    aria-valuetext={t("settings.terminalFontSizeValue", {
-                      size: props.terminalFontSize,
-                    })}
-                    style={
-                      {
-                        "--terminal-font-size-progress": `${fontSizeProgress}%`,
-                      } as CSSProperties
-                    }
-                    onChange={(event) =>
-                      props.onSelectTerminalFontSize(Number(event.target.value))
-                    }
-                  />
-                  <output
-                    className="terminal-font-size-value"
-                    aria-live="polite"
-                  >
-                    {t("settings.terminalFontSizeValue", {
-                      size: props.terminalFontSize,
-                    })}
-                  </output>
-                </div>
-              </div>
-          </div>
-
-          <div
-            id={settingsPanelId("notifications")}
-            role="tabpanel"
-            aria-labelledby={settingsTabId("notifications")}
-            hidden={tab !== "notifications"}
-            tabIndex={0}
-          >
-            <div className="settings-section">
-              <div className="settings-label">
-                {t("settings.notificationSound")}
-              </div>
-              <div
-                className="sound-options"
-                role="group"
-                aria-label={t("settings.notificationSound")}
-              >
-                {NOTIFICATION_SOUNDS.map((option) => {
-                  const name = t(soundMessageKeys[option.id]);
-                  const isOff = option.id === "off";
-                  const label = isOff
-                    ? name
-                    : t("settings.previewSound", { name });
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      title={label}
-                      aria-label={label}
-                      aria-pressed={sound === option.id}
-                      className={`sound-option ${
-                        sound === option.id ? "is-selected" : ""
-                      }`}
-                      onClick={() => selectSound(option.id)}
-                    >
-                      <span className="sound-option-icon" aria-hidden="true">
-                        {isOff ? "🔇" : "▶"}
-                      </span>
-                      <span>{name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="settings-note">
-                {t("settings.notificationSoundNote")}
-              </p>
-              {soundSuppressed && (
-                <p className="settings-note is-warning" role="alert">
-                  {t("settings.notificationSoundSuppressed")}
-                </p>
-              )}
+            <div
+              id={settingsPanelId("appearance")}
+              role="tabpanel"
+              aria-labelledby={settingsTabId("appearance")}
+              hidden={tab !== "appearance"}
+              tabIndex={0}
+            >
+              <AppearanceTab
+                themeId={props.themeId}
+                accent={props.accent}
+                onSelectTheme={props.onSelectTheme}
+                onSelectAccent={props.onSelectAccent}
+              />
             </div>
-          </div>
+
+            <div
+              id={settingsPanelId("terminal")}
+              role="tabpanel"
+              aria-labelledby={settingsTabId("terminal")}
+              hidden={tab !== "terminal"}
+              tabIndex={0}
+            >
+              <TerminalTab
+                shell={props.shell}
+                shellBusy={props.shellBusy}
+                terminalFontSize={props.terminalFontSize}
+                onSelectShell={props.onSelectShell}
+                onSelectTerminalFontSize={props.onSelectTerminalFontSize}
+              />
+            </div>
+
+            <div
+              id={settingsPanelId("notifications")}
+              role="tabpanel"
+              aria-labelledby={settingsTabId("notifications")}
+              hidden={tab !== "notifications"}
+              tabIndex={0}
+            >
+              <NotificationsTab />
+            </div>
           </div>
         </div>
       </div>
