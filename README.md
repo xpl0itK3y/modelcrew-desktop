@@ -29,6 +29,9 @@ themselves after the running program.
   batched output, WebGL rendering; panel titles follow the foreground
   process (`codex`, `vim`, …).
 - **Persistent state** — layouts, projects, and sessions survive restarts.
+- **Session restore** — terminals reopen with their previous text, and a
+  panel that was running an agent (Claude Code, Codex, OpenCode, Kilo,
+  Antigravity) automatically resumes its last conversation.
 - **Settings** — interface language (English/Russian), six themes, accent
   colors, shell picker, terminal font size, and notification sounds.
 - **Notification center** — automatic signed updates with download progress,
