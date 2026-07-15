@@ -213,7 +213,7 @@ jobs:
           arch=('__ARCH__')
           url='https://github.com/xpl0itK3y/modelcrew-desktop'
           license=('MIT')
-          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gtk3' 'hicolor-icon-theme' 'libsoup3' 'openssl' 'pango' 'webkit2gtk-4.1')
+          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1')
           provides=('modelcrew')
           conflicts=('modelcrew')
           options=('!strip')
