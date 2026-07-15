@@ -1,0 +1,142 @@
+/* Оболочка центра уведомлений: поповер, шапка, ручка растягивания. */
+
+
+.update-popover {
+  position: absolute;
+  top: 34px;
+  right: -4px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: min(420px, calc(100vh - 52px));
+  overflow: hidden;
+  border: 1px solid var(--mc-border);
+  border-radius: 12px;
+  outline: none;
+  background: var(--mc-surface-raised);
+  color: var(--mc-text);
+  box-shadow: 0 18px 56px var(--mc-shadow);
+  user-select: text;
+  z-index: 200;
+  animation: update-popover-in 150ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.update-popover-header {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  flex: none;
+  gap: 8px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--mc-border);
+  background: var(--mc-surface-raised);
+}
+
+.update-popover-title-row {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-popover-title {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  color: var(--mc-text-bright);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-header-sync {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  color: var(--mc-text-faint);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.update-header-spinner {
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  flex: none;
+  border: 1.5px solid var(--mc-border);
+  border-top-color: var(--mc-accent);
+  border-radius: 50%;
+  animation: update-spin 800ms linear infinite;
+}
+
+.update-popover-close {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  user-select: none;
+}
+
+.update-popover-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mc-scrollbar) transparent;
+}
+
+/* Drag the bottom edge to make the notification center taller. */
+.update-popover-resize {
+  flex: none;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.update-popover-resize::after {
+  content: "";
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--mc-border);
+  transition: background 120ms ease;
+}
+
+.update-popover-resize:hover::after {
+  background: var(--mc-text-faint);
+}
+
+@keyframes update-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-popover {
+    transition: none;
+    animation: none;
+  }
+
+  .update-header-spinner {
+    animation: none;
+  }
+}

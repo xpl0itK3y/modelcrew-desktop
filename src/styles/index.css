@@ -3,7 +3,9 @@
    overlays before settings so .settings-dialog can override .dialog, etc.). */
 @import "./base.css";
 @import "./titlebar.css";
-@import "./notifications.css";
+@import "./notification-bell.css";
+@import "./update-popover.css";
+@import "./update-cards.css";
 @import "./sidebar.css";
 @import "./terminal.css";
 @import "./overlays.css";
