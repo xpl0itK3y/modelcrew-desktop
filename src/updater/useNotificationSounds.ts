@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   playNotificationSound,
   selectUnseenNotificationSoundIds,
 } from "../sound";
+import { sendSystemNotification } from "../notifications";
 import { loadReadNotificationIds } from "./readNotifications";
 import type { NotificationItem } from "./types";
+
+// Баннер уровня ОС шлём только когда окно не в фокусе: в фокусе пользователю
+// хватает бейджа и звука, дублировать системным всплытием — спам.
+async function notifyInBackground(item: NotificationItem): Promise<void> {
+  try {
+    if (await getCurrentWindow().isFocused()) {
+      return;
+    }
+  } catch {
+    // Веб-превью или ранний старт: статус фокуса неизвестен — не шлём.
+    return;
+  }
+  await sendSystemNotification(item.title, item.summary ?? "");
+}
 
 // Plays the notification sound once per newly arrived attention-worthy item.
 // Read notifications stay quiet after restart, while an unread update can
@@ -28,5 +44,10 @@ export function useNotificationSounds(items: readonly NotificationItem[]) {
       handledIds.add(id);
     }
     playNotificationSound();
+    const newestId = unseenIds[unseenIds.length - 1];
+    const newest = items.find((item) => item.id === newestId);
+    if (newest) {
+      void notifyInBackground(newest);
+    }
   }, [handledIds, items]);
 }

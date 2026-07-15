@@ -8,6 +8,10 @@ import {
   saveNotificationSound,
   type NotificationSoundId,
 } from "../../sound";
+import {
+  loadSystemNotificationsEnabled,
+  saveSystemNotificationsEnabled,
+} from "../../notifications";
 
 const soundMessageKeys: Record<NotificationSoundId, MessageKey> = {
   off: "settings.soundOff",
@@ -26,6 +30,9 @@ export function NotificationsTab() {
   const [soundSuppressed, setSoundSuppressed] = useState(() =>
     isNotificationSoundSuppressed(),
   );
+  const [systemEnabled, setSystemEnabled] = useState(() =>
+    loadSystemNotificationsEnabled(),
+  );
 
   // Selecting a sound also auditions it so the choice is audible immediately.
   // Selecting "off" clears the hang-protection verdict (see sound.ts), so the
@@ -38,6 +45,7 @@ export function NotificationsTab() {
   };
 
   return (
+    <>
     <div className="settings-section">
       <div className="settings-label">{t("settings.notificationSound")}</div>
       <div
@@ -76,5 +84,37 @@ export function NotificationsTab() {
         </p>
       )}
     </div>
+
+    <div className="settings-section">
+      <div className="settings-label">{t("settings.systemNotifications")}</div>
+      <div
+        className="shell-options"
+        role="group"
+        aria-label={t("settings.systemNotifications")}
+      >
+        {[true, false].map((enabled) => (
+          <button
+            key={String(enabled)}
+            type="button"
+            aria-pressed={systemEnabled === enabled}
+            className={`shell-option ${
+              systemEnabled === enabled ? "is-selected" : ""
+            }`}
+            onClick={() => {
+              setSystemEnabled(enabled);
+              saveSystemNotificationsEnabled(enabled);
+            }}
+          >
+            {t(
+              enabled
+                ? "settings.systemNotificationsOn"
+                : "settings.systemNotificationsOff",
+            )}
+          </button>
+        ))}
+      </div>
+      <p className="settings-note">{t("settings.systemNotificationsNote")}</p>
+    </div>
+    </>
   );
 }

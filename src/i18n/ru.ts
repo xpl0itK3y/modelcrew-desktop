@@ -144,6 +144,11 @@ export const ru = {
   "settings.notificationSoundSuppressed":
     "Похоже, аудиосистема зависла при прошлой попытке, поэтому звук временно отключён. Выберите «Без звука», а затем нужный звук, чтобы попробовать снова.",
   "settings.previewSound": "Прослушать «{name}»",
+  "settings.systemNotifications": "Системные уведомления",
+  "settings.systemNotificationsOn": "Включены",
+  "settings.systemNotificationsOff": "Выключены",
+  "settings.systemNotificationsNote":
+    "Баннер на уровне ОС, когда окно не в фокусе: обновления и анонсы видно даже со свёрнутым приложением.",
   "settings.soundOff": "Без звука",
   "settings.soundChime": "Перезвон",
   "settings.soundClick": "Клик",

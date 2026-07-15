@@ -145,6 +145,11 @@ export const en: Record<MessageKey, string> = {
   "settings.notificationSoundSuppressed":
     "Audio appeared to hang last time a sound played, so sound is temporarily disabled. Select “Off”, then pick a sound to try again.",
   "settings.previewSound": "Preview “{name}”",
+  "settings.systemNotifications": "System notifications",
+  "settings.systemNotificationsOn": "On",
+  "settings.systemNotificationsOff": "Off",
+  "settings.systemNotificationsNote":
+    "OS-level banner when the window is unfocused: updates and announcements stay visible even with the app minimized.",
   "settings.soundOff": "Off",
   "settings.soundChime": "Chime",
   "settings.soundClick": "Click",
