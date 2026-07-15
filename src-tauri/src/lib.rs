@@ -1,4 +1,5 @@
 mod command_error;
+mod terminal_snapshots;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod pty;
@@ -10,6 +11,10 @@ use linux_updater::{
     LinuxUpdaterState,
 };
 use pty::{PtyManager, ShellInfo, SpawnOptions};
+use terminal_snapshots::{
+    terminal_snapshot_delete, terminal_snapshot_load, terminal_snapshot_save,
+    terminal_snapshots_prune,
+};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Emitter, Manager, RunEvent};
@@ -565,6 +570,10 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_kill_all,
+            terminal_snapshot_save,
+            terminal_snapshot_load,
+            terminal_snapshot_delete,
+            terminal_snapshots_prune,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,
