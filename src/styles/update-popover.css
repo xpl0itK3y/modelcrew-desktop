@@ -119,6 +119,12 @@
   background: var(--mc-text-faint);
 }
 
+/* Исчезание: presence-хук держит поповер смонтированным на время анимации. */
+.update-popover.is-closing {
+  animation: update-popover-out 140ms ease-in forwards;
+  pointer-events: none;
+}
+
 @keyframes update-popover-in {
   from {
     opacity: 0;
@@ -130,10 +136,22 @@
   }
 }
 
+@keyframes update-popover-out {
+  to {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .update-popover {
     transition: none;
     animation: none;
+  }
+
+  .update-popover.is-closing {
+    animation: none;
+    opacity: 0;
   }
 
   .update-header-spinner {

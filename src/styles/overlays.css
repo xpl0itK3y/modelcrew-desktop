@@ -13,13 +13,18 @@
   font-size: 12.5px;
   box-shadow: 0 8px 24px var(--mc-shadow);
   z-index: 100;
-  animation: toast-in 160ms ease-out;
+  animation: toast-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.toast.is-closing {
+  animation: toast-out 160ms ease-in forwards;
+  pointer-events: none;
 }
 
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(6px);
+    transform: translateX(-50%) translateY(8px);
   }
   to {
     opacity: 1;
@@ -27,9 +32,21 @@
   }
 }
 
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast {
     animation: none;
+  }
+
+  .toast.is-closing {
+    animation: none;
+    opacity: 0;
   }
 }
 
@@ -44,6 +61,7 @@
   justify-content: center;
   background: var(--mc-backdrop);
   z-index: 1000;
+  animation: overlay-fade-in 160ms ease-out;
 }
 
 .dialog {
@@ -53,6 +71,43 @@
   border-radius: 10px;
   background: var(--mc-surface-raised);
   box-shadow: 0 16px 48px var(--mc-shadow);
+  animation: dialog-pop-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+/* Исчезание: presence-хук держит диалог смонтированным на время анимации. */
+.dialog-backdrop.is-closing {
+  animation: overlay-fade-out 150ms ease-in forwards;
+  pointer-events: none;
+}
+
+.dialog-backdrop.is-closing .dialog {
+  animation: dialog-pop-out 150ms ease-in forwards;
+}
+
+@keyframes overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes overlay-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.965);
+  }
+}
+
+@keyframes dialog-pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.975);
+  }
 }
 
 .dialog-text {
@@ -101,3 +156,15 @@
   cursor: wait;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .dialog-backdrop,
+  .dialog,
+  .dialog-backdrop.is-closing,
+  .dialog-backdrop.is-closing .dialog {
+    animation: none;
+  }
+
+  .dialog-backdrop.is-closing {
+    opacity: 0;
+  }
+}

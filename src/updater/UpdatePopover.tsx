@@ -14,6 +14,8 @@ type NotificationCenterState = AppUpdaterController["center"];
 
 type UpdatePopoverProps = {
   center: NotificationCenterState;
+  // Поповер доигрывает exit-анимацию перед размонтированием.
+  closing?: boolean;
   onInstall: () => void;
   onOpenRelease: () => void;
   onClose: () => void;
@@ -148,7 +150,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
       <div
         id="notification-center"
         ref={setDialogRef}
-        className="update-popover"
+        className={`update-popover ${props.closing ? "is-closing" : ""}`}
         data-tauri-drag-region="false"
         role="dialog"
         aria-modal="false"

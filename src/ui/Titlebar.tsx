@@ -7,6 +7,7 @@ import {
   SlidersIcon,
 } from "./Icons";
 import { useI18n } from "../i18n";
+import { useAnimatedPresence } from "./useAnimatedPresence";
 import { UpdatePopover } from "../updater/UpdatePopover";
 import {
   loadReadNotificationIds,
@@ -37,6 +38,8 @@ function collapseHome(path: string): string {
 export function Titlebar(props: TitlebarProps) {
   const { t } = useI18n();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // Поповер остаётся в DOM на время exit-анимации после закрытия.
+  const popoverPresence = useAnimatedPresence(notificationsOpen || null, 150);
   const [readNotificationIds, setReadNotificationIds] = useState(() =>
     loadReadNotificationIds(),
   );
@@ -259,10 +262,11 @@ export function Titlebar(props: TitlebarProps) {
               </span>
             )}
           </button>
-          {notificationsOpen && (
+          {popoverPresence && (
             <UpdatePopover
               ref={popoverRef}
               center={props.updater.center}
+              closing={popoverPresence.closing}
               onInstall={() => void props.updater.installUpdate()}
               onOpenRelease={() => void props.updater.openRelease()}
               onClose={() => closeNotifications()}

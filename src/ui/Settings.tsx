@@ -33,6 +33,8 @@ type SettingsProps = {
   onSelectAccent: (color: string) => void;
   onSelectShell: (command: string | null, label: string) => void;
   onSelectTerminalFontSize: (size: number) => void;
+  // Диалог доигрывает exit-анимацию перед размонтированием.
+  closing?: boolean;
   onClose: () => void;
 };
 
@@ -104,7 +106,10 @@ export function Settings(props: SettingsProps) {
   };
 
   return (
-    <div className="dialog-backdrop" onClick={props.onClose}>
+    <div
+      className={`dialog-backdrop ${props.closing ? "is-closing" : ""}`}
+      onClick={props.onClose}
+    >
       <div
         className="dialog settings-dialog"
         role="dialog"

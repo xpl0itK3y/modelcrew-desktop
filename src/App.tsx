@@ -23,6 +23,7 @@ import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Settings } from "./ui/Settings";
 import { MaximizeIcon } from "./ui/Icons";
+import { useAnimatedPresence } from "./ui/useAnimatedPresence";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { useCmdDrag } from "./hotkeys/useCmdDrag";
@@ -288,6 +289,33 @@ export default function App() {
     };
   }, []);
 
+  // Оверлеи (настройки, диалоги, тост) доигрывают exit-анимацию после
+  // закрытия; presence хранит последние данные для текста, даже если
+  // исходное состояние уже обнулено (например, сессия удалена).
+  const settingsPresence = useAnimatedPresence(settingsOpen || null, 160);
+  const toastPresence = useAnimatedPresence(toast, 190);
+  const closeGroupPresence = useAnimatedPresence(closeGroupRequest, 160);
+  const deleteWorkspacePresence = useAnimatedPresence(
+    deleteWorkspaceRequest,
+    160,
+  );
+  const pendingShellPresence = useAnimatedPresence(pendingShell, 160);
+  const deleteSessionView = useMemo(() => {
+    if (!deleteSessionRequest) {
+      return null;
+    }
+    const workspace = workspaces.list.find(
+      (item) => item.id === deleteSessionRequest.workspaceId,
+    );
+    const target = workspace?.sessions.find(
+      (session) => session.id === deleteSessionRequest.sessionId,
+    );
+    return workspace && target
+      ? { request: deleteSessionRequest, workspace, target }
+      : null;
+  }, [deleteSessionRequest, workspaces]);
+  const deleteSessionPresence = useAnimatedPresence(deleteSessionView, 160);
+
   const activeWorkspace = workspaces.list.find(
     (workspace) => workspace.id === workspaces.activeId,
   );
@@ -310,18 +338,6 @@ export default function App() {
       sessions,
     };
   });
-  const deleteSessionWorkspace = deleteSessionRequest
-    ? workspaces.list.find(
-        (workspace) => workspace.id === deleteSessionRequest.workspaceId,
-      )
-    : undefined;
-  const deleteSessionTarget =
-    deleteSessionWorkspace && deleteSessionRequest
-      ? deleteSessionWorkspace.sessions.find(
-          (session) => session.id === deleteSessionRequest.sessionId,
-        )
-      : undefined;
-
   return (
     <div className={`app-shell ${sidebarVisible ? "" : "sidebar-hidden"}`}>
       <Titlebar
@@ -383,9 +399,13 @@ export default function App() {
           )}
         </main>
       </div>
-      {toast && (
-        <div className="toast" role="status" aria-live="polite">
-          {toast}
+      {toastPresence && (
+        <div
+          className={`toast ${toastPresence.closing ? "is-closing" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {toastPresence.item}
         </div>
       )}
       {zoomed && (
@@ -416,58 +436,65 @@ export default function App() {
           ))}
         </div>
       )}
-      {closeGroupRequest && (
+      {closeGroupPresence && (
         <ConfirmDialog
           text={t("confirm.closeTerminal")}
           confirmLabel={t("common.close")}
+          closing={closeGroupPresence.closing}
           onConfirm={() => {
-            closeGroupAnimated(closeGroupRequest);
+            closeGroupAnimated(closeGroupPresence.item);
             setCloseGroupRequest(null);
           }}
           onCancel={() => setCloseGroupRequest(null)}
         />
       )}
-      {deleteSessionRequest && deleteSessionWorkspace && deleteSessionTarget && (
+      {deleteSessionPresence && (
         <ConfirmDialog
           text={t("confirm.deleteSession", {
-            name: sessionDisplayName(deleteSessionTarget, (index) =>
+            name: sessionDisplayName(deleteSessionPresence.item.target, (index) =>
               t("session.defaultName", { index }),
             ),
             terminals: formatTerminalCount(
-              sessionPanelCount(deleteSessionWorkspace, deleteSessionTarget),
+              sessionPanelCount(
+                deleteSessionPresence.item.workspace,
+                deleteSessionPresence.item.target,
+              ),
               locale,
             ),
           })}
           confirmLabel={t("common.delete")}
+          closing={deleteSessionPresence.closing}
           onConfirm={() => {
             deleteSession(
-              deleteSessionRequest.workspaceId,
-              deleteSessionRequest.sessionId,
+              deleteSessionPresence.item.request.workspaceId,
+              deleteSessionPresence.item.request.sessionId,
             );
             setDeleteSessionRequest(null);
           }}
           onCancel={() => setDeleteSessionRequest(null)}
         />
       )}
-      {deleteWorkspaceRequest && (
+      {deleteWorkspacePresence && (
         <ConfirmDialog
           text={t("confirm.deleteWorkspace", {
-            name: deleteWorkspaceRequest.displayName,
+            name: deleteWorkspacePresence.item.displayName,
             terminals: formatTerminalCount(
-              workspacePanelCount(deleteWorkspaceRequest),
+              workspacePanelCount(deleteWorkspacePresence.item),
               locale,
             ),
           })}
           confirmLabel={t("common.delete")}
+          closing={deleteWorkspacePresence.closing}
           onConfirm={() => {
-            deleteWorkspace(deleteWorkspaceRequest);
+            deleteWorkspace(deleteWorkspacePresence.item);
             setDeleteWorkspaceRequest(null);
           }}
           onCancel={() => setDeleteWorkspaceRequest(null)}
         />
       )}
-      {settingsOpen && (
+      {settingsPresence && (
         <Settings
+          closing={settingsPresence.closing}
           themeId={themeId}
           accent={accent}
           shell={shell}
@@ -495,12 +522,16 @@ export default function App() {
           }}
         />
       )}
-      {pendingShell && (
+      {pendingShellPresence && (
         <ConfirmDialog
           text={t("settings.confirmShellChange", {
-            name: pendingShell.label,
-            terminals: formatTerminalCount(pendingShell.count, locale),
+            name: pendingShellPresence.item.label,
+            terminals: formatTerminalCount(
+              pendingShellPresence.item.count,
+              locale,
+            ),
           })}
+          closing={pendingShellPresence.closing}
           confirmLabel={
             shellBusy
               ? t("settings.shellApplying")

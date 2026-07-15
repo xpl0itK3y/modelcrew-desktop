@@ -5,6 +5,8 @@ type ConfirmDialogProps = {
   text: string;
   confirmLabel: string;
   busy?: boolean;
+  // Диалог доигрывает exit-анимацию перед размонтированием.
+  closing?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -18,7 +20,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     confirmRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       event.stopPropagation();
-      if (props.busy) {
+      if (props.busy || props.closing) {
         event.preventDefault();
         return;
       }
@@ -36,9 +38,9 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
   return (
     <div
-      className="dialog-backdrop"
+      className={`dialog-backdrop ${props.closing ? "is-closing" : ""}`}
       onClick={() => {
-        if (!props.busy) {
+        if (!props.busy && !props.closing) {
           props.onCancel();
         }
       }}

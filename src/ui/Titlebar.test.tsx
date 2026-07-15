@@ -116,15 +116,20 @@ describe("Titlebar notification center", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Поповер доигрывает exit-анимацию, затем размонтируется.
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
     await waitFor(() => expect(bell).toHaveFocus());
   });
 
-  it("closes on an outside pointer press", () => {
+  it("closes on an outside pointer press", async () => {
     render(titlebar(controller({ sync: "settled", items: [] })));
     fireEvent.click(screen.getByRole("button", { name: "Уведомления" }));
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("shows download progress on the bell without an unread badge", () => {
