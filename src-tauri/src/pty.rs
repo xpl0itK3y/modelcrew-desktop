@@ -99,6 +99,9 @@ impl PtyManager {
         if let Some(history) = &opts.history_dir {
             cmd.env("ZDOTDIR", history);
             cmd.env("HISTFILE", history.join("shell_history"));
+            // bash пишет историю только на выходе — history -a после каждой
+            // команды спасает её при принудительном завершении приложения.
+            cmd.env("PROMPT_COMMAND", "history -a");
             let fish_name: String = opts
                 .id
                 .chars()
