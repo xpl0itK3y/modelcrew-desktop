@@ -1,12 +1,12 @@
-<p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="128" alt="ModelCrew logo" />
-</p>
+<div align="center">
 
-<h1 align="center">ModelCrew</h1>
+<img src="src-tauri/icons/128x128@2x.png" width="128" alt="ModelCrew logo" />
 
-<p align="center">
-  A fast terminal workspace for running AI coding agents side by side.
-</p>
+# ModelCrew
+
+**A fast terminal workspace for running AI coding agents side by side.**
+
+</div>
 
 ModelCrew is a modular agent-based development system where each agent role
 can run on a separate model, and the user stays in control of quality, cost,
