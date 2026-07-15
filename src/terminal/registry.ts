@@ -1,8 +1,16 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  discardSnapshot,
+  flushSnapshot,
+  loadSnapshot,
+  markSnapshotDirty,
+  registerSnapshotSource,
+} from "./snapshots";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
@@ -107,6 +115,10 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Снимки текста: сериализатор регистрируется до первого вывода PTY.
+  const serialize = new SerializeAddon();
+  term.loadAddon(serialize);
+  registerSnapshotSource(id, serialize);
   term.open(container);
 
   try {
@@ -179,6 +191,7 @@ type PtyCreateResult = {
 
 function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   entry.term.write(typeof data === "string" ? data : new Uint8Array(data));
+  markSnapshotDirty(entry.id);
 }
 
 function createLiveOutputChannel(
@@ -312,6 +325,16 @@ async function spawnTerminal(
     return;
   }
 
+  // Восстановление после полного перезапуска: прежний текст панели
+  // подкладывается до первого вывода нового PTY.
+  const snapshot = await loadSnapshot(entry.id);
+  if (snapshot && registry.get(entry.id) === entry && !entry.exited) {
+    entry.term.write(snapshot);
+    entry.term.write(
+      `\r\n\x1b[2m── ${translate("terminal.restored")} ──\x1b[0m\r\n`,
+    );
+  }
+
   const generation = entry.outputGeneration + 1;
   entry.outputGeneration = generation;
   const output = createLiveOutputChannel(entry, generation);
@@ -373,6 +396,8 @@ export async function destroyTerminal(id: string): Promise<void> {
   }
   registry.delete(id);
   autoTitles.delete(id);
+  // Закрытие панели — намеренное: её история больше не восстановится.
+  discardSnapshot(id);
   entry.outputGeneration += 1;
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
@@ -400,6 +425,8 @@ if (isTauri) {
     entry.term.write(
       `\r\n\x1b[2m[${translate("terminal.processExited")}${codeLabel}]\x1b[0m\r\n`,
     );
+    // Процесс завершился (например, агент) — фиксируем историю сразу.
+    void flushSnapshot(entry.id);
   }
   }).catch(() => {
     // Событие может быть недоступно при раннем старте — не критично.

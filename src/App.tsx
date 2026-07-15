@@ -18,6 +18,7 @@ import {
   isManualTitle,
   restartRunningTerminals,
 } from "./terminal/registry";
+import { flushAllSnapshots, pruneSnapshots } from "./terminal/snapshots";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -180,6 +181,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Сироты-снимки терминалов (панели/сессии удалены в прошлых запусках)
+  // вычищаются один раз на старте по актуальным раскладкам.
+  useEffect(() => {
+    const keep: string[] = [];
+    for (const workspace of workspacesRef.current.list) {
+      for (const session of workspace.sessions) {
+        keep.push(...Object.keys(session.layout?.panels ?? {}));
+      }
+    }
+    pruneSnapshots(keep);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const prepareForUpdate = useCallback(async () => {
     // Фиксируем Dockview/Workspace и явно гасим процессы перед заменой
     // self-update или перед перезапуском уже установленного Linux-пакета.
@@ -190,6 +204,9 @@ export default function App() {
     // проекты во время установки и перезапуска.
     persistNow();
     suspendPersistence();
+    // Историю терминалов фиксируем до гашения процессов: после обновления
+    // панели восстановятся с последним текстом.
+    await flushAllSnapshots();
     if (isTauri) {
       try {
         await invoke("pty_kill_all");

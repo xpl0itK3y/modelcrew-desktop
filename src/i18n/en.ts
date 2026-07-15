@@ -226,6 +226,7 @@ export const en: Record<MessageKey, string> = {
   "terminal.workspaceMissing": "the panel is not linked to a workspace",
   "terminal.webPreview": "web preview: the shell only runs in the app",
   "terminal.processExited": "process exited",
+  "terminal.restored": "restored",
   "terminal.exitCode": "code {code}",
 
   "error.mainWindowOnly": "This command is only available in the main window",

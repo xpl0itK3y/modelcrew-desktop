@@ -224,6 +224,7 @@ export const ru = {
   "terminal.webPreview":
     "веб-превью: оболочка работает только в приложении",
   "terminal.processExited": "процесс завершён",
+  "terminal.restored": "восстановлено",
   "terminal.exitCode": "код {code}",
 
   "error.mainWindowOnly": "Команда доступна только в главном окне",
