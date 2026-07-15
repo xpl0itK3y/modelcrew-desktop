@@ -221,3 +221,25 @@ export function normalizeDefaultIndex(value: unknown, fallback: number): number 
     ? value
     : fallback;
 }
+
+// Активная сессия проекта; при битом activeSessionId откатываемся к первой.
+export function activeSession(
+  workspace: Workspace,
+): TerminalSession | undefined {
+  return (
+    workspace.sessions.find(
+      (session) => session.id === workspace.activeSessionId,
+    ) ?? workspace.sessions[0]
+  );
+}
+
+export function isActiveSession(
+  state: WorkspacesState,
+  workspaceId: string,
+  sessionId: string,
+): boolean {
+  const workspace = state.list.find((item) => item.id === workspaceId);
+  return (
+    state.activeId === workspaceId && workspace?.activeSessionId === sessionId
+  );
+}

@@ -5,15 +5,14 @@ import {
   DockviewReact,
   DockviewReadyEvent,
   DockviewTheme,
-  IDockviewHeaderActionsProps,
-  IWatermarkPanelProps,
-  SerializedDockview,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import { TerminalTab } from "./panels/TerminalTab";
+import { GroupActions } from "./panels/GroupActions";
+import { Welcome } from "./panels/Welcome";
 import {
   destroyTerminal,
   applyTerminalFontSize,
@@ -28,12 +27,7 @@ import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Settings } from "./ui/Settings";
-import {
-  CloseIcon,
-  FolderIcon,
-  MaximizeIcon,
-  PlusIcon,
-} from "./ui/Icons";
+import { MaximizeIcon } from "./ui/Icons";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { useCmdDrag } from "./hotkeys/useCmdDrag";
@@ -44,15 +38,20 @@ import {
   saveAccent,
   saveTheme,
 } from "./theme";
+import { closeGroupAnimated } from "./animations";
 import {
-  closeGroupAnimated,
-  flipGroups,
-  snapshotGroupRects,
-} from "./animations";
+  addPanel,
+  addTerminalAutoGrid,
+  defaultTerminalTitles,
+  localizeDefaultPanelTitles,
+  snapshotActiveSessionLayout,
+} from "./layoutOps";
 import {
+  activeSession,
   createDefaultSession,
   createTerminalSession,
   folderBaseName,
+  isActiveSession,
   loadWorkspacesState,
   nextSessionDefaultIndex,
   saveWorkspacesState,
@@ -69,24 +68,15 @@ import {
   translate,
   useI18n,
 } from "./i18n";
-import {
-  isMac,
-  MAX_TERMINALS,
-  PANEL_MIN_HEIGHT,
-  PANEL_MIN_WIDTH,
-  WORKSPACE_NAME,
-} from "./constants";
+import { isMac, MAX_TERMINALS, WORKSPACE_NAME } from "./constants";
 import { loadShell, saveShell } from "./shell";
-import {
-  playNotificationSound,
-  selectUnseenNotificationSoundIds,
-} from "./sound";
 import {
   loadTerminalFontSize,
   saveTerminalFontSize,
 } from "./terminal/preferences";
 import { useAppUpdater } from "./updater/useAppUpdater";
-import { loadReadNotificationIds } from "./updater/readNotifications";
+import { useNotificationSounds } from "./updater/useNotificationSounds";
+import "./styles/index.css";
 
 function unavailable(error: unknown): FolderRuntimeStatus {
   return {
@@ -95,7 +85,6 @@ function unavailable(error: unknown): FolderRuntimeStatus {
     message: localizeBackendError(error),
   };
 }
-import "./styles/index.css";
 
 const components = { terminal: TerminalPanel };
 const tabComponents = { terminal: TerminalTab };
@@ -111,49 +100,6 @@ type SessionDeleteRequest = {
   sessionId: string;
 };
 
-function activeSession(workspace: Workspace): TerminalSession | undefined {
-  return (
-    workspace.sessions.find(
-      (session) => session.id === workspace.activeSessionId,
-    ) ?? workspace.sessions[0]
-  );
-}
-
-function snapshotActiveSessionLayout(
-  list: Workspace[],
-  activeWorkspaceId: string | null,
-  api: DockviewApi | null,
-): Workspace[] {
-  if (!api || !activeWorkspaceId) {
-    return list;
-  }
-  const layout = api.toJSON();
-  return list.map((workspace) =>
-    workspace.id !== activeWorkspaceId
-      ? workspace
-      : {
-          ...workspace,
-          sessions: workspace.sessions.map((session) =>
-            session.id === workspace.activeSessionId
-              ? { ...session, layout }
-              : session,
-          ),
-        },
-  );
-}
-
-function isActiveSession(
-  state: WorkspacesState,
-  workspaceId: string,
-  sessionId: string,
-): boolean {
-  const workspace = state.list.find((item) => item.id === workspaceId);
-  return (
-    state.activeId === workspaceId &&
-    workspace?.activeSessionId === sessionId
-  );
-}
-
 const modelcrewTheme: DockviewTheme = {
   name: "modelcrew",
   className: "dockview-theme-modelcrew",
@@ -163,227 +109,6 @@ const modelcrewTheme: DockviewTheme = {
   dndPanelOverlay: "group",
   tabGroupIndicator: "none",
 };
-
-const defaultTerminalTitles = new Set(["терминал", "terminal"]);
-
-function localizeDefaultPanelTitles(
-  layout: SerializedDockview | null,
-): SerializedDockview | null {
-  if (!layout) {
-    return null;
-  }
-  const title = translate("terminal.defaultTitle");
-  return {
-    ...layout,
-    panels: Object.fromEntries(
-      Object.entries(layout.panels).map(([panelId, panel]) => {
-        const titleKind = panel.params?.titleKind;
-        const isDefaultTitle =
-          titleKind === "default" ||
-          (titleKind === undefined &&
-            defaultTerminalTitles.has(panel.title ?? ""));
-        return [panelId, isDefaultTitle ? { ...panel, title } : panel];
-      }),
-    ),
-  };
-}
-
-function addPanel(
-  api: DockviewApi,
-  workspaceId: string,
-  sessionId: string,
-  options: {
-    group?: DockviewGroupPanel;
-    direction?: "left" | "right" | "above" | "below";
-  } = {},
-) {
-  api.addPanel({
-    id: crypto.randomUUID(),
-    component: "terminal",
-    tabComponent: "terminal",
-    // Короткий placeholder только на время запуска PTY. pty_create сразу
-    // вернёт имя оболочки, дальше watcher отслеживает codex/vim/другие процессы.
-    title: translate("terminal.defaultTitle"),
-    // В layout сохраняется только владелец панели. cwd разрешает Rust.
-    params: { workspaceId, sessionId, titleKind: "default" },
-    minimumWidth: PANEL_MIN_WIDTH,
-    minimumHeight: PANEL_MIN_HEIGHT,
-    ...(options.group
-      ? {
-          position: {
-            referenceGroup: options.group,
-            ...(options.direction ? { direction: options.direction } : {}),
-          },
-        }
-      : options.direction
-        ? // Absolute-позиция: панель встаёт у края всего грида
-          // (полноширинная строка/колонка).
-          { position: { direction: options.direction } }
-        : {}),
-  });
-}
-
-// Новый терминал встаёт в сетку: делим самую большую группу вдоль её
-// длинной стороны. Вкладок нет — один терминал = одна панель, поэтому
-// при упоре в минимумы 240×160 новый терминал не создаём вовсе.
-function addTerminalAutoGrid(
-  api: DockviewApi,
-  workspaceId: string,
-  sessionId: string,
-  onBlocked?: (reason: "limit" | "space") => void,
-) {
-  // Жёсткий предел раньше пространственного: 12 терминалов на сессию.
-  if (api.panels.length >= MAX_TERMINALS) {
-    onBlocked?.("limit");
-    return;
-  }
-  const groups = api.groups;
-  if (groups.length === 0) {
-    addPanel(api, workspaceId, sessionId);
-    return;
-  }
-
-  // Раскладка строится СТРОКАМИ: новая панель встаёт в самую короткую
-  // строку, а когда строки заполнены — полноширинной строкой снизу.
-  // У строчного дерева вертикальные разделители соседних строк
-  // независимы: перетаскивание границы в одной строке не двигает другую.
-  const sorted = [...groups].sort((a, b) => {
-    const rectA = a.element.getBoundingClientRect();
-    const rectB = b.element.getBoundingClientRect();
-    if (Math.abs(rectA.top - rectB.top) > 30) {
-      return rectA.top - rectB.top;
-    }
-    return rectA.left - rectB.left;
-  });
-  const rows: DockviewGroupPanel[][] = [];
-  let currentTop = Number.NEGATIVE_INFINITY;
-  for (const group of sorted) {
-    const top = group.element.getBoundingClientRect().top;
-    if (Math.abs(top - currentTop) > 30) {
-      rows.push([]);
-      currentTop = top;
-    }
-    rows[rows.length - 1].push(group);
-  }
-
-  let shortest = rows[0];
-  for (const row of rows) {
-    if (row.length < shortest.length) {
-      shortest = row;
-    }
-  }
-  const targetColumns = Math.ceil(Math.sqrt(groups.length + 1));
-  const rowWidth = shortest.reduce((width, group) => width + group.width, 0);
-  const widenFits = rowWidth / (shortest.length + 1) >= PANEL_MIN_WIDTH;
-  const gridHeight = rows.reduce((height, row) => height + row[0].height, 0);
-  const newRowFits = gridHeight / (rows.length + 1) >= PANEL_MIN_HEIGHT;
-
-  // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
-  const before = snapshotGroupRects(api);
-  if (widenFits && (shortest.length < targetColumns || !newRowFits)) {
-    addPanel(api, workspaceId, sessionId, {
-      group: shortest[shortest.length - 1],
-      direction: "right",
-    });
-  } else if (newRowFits) {
-    addPanel(api, workspaceId, sessionId, { direction: "below" });
-  } else {
-    onBlocked?.("space");
-    return;
-  }
-  flipGroups(api, before, 200);
-}
-
-function GroupActions(props: IDockviewHeaderActionsProps) {
-  const { t } = useI18n();
-  const maximizeShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
-  const closeShortcut = isMac ? "⌘⇧W" : "Ctrl+Shift+W";
-  return (
-    <div className="group-actions">
-      <button
-        type="button"
-        className="icon-button"
-        title={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
-        aria-label={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
-        onClick={() => {
-          if (props.containerApi.hasMaximizedGroup()) {
-            props.containerApi.exitMaximizedGroup();
-          } else if (props.activePanel) {
-            props.containerApi.maximizeGroup(props.activePanel);
-          }
-        }}
-      >
-        <MaximizeIcon />
-      </button>
-      <button
-        type="button"
-        className="icon-button"
-        title={t("group.close", { shortcut: closeShortcut })}
-        aria-label={t("group.close", { shortcut: closeShortcut })}
-        onClick={() => appActions.requestCloseGroup(props.group)}
-      >
-        <CloseIcon />
-      </button>
-    </div>
-  );
-}
-
-function Welcome(_props: IWatermarkPanelProps) {
-  const { t } = useI18n();
-  const newTerminalShortcut = isMac ? "⌘T" : "Ctrl+T";
-  const panelNumbersShortcut = isMac ? "⌘⌥" : "Ctrl+Alt";
-  const zoomShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
-  // Первый запуск (воркспейса нет) — онбординг через выбор папки проекта.
-  if (!appActions.hasActiveWorkspace()) {
-    return (
-      <div className="welcome">
-        <div className="welcome-badge">MODELCREW</div>
-        <h1 className="welcome-title">{t("welcome.title")}</h1>
-        <p className="welcome-subtitle">
-          {t("welcome.chooseProject")}
-        </p>
-        <button
-          type="button"
-          className="welcome-button"
-          onClick={() => appActions.requestCreateWorkspace()}
-        >
-          <FolderIcon /> {t("welcome.openProject")}
-        </button>
-        <div className="welcome-hints">
-          <span>
-            <kbd>{newTerminalShortcut}</kbd> {t("welcome.openProjectShortcut")}
-          </span>
-        </div>
-      </div>
-    );
-  }
-  // Воркспейс есть, но все терминалы закрыты.
-  return (
-    <div className="welcome">
-      <div className="welcome-badge">MODELCREW</div>
-      <h1 className="welcome-title">{t("welcome.title")}</h1>
-      <p className="welcome-subtitle">{t("welcome.terminalsTogether")}</p>
-      <button
-        type="button"
-        className="welcome-button"
-        onClick={() => appActions.requestNewTerminal()}
-      >
-        <PlusIcon /> {t("welcome.newTerminal")}
-      </button>
-      <div className="welcome-hints">
-        <span>
-          <kbd>{newTerminalShortcut}</kbd> {t("welcome.newTerminalShortcut")}
-        </span>
-        <span>
-          <kbd>{panelNumbersShortcut}</kbd> {t("welcome.panelNumbersShortcut")}
-        </span>
-        <span>
-          <kbd>{zoomShortcut}</kbd> {t("welcome.zoomShortcut")}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const { locale, t } = useI18n();
@@ -511,31 +236,7 @@ export default function App() {
 
   const updater = useAppUpdater({ locale, beforeInstall: prepareForUpdate });
 
-  // Read notifications stay quiet after restart, while an unread update can
-  // still announce itself the next time the app discovers it.
-  const [handledSoundNotificationIds] = useState(
-    () => new Set(loadReadNotificationIds()),
-  );
-  useEffect(() => {
-    // The notification center can mark items read without changing updater
-    // state, so refresh persistence whenever its item list changes.
-    for (const id of loadReadNotificationIds()) {
-      handledSoundNotificationIds.add(id);
-    }
-    const unseenIds = selectUnseenNotificationSoundIds(
-      updater.center.items,
-      handledSoundNotificationIds,
-    );
-    if (unseenIds.length === 0) {
-      return;
-    }
-    // Mark the whole batch before playback. Even a muted or rejected sound must
-    // not be retried on a later render during the same app run.
-    for (const id of unseenIds) {
-      handledSoundNotificationIds.add(id);
-    }
-    playNotificationSound();
-  }, [handledSoundNotificationIds, updater.center.items]);
+  useNotificationSounds(updater.center.items);
 
   const schedulePersist = useCallback(() => {
     if (persistTimer.current !== undefined) {
