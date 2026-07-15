@@ -1,0 +1,255 @@
+// Russian catalog — the source of truth for MessageKey.
+export const ru = {
+  "common.cancel": "Отмена",
+  "common.close": "Закрыть",
+  "common.delete": "Удалить",
+
+  "titlebar.toggleSidebar": "Показать или скрыть боковую панель",
+  "titlebar.newTerminal": "Новый терминал в сетку",
+  "titlebar.layoutsSoon": "Раскладки — скоро",
+  "titlebar.notificationsSoon": "Уведомления — скоро",
+  "titlebar.notifications": "Уведомления",
+  "titlebar.updateReady": "Обновление {version} готово",
+  "titlebar.updatesUnavailable":
+    "Обновления доступны в установленной версии приложения",
+  "titlebar.settings": "Настройки",
+
+  "update.title": "Обновления",
+  "update.idleDescription":
+    "ModelCrew проверяет и загружает обновления в фоне.",
+  "update.checkNow": "Проверить обновления",
+  "update.checking": "Проверяем новую версию…",
+  "update.upToDate": "Установлена последняя версия",
+  "update.upToDateDescription":
+    "Новых стабильных обновлений сейчас нет.",
+  "update.checkAgain": "Проверить ещё раз",
+  "update.downloading": "Загружаем ModelCrew {version}",
+  "update.downloadingDescription":
+    "Можно продолжать работать — терминалы не будут закрыты.",
+  "update.downloadProgress": "Прогресс загрузки обновления",
+  "update.downloaded": "Загружено {downloaded}",
+  "update.downloadedOf": "{downloaded} из {total}",
+  "update.verifying": "Проверяем загруженное обновление",
+  "update.verifyingDescription":
+    "Проверяем подпись и целостность системного пакета.",
+  "update.version": "Обновление {version} готово",
+  "update.readyTitle": "Обновление ModelCrew {version}",
+  "update.fallbackSummary":
+    "Доступна новая версия ModelCrew. Подробности опубликованы на странице релиза.",
+  "update.manualPackageHelp":
+    "ModelCrew не смог безопасно определить формат этой установки. Откройте страницу загрузки и выберите подходящий пакет вручную.",
+  "update.details": "Подробнее",
+  "update.later": "Позже",
+  "update.openDownloads": "Открыть страницу загрузки",
+  "update.restartAndInstall": "Перезапустить и обновить",
+  "update.confirmTitle": "Перезапустить ModelCrew?",
+  "update.confirmWarning":
+    "Терминалы и запущенные процессы будут закрыты. Проекты, сессии и раскладка сохранятся.",
+  "update.nativeConfirmWarning":
+    "Linux запросит системную авторизацию. После установки терминалы и запущенные процессы будут закрыты. Проекты, сессии и раскладка сохранятся.",
+  "update.confirmRestart": "Перезапустить",
+  "update.authorizing": "Ожидаем системное подтверждение",
+  "update.authorizingDescription":
+    "Подтвердите установку в системном окне Linux. После подтверждения она продолжится автоматически.",
+  "update.authorizationCancelledTitle": "Установка не подтверждена",
+  "update.authorizationCancelledDescription":
+    "Системная авторизация отменена. Обновление не установлено, терминалы продолжают работать.",
+  "update.installing": "Устанавливаем ModelCrew {version}",
+  "update.installingDescription":
+    "Приложение перезапустится после установки обновления.",
+  "update.nativeInstallingDescription":
+    "Подтвердите системное окно, если оно появится. Linux установит пакет автоматически — не закрывайте ModelCrew.",
+  "update.restarting": "Перезапускаем ModelCrew {version}",
+  "update.restartingDescription":
+    "Обновление установлено. Сохраняем рабочее состояние и перезапускаем приложение.",
+  "update.errorTitle": "Не удалось обновить ModelCrew",
+  "update.errorCheck": "Не удалось проверить наличие новой версии.",
+  "update.errorDownload": "Не удалось загрузить обновление.",
+  "update.errorInstall": "Не удалось установить загруженное обновление.",
+  "update.retry": "Повторить",
+  "update.close": "Закрыть уведомления",
+  "update.resize": "Потяните, чтобы изменить высоту",
+  "update.notificationsTitle": "Уведомления",
+  "update.refreshingNotifications": "Обновляем уведомления…",
+  "update.empty": "Пока нет уведомлений",
+  "update.versionLabel": "ModelCrew {version}",
+  "update.downloadRetry":
+    "Загрузка не завершилась. Повторим автоматически.",
+  "update.installFailedTitle": "Не удалось установить обновление",
+  "update.installFailedDescription":
+    "Попробуйте установить его ещё раз. Перед новой попыткой ModelCrew снова попросит подтвердить перезапуск.",
+  "update.retryInstall": "Повторить установку",
+  "update.restartFailedTitle":
+    "Обновление установлено, но ModelCrew не перезапустился",
+  "update.restartFailedDescription":
+    "Повторная установка не нужна. Попробуйте перезапустить приложение ещё раз.",
+  "update.retryRestart": "Повторить перезапуск",
+
+  "sidebar.title": "Проекты",
+  "sidebar.newWorkspace": "Новый проект",
+  "sidebar.deleteWorkspace": "Удалить проект",
+  "sidebar.homeFolder": "Домашняя папка",
+  "sidebar.renameWorkspace": "Переименовать проект",
+  "sidebar.expandWorkspace": "Развернуть проект «{name}»",
+  "sidebar.collapseWorkspace": "Свернуть проект «{name}»",
+  "sidebar.workspaceActions": "Действия с проектом «{name}»",
+  "sidebar.newSessionIn": "Новая сессия в проекте «{name}»",
+  "sidebar.renameSession": "Переименовать сессию",
+  "sidebar.deleteSession": "Удалить сессию",
+  "sidebar.sessionActions": "Действия с сессией «{name}»",
+  "sidebar.newTerminalIn": "Новый терминал в сессии «{name}»",
+
+  "settings.title": "Настройки",
+  "settings.language": "Язык интерфейса",
+  "settings.languageRussian": "Русский",
+  "settings.languageEnglish": "English",
+  "settings.theme": "Тема интерфейса",
+  "settings.accent": "Цвет подсветки",
+  "settings.customColor": "Свой цвет",
+  "settings.selectTheme": "Выбрать тему «{name}»",
+  "settings.selectAccent": "Выбрать цвет «{name}»",
+  "settings.shell": "Оболочка",
+  "settings.shellDefault": "Системная",
+  "settings.shellNote": "Смена перезапустит все работающие терминалы",
+  "settings.selectShell": "Выбрать оболочку «{name}»",
+  "settings.confirmShellChange":
+    "Сменить оболочку на «{name}» и перезапустить {terminals}? Текущие процессы будут остановлены.",
+  "settings.shellRestart": "Перезапустить",
+  "settings.shellApplying": "Перезапуск…",
+  "settings.shellChanged": "Оболочка изменена",
+  "settings.shellRestarted": "Оболочка изменена: перезапущено {terminals}",
+  "settings.shellRestartFailed":
+    "Не удалось перезапустить {failed} из {total} терминалов — они продолжают работать в прежней оболочке",
+  "settings.terminalFontSize": "Размер шрифта терминала",
+  "settings.terminalFontSizeValue": "{size} px",
+  "settings.tabAppearance": "Внешний вид",
+  "settings.tabTerminal": "Терминал",
+  "settings.tabNotifications": "Уведомления",
+  "settings.notificationSound": "Звук уведомления",
+  "settings.notificationSoundNote":
+    "Проигрывается при новом уведомлении. Нажмите, чтобы прослушать.",
+  "settings.notificationSoundSuppressed":
+    "Похоже, аудиосистема зависла при прошлой попытке, поэтому звук временно отключён. Выберите «Без звука», а затем нужный звук, чтобы попробовать снова.",
+  "settings.previewSound": "Прослушать «{name}»",
+  "settings.soundOff": "Без звука",
+  "settings.soundChime": "Перезвон",
+  "settings.soundClick": "Клик",
+  "settings.soundPop": "Хлопок",
+  "settings.soundReveal": "Всплеск",
+  "settings.soundFlute": "Флейта",
+
+  "theme.midnight.name": "Полночь",
+  "theme.midnight.description": "Исходная тёмная",
+  "theme.graphite.name": "Графит",
+  "theme.graphite.description": "Спокойный монохром",
+  "theme.ocean.name": "Океан",
+  "theme.ocean.description": "Глубокий сине-чёрный",
+  "theme.forest.name": "Лес",
+  "theme.forest.description": "Тёмный хвойный",
+  "theme.aubergine.name": "Аметист",
+  "theme.aubergine.description": "Приглушённый фиолетовый",
+  "theme.porcelain.name": "Фарфор",
+  "theme.porcelain.description": "Светлая сланцевая",
+
+  "accent.pink": "Розовый",
+  "accent.rose": "Малиновый",
+  "accent.red": "Красный",
+  "accent.orange": "Оранжевый",
+  "accent.amber": "Янтарный",
+  "accent.yellow": "Жёлтый",
+  "accent.lime": "Лаймовый",
+  "accent.green": "Зелёный",
+  "accent.emerald": "Изумрудный",
+  "accent.teal": "Бирюзовый",
+  "accent.sky": "Голубой",
+  "accent.blue": "Синий",
+  "accent.indigo": "Индиго",
+  "accent.violet": "Фиолетовый",
+  "accent.purple": "Пурпурный",
+  "accent.fuchsia": "Фуксия",
+  "accent.white": "Белый",
+  "accent.gray": "Серый",
+
+  "welcome.title": "Собери свой флот.",
+  "welcome.chooseProject":
+    "Выбери папку проекта — в ней будут жить терминалы рабочего пространства.",
+  "welcome.terminalsTogether": "Терминалы для агентов — в одном окне.",
+  "welcome.openProject": "Открыть папку проекта",
+  "welcome.newTerminal": "Новый терминал",
+  "welcome.openProjectShortcut": "также откроет выбор папки",
+  "welcome.newTerminalShortcut": "новый терминал",
+  "welcome.panelNumbersShortcut": "номера панелей",
+  "welcome.zoomShortcut": "зум",
+
+  "group.splitRight": "Разделить вправо",
+  "group.maximizeRestore": "Развернуть или вернуть ({shortcut})",
+  "group.close": "Закрыть группу ({shortcut})",
+  "layout.noSplitSpace": "Недостаточно места для нового терминала",
+  "layout.terminalLimit": "Нельзя открыть больше {max} терминалов",
+  "layout.restore": "Вернуть раскладку",
+  "layout.terminalExpanded": "Терминал развёрнут",
+  "layout.restoreShortcut": "вернуть",
+
+  "workspace.checking": "Проверяем папки проектов…",
+  "workspace.folderChecking": "Папка проекта ещё проверяется",
+  "workspace.folderPickerDesktopOnly":
+    "Выбор папки доступен в приложении ModelCrew",
+  "workspace.syncFailed": "Не удалось синхронизировать папки: {error}",
+  "workspace.prepareFailed": "Не удалось подготовить папки: {error}",
+  "workspace.rootOwnedBy": "Папка уже принадлежит проекту {workspaceId}",
+  "workspace.alreadyOpen": "Папка уже открыта в «{name}»",
+  "workspace.alreadyRegistered": "Папка уже открыта в другом проекте",
+  "workspace.invalidBackendId":
+    "Приложение получило неверный идентификатор проекта",
+
+  "confirm.closeTerminal": "Закрытие терминала",
+  "confirm.deleteWorkspace":
+    "Удалить проект «{name}» и закрыть {terminals}?",
+  "confirm.deleteSession":
+    "Удалить сессию «{name}» и закрыть {terminals}?",
+
+  "session.defaultName": "Сессия {index}",
+  "session.cannotDeleteLast": "Нельзя удалить единственную сессию проекта",
+
+  "terminal.defaultTitle": "терминал",
+  "terminal.statusRunning": "Терминал работает",
+  "terminal.statusExited": "Терминал завершён",
+  "terminal.rename": "Переименовать терминал",
+  "terminal.shellStartFailed": "Не удалось запустить оболочку: {error}",
+  "terminal.workspaceMissing": "панель не связана с проектом",
+  "terminal.webPreview":
+    "веб-превью: оболочка работает только в приложении",
+  "terminal.processExited": "процесс завершён",
+  "terminal.exitCode": "код {code}",
+
+  "error.mainWindowOnly": "Команда доступна только в главном окне",
+  "error.invalidLocale": "Выбран неподдерживаемый язык интерфейса",
+  "error.appMenuUpdateFailed": "Не удалось обновить меню приложения",
+  "error.workspaceInvalidId": "Некорректный идентификатор проекта",
+  "error.workspaceRootConflict":
+    "Проект уже связан с другой папкой",
+  "error.workspaceRootNotRegistered": "Папка проекта не зарегистрирована",
+  "error.workspaceRootIdentityChanged":
+    "Папка проекта была заменена — выберите её заново",
+  "error.workspaceRootMissing": "Папка проекта недоступна",
+  "error.workspaceRootPermissionDenied": "Нет доступа к папке проекта",
+  "error.workspaceRootNotDirectory": "Выбранный путь не является папкой",
+  "error.workspaceRootUnavailable": "Не удалось проверить папку проекта",
+  "error.workspacePathUnsupported":
+    "Путь проекта содержит неподдерживаемые символы",
+  "error.workspacePickerPathInvalid": "Не удалось прочитать выбранный путь",
+  "error.terminalNotFound": "Терминал не найден",
+  "error.terminalPtyOpenFailed": "Не удалось открыть PTY",
+  "error.terminalShellNotFound": "Оболочка не найдена: {shell}",
+  "error.terminalCwdUnavailable": "Рабочая папка терминала недоступна",
+  "error.terminalSpawnFailed": "Не удалось запустить оболочку {shell}",
+  "error.terminalOutputStreamFailed": "Не удалось открыть поток вывода",
+  "error.terminalInputStreamFailed": "Не удалось открыть поток ввода",
+  "error.terminalWriteFailed": "Не удалось записать данные в терминал",
+  "error.terminalResizeFailed": "Не удалось изменить размер терминала",
+  "error.terminalKillFailed":
+    "Не удалось завершить все терминалы перед обновлением",
+  "error.unknown": "Произошла неизвестная ошибка",
+} as const;
+
+export type MessageKey = keyof typeof ru;
