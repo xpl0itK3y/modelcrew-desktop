@@ -80,6 +80,15 @@ impl PtyManager {
         cmd.arg("-l");
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // Терминал должен выглядеть как свежая пользовательская сессия. Если
+        // само приложение запущено из-под CLI-агента (например, Claude Code),
+        // его служебные маркеры протекают в PTY, и агенты внутри считают себя
+        // «вложенными» — Claude Code, в частности, перестаёт сохранять сессию.
+        for (key, _) in std::env::vars() {
+            if key == "CLAUDECODE" || key == "CLAUDE_EFFORT" || key.starts_with("CLAUDE_CODE_") {
+                cmd.env_remove(&key);
+            }
+        }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
         if !opts.cwd.is_dir() {
@@ -581,6 +590,48 @@ mod tests {
 
     /// Стресс приёмки: 50 МБ сплошного вывода не должны идти по байту —
     /// батчер обязан отдавать крупные куски, и весь объём должен дойти.
+    #[test]
+    fn agent_launcher_markers_do_not_leak_into_terminals() {
+        // Приложение может быть запущено из-под CLI-агента; его маркеры не
+        // должны доставаться пользовательским терминалам (см. spawn).
+        std::env::set_var("CLAUDECODE", "1");
+        std::env::set_var("CLAUDE_CODE_SESSION_ID", "leak-test");
+
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-env".into(),
+                    shell: Some("/bin/sh".into()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        // Кавычки разрывают маркер в эхе набранной команды: совпадение
+        // возможно только в строке результата.
+        manager
+            .write(
+                "t-env",
+                b"echo PRO\"BE\"_${CLAUDECODE:-clean}_${CLAUDE_CODE_SESSION_ID:-clean}\n",
+            )
+            .expect("запись в PTY");
+        let output = wait_for_output(&out_rx, "PROBE_", Duration::from_secs(10))
+            .expect("эхо из шелла");
+        assert!(
+            output.contains("PROBE_clean_clean"),
+            "маркеры агента протекли в терминал: {output}"
+        );
+        let _ = manager.kill("t-env");
+    }
+
     #[test]
     fn fifty_megabytes_arrive_batched() {
         const PAYLOAD: usize = 50 * 1024 * 1024;

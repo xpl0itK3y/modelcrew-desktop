@@ -58,6 +58,10 @@ export type TerminalEntry = {
   manualTitle: boolean;
   // Анимация появления играется только при первом монтировании.
   everAttached: boolean;
+  // Отложенная resume-команда агента: вводится, когда оболочка готова
+  // (пауза в выводе после старта), а не вперемешку с её инициализацией.
+  pendingResume: string | null;
+  resumeTimer: number | undefined;
 };
 
 const registry = new Map<string, TerminalEntry>();
@@ -149,6 +153,8 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     resizeTimer: undefined,
     manualTitle: false,
     everAttached: false,
+    pendingResume: null,
+    resumeTimer: undefined,
   };
   registry.set(id, entry);
   return entry;
@@ -195,9 +201,42 @@ type PtyCreateResult = {
   title: string;
 };
 
+// Пауза в выводе после старта оболочки ≈ приглашение напечатано.
+const RESUME_QUIET_MS = 350;
+// Если оболочка молчит или бесконечно шумит — вводим команду принудительно.
+const RESUME_FALLBACK_MS = 3_000;
+
+function injectPendingResume(entry: TerminalEntry): void {
+  const data = entry.pendingResume;
+  if (data === null) {
+    return;
+  }
+  entry.pendingResume = null;
+  if (entry.resumeTimer !== undefined) {
+    window.clearTimeout(entry.resumeTimer);
+    entry.resumeTimer = undefined;
+  }
+  if (!entry.exited) {
+    void invoke("pty_write", { id: entry.id, data }).catch(() => {});
+  }
+}
+
+function scheduleResumeInjection(entry: TerminalEntry, quietMs: number): void {
+  if (entry.resumeTimer !== undefined) {
+    window.clearTimeout(entry.resumeTimer);
+  }
+  entry.resumeTimer = window.setTimeout(() => {
+    entry.resumeTimer = undefined;
+    injectPendingResume(entry);
+  }, quietMs);
+}
+
 function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   entry.term.write(typeof data === "string" ? data : new Uint8Array(data));
   markSnapshotDirty(entry.id);
+  if (entry.pendingResume !== null) {
+    scheduleResumeInjection(entry, RESUME_QUIET_MS);
+  }
 }
 
 function createLiveOutputChannel(
@@ -331,8 +370,10 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
   if (!line) {
     return;
   }
-  const data = mode === "auto" ? `${line}\r` : line;
-  void invoke("pty_write", { id: entry.id, data }).catch(() => {});
+  // Команда вводится после паузы в выводе (оболочка напечатала приглашение),
+  // иначе байты перемешиваются с инициализацией шелла.
+  entry.pendingResume = mode === "auto" ? `${line}\r` : line;
+  scheduleResumeInjection(entry, RESUME_FALLBACK_MS);
   // Инъекция разовая: когда агент реально запустится, watcher запишет его
   // заново — уже для следующего перезапуска.
   discardAgentRecord(entry.id);
@@ -365,6 +406,12 @@ async function spawnTerminal(
   const snapshot = await loadSnapshot(entry.id);
   if (snapshot && registry.get(entry.id) === entry && !entry.exited) {
     entry.term.write(snapshot);
+    // Снимок мог включить приватные режимы прежнего TUI (alt-screen, focus
+    // reporting, bracketed paste, application keys) — сбрасываем, иначе xterm
+    // начнёт слать focus-события в свежий шелл как ввод (^[[O в приглашении).
+    entry.term.write(
+      "\x1b[0m\x1b[?1049l\x1b[?1004l\x1b[?2004l\x1b[?1l\x1b>\x1b[?25h",
+    );
     entry.term.write(
       `\r\n\x1b[2m── ${translate("terminal.restored")} ──\x1b[0m\r\n`,
     );
@@ -438,6 +485,10 @@ export async function destroyTerminal(id: string): Promise<void> {
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
   }
+  if (entry.resumeTimer !== undefined) {
+    window.clearTimeout(entry.resumeTimer);
+  }
+  entry.pendingResume = null;
   entry.term.dispose();
   entry.container.remove();
   if (!isTauri) {
