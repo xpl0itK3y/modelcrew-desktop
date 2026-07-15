@@ -1,4 +1,26 @@
 const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
+const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
+
+// Своя история команд у каждой панели (стрелка вверх возвращает команды
+// именно этой панели и переживает перезапуск). false — общесистемная история.
+export function loadTerminalHistoryIsolation(): boolean {
+  try {
+    return localStorage.getItem(HISTORY_ISOLATION_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function saveTerminalHistoryIsolation(isolated: boolean): void {
+  try {
+    localStorage.setItem(
+      HISTORY_ISOLATION_STORAGE_KEY,
+      isolated ? "on" : "off",
+    );
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}
 
 export const MIN_TERMINAL_FONT_SIZE = 10;
 export const MAX_TERMINAL_FONT_SIZE = 24;

@@ -5,6 +5,8 @@ import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
+  loadTerminalHistoryIsolation,
+  saveTerminalHistoryIsolation,
 } from "../../terminal/preferences";
 import {
   loadAgentResumeMode,
@@ -35,6 +37,9 @@ export function TerminalTab(props: TerminalTabProps) {
   const [shells, setShells] = useState<ShellOption[]>([]);
   const [resumeMode, setResumeMode] = useState<AgentResumeMode>(() =>
     loadAgentResumeMode(),
+  );
+  const [historyIsolated, setHistoryIsolated] = useState(() =>
+    loadTerminalHistoryIsolation(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -163,6 +168,37 @@ export function TerminalTab(props: TerminalTabProps) {
           ))}
         </div>
         <p className="settings-note">{t("settings.agentResumeNote")}</p>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.terminalHistory")}</div>
+        <div
+          className="shell-options"
+          role="group"
+          aria-label={t("settings.terminalHistory")}
+        >
+          {[true, false].map((isolated) => (
+            <button
+              key={String(isolated)}
+              type="button"
+              aria-pressed={historyIsolated === isolated}
+              className={`shell-option ${
+                historyIsolated === isolated ? "is-selected" : ""
+              }`}
+              onClick={() => {
+                setHistoryIsolated(isolated);
+                saveTerminalHistoryIsolation(isolated);
+              }}
+            >
+              {t(
+                isolated
+                  ? "settings.terminalHistoryPerPanel"
+                  : "settings.terminalHistoryShared",
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">{t("settings.terminalHistoryNote")}</p>
       </div>
     </>
   );

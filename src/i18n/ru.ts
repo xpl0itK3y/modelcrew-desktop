@@ -128,6 +128,11 @@ export const ru = {
   "settings.agentResumeOff": "Выключено",
   "settings.agentResumeInsert": "Подставить команду",
   "settings.agentResumeAuto": "Запускать автоматически",
+  "settings.terminalHistory": "История команд",
+  "settings.terminalHistoryPerPanel": "Своя у каждой панели",
+  "settings.terminalHistoryShared": "Общая (как в системе)",
+  "settings.terminalHistoryNote":
+    "Стрелка вверх возвращает команды именно этой панели; история переживает перезапуск. Действует для новых терминалов.",
   "settings.terminalFontSize": "Размер шрифта терминала",
   "settings.terminalFontSizeValue": "{size} px",
   "settings.tabAppearance": "Внешний вид",

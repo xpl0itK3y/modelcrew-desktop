@@ -22,6 +22,7 @@ import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
 import {
   loadTerminalFontSize,
+  loadTerminalHistoryIsolation,
   normalizeTerminalFontSize,
 } from "./preferences";
 import "@xterm/xterm/css/xterm.css";
@@ -297,6 +298,7 @@ async function restartTerminal(
     cols: entry.term.cols,
     rows: entry.term.rows,
     shell,
+    isolatedHistory: loadTerminalHistoryIsolation(),
     onOutput: output,
   });
 
@@ -448,6 +450,7 @@ async function spawnTerminal(
       rows: entry.term.rows,
       // null → бэкенд возьмёт оболочку по умолчанию для ОС.
       shell: loadShell(),
+      isolatedHistory: loadTerminalHistoryIsolation(),
       onOutput: output,
     });
     const title = result.title.trim();

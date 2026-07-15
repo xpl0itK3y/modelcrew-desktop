@@ -129,6 +129,11 @@ export const en: Record<MessageKey, string> = {
   "settings.agentResumeOff": "Off",
   "settings.agentResumeInsert": "Type the command",
   "settings.agentResumeAuto": "Run automatically",
+  "settings.terminalHistory": "Command history",
+  "settings.terminalHistoryPerPanel": "Per panel",
+  "settings.terminalHistoryShared": "Shared (system default)",
+  "settings.terminalHistoryNote":
+    "Arrow-up recalls commands from this panel only; history survives restarts. Applies to new terminals.",
   "settings.terminalFontSize": "Terminal font size",
   "settings.terminalFontSizeValue": "{size} px",
   "settings.tabAppearance": "Appearance",
