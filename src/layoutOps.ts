@@ -132,6 +132,10 @@ export function arrangeEvenGrid(api: DockviewApi): boolean {
 
   api.closeAllGroups();
 
+  // Дерево строится КОЛОНКАМИ: у каждой колонки свой горизонтальный
+  // разделитель, поэтому один терминал можно поднимать/опускать, не двигая
+  // соседние колонки. Общим остаётся только вертикальный разделитель колонок
+  // — в дереве-раскладке независимыми могут быть лишь границы одной оси.
   const grid: IDockviewPanel[][] = [];
   meta.forEach((entry, index) => {
     const row = Math.floor(index / cols);
@@ -144,28 +148,30 @@ export function arrangeEvenGrid(api: DockviewApi): boolean {
       params: entry.params,
       minimumWidth: PANEL_MIN_WIDTH,
       minimumHeight: PANEL_MIN_HEIGHT,
-      ...(row === 0 && col === 0
-        ? {}
-        : col === 0
-          ? // Новая строка — полноширинная, у нижнего края всего грида.
-            { position: { direction: "below" as const } }
-          : {
-              position: {
-                referencePanel: grid[row][col - 1],
-                direction: "right" as const,
-              },
-            }),
+      ...(row === 0
+        ? col === 0
+          ? {}
+          : // Новая колонка — полновысотная, у правого края всего грида.
+            { position: { direction: "right" as const } }
+        : {
+            position: {
+              referencePanel: grid[row - 1][col],
+              direction: "below" as const,
+            },
+          }),
     });
-    (grid[row] ??= []).push(panel);
+    (grid[row] ??= [])[col] = panel;
   });
 
   // Сплиты делят место пополам неравномерно — приводим к равным долям.
   const rowHeight = Math.floor(api.height / rows);
   const colWidth = Math.floor(api.width / cols);
+  for (const panel of grid[0]) {
+    panel?.api.setSize({ width: colWidth });
+  }
   for (const row of grid) {
-    row[0].api.setSize({ height: rowHeight });
     for (const panel of row) {
-      panel.api.setSize({ width: colWidth });
+      panel?.api.setSize({ height: rowHeight });
     }
   }
   return true;
