@@ -5,7 +5,9 @@ import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
+  loadEagerSessionRestore,
   loadTerminalHistoryIsolation,
+  saveEagerSessionRestore,
   saveTerminalHistoryIsolation,
 } from "../../terminal/preferences";
 import {
@@ -41,6 +43,9 @@ export function TerminalTab(props: TerminalTabProps) {
   );
   const [historyIsolated, setHistoryIsolated] = useState(() =>
     loadTerminalHistoryIsolation(),
+  );
+  const [eagerRestore, setEagerRestore] = useState(() =>
+    loadEagerSessionRestore(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -174,6 +179,37 @@ export function TerminalTab(props: TerminalTabProps) {
             agents: AGENTS.map((agent) => agent.label).join(" · "),
           })}
         </p>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.sessionRestore")}</div>
+        <div
+          className="shell-options"
+          role="group"
+          aria-label={t("settings.sessionRestore")}
+        >
+          {[true, false].map((eager) => (
+            <button
+              key={String(eager)}
+              type="button"
+              aria-pressed={eagerRestore === eager}
+              className={`shell-option ${
+                eagerRestore === eager ? "is-selected" : ""
+              }`}
+              onClick={() => {
+                setEagerRestore(eager);
+                saveEagerSessionRestore(eager);
+              }}
+            >
+              {t(
+                eager
+                  ? "settings.sessionRestoreAll"
+                  : "settings.sessionRestoreActive",
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">{t("settings.sessionRestoreNote")}</p>
       </div>
 
       <div className="settings-section">

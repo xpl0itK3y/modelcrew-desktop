@@ -131,6 +131,11 @@ export const ru = {
   "settings.agentResumeOff": "Выключено",
   "settings.agentResumeInsert": "Подставить команду",
   "settings.agentResumeAuto": "Запускать автоматически",
+  "settings.sessionRestore": "Восстановление сессий",
+  "settings.sessionRestoreAll": "Все сессии проекта",
+  "settings.sessionRestoreActive": "Только активная",
+  "settings.sessionRestoreNote":
+    "«Все сессии» поднимает терминалы и агентов скрытых сессий проекта сразу при запуске — переключение мгновенное, но памяти уходит больше.",
   "settings.terminalHistory": "История команд",
   "settings.terminalHistoryPerPanel": "Своя у каждой панели",
   "settings.terminalHistoryShared": "Общая (как в системе)",

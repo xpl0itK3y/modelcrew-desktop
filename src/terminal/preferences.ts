@@ -1,5 +1,24 @@
 const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
 const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
+const EAGER_RESTORE_STORAGE_KEY = "modelcrew.eagerSessionRestore";
+
+// Оживлять ли при старте все сессии активного проекта разом (PTY + агенты),
+// или только активную, а остальные — при переключении.
+export function loadEagerSessionRestore(): boolean {
+  try {
+    return localStorage.getItem(EAGER_RESTORE_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function saveEagerSessionRestore(eager: boolean): void {
+  try {
+    localStorage.setItem(EAGER_RESTORE_STORAGE_KEY, eager ? "on" : "off");
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}
 
 // Своя история команд у каждой панели (стрелка вверх возвращает команды
 // именно этой панели и переживает перезапуск). false — общесистемная история.

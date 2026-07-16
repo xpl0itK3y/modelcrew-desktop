@@ -269,6 +269,20 @@ export function getTerminalWorkspaceId(id: string): string | null {
   return registry.get(id)?.workspaceId ?? null;
 }
 
+// Фоновое оживление скрытых сессий проекта: инстансы xterm живут вне
+// dockview, поэтому PTY (со снимком и авто-resume агента) поднимаются до
+// того, как панель впервые показана — переключение сессии мгновенное.
+export function prespawnSessionPanels(
+  workspaceId: string,
+  panelIds: readonly string[],
+): void {
+  for (const panelId of panelIds) {
+    const entry = getOrCreateTerminal(panelId);
+    // Уже живой терминал (сессию открывали) спавн не трогает.
+    void ensureSpawned(entry, workspaceId);
+  }
+}
+
 export type RestartTerminalsResult = {
   total: number;
   restarted: number;

@@ -132,6 +132,11 @@ export const en: Record<MessageKey, string> = {
   "settings.agentResumeOff": "Off",
   "settings.agentResumeInsert": "Type the command",
   "settings.agentResumeAuto": "Run automatically",
+  "settings.sessionRestore": "Session restore",
+  "settings.sessionRestoreAll": "All project sessions",
+  "settings.sessionRestoreActive": "Active session only",
+  "settings.sessionRestoreNote":
+    "“All sessions” brings up terminals and agents of the project's hidden sessions right at launch — switching is instant, at the cost of extra memory.",
   "settings.terminalHistory": "Command history",
   "settings.terminalHistoryPerPanel": "Per panel",
   "settings.terminalHistoryShared": "Shared (system default)",
