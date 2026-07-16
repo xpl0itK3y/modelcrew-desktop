@@ -7,7 +7,7 @@ export const en: Record<MessageKey, string> = {
 
   "titlebar.toggleSidebar": "Show or hide sidebar",
   "titlebar.newTerminal": "Add terminal to grid",
-  "titlebar.layoutsSoon": "Layouts — coming soon",
+  "titlebar.arrangeGrid": "Arrange terminals in a grid",
   "titlebar.gitChanges": "Project changes",
   "git.panelTitle": "Changes",
   "git.close": "Close the changes panel",

@@ -48,6 +48,7 @@ function titlebar(updater: AppUpdaterController) {
       gitCounts={{ additions: 12, deletions: 3, files: 2 }}
       onToggleSidebar={vi.fn()}
       onNewTerminal={vi.fn()}
+      onArrangeGrid={vi.fn()}
       onOpenSettings={vi.fn()}
       onOpenGitChanges={vi.fn()}
       updater={updater}

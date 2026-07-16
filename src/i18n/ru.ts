@@ -6,7 +6,7 @@ export const ru = {
 
   "titlebar.toggleSidebar": "Показать или скрыть боковую панель",
   "titlebar.newTerminal": "Новый терминал в сетку",
-  "titlebar.layoutsSoon": "Раскладки — скоро",
+  "titlebar.arrangeGrid": "Выровнять терминалы сеткой",
   "titlebar.gitChanges": "Изменения в проекте",
   "git.panelTitle": "Изменения",
   "git.close": "Закрыть панель изменений",

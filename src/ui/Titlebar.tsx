@@ -29,6 +29,7 @@ type TitlebarProps = {
   gitCounts: { additions: number; deletions: number; files: number } | null;
   onToggleSidebar: () => void;
   onNewTerminal: () => void;
+  onArrangeGrid: () => void;
   onOpenSettings: () => void;
   onOpenGitChanges: () => void;
   updater: AppUpdaterController;
@@ -222,10 +223,10 @@ export function Titlebar(props: TitlebarProps) {
         </button>
         <button
           type="button"
-          className="icon-button is-disabled"
-          title={t("titlebar.layoutsSoon")}
-          aria-label={t("titlebar.layoutsSoon")}
-          disabled
+          className="icon-button"
+          title={t("titlebar.arrangeGrid")}
+          aria-label={t("titlebar.arrangeGrid")}
+          onClick={props.onArrangeGrid}
         >
           <GridIcon />
         </button>

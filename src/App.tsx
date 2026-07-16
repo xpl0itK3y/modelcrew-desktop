@@ -43,7 +43,7 @@ import {
   saveTheme,
 } from "./theme";
 import { closeGroupAnimated } from "./animations";
-import { defaultTerminalTitles } from "./layoutOps";
+import { arrangeEvenGrid, defaultTerminalTitles } from "./layoutOps";
 import { sessionDisplayName, type Workspace } from "./persist";
 import {
   formatTerminalCount,
@@ -368,6 +368,21 @@ export default function App() {
     return subscribeGitChanges(activeGitWorkspaceId, setGitSummary);
   }, [activeGitWorkspaceId]);
 
+  // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
+  const arrangeGrid = useCallback(() => {
+    const api = apiRef.current;
+    if (!api) {
+      return;
+    }
+    suppressCleanupRef.current = true;
+    try {
+      arrangeEvenGrid(api);
+    } finally {
+      suppressCleanupRef.current = false;
+    }
+    schedulePersist();
+  }, [schedulePersist]);
+
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
@@ -417,6 +432,7 @@ export default function App() {
         }
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
+        onArrangeGrid={arrangeGrid}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
         updater={updater}
