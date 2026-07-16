@@ -408,6 +408,181 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
     })
 }
 
+// ---------- Ветки и история ----------
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub is_current: bool,
+    // Unix-время последнего коммита в миллисекундах (для сортировки/подписи).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_commit_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitInfo {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    pub epoch_ms: i64,
+    // Декорации коммита: ветки/теги, указывающие на него.
+    pub refs: Vec<String>,
+}
+
+// Имя ветки, безопасное для передачи git-у аргументом.
+pub fn is_safe_ref_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 256
+        && !name.starts_with('-')
+        && !name.starts_with('.')
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.ends_with(".lock")
+        && name
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/'))
+}
+
+pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let raw = run_git(
+        &toplevel,
+        &[
+            "for-each-ref",
+            "refs/heads",
+            "--sort=-committerdate",
+            "--format=%(HEAD)%1f%(refname:short)%1f%(committerdate:unix)",
+        ],
+    )?;
+    let text = String::from_utf8_lossy(&raw);
+    Ok(text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\u{1f}');
+            let head = parts.next()?;
+            let name = parts.next()?;
+            let date = parts.next().and_then(|value| value.parse::<i64>().ok());
+            Some(GitBranch {
+                name: name.to_owned(),
+                is_current: head == "*",
+                last_commit_at: date.map(|seconds| seconds * 1000),
+            })
+        })
+        .collect())
+}
+
+pub fn switch_branch(root: &Path, name: &str) -> CommandResult<()> {
+    if !is_safe_ref_name(name) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("branch", name));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    run_git(&toplevel, &["checkout", name])?;
+    Ok(())
+}
+
+pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let limit = limit.clamp(1, 500);
+    let count = format!("-n{limit}");
+    let raw = match run_git(
+        &toplevel,
+        &[
+            "log",
+            &count,
+            "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%D%x1e",
+        ],
+    ) {
+        Ok(raw) => raw,
+        // Пустой репозиторий без коммитов — не ошибка, а пустая история.
+        Err(_) => return Ok(Vec::new()),
+    };
+    let text = String::from_utf8_lossy(&raw);
+    Ok(text
+        .split('\u{1e}')
+        .filter_map(|record| {
+            let record = record.trim_start_matches(['\n', '\r']);
+            let mut parts = record.split('\u{1f}');
+            let hash = parts.next()?.trim();
+            if hash.is_empty() {
+                return None;
+            }
+            let short_hash = parts.next()?.to_owned();
+            let author = parts.next()?.to_owned();
+            let epoch = parts.next().and_then(|value| value.parse::<i64>().ok())?;
+            let subject = parts.next()?.to_owned();
+            let refs = parts
+                .next()
+                .map(|decorations| {
+                    decorations
+                        .split(", ")
+                        .map(|entry| entry.trim().trim_start_matches("HEAD -> "))
+                        .filter(|entry| !entry.is_empty() && *entry != "HEAD")
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(GitCommitInfo {
+                hash: hash.to_owned(),
+                short_hash,
+                subject,
+                author,
+                epoch_ms: epoch * 1000,
+                refs,
+            })
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn git_branches(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<Vec<GitBranch>> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || list_branches(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_switch_branch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    branch: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || switch_branch(&root, &branch))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_log(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    limit: u32,
+) -> CommandResult<Vec<GitCommitInfo>> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || list_log(&root, limit))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
 // ---------- Действия: коммит и откат файла ----------
 
 const MAX_COMMIT_MESSAGE_CHARS: usize = 4000;
@@ -819,6 +994,77 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let plain = tempfile::tempdir().unwrap();
         let empty = collect_summary(plain.path()).unwrap();
         assert!(!empty.is_repo);
+    }
+
+    #[test]
+    fn validates_branch_names() {
+        assert!(is_safe_ref_name("main"));
+        assert!(is_safe_ref_name("feature/agent-resume"));
+        assert!(is_safe_ref_name("v1.2.3"));
+        assert!(!is_safe_ref_name(""));
+        assert!(!is_safe_ref_name("-rf"));
+        assert!(!is_safe_ref_name("a..b"));
+        assert!(!is_safe_ref_name("bad name"));
+        assert!(!is_safe_ref_name("head@{1}"));
+        assert!(!is_safe_ref_name("x.lock"));
+    }
+
+    #[test]
+    fn lists_branches_and_history_in_a_real_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Denis")
+                .env("GIT_AUTHOR_EMAIL", "d@t")
+                .env("GIT_COMMITTER_NAME", "Denis")
+                .env("GIT_COMMITTER_EMAIL", "d@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first commit"]);
+        git(&["checkout", "--quiet", "-b", "feature/x"]);
+        std::fs::write(root.join("b.txt"), "two\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second commit"]);
+
+        let branches = list_branches(root).unwrap();
+        assert_eq!(branches.len(), 2);
+        let current = branches.iter().find(|branch| branch.is_current).unwrap();
+        assert_eq!(current.name, "feature/x");
+        assert!(current.last_commit_at.is_some());
+
+        let log = list_log(root, 10).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].subject, "second commit");
+        assert_eq!(log[0].author, "Denis");
+        assert!(log[0].epoch_ms > 0);
+        assert_eq!(log[0].short_hash.len(), 7.max(log[0].short_hash.len()));
+        assert!(log[0].refs.iter().any(|entry| entry == "feature/x"));
+
+        switch_branch(root, "main").unwrap();
+        let branches = list_branches(root).unwrap();
+        assert_eq!(
+            branches.iter().find(|branch| branch.is_current).unwrap().name,
+            "main"
+        );
+        assert!(switch_branch(root, "no-such-branch").is_err());
+
+        // Пустой репозиторий: история пуста, а не ошибка.
+        let fresh = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(fresh.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        assert!(list_log(fresh.path(), 10).unwrap().is_empty());
     }
 
     #[test]
