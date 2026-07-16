@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.4
+
+### Русский
+
+Терминалы теперь восстанавливают экран и отдельную историю команд, продолжают сессии AI-агентов и показывают системные уведомления.
+
+- Текст терминалов восстанавливается после полного перезапуска приложения
+- Каждая панель хранит собственную историю команд между запусками
+- Каталог возобновления расширен до 11 CLI; для шести агентов сохраняется точная привязка к диалогу
+- Можно автоматически восстановить все сессии активного проекта для мгновенного переключения
+- Добавлены системные уведомления, удаление анонсов и новые анимации центра уведомлений
+
+### English
+
+Terminal screens and per-panel command history now survive restarts, AI-agent chats resume automatically, and notifications can appear at the OS level.
+
+- Restore terminal text after fully quitting and reopening ModelCrew
+- Keep command history isolated per panel across launches
+- Resume 11 supported agent CLIs; six agents retain an exact panel-to-chat binding
+- Optionally restore every session in the active project for instant switching
+- Use OS notifications and dismiss announcements with refreshed arrival animations
+
 ## 0.0.3
 
 ### Русский

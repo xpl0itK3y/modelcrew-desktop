@@ -2146,7 +2146,7 @@ dependencies = [
 
 [[package]]
 name = "modelcrew-desktop"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "portable-pty",
  "rusqlite",
