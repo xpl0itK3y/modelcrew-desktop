@@ -227,8 +227,11 @@ export type GitCommitInfo = {
   shortHash: string;
   subject: string;
   author: string;
+  authorEmail: string;
   epochMs: number;
   refs: string[];
+  body?: string;
+  coAuthors?: string[];
 };
 
 export function fetchBranches(workspaceId: string): Promise<GitBranchInfo[]> {

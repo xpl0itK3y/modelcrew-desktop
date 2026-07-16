@@ -427,9 +427,37 @@ pub struct GitCommitInfo {
     pub short_hash: String,
     pub subject: String,
     pub author: String,
+    pub author_email: String,
     pub epoch_ms: i64,
     // Декорации коммита: ветки/теги, указывающие на него.
     pub refs: Vec<String>,
+    // Тело коммита без трейлеров Co-authored-by (они в co_authors).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub body: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub co_authors: Vec<String>,
+}
+
+// Отделяет соавторов от остального тела коммита.
+pub fn split_body_and_co_authors(raw_body: &str) -> (String, Vec<String>) {
+    let mut body_lines = Vec::new();
+    let mut co_authors = Vec::new();
+    for line in raw_body.lines() {
+        let trimmed = line.trim();
+        if let Some(author) = trimmed
+            .strip_prefix("Co-authored-by:")
+            .or_else(|| trimmed.strip_prefix("Co-Authored-By:"))
+            .or_else(|| trimmed.strip_prefix("co-authored-by:"))
+        {
+            let author = author.trim();
+            if !author.is_empty() {
+                co_authors.push(author.to_owned());
+            }
+        } else {
+            body_lines.push(line);
+        }
+    }
+    (body_lines.join("\n").trim().to_owned(), co_authors)
 }
 
 // Имя ветки, безопасное для передачи git-у аргументом.
@@ -498,7 +526,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
         &[
             "log",
             &count,
-            "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%D%x1e",
+            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%b%x1e",
         ],
     ) {
         Ok(raw) => raw,
@@ -517,6 +545,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
             }
             let short_hash = parts.next()?.to_owned();
             let author = parts.next()?.to_owned();
+            let author_email = parts.next()?.to_owned();
             let epoch = parts.next().and_then(|value| value.parse::<i64>().ok())?;
             let subject = parts.next()?.to_owned();
             let refs = parts
@@ -530,13 +559,18 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
                         .collect()
                 })
                 .unwrap_or_default();
+            let (body, co_authors) =
+                split_body_and_co_authors(parts.next().unwrap_or_default());
             Some(GitCommitInfo {
                 hash: hash.to_owned(),
                 short_hash,
                 subject,
                 author,
+                author_email,
                 epoch_ms: epoch * 1000,
                 refs,
+                body,
+                co_authors,
             })
         })
         .collect())
@@ -997,6 +1031,18 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     #[test]
+    fn splits_co_authors_from_the_body() {
+        let (body, co_authors) = split_body_and_co_authors(
+            "Long description line.\n\nCo-authored-by: Alex <a@t>\nCo-Authored-By: Kim <k@t>",
+        );
+        assert_eq!(body, "Long description line.");
+        assert_eq!(co_authors, vec!["Alex <a@t>".to_owned(), "Kim <k@t>".to_owned()]);
+        let (empty_body, none) = split_body_and_co_authors("");
+        assert_eq!(empty_body, "");
+        assert!(none.is_empty());
+    }
+
+    #[test]
     fn validates_branch_names() {
         assert!(is_safe_ref_name("main"));
         assert!(is_safe_ref_name("feature/agent-resume"));
@@ -1032,7 +1078,14 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["checkout", "--quiet", "-b", "feature/x"]);
         std::fs::write(root.join("b.txt"), "two\n").unwrap();
         git(&["add", "."]);
-        git(&["commit", "--quiet", "-m", "second commit"]);
+        git(&[
+            "commit",
+            "--quiet",
+            "-m",
+            "second commit",
+            "-m",
+            "Detailed description of the change.\n\nCo-authored-by: Alex <alex@t>",
+        ]);
 
         let branches = list_branches(root).unwrap();
         assert_eq!(branches.len(), 2);
@@ -1044,9 +1097,14 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].subject, "second commit");
         assert_eq!(log[0].author, "Denis");
+        assert_eq!(log[0].author_email, "d@t");
+        assert_eq!(log[0].body, "Detailed description of the change.");
+        assert_eq!(log[0].co_authors, vec!["Alex <alex@t>".to_owned()]);
         assert!(log[0].epoch_ms > 0);
-        assert_eq!(log[0].short_hash.len(), 7.max(log[0].short_hash.len()));
         assert!(log[0].refs.iter().any(|entry| entry == "feature/x"));
+        // Однострочный коммит: без тела и соавторов.
+        assert_eq!(log[1].body, "");
+        assert!(log[1].co_authors.is_empty());
 
         switch_branch(root, "main").unwrap();
         let branches = list_branches(root).unwrap();
