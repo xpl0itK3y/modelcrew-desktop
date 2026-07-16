@@ -10,6 +10,7 @@ export const en: Record<MessageKey, string> = {
   "titlebar.layoutsSoon": "Layouts — coming soon",
   "titlebar.gitChanges": "Project changes",
   "git.panelTitle": "Changes",
+  "git.close": "Close the changes panel",
   "git.loading": "Reading changes…",
   "git.notARepo": "This folder is not a git repository",
   "git.clean": "No uncommitted changes",

@@ -8,7 +8,7 @@ import {
 import "dockview/dist/styles/dockview.css";
 import { invoke } from "@tauri-apps/api/core";
 import { TerminalPanel } from "./panels/TerminalPanel";
-import { GitChangesPanel } from "./panels/GitChangesPanel";
+import { GitChangesPanel, GitChangesView } from "./panels/GitChangesPanel";
 import {
   aggregateCounts,
   subscribeGitChanges,
@@ -26,12 +26,11 @@ import {
 } from "./terminal/registry";
 import { flushAllSnapshots, pruneSnapshots } from "./terminal/snapshots";
 import { pruneAgentRecords } from "./agents";
-import { openGitChangesPanel } from "./layoutOps";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Settings } from "./ui/Settings";
-import { MaximizeIcon } from "./ui/Icons";
+import { CloseIcon, MaximizeIcon } from "./ui/Icons";
 import { useAnimatedPresence } from "./ui/useAnimatedPresence";
 import { appActions } from "./appActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
@@ -369,17 +368,24 @@ export default function App() {
     return subscribeGitChanges(activeGitWorkspaceId, setGitSummary);
   }, [activeGitWorkspaceId]);
 
-  const openGitChanges = useCallback(() => {
-    const api = apiRef.current;
-    const current = workspacesRef.current;
-    const workspace = current.list.find(
-      (item) => item.id === current.activeId,
-    );
-    if (!api || !workspace) {
+  // Оверлей поверх терминалов: панель изменений не двигает раскладку.
+  const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
+  const gitDrawerPresence = useAnimatedPresence(
+    gitDrawerOpen && activeGitWorkspaceId ? activeGitWorkspaceId : null,
+    160,
+  );
+  useEffect(() => {
+    if (!gitDrawerOpen) {
       return;
     }
-    openGitChangesPanel(api, workspace.id, workspace.activeSessionId);
-  }, [workspacesRef]);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setGitDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [gitDrawerOpen]);
   const sidebarWorkspaces = workspaces.list.map((workspace) => {
     const sessions = workspace.sessions.map((session) => ({
       id: session.id,
@@ -411,7 +417,7 @@ export default function App() {
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenGitChanges={openGitChanges}
+        onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
         updater={updater}
       />
       <div className="app-body">
@@ -461,6 +467,28 @@ export default function App() {
             />
           ) : (
             <div className="workspace-loading">{t("workspace.checking")}</div>
+          )}
+          {gitDrawerPresence && (
+            <aside
+              className={`git-drawer ${
+                gitDrawerPresence.closing ? "is-closing" : ""
+              }`}
+              aria-label={t("git.panelTitle")}
+            >
+              <div className="git-drawer-header">
+                <span className="git-drawer-title">{t("git.panelTitle")}</span>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={t("git.close")}
+                  aria-label={t("git.close")}
+                  onClick={() => setGitDrawerOpen(false)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <GitChangesView workspaceId={gitDrawerPresence.item} />
+            </aside>
           )}
         </main>
       </div>

@@ -99,31 +99,6 @@ export function localizeDefaultPanelTitles(
   };
 }
 
-// Панель «Изменения» — одна на сессию, id фиксированный.
-export const GIT_CHANGES_PANEL_ID = "git-changes";
-
-export function openGitChangesPanel(
-  api: DockviewApi,
-  workspaceId: string,
-  sessionId: string,
-) {
-  const existing = api.getPanel(GIT_CHANGES_PANEL_ID);
-  if (existing) {
-    existing.api.setActive();
-    return;
-  }
-  api.addPanel({
-    id: GIT_CHANGES_PANEL_ID,
-    component: "gitChanges",
-    title: translate("git.panelTitle"),
-    params: { workspaceId, sessionId },
-    minimumWidth: 260,
-    minimumHeight: PANEL_MIN_HEIGHT,
-    // Колонка у правого края: терминалы с агентом слева, их правки справа.
-    position: { direction: "right" },
-  });
-}
-
 export function addPanel(
   api: DockviewApi,
   workspaceId: string,

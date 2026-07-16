@@ -152,6 +152,9 @@ export function useWorkspaces({
         if (rootAvailable && session.layout) {
           try {
             api.fromJSON(localizeDefaultPanelTitles(session.layout)!);
+            // «Изменения» переехали в оверлей: вкладку из старых раскладок
+            // (когда панель жила в dockview) убираем при восстановлении.
+            api.getPanel("git-changes")?.api.close();
             restored = true;
           } catch {
             // Повреждённая сохранённая раскладка не должна блокировать вход

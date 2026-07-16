@@ -66,6 +66,7 @@ body {
 }
 
 .dock-area {
+  position: relative; /* якорь для оверлея панели изменений */
   flex: 1;
   min-width: 0;
   padding: 0 8px 8px;

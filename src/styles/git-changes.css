@@ -226,6 +226,77 @@
   color: var(--mc-text-faint);
 }
 
+/* ---------- Drawer поверх терминалов ---------- */
+
+/* Оверлей не двигает раскладку: терминалы сохраняют размер под ним. */
+.git-drawer {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  bottom: 8px;
+  z-index: 60;
+  display: flex;
+  width: min(400px, calc(100% - 48px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-surface-raised);
+  box-shadow: -14px 0 40px var(--mc-shadow);
+  animation: git-drawer-in 160ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.git-drawer.is-closing {
+  animation: git-drawer-out 150ms ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes git-drawer-in {
+  from {
+    opacity: 0.4;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes git-drawer-out {
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.git-drawer-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.git-drawer-title {
+  color: var(--mc-text-bright);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.git-drawer .git-changes-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .git-drawer,
+  .git-drawer.is-closing {
+    animation: none;
+  }
+}
+
 /* ---------- Кнопка «±» в титлбаре ---------- */
 
 /* Кнопка с счётчиками шире квадратной иконки: элементы дышат, не липнут. */

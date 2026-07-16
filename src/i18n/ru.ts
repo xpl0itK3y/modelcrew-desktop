@@ -9,6 +9,7 @@ export const ru = {
   "titlebar.layoutsSoon": "Раскладки — скоро",
   "titlebar.gitChanges": "Изменения в проекте",
   "git.panelTitle": "Изменения",
+  "git.close": "Закрыть панель изменений",
   "git.loading": "Читаем изменения…",
   "git.notARepo": "Эта папка не под управлением git",
   "git.clean": "Нет незакоммиченных изменений",
