@@ -31,6 +31,7 @@ sha2 = "0.10"
 tempfile = "3"
 tauri-plugin-notification = "2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+notify = "8"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

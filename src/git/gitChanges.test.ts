@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn<(command: string, args?: unknown) => Promise<unknown>>(),
+  listen: vi.fn(async () => () => {}),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 import {
   aggregateCounts,
@@ -88,12 +90,15 @@ describe("subscribeGitChanges", () => {
   it("notifies subscribers only when the summary actually changes", async () => {
     vi.resetModules();
     const { subscribeGitChanges } = await import("./gitChanges");
-    const summary: GitChangesSummary = {
+    let summary: GitChangesSummary = {
       isRepo: true,
       branch: "main",
       files: [],
     };
-    mocks.invoke.mockResolvedValue(summary);
+    // Вотчер «не поднялся» — стор остаётся на быстром поллинге.
+    mocks.invoke.mockImplementation(async (command) =>
+      command === "git_changes_summary" ? summary : false,
+    );
     const listener = vi.fn();
     const unsubscribe = subscribeGitChanges("ws-1", listener);
 
@@ -107,14 +112,19 @@ describe("subscribeGitChanges", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(listener).toHaveBeenCalledTimes(1);
 
-    mocks.invoke.mockResolvedValue({ ...summary, branch: "dev" });
+    summary = { ...summary, branch: "dev" };
     await vi.advanceTimersByTimeAsync(3_000);
     expect(listener).toHaveBeenCalledTimes(2);
 
     unsubscribe();
     mocks.invoke.mockClear();
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    // После отписки остаётся только git_changes_unwatch, поллинг остановлен.
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "git_changes_summary",
+      ),
+    ).toHaveLength(0);
     vi.useRealTimers();
   });
 });

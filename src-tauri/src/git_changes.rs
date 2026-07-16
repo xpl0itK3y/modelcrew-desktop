@@ -408,6 +408,151 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
     })
 }
 
+// ---------- Реал-тайм: вотчер рабочего дерева ----------
+
+// Событие внутри .git интересно только когда меняется состояние репозитория
+// (индекс, HEAD, ветки) — журнал и объекты git status не меняют.
+pub fn is_relevant_event_path(repo_root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(repo_root) else {
+        return true; // событие вне корня — перестрахуемся и проверим
+    };
+    let mut components = relative.components().map(|part| {
+        part.as_os_str().to_string_lossy().into_owned()
+    });
+    let Some(first) = components.next() else {
+        return true;
+    };
+    if first != ".git" {
+        return true;
+    }
+    match components.next().as_deref() {
+        Some("index") | Some("HEAD") | Some("refs") => true,
+        _ => false,
+    }
+}
+
+struct GitWatchHandle {
+    // Drop наблюдателя закрывает канал — поток дебаунса завершается сам.
+    _watcher: notify::RecommendedWatcher,
+}
+
+#[derive(Default)]
+pub struct GitWatchState {
+    watchers: std::sync::Mutex<std::collections::HashMap<String, GitWatchHandle>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitChangesEvent<'a> {
+    workspace_id: &'a str,
+    summary: &'a GitChangesSummary,
+}
+
+const DEBOUNCE_MS: u64 = 300;
+
+fn spawn_watch(
+    app: tauri::AppHandle,
+    workspace_id: String,
+    root: PathBuf,
+) -> Result<GitWatchHandle, notify::Error> {
+    use notify::Watcher;
+
+    let (event_sender, event_receiver) = std::sync::mpsc::channel::<()>();
+    let filter_root = root.clone();
+    let mut watcher = notify::recommended_watcher(
+        move |event: Result<notify::Event, notify::Error>| {
+            let Ok(event) = event else {
+                return;
+            };
+            if event
+                .paths
+                .iter()
+                .any(|path| is_relevant_event_path(&filter_root, path))
+            {
+                let _ = event_sender.send(());
+            }
+        },
+    )?;
+    watcher.watch(&root, notify::RecursiveMode::Recursive)?;
+
+    std::thread::spawn(move || {
+        let mut last_key: Option<String> = None;
+        loop {
+            match event_receiver.recv() {
+                Ok(()) => {
+                    // Тихое окно: серия событий (npm install, генерация кода)
+                    // схлопывается в один прогон git status.
+                    while event_receiver
+                        .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
+                        .is_ok()
+                    {}
+                    let Ok(summary) = collect_summary(&root) else {
+                        continue;
+                    };
+                    let key = serde_json::to_string(&summary).unwrap_or_default();
+                    if last_key.as_deref() == Some(key.as_str()) {
+                        continue;
+                    }
+                    last_key = Some(key);
+                    use tauri::Emitter;
+                    let _ = app.emit(
+                        "git-changes",
+                        GitChangesEvent {
+                            workspace_id: &workspace_id,
+                            summary: &summary,
+                        },
+                    );
+                }
+                // Вотчер удалён (unwatch/выход) — отправитель закрыт.
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(GitWatchHandle { _watcher: watcher })
+}
+
+// Возвращает false, если вотчер поднять не удалось (например, лимит inotify
+// на гигантском дереве) — фронтенд остаётся на поллинге.
+#[tauri::command]
+pub fn git_changes_watch(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    state: tauri::State<'_, GitWatchState>,
+    workspace_id: String,
+) -> CommandResult<bool> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    let mut watchers = state
+        .watchers
+        .lock()
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    if watchers.contains_key(&workspace_id) {
+        return Ok(true);
+    }
+    match spawn_watch(app, workspace_id.clone(), root) {
+        Ok(handle) => {
+            watchers.insert(workspace_id, handle);
+            Ok(true)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub fn git_changes_unwatch(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, GitWatchState>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    if let Ok(mut watchers) = state.watchers.lock() {
+        watchers.remove(&workspace_id);
+    }
+    Ok(())
+}
+
 // ---------- Команды ----------
 
 #[tauri::command]
@@ -514,6 +659,26 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             synthesize_added_diff("empty.txt", ""),
             "--- /dev/null\n+++ b/empty.txt\n@@ -0,0 +1,0 @@\n"
         );
+    }
+
+    #[test]
+    fn filters_git_internals_from_watch_events() {
+        let root = Path::new("/repo");
+        assert!(is_relevant_event_path(root, Path::new("/repo/src/app.ts")));
+        assert!(is_relevant_event_path(root, Path::new("/repo/.git/index")));
+        assert!(is_relevant_event_path(root, Path::new("/repo/.git/HEAD")));
+        assert!(is_relevant_event_path(
+            root,
+            Path::new("/repo/.git/refs/heads/main")
+        ));
+        assert!(!is_relevant_event_path(
+            root,
+            Path::new("/repo/.git/objects/ab/cdef")
+        ));
+        assert!(!is_relevant_event_path(
+            root,
+            Path::new("/repo/.git/logs/HEAD")
+        ));
     }
 
     #[test]

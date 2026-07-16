@@ -19,7 +19,9 @@ use update_cache::{
     updater_install_self_update, updater_prepare_self_update, SelfUpdaterState,
 };
 use agent_sessions::agent_session_locate;
-use git_changes::{git_changes_summary, git_file_diff};
+use git_changes::{
+    git_changes_summary, git_changes_unwatch, git_changes_watch, git_file_diff, GitWatchState,
+};
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use terminal_snapshots::{
     terminal_snapshot_delete, terminal_snapshot_load, terminal_snapshot_save,
@@ -618,6 +620,7 @@ pub fn run() {
         .manage(WorkspaceRoots::default())
         .manage(LinuxUpdaterState::default())
         .manage(SelfUpdaterState::default())
+        .manage(GitWatchState::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
@@ -632,6 +635,8 @@ pub fn run() {
             agent_session_locate,
             git_changes_summary,
             git_file_diff,
+            git_changes_watch,
+            git_changes_unwatch,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,

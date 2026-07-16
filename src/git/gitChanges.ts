@@ -1,9 +1,9 @@
 // Живая сводка git-изменений проекта: общий store с подпиской по workspaceId.
-// Пока панель или бейдж подписаны, сводка обновляется поллингом (этап
-// реал-тайма заменит его push-событиями от Rust-вотчера, интерфейс подписки
-// не изменится).
+// Основной канал — push-события Rust-вотчера (notify на рабочем дереве);
+// поллинг остаётся страховкой на случай, когда вотчер поднять не удалось.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export type GitFileStatus =
   | "modified"
@@ -38,6 +38,8 @@ export type GitFileDiff = {
 };
 
 const POLL_INTERVAL_MS = 3_000;
+// С работающим вотчером поллинг — лишь редкая страховка.
+const WATCHED_POLL_INTERVAL_MS = 60_000;
 // После ошибки (папка недоступна, git отсутствует) опрос замедляется.
 const ERROR_POLL_INTERVAL_MS = 15_000;
 
@@ -52,9 +54,40 @@ type WatchEntry = {
   lastKey: string | null;
   last: GitChangesSummary | null;
   failed: boolean;
+  watched: boolean;
 };
 
 const watches = new Map<string, WatchEntry>();
+
+// Один глобальный слушатель на все проекты: Rust шлёт workspaceId в payload.
+let eventUnlisten: Promise<() => void> | null = null;
+
+function publish(entry: WatchEntry, summary: GitChangesSummary): void {
+  const key = JSON.stringify(summary);
+  if (key === entry.lastKey) {
+    return;
+  }
+  entry.lastKey = key;
+  entry.last = summary;
+  for (const listener of entry.listeners) {
+    listener(summary);
+  }
+}
+
+function ensureEventListener(): void {
+  if (!isTauri || eventUnlisten) {
+    return;
+  }
+  eventUnlisten = listen<{
+    workspaceId: string;
+    summary: GitChangesSummary;
+  }>("git-changes", (event) => {
+    const entry = watches.get(event.payload.workspaceId);
+    if (entry && entry.listeners.size > 0) {
+      publish(entry, event.payload.summary);
+    }
+  });
+}
 
 export function getGitSummary(workspaceId: string): GitChangesSummary | null {
   return watches.get(workspaceId)?.last ?? null;
@@ -71,14 +104,7 @@ async function refresh(workspaceId: string): Promise<void> {
       workspaceId,
     });
     entry.failed = false;
-    const key = JSON.stringify(summary);
-    if (key !== entry.lastKey) {
-      entry.lastKey = key;
-      entry.last = summary;
-      for (const listener of entry.listeners) {
-        listener(summary);
-      }
-    }
+    publish(entry, summary);
   } catch {
     // Корень недоступен или git отсутствует: не спамим, опрос замедлится.
     entry.failed = true;
@@ -96,7 +122,11 @@ function scheduleNext(workspaceId: string): void {
   window.clearTimeout(entry.timer);
   entry.timer = window.setTimeout(
     () => void refresh(workspaceId),
-    entry.failed ? ERROR_POLL_INTERVAL_MS : POLL_INTERVAL_MS,
+    entry.failed
+      ? ERROR_POLL_INTERVAL_MS
+      : entry.watched
+        ? WATCHED_POLL_INTERVAL_MS
+        : POLL_INTERVAL_MS,
   );
 }
 
@@ -113,12 +143,25 @@ export function subscribeGitChanges(
       lastKey: null,
       last: null,
       failed: false,
+      watched: false,
     };
     watches.set(workspaceId, entry);
   }
+  const firstSubscriber = entry.listeners.size === 0;
   entry.listeners.add(listener);
   if (entry.last) {
     listener(entry.last);
+  }
+  if (firstSubscriber && isTauri) {
+    ensureEventListener();
+    const target = entry;
+    void invoke<boolean>("git_changes_watch", { workspaceId })
+      .then((watching) => {
+        target.watched = watching;
+      })
+      .catch(() => {
+        target.watched = false; // остаёмся на поллинге
+      });
   }
   void refresh(workspaceId);
   return () => {
@@ -130,6 +173,10 @@ export function subscribeGitChanges(
     if (current.listeners.size === 0) {
       window.clearTimeout(current.timer);
       current.timer = undefined;
+      current.watched = false;
+      if (isTauri) {
+        void invoke("git_changes_unwatch", { workspaceId }).catch(() => {});
+      }
       // Кеш сводки оставляем: повторное открытие панели покажет её мгновенно.
     }
   };
