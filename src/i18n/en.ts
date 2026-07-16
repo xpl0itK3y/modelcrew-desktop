@@ -139,6 +139,7 @@ export const en: Record<MessageKey, string> = {
   "settings.tabAppearance": "Appearance",
   "settings.tabTerminal": "Terminal",
   "settings.tabNotifications": "Notifications",
+  "settings.appVersion": "version {version}",
   "settings.notificationSound": "Notification sound",
   "settings.notificationSoundNote":
     "Plays when a new notification arrives. Click to preview.",

@@ -138,6 +138,7 @@ export const ru = {
   "settings.tabAppearance": "Внешний вид",
   "settings.tabTerminal": "Терминал",
   "settings.tabNotifications": "Уведомления",
+  "settings.appVersion": "версия {version}",
   "settings.notificationSound": "Звук уведомления",
   "settings.notificationSoundNote":
     "Проигрывается при новом уведомлении. Нажмите, чтобы прослушать.",

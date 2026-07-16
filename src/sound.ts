@@ -3,6 +3,7 @@
 // build. Selection is persisted per-machine in localStorage, mirroring shell.ts.
 
 import type { NotificationItem } from "./updater/types";
+import { APP_VERSION } from "./version";
 
 export type NotificationSoundId =
   | "off"
@@ -99,9 +100,6 @@ export function selectUnseenNotificationSoundIds(
 
 const HEALTH_KEY = "modelcrew.audioHealth";
 const AUDIO_HANG_THRESHOLD_MS = 5_000;
-
-const APP_VERSION =
-  typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0-dev";
 
 // Distinguishes our own in-flight "pending" marker from one left behind by a
 // process that never lived to confirm it.

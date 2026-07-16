@@ -8,6 +8,7 @@ import {
 } from "react";
 import { type ThemeId } from "../theme";
 import { type MessageKey, useI18n } from "../i18n";
+import { APP_VERSION } from "../version";
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
@@ -203,6 +204,10 @@ export function Settings(props: SettingsProps) {
               <NotificationsTab />
             </div>
           </div>
+        </div>
+
+        <div className="settings-footer">
+          ModelCrew · {t("settings.appVersion", { version: APP_VERSION })}
         </div>
       </div>
     </div>

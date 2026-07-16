@@ -466,3 +466,13 @@
     animation: none;
   }
 }
+
+.settings-footer {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mc-border);
+  font-size: 11px;
+  color: var(--mc-text-faint);
+  text-align: center;
+  user-select: text;
+}

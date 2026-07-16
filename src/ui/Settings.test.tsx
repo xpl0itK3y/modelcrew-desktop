@@ -133,6 +133,11 @@ describe("Settings tabs", () => {
     expect(appearanceTab).toHaveAttribute("aria-selected", "true");
   });
 
+  it("shows the app version in the dialog footer", () => {
+    renderSettings();
+    expect(screen.getByText(/ModelCrew · версия \d+\.\d+\.\d+/)).toBeInTheDocument();
+  });
+
   it("warns on the notifications tab when audio is suppressed after a hang", () => {
     soundSuppressed.mockReturnValue(true);
     renderSettings();
