@@ -8,6 +8,12 @@ import {
 import "dockview/dist/styles/dockview.css";
 import { invoke } from "@tauri-apps/api/core";
 import { TerminalPanel } from "./panels/TerminalPanel";
+import { GitChangesPanel } from "./panels/GitChangesPanel";
+import {
+  aggregateCounts,
+  subscribeGitChanges,
+  type GitChangesSummary,
+} from "./git/gitChanges";
 import { TerminalTab } from "./panels/TerminalTab";
 import { GroupActions } from "./panels/GroupActions";
 import { Welcome } from "./panels/Welcome";
@@ -20,6 +26,7 @@ import {
 } from "./terminal/registry";
 import { flushAllSnapshots, pruneSnapshots } from "./terminal/snapshots";
 import { pruneAgentRecords } from "./agents";
+import { openGitChangesPanel } from "./layoutOps";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -57,7 +64,7 @@ import { useWorkspaces } from "./workspaces/useWorkspaces";
 import { useDockviewSetup } from "./useDockviewSetup";
 import "./styles/index.css";
 
-const components = { terminal: TerminalPanel };
+const components = { terminal: TerminalPanel, gitChanges: GitChangesPanel };
 const tabComponents = { terminal: TerminalTab };
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -349,6 +356,30 @@ export default function App() {
   const activeWorkspace = workspaces.list.find(
     (workspace) => workspace.id === workspaces.activeId,
   );
+
+  // Живой агрегат git-изменений активного проекта для бейджа в титлбаре.
+  const [gitSummary, setGitSummary] = useState<GitChangesSummary | null>(null);
+  const activeGitWorkspaceId =
+    rootRegistryReady && activeWorkspace?.folder ? activeWorkspace.id : null;
+  useEffect(() => {
+    setGitSummary(null);
+    if (!activeGitWorkspaceId) {
+      return;
+    }
+    return subscribeGitChanges(activeGitWorkspaceId, setGitSummary);
+  }, [activeGitWorkspaceId]);
+
+  const openGitChanges = useCallback(() => {
+    const api = apiRef.current;
+    const current = workspacesRef.current;
+    const workspace = current.list.find(
+      (item) => item.id === current.activeId,
+    );
+    if (!api || !workspace) {
+      return;
+    }
+    openGitChangesPanel(api, workspace.id, workspace.activeSessionId);
+  }, [workspacesRef]);
   const sidebarWorkspaces = workspaces.list.map((workspace) => {
     const sessions = workspace.sessions.map((session) => ({
       id: session.id,
@@ -374,9 +405,13 @@ export default function App() {
         workspaceName={activeWorkspace?.displayName ?? WORKSPACE_NAME}
         workspaceFolder={activeWorkspace?.folder?.selectedPath ?? null}
         sidebarVisible={sidebarVisible}
+        gitCounts={
+          gitSummary?.isRepo ? aggregateCounts(gitSummary) : null
+        }
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenGitChanges={openGitChanges}
         updater={updater}
       />
       <div className="app-body">

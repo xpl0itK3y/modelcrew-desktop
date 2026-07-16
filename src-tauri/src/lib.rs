@@ -1,5 +1,6 @@
 mod agent_sessions;
 mod command_error;
+mod git_changes;
 mod terminal_snapshots;
 #[cfg(windows)]
 mod win_proc;
@@ -18,6 +19,7 @@ use update_cache::{
     updater_install_self_update, updater_prepare_self_update, SelfUpdaterState,
 };
 use agent_sessions::agent_session_locate;
+use git_changes::{git_changes_summary, git_file_diff};
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use terminal_snapshots::{
     terminal_snapshot_delete, terminal_snapshot_load, terminal_snapshot_save,
@@ -628,6 +630,8 @@ pub fn run() {
             terminal_snapshot_delete,
             terminal_snapshots_prune,
             agent_session_locate,
+            git_changes_summary,
+            git_file_diff,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,

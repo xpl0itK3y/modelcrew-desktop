@@ -122,6 +122,9 @@ function parseBackendError(error: unknown): BackendError | null {
 }
 
 const backendErrorKeys: Record<string, MessageKey> = {
+  git_unavailable: "error.gitUnavailable",
+  git_not_a_repository: "error.gitNotARepository",
+  git_command_failed: "error.gitCommandFailed",
   main_window_only: "error.mainWindowOnly",
   invalid_locale: "error.invalidLocale",
   app_menu_update_failed: "error.appMenuUpdateFailed",

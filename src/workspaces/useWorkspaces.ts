@@ -196,9 +196,16 @@ export function useWorkspaces({
         if (session.id === workspace.activeSessionId) {
           continue; // активную поднимает dockview
         }
+        // PTY поднимаем только терминалам: панель git-изменений и другие
+        // будущие типы панелей оболочки не имеют.
         prespawnSessionPanels(
           workspace.id,
-          Object.keys(session.layout?.panels ?? {}),
+          Object.entries(session.layout?.panels ?? {})
+            .filter(
+              ([, panel]) =>
+                (panel.contentComponent ?? "terminal") === "terminal",
+            )
+            .map(([panelId]) => panelId),
         );
       }
     },
@@ -313,14 +320,21 @@ export function useWorkspaces({
 
   const sessionPanelCount = useCallback(
     (workspace: Workspace, session: TerminalSession): number => {
+      // Счётчик в сайдбаре — только терминалы, без панели изменений.
       if (
         workspace.id === workspaces.activeId &&
         session.id === workspace.activeSessionId
       ) {
-        return apiRef.current?.panels.length ?? 0;
+        return (
+          apiRef.current?.panels.filter(
+            (panel) => panel.view?.contentComponent === "terminal",
+          ).length ?? 0
+        );
       }
       return session.layout
-        ? Object.keys(session.layout.panels).length
+        ? Object.values(session.layout.panels).filter(
+            (panel) => (panel.contentComponent ?? "terminal") === "terminal",
+          ).length
         : 0;
     },
     [apiRef, workspaces.activeId],

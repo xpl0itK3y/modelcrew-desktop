@@ -52,6 +52,9 @@ pub enum ErrorCode {
     UpdaterAuthorizationUnavailable,
     UpdaterAuthorizationCancelled,
     UpdaterInstallFailed,
+    GitUnavailable,
+    GitNotARepository,
+    GitCommandFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

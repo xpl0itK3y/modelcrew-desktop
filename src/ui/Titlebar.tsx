@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BellIcon,
+  GitBranchIcon,
   GridIcon,
   PlusIcon,
   SidebarIcon,
@@ -24,9 +25,12 @@ type TitlebarProps = {
   workspaceName: string;
   workspaceFolder: string | null;
   sidebarVisible: boolean;
+  // Живой агрегат git-изменений активного проекта; null — не показывать.
+  gitCounts: { additions: number; deletions: number; files: number } | null;
   onToggleSidebar: () => void;
   onNewTerminal: () => void;
   onOpenSettings: () => void;
+  onOpenGitChanges: () => void;
   updater: AppUpdaterController;
 };
 
@@ -225,6 +229,27 @@ export function Titlebar(props: TitlebarProps) {
         >
           <GridIcon />
         </button>
+        {props.gitCounts && (
+          <button
+            type="button"
+            className="icon-button git-titlebar-button"
+            title={t("titlebar.gitChanges")}
+            aria-label={t("titlebar.gitChanges")}
+            onClick={props.onOpenGitChanges}
+          >
+            <GitBranchIcon />
+            {props.gitCounts.files > 0 && (
+              <span className="git-titlebar-badge" aria-hidden="true">
+                <span className="git-count-add">
+                  +{props.gitCounts.additions}
+                </span>
+                <span className="git-count-del">
+                  −{props.gitCounts.deletions}
+                </span>
+              </span>
+            )}
+          </button>
+        )}
         <div className="titlebar-notifications" ref={notificationsRef}>
           <button
             ref={bellRef}

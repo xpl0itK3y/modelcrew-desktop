@@ -1,0 +1,230 @@
+/* Панель «Изменения»: список файлов и живой diff. */
+
+.git-changes-panel {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--mc-bg);
+  color: var(--mc-text);
+  font-size: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mc-scrollbar) transparent;
+}
+
+.git-changes-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--mc-border);
+  background: var(--mc-surface-raised);
+}
+
+.git-branch {
+  color: var(--mc-text-bright);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--mc-text-faint);
+  text-align: center;
+}
+
+.git-file-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.git-file {
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.git-file-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-file-header:hover {
+  background: var(--mc-hover);
+}
+
+.git-file-status {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.git-file-status.is-modified {
+  color: #d9a03f;
+  background: color-mix(in srgb, #d9a03f 14%, transparent);
+}
+
+.git-file-status.is-added,
+.git-file-status.is-untracked {
+  color: #4fb864;
+  background: color-mix(in srgb, #4fb864 14%, transparent);
+}
+
+.git-file-status.is-deleted {
+  color: #e05c5c;
+  background: color-mix(in srgb, #e05c5c 14%, transparent);
+}
+
+.git-file-status.is-renamed {
+  color: #5c9de0;
+  background: color-mix(in srgb, #5c9de0 14%, transparent);
+}
+
+.git-file-status.is-conflicted {
+  color: #c95ce0;
+  background: color-mix(in srgb, #c95ce0 14%, transparent);
+}
+
+.git-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* хвост пути важнее начала */
+  text-align: left;
+}
+
+.git-file-counts {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.git-count-add {
+  color: #4fb864;
+}
+
+.git-count-del {
+  color: #e05c5c;
+}
+
+.git-count-binary {
+  color: var(--mc-text-faint);
+}
+
+/* ---------- Diff ---------- */
+
+.git-diff {
+  overflow-x: auto;
+  border-top: 1px solid var(--mc-border);
+  background: var(--mc-surface);
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.git-diff-line {
+  display: flex;
+  min-width: max-content;
+}
+
+.git-diff-gutter {
+  flex: none;
+  width: 34px;
+  padding-right: 8px;
+  box-sizing: border-box;
+  color: var(--mc-text-faint);
+  text-align: right;
+  user-select: none;
+}
+
+.git-diff-text {
+  flex: 1;
+  white-space: pre;
+  padding-right: 12px;
+}
+
+.git-diff-line.is-add {
+  background: color-mix(in srgb, #4fb864 12%, transparent);
+}
+
+.git-diff-line.is-add .git-diff-text {
+  color: color-mix(in srgb, #4fb864 60%, var(--mc-text-bright));
+}
+
+.git-diff-line.is-del {
+  background: color-mix(in srgb, #e05c5c 12%, transparent);
+}
+
+.git-diff-line.is-del .git-diff-text {
+  color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
+}
+
+.git-diff-line.is-hunk {
+  color: var(--mc-text-faint);
+  background: var(--mc-surface-raised);
+}
+
+/* Реал-тайм: свежедобавленная агентом строка вспыхивает и гаснет. */
+.git-diff-line.is-fresh {
+  animation: git-line-fresh 1.2s ease-out;
+}
+
+@keyframes git-line-fresh {
+  from {
+    background: color-mix(in srgb, #4fb864 38%, transparent);
+  }
+  to {
+    background: color-mix(in srgb, #4fb864 12%, transparent);
+  }
+}
+
+.git-diff-note {
+  padding: 8px 12px;
+  border-top: 1px solid var(--mc-border);
+  color: var(--mc-text-faint);
+}
+
+/* ---------- Бейдж в титлбаре ---------- */
+
+.git-titlebar-badge {
+  display: inline-flex;
+  gap: 5px;
+  margin-left: 4px;
+  font-size: 10.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .git-diff-line.is-fresh {
+    animation: none;
+  }
+}
