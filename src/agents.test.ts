@@ -40,7 +40,17 @@ describe("agent catalog", () => {
       detectedAt: expect.any(Number),
     });
 
-    // Агент завершился — foreground снова оболочка.
+    // Вспышка подпроцесса (TUI запустил команду) запись не стирает.
+    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "node");
+    expect(getAgentRecord("panel-1")).not.toBeNull();
+    // Агент вернулся в foreground — счётчик промахов сброшен.
+    rememberAgentProcess("panel-1", "claude");
+    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "zsh");
+    expect(getAgentRecord("panel-1")).not.toBeNull();
+
+    // Устойчивая смена: три тика подряд не-агент — агент завершился.
     rememberAgentProcess("panel-1", "zsh");
     expect(getAgentRecord("panel-1")).toBeNull();
   });

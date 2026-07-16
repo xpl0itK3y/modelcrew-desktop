@@ -169,8 +169,14 @@ function saveRecords(records: Record<string, AgentRecord>): void {
   }
 }
 
+// TUI-агенты (codex и др.) гоняют подпроцессы: foreground на тик-другой
+// становится не-агентом, хотя агент жив. Запись стирается только после
+// устойчивой смены — короткая вспышка (или тик в момент Cmd+Q) её не убьёт.
+const AGENT_MISS_TOLERANCE = 3;
+const agentMisses = new Map<string, number>();
+
 // Watcher заголовков зовёт это на каждое имя foreground-процесса: агент в
-// фокусе — записываем, обычная команда/оболочка — запись снимается.
+// фокусе — записываем, устойчивый не-агент — запись снимается.
 // Возвращает true, когда в панели работает известный агент, — сигнал
 // планировать привязку точной сессии.
 export function rememberAgentProcess(
@@ -181,6 +187,7 @@ export function rememberAgentProcess(
   const matched = matchAgent(processName);
   const existing = records[terminalId];
   if (matched) {
+    agentMisses.delete(terminalId);
     if (
       existing?.agentId === matched.agent.id &&
       existing.command === matched.command
@@ -196,6 +203,12 @@ export function rememberAgentProcess(
     return true;
   }
   if (existing) {
+    const misses = (agentMisses.get(terminalId) ?? 0) + 1;
+    if (misses < AGENT_MISS_TOLERANCE) {
+      agentMisses.set(terminalId, misses);
+      return false;
+    }
+    agentMisses.delete(terminalId);
     delete records[terminalId];
     saveRecords(records);
   }
