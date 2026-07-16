@@ -156,9 +156,15 @@
   line-height: 1.5;
 }
 
+/* Ширина по самой длинной строке, но не уже видимой области: фон каждой
+   строки закрашивается до конца и при горизонтальной прокрутке. */
+.git-diff-body {
+  width: max-content;
+  min-width: 100%;
+}
+
 .git-diff-line {
   display: flex;
-  min-width: max-content;
 }
 
 .git-diff-gutter {
