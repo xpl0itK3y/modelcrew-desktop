@@ -27,6 +27,10 @@ const POPOVER_HEIGHT_KEY = "modelcrew.notificationHeight";
 const MIN_POPOVER_HEIGHT = 220;
 // Bottom margin kept between the stretched popover and the window edge.
 const POPOVER_BOTTOM_GAP = 12;
+// Длительность схлопывания карточки (см. .update-card.is-dismissing).
+const DISMISS_ANIMATION_MS = 220;
+// Задержка между карточками при «Очистить» — волна вместо одного щелчка.
+const DISMISS_STAGGER_MS = 45;
 
 function loadPopoverHeight(): number | null {
   try {
@@ -64,6 +68,7 @@ function canConfirmInstall(item: UpdateNotification): boolean {
 export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
   function UpdatePopover(props, ref) {
     const { locale, t } = useI18n();
+    const { onDismiss } = props;
     const [confirmingInstall, setConfirmingInstall] = useState<string | null>(
       null,
     );
@@ -72,6 +77,65 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
     );
     const dialogRef = useRef<HTMLDivElement | null>(null);
     const confirmationCancelRef = useRef<HTMLButtonElement | null>(null);
+    // Карточки, появившиеся уже при открытом поповере, въезжают с анимацией;
+    // состав на момент открытия показывается сразу (поповер сам анимируется).
+    const knownIdsRef = useRef<Set<string> | null>(null);
+    const arrivedIdsRef = useRef(new Set<string>());
+    const dismissingRef = useRef(new Set<string>());
+
+    {
+      const ids = props.center.items.map((item) => item.id);
+      if (knownIdsRef.current === null) {
+        knownIdsRef.current = new Set(ids);
+      } else {
+        for (const id of ids) {
+          if (!knownIdsRef.current.has(id)) {
+            knownIdsRef.current.add(id);
+            arrivedIdsRef.current.add(id);
+          }
+        }
+      }
+    }
+
+    // Скрытие с анимацией: карточка схлопывается по высоте и тает, состояние
+    // обновляется после. Без реальной раскладки (тесты) или при
+    // prefers-reduced-motion уведомление убирается сразу.
+    const dismissAnimated = useCallback(
+      (id: string, delay = 0) => {
+        if (dismissingRef.current.has(id)) {
+          return;
+        }
+        const card = dialogRef.current?.querySelector<HTMLElement>(
+          `[data-notification-id="${CSS.escape(id)}"]`,
+        );
+        if (
+          !card ||
+          card.offsetHeight === 0 ||
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          onDismiss(id);
+          return;
+        }
+        dismissingRef.current.add(id);
+        const collapse = () => {
+          card.style.height = `${card.offsetHeight}px`;
+          // Стартовая высота должна лечь в раскладку до перехода к нулю.
+          void card.offsetHeight;
+          card.classList.add("is-dismissing");
+          card.style.height = "0px";
+          window.setTimeout(() => {
+            dismissingRef.current.delete(id);
+            onDismiss(id);
+          }, DISMISS_ANIMATION_MS);
+        };
+        if (delay > 0) {
+          window.setTimeout(collapse, delay);
+        } else {
+          collapse();
+        }
+      },
+      [onDismiss],
+    );
 
     const setDialogRef = useCallback(
       (node: HTMLDivElement | null) => {
@@ -187,9 +251,10 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                 type="button"
                 className="update-popover-clear"
                 onClick={() => {
-                  for (const id of dismissibleIds) {
-                    props.onDismiss(id);
-                  }
+                  // Волна: карточки уходят одна за другой сверху вниз.
+                  dismissibleIds.forEach((id, index) => {
+                    dismissAnimated(id, index * DISMISS_STAGGER_MS);
+                  });
                 }}
               >
                 {t("update.clearAll")}
@@ -226,11 +291,15 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
             <div className="update-notification-list">
               {props.center.items.map((item, index) => {
                 const titleId = `update-notification-${index}-title`;
+                const arriving = arrivedIdsRef.current.has(item.id)
+                  ? " is-arriving"
+                  : "";
                 if (item.kind === "announcement") {
                   return (
                     <article
                       key={item.id}
-                      className="update-card is-announcement"
+                      data-notification-id={item.id}
+                      className={`update-card is-announcement${arriving}`}
                       aria-labelledby={titleId}
                     >
                       <button
@@ -238,7 +307,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                         className="icon-button update-card-dismiss"
                         title={t("update.dismiss")}
                         aria-label={t("update.dismiss")}
-                        onClick={() => props.onDismiss(item.id)}
+                        onClick={() => dismissAnimated(item.id)}
                       >
                         <CloseIcon />
                       </button>
@@ -301,7 +370,8 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                 return (
                   <article
                     key={item.id}
-                    className={`update-card is-${item.phase}`}
+                    data-notification-id={item.id}
+                    className={`update-card is-${item.phase}${arriving}`}
                     aria-labelledby={titleId}
                   >
                     <div className="update-card-header">

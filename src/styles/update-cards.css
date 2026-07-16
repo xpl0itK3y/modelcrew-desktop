@@ -74,6 +74,50 @@
   background: transparent;
 }
 
+/* Свежая карточка (пришла при открытом центре) въезжает сверху. */
+.update-card.is-arriving {
+  animation: update-card-in 260ms cubic-bezier(0.2, 0, 0.13, 1) backwards;
+}
+
+@keyframes update-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Скрытие: стартовая высота задаётся инлайном из JS, затем карточка
+   схлопывается до нуля, уезжая вправо и растворяясь. */
+.update-card.is-dismissing {
+  overflow: hidden;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom-color: transparent;
+  opacity: 0;
+  transform: translateX(16px);
+  transition:
+    height 200ms cubic-bezier(0.2, 0, 0.13, 1),
+    padding 200ms cubic-bezier(0.2, 0, 0.13, 1),
+    border-bottom-color 150ms ease-out,
+    opacity 150ms ease-out,
+    transform 200ms cubic-bezier(0.2, 0, 0.13, 1);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-card.is-arriving {
+    animation: none;
+  }
+
+  .update-card.is-dismissing {
+    transition: none;
+  }
+}
+
 /* Крестик скрытия — только на карточках анонсов. */
 .update-card-dismiss {
   position: absolute;

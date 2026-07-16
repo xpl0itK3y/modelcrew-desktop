@@ -277,6 +277,46 @@ describe("UpdatePopover", () => {
     expect(callbacks.onDismiss).toHaveBeenCalledWith("announcement:two");
   });
 
+  it("collapses the card visually before reporting the dismissal", () => {
+    vi.useFakeTimers();
+    try {
+      const callbacks = renderPopover({
+        sync: "settled",
+        items: [
+          {
+            id: "announcement:animated",
+            kind: "announcement",
+            title: "Анимация",
+            summary: "",
+            highlights: [],
+          },
+        ],
+      });
+      const card = document.querySelector<HTMLElement>(
+        '[data-notification-id="announcement:animated"]',
+      )!;
+      // jsdom не считает раскладку — даём карточке «реальную» высоту,
+      // чтобы сработал анимированный путь скрытия.
+      Object.defineProperty(card, "offsetHeight", { value: 120 });
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Скрыть уведомление" }),
+      );
+      expect(card.classList.contains("is-dismissing")).toBe(true);
+      expect(card.style.height).toBe("0px");
+      expect(callbacks.onDismiss).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(250);
+      expect(callbacks.onDismiss).toHaveBeenCalledWith(
+        "announcement:animated",
+      );
+      // Повторный клик по уже схлопывающейся карточке не дублирует скрытие.
+      expect(callbacks.onDismiss).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("hides the clear button when only an update card is present", () => {
     renderPopover({ sync: "settled", items: [notification("ready")] });
     expect(

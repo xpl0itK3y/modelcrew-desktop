@@ -241,7 +241,13 @@ export function Titlebar(props: TitlebarProps) {
           >
             <BellIcon />
             {unreadCount > 0 && (
-              <span className="notification-badge" aria-hidden="true">
+              // key по счётчику пересоздаёт бейдж — pop-анимация играет на
+              // каждое новое уведомление, а не только на первое.
+              <span
+                key={unreadCount}
+                className="notification-badge"
+                aria-hidden="true"
+              >
                 {unreadCount > 9 ? "9+" : unreadCount}
               </span>
             )}
