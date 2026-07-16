@@ -465,12 +465,13 @@ export default function App() {
               rightHeaderActionsComponent={GroupActions}
               onReady={onReady}
               theme={dockviewTheme}
-              // Дроп-зоны у краёв всей сетки: перетащить терминал в любой
-              // край (полноширинная строка/колонка) реально попасть — родная
-              // зона активации в 10px практически неуловима.
+              // Дроп-зоны у краёв всей сетки: полноширинная строка/колонка.
+              // Полоска узкая нарочно — иначе она перехватывает дропы,
+              // которыми пользователь хочет встать РЯДОМ с крайней панелью
+              // (это делается через половинки самой панели).
               dndEdges={{
-                activationSize: { type: "pixels", value: 28 },
-                size: { type: "percentage", value: 30 },
+                activationSize: { type: "pixels", value: 16 },
+                size: { type: "pixels", value: 48 },
               }}
             />
           ) : (
