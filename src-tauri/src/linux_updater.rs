@@ -1,4 +1,5 @@
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::update_cache::UpdateProgress as LinuxUpdateProgress;
 use semver::Version;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -10,13 +11,10 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 
 #[cfg(target_os = "linux")]
-use sha2::{Digest, Sha256};
-#[cfg(target_os = "linux")]
-use std::fs;
-#[cfg(target_os = "linux")]
-use std::io::{Read, Write};
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::PermissionsExt;
+use crate::update_cache::{
+    clear_cached, load_cached, parse_exact_version, sha256_bytes, sha256_file,
+    store_cached, verify_cached, CachedUpdateMeta,
+};
 #[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 #[cfg(target_os = "linux")]
@@ -50,14 +48,6 @@ impl LinuxPackageKind {
         }
     }
 
-    #[cfg(target_os = "linux")]
-    fn file_suffix(self) -> &'static str {
-        match self {
-            Self::Deb => ".deb",
-            Self::Rpm => ".rpm",
-            Self::Pacman => ".pkg.tar.zst",
-        }
-    }
 }
 
 impl std::fmt::Display for LinuxPackageKind {
@@ -83,21 +73,6 @@ pub enum UpdaterInstallTarget {
     },
     Manual,
     Development,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(
-    tag = "phase",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum LinuxUpdateProgress {
-    Downloading {
-        downloaded: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        total: Option<u64>,
-    },
-    Verifying,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -167,25 +142,12 @@ fn appimage_target_for_arch(arch: &str) -> Option<String> {
     }
 }
 
-fn parse_exact_version(version: &str) -> CommandResult<Version> {
-    let parsed = Version::parse(version).map_err(|error| {
-        CommandError::new(ErrorCode::UpdaterInvalidVersion)
-            .with_context("version", version)
-            .with_debug(error)
-    })?;
-    if parsed.to_string() != version {
-        return Err(
-            CommandError::new(ErrorCode::UpdaterInvalidVersion).with_context("version", version)
-        );
-    }
-    Ok(parsed)
-}
-
 struct PreparedLinuxPackage {
     version: String,
     package_kind: LinuxPackageKind,
     target: String,
-    path: tempfile::TempPath,
+    // Файл в постоянном каталоге pending-update: переживает перезапуск.
+    path: PathBuf,
     sha256: String,
     size: u64,
     total: Option<u64>,
@@ -208,7 +170,7 @@ impl PreparedLinuxPackage {
             version: self.version.clone(),
             package_kind: self.package_kind,
             target: self.target.clone(),
-            path: self.path.to_path_buf(),
+            path: self.path.clone(),
             sha256: self.sha256.clone(),
             size: self.size,
             total: self.total,
@@ -317,6 +279,7 @@ pub async fn updater_prepare_linux_package(
 #[tauri::command]
 pub async fn updater_install_linux_package(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     state: tauri::State<'_, LinuxUpdaterState>,
     version: String,
 ) -> CommandResult<()> {
@@ -324,12 +287,12 @@ pub async fn updater_install_linux_package(
 
     #[cfg(target_os = "linux")]
     {
-        install_linux_package(&state, version).await
+        install_linux_package(app, &state, version).await
     }
 
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (state, version);
+        let _ = (app, state, version);
         Err(CommandError::new(ErrorCode::UpdaterUnsupportedPlatform))
     }
 }
@@ -386,6 +349,29 @@ async fn prepare_linux_package(
     let requested_version = parse_exact_version(&version)?;
     let (package_kind, target) = current_native_target()?;
     let _operation = state.begin_operation()?;
+    let cache_dir = crate::update_cache::pending_update_dir(&app)?;
+
+    // Память пуста после перезапуска приложения — пробуем поднять пакет,
+    // сохранённый на диске прошлым экземпляром, чтобы не качать заново.
+    if state.prepared()?.is_none() {
+        let current_version = app.package_info().version.clone();
+        if let Some((meta, artifact)) = load_cached(&cache_dir, &current_version) {
+            if meta.kind == package_kind.target_suffix()
+                && meta.version == version
+                && meta.target == target
+            {
+                *state.prepared()? = Some(PreparedLinuxPackage {
+                    version: meta.version,
+                    package_kind,
+                    target: target.clone(),
+                    path: artifact,
+                    sha256: meta.sha256,
+                    size: meta.size,
+                    total: meta.total,
+                });
+            }
+        }
+    }
 
     let cached = state.prepared()?.as_ref().and_then(|prepared| {
         (prepared.version == version
@@ -395,8 +381,10 @@ async fn prepare_linux_package(
     });
     if let Some(cached) = cached {
         let _ = on_progress.send(LinuxUpdateProgress::Verifying);
-        if verify_cached_package(&cached).is_ok() {
-            verify_package_version(cached.package_kind, &cached.path, &requested_version)?;
+        if verify_cached_package(&cached).is_ok()
+            && verify_package_version(cached.package_kind, &cached.path, &requested_version)
+                .is_ok()
+        {
             return Ok(PreparedLinuxPackageInfo {
                 version,
                 package_kind,
@@ -412,6 +400,7 @@ async fn prepare_linux_package(
         {
             prepared.take();
         }
+        clear_cached(&cache_dir);
     }
 
     let updater = app
@@ -481,21 +470,17 @@ async fn prepare_linux_package(
     };
     let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     let sha256 = sha256_bytes(&bytes);
-    let mut temporary = tempfile::Builder::new()
-        .prefix("modelcrew-update-")
-        .suffix(package_kind.file_suffix())
-        .tempfile()
-        .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error))?;
-    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o600))
-        .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error))?;
-    temporary
-        .write_all(&bytes)
-        .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error))?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error))?;
-    let path = temporary.into_temp_path();
+    // Пакет ложится в постоянный pending-update: перезапуск приложения не
+    // потеряет загрузку, а установка возможна и в следующем экземпляре.
+    let meta = CachedUpdateMeta {
+        version: version.clone(),
+        target: target.clone(),
+        kind: package_kind.target_suffix().to_owned(),
+        sha256: sha256.clone(),
+        size,
+        total,
+    };
+    let path = store_cached(&cache_dir, &meta, &bytes)?;
     verify_package_version(package_kind, &path, &requested_version)?;
 
     *state.prepared()? = Some(PreparedLinuxPackage {
@@ -518,7 +503,11 @@ async fn prepare_linux_package(
 }
 
 #[cfg(target_os = "linux")]
-async fn install_linux_package(state: &LinuxUpdaterState, version: String) -> CommandResult<()> {
+async fn install_linux_package(
+    app: tauri::AppHandle,
+    state: &LinuxUpdaterState,
+    version: String,
+) -> CommandResult<()> {
     let requested_version = parse_exact_version(&version)?;
     let (package_kind, target) = current_native_target()?;
     let _operation = state.begin_operation()?;
@@ -559,37 +548,12 @@ async fn install_linux_package(state: &LinuxUpdaterState, version: String) -> Co
             && entry.target == prepared.target
     }) {
         cached.take();
+        // Дисковую копию тоже убираем: обновление уже установлено.
+        if let Ok(cache_dir) = crate::update_cache::pending_update_dir(&app) {
+            clear_cached(&cache_dir);
+        }
     }
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
-#[cfg(target_os = "linux")]
-fn sha256_file(path: &Path) -> CommandResult<(String, u64)> {
-    let mut file = fs::File::open(path)
-        .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheMissing).with_debug(error))?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheInvalid).with_debug(error))?;
-    if !metadata.is_file() {
-        return Err(CommandError::new(ErrorCode::UpdaterCacheInvalid));
-    }
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheInvalid).with_debug(error))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok((format!("{:x}", hasher.finalize()), metadata.len()))
 }
 
 #[cfg(target_os = "linux")]
@@ -936,14 +900,6 @@ mod tests {
     }
 
     #[test]
-    fn version_must_be_canonical_semver() {
-        assert_eq!(parse_exact_version("0.0.2").unwrap(), Version::new(0, 0, 2));
-        assert!(parse_exact_version("v0.0.2").is_err());
-        assert!(parse_exact_version("0.0.2 ").is_err());
-        assert!(parse_exact_version("01.0.0").is_err());
-    }
-
-    #[test]
     fn install_target_serialization_matches_frontend_contract() {
         let value = serde_json::to_value(UpdaterInstallTarget::NativePackage {
             package_kind: LinuxPackageKind::Pacman,
@@ -1136,7 +1092,7 @@ mod tests {
             total: Some(20),
         };
         verify_cached_package(&snapshot).unwrap();
-        fs::write(file.path(), b"tampered").unwrap();
+        std::fs::write(file.path(), b"tampered").unwrap();
         assert_eq!(
             verify_cached_package(&snapshot).unwrap_err().code,
             ErrorCode::UpdaterCacheInvalid

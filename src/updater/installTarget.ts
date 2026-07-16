@@ -1,12 +1,12 @@
-// Pure guards and classifiers for updater install targets and the Linux
-// package flow, extracted from useAppUpdater for readability.
+// Pure guards and classifiers for updater install targets and the Rust-side
+// update download flow, extracted from useAppUpdater for readability.
 
 import type {
   InstallUpdateTarget,
   UpdateInstallKind,
 } from "./types";
 
-export type LinuxPackageDownloadProgress =
+export type UpdateDownloadProgress =
   | {
       phase: "downloading";
       downloaded: number;
@@ -59,9 +59,9 @@ export function installKindFrom(target: InstallUpdateTarget): UpdateInstallKind 
   }
 }
 
-export function isLinuxPackageDownloadProgress(
+export function isUpdateDownloadProgress(
   value: unknown,
-): value is LinuxPackageDownloadProgress {
+): value is UpdateDownloadProgress {
   if (!isPlainObject(value) || typeof value.phase !== "string") {
     return false;
   }
@@ -91,7 +91,7 @@ export function isAuthorizationCancelled(error: unknown): boolean {
   );
 }
 
-export function isRecoverableLinuxPackageCacheError(error: unknown): boolean {
+export function isRecoverableUpdateCacheError(error: unknown): boolean {
   if (!isPlainObject(error) || typeof error.code !== "string") {
     return false;
   }

@@ -101,6 +101,14 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+// Скачивание самообновления ушло на Rust-сторону: вместо update.download()
+// хук зовёт команду updater_prepare_self_update с постоянным кешем.
+function prepareSelfUpdateCalls() {
+  return mocks.invoke.mock.calls.filter(
+    ([command]) => command === "updater_prepare_self_update",
+  );
+}
+
 describe("useAppUpdater", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -170,10 +178,15 @@ describe("useAppUpdater", () => {
 
     await advance(INITIAL_DELAY);
 
-    expect(candidate.download).toHaveBeenCalledTimes(1);
-    expect(candidate.download).toHaveBeenCalledWith(
-      expect.any(Function),
-      { timeout: 10 * 60 * 1_000 },
+    // Скачивание в Rust-кеш: JS-ресурс закрыт сразу после проверки.
+    expect(candidate.download).not.toHaveBeenCalled();
+    expect(candidate.close).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "updater_prepare_self_update",
+      expect.objectContaining({
+        version: "0.0.2",
+        onProgress: expect.anything(),
+      }),
     );
     expect(result.current.center.sync).toBe("settled");
     expect(result.current.center.items).toEqual([
@@ -186,7 +199,7 @@ describe("useAppUpdater", () => {
     ]);
   });
 
-  it("keeps the downloaded resource when a periodic check returns the same version", async () => {
+  it("keeps the prepared update when a periodic check returns the same version", async () => {
     const downloaded = makeUpdate({ version: "0.0.2" });
     const duplicate = makeUpdate({ version: "0.0.2" });
     mocks.check
@@ -201,9 +214,9 @@ describe("useAppUpdater", () => {
     await advance(4 * HOUR - INITIAL_DELAY);
 
     expect(mocks.check).toHaveBeenCalledTimes(2);
-    expect(duplicate.download).not.toHaveBeenCalled();
     expect(duplicate.close).toHaveBeenCalledTimes(1);
-    expect(downloaded.close).not.toHaveBeenCalled();
+    // Повторная проверка той же версии не перекачивает подготовленный кеш.
+    expect(prepareSelfUpdateCalls()).toHaveLength(1);
     expect(result.current.center.items[0]).toEqual(readyNotification);
   });
 
@@ -225,7 +238,11 @@ describe("useAppUpdater", () => {
     await advance(4 * HOUR - INITIAL_DELAY);
 
     expect(first.close).toHaveBeenCalledTimes(1);
-    expect(newer.download).toHaveBeenCalledTimes(1);
+    expect(
+      prepareSelfUpdateCalls().map(
+        ([, args]) => (args as { version: string }).version,
+      ),
+    ).toEqual(["0.0.2", "0.0.3"]);
     expect(result.current.center.items[0]).toEqual(
       expect.objectContaining({
         id: "update:0.0.3",
@@ -356,15 +373,24 @@ describe("useAppUpdater", () => {
   });
 
   it("shows downloadRetry and retries the download automatically", async () => {
-    const first = makeUpdate({
-      download: async () => {
-        throw new Error("temporary CDN failure");
-      },
-    });
+    const first = makeUpdate();
     const second = makeUpdate();
     mocks.check
       .mockResolvedValueOnce(first.update)
       .mockResolvedValueOnce(second.update);
+    let prepareAttempts = 0;
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === "updater_install_target") {
+        return { mode: "selfUpdate" };
+      }
+      if (command === "updater_prepare_self_update") {
+        prepareAttempts += 1;
+        if (prepareAttempts === 1) {
+          throw new Error("temporary CDN failure");
+        }
+      }
+      return undefined;
+    });
     const { result } = renderHook(() =>
       useAppUpdater({ locale: "ru", beforeInstall: vi.fn() }),
     );
@@ -378,7 +404,7 @@ describe("useAppUpdater", () => {
 
     await advance(MINUTE);
     expect(mocks.check).toHaveBeenCalledTimes(2);
-    expect(second.download).toHaveBeenCalledTimes(1);
+    expect(prepareAttempts).toBe(2);
     expect(result.current.center.items[0]).toEqual(
       expect.objectContaining({ phase: "ready", version: "0.0.2" }),
     );
@@ -699,8 +725,11 @@ describe("useAppUpdater", () => {
     });
 
     expect(beforeInstall).toHaveBeenCalledTimes(1);
-    expect(candidate.download).toHaveBeenCalledTimes(1);
-    expect(candidate.install).toHaveBeenCalledTimes(1);
+    expect(candidate.install).not.toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "updater_install_self_update",
+      expect.objectContaining({ version: "0.0.2" }),
+    );
     expect(mocks.relaunch).toHaveBeenCalledTimes(1);
     expect(result.current.center.items[0]).toEqual(
       expect.objectContaining({ phase: "restarting", version: "0.0.2" }),
@@ -751,8 +780,13 @@ describe("useAppUpdater", () => {
     });
 
     expect(beforeInstall).toHaveBeenCalledTimes(1);
-    expect(candidate.download).toHaveBeenCalledTimes(1);
-    expect(candidate.install).toHaveBeenCalledTimes(1);
+    // Повторная попытка после restartFailed только перезапускает: установка
+    // из кеша не выполняется второй раз.
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "updater_install_self_update",
+      ),
+    ).toHaveLength(1);
     expect(mocks.relaunch).toHaveBeenCalledTimes(2);
     expect((result.current.center.items[0] as UpdateNotification)?.phase).toBe(
       "restarting",
@@ -761,12 +795,17 @@ describe("useAppUpdater", () => {
 
   it("turns an install failure into a localized-safe public phase", async () => {
     const rawMessage = "raw updater secret: signature mismatch at /tmp/private";
-    const candidate = makeUpdate({
-      install: async () => {
-        throw new Error(rawMessage);
-      },
-    });
+    const candidate = makeUpdate();
     mocks.check.mockResolvedValue(candidate.update);
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === "updater_install_target") {
+        return { mode: "selfUpdate" };
+      }
+      if (command === "updater_install_self_update") {
+        throw new Error(rawMessage);
+      }
+      return undefined;
+    });
     const beforeInstall = vi.fn(async () => {});
     const { result } = renderHook(() =>
       useAppUpdater({ locale: "en", beforeInstall }),
@@ -778,7 +817,6 @@ describe("useAppUpdater", () => {
     });
 
     expect(beforeInstall).toHaveBeenCalledTimes(1);
-    expect(candidate.install).toHaveBeenCalledTimes(1);
     expect(mocks.relaunch).not.toHaveBeenCalled();
     expect((result.current.center.items[0] as UpdateNotification)?.phase).toBe(
       "installFailed",
@@ -835,9 +873,16 @@ describe("useAppUpdater", () => {
 
   it("does not duplicate checks while check or download work is pending", async () => {
     const pendingCheck = deferred<Update | null>();
-    const pendingDownload = deferred<void>();
-    const candidate = makeUpdate({
-      download: async () => pendingDownload.promise,
+    const pendingPrepare = deferred<void>();
+    const candidate = makeUpdate();
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === "updater_install_target") {
+        return { mode: "selfUpdate" };
+      }
+      if (command === "updater_prepare_self_update") {
+        return pendingPrepare.promise;
+      }
+      return undefined;
     });
     mocks.check.mockReturnValue(pendingCheck.promise);
     const { result } = renderHook(() =>
@@ -854,7 +899,7 @@ describe("useAppUpdater", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(candidate.download).toHaveBeenCalledTimes(1);
+    expect(prepareSelfUpdateCalls()).toHaveLength(1);
     expect((result.current.center.items[0] as UpdateNotification)?.phase).toBe(
       "downloading",
     );
@@ -862,10 +907,10 @@ describe("useAppUpdater", () => {
     await advance(30 * MINUTE);
     await dispatchWindowEvent("focus");
     expect(mocks.check).toHaveBeenCalledTimes(1);
-    expect(candidate.download).toHaveBeenCalledTimes(1);
+    expect(prepareSelfUpdateCalls()).toHaveLength(1);
 
     await act(async () => {
-      pendingDownload.resolve();
+      pendingPrepare.resolve();
       await Promise.resolve();
     });
     expect((result.current.center.items[0] as UpdateNotification)?.phase).toBe(

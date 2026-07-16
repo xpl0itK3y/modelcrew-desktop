@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
-import {
-  check,
-  type DownloadEvent,
-  type Update,
-} from "@tauri-apps/plugin-updater";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Locale } from "../i18n";
@@ -38,9 +34,9 @@ import {
   installKindFrom,
   isAuthorizationCancelled,
   isInstallTarget,
-  isLinuxPackageDownloadProgress,
+  isUpdateDownloadProgress,
   isPlainObject,
-  isRecoverableLinuxPackageCacheError,
+  isRecoverableUpdateCacheError,
 } from "./installTarget";
 import {
   blocksBackgroundCheck,
@@ -355,51 +351,51 @@ export function useAppUpdater({
         }));
       };
 
-      if (installTarget.mode === "nativePackage") {
-        await closeUpdateResource(update);
-        operationUpdate = null;
-        if (!isCurrentGeneration(generation)) {
+      // Скачивание идёт на Rust-стороне и ложится в постоянный кеш: после
+      // перезапуска приложения проверка находит готовый артефакт, и
+      // обновление сразу «готово к установке» без повторной загрузки.
+      await closeUpdateResource(update);
+      operationUpdate = null;
+      if (!isCurrentGeneration(generation)) {
+        return;
+      }
+      const onProgress = new Channel<unknown>();
+      let acceptProgress = true;
+      onProgress.onmessage = (event) => {
+        if (!acceptProgress || !isUpdateDownloadProgress(event)) {
           return;
         }
-        const onProgress = new Channel<unknown>();
-        let acceptProgress = true;
-        onProgress.onmessage = (event) => {
-          if (!acceptProgress || !isLinuxPackageDownloadProgress(event)) {
-            return;
-          }
-          if (event.phase === "verifying") {
-            publishProgress("verifying", true);
-            return;
-          }
-          downloaded = event.downloaded;
-          if (event.total !== undefined) {
-            total = event.total;
-          }
-          publishProgress("downloading");
-        };
-        try {
+        if (event.phase === "verifying") {
+          publishProgress("verifying", true);
+          return;
+        }
+        downloaded = event.downloaded;
+        if (event.total !== undefined) {
+          total = event.total;
+        }
+        publishProgress("downloading");
+      };
+      try {
+        if (installTarget.mode === "nativePackage") {
           await invoke("updater_prepare_linux_package", {
             version: source.version,
             onProgress,
           });
-        } finally {
-          // A queued IPC Channel message can arrive after invoke settles. It
-          // must not move a ready/retry notification back to progress state.
-          acceptProgress = false;
+        } else {
+          const target =
+            installTarget.mode === "selfUpdate"
+              ? installTarget.target
+              : undefined;
+          await invoke("updater_prepare_self_update", {
+            version: source.version,
+            ...(target === undefined ? {} : { target }),
+            onProgress,
+          });
         }
-      } else {
-        const onDownload = (event: DownloadEvent) => {
-          if (event.event === "Started") {
-            total = event.data.contentLength;
-            publishProgress("downloading", true);
-          } else if (event.event === "Progress") {
-            downloaded += event.data.chunkLength;
-            publishProgress();
-          } else {
-            publishProgress("downloading", true);
-          }
-        };
-        await update.download(onDownload, { timeout: 10 * 60 * 1_000 });
+      } finally {
+        // A queued IPC Channel message can arrive after invoke settles. It
+        // must not move a ready/retry notification back to progress state.
+        acceptProgress = false;
       }
       if (!isCurrentGeneration(generation)) {
         if (updateRef.current === update) {
@@ -486,7 +482,8 @@ export function useAppUpdater({
     const installTarget = installTargetRef.current;
     const restartOnly = notification?.id === restartPendingIdRef.current;
     const canInstallSelfUpdate =
-      notification?.installKind === "selfUpdate" && update !== null;
+      notification?.installKind === "selfUpdate" &&
+      installTarget?.mode === "selfUpdate";
     const canInstallNativePackage =
       notification?.installKind === "nativePackage" &&
       installTarget?.mode === "nativePackage";
@@ -536,8 +533,16 @@ export function useAppUpdater({
             return;
           }
           restartPreparedIdRef.current = notification.id;
-          await update!.install();
-          updateRef.current = null;
+          // Установка берёт артефакт из постоянного кеша: он мог быть скачан
+          // ещё прошлым экземпляром приложения.
+          const target =
+            installTarget?.mode === "selfUpdate"
+              ? installTarget.target
+              : undefined;
+          await invoke("updater_install_self_update", {
+            version: notification.version,
+            ...(target === undefined ? {} : { target }),
+          });
           restartPendingIdRef.current = notification.id;
         }
       }
@@ -568,11 +573,12 @@ export function useAppUpdater({
         return;
       }
       console.error("Updater install or relaunch failed", error);
-      const recoverNativePackage =
-        notification.installKind === "nativePackage" &&
+      // Кеш пропал или устарел (для обоих видов установки): возвращаемся к
+      // повторной загрузке вместо тупиковой ошибки установки.
+      const recoverFromCache =
         restartPendingIdRef.current !== notification.id &&
-        isRecoverableLinuxPackageCacheError(error);
-      if (recoverNativePackage) {
+        isRecoverableUpdateCacheError(error);
+      if (recoverFromCache) {
         if (
           isPlainObject(error) &&
           error.code === "updater_install_target_changed"

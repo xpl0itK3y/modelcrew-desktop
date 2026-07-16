@@ -6,12 +6,16 @@ mod win_proc;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod pty;
+mod update_cache;
 mod workspace_roots;
 
 use command_error::{CommandError, CommandResult, ErrorCode};
 use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
     LinuxUpdaterState,
+};
+use update_cache::{
+    updater_install_self_update, updater_prepare_self_update, SelfUpdaterState,
 };
 use agent_sessions::agent_session_locate;
 use pty::{PtyManager, ShellInfo, SpawnOptions};
@@ -611,6 +615,7 @@ pub fn run() {
         .manage(PtyManager::default())
         .manage(WorkspaceRoots::default())
         .manage(LinuxUpdaterState::default())
+        .manage(SelfUpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
@@ -631,7 +636,9 @@ pub fn run() {
             app_set_locale,
             updater_install_target,
             updater_prepare_linux_package,
-            updater_install_linux_package
+            updater_install_linux_package,
+            updater_prepare_self_update,
+            updater_install_self_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
