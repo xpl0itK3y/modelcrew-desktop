@@ -576,6 +576,64 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
         .collect())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitFile {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u64>,
+}
+
+fn is_safe_hash(hash: &str) -> bool {
+    (4..=64).contains(&hash.len()) && hash.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+// Файлы, изменённые конкретным коммитом (для раскрытой карточки истории).
+pub fn list_commit_files(root: &Path, hash: &str) -> CommandResult<Vec<GitCommitFile>> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let raw = run_git(
+        &toplevel,
+        &[
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--numstat",
+            "-r",
+            "-z",
+            hash,
+        ],
+    )?;
+    Ok(parse_numstat(&raw)
+        .into_iter()
+        .map(|(path, additions, deletions)| GitCommitFile {
+            path,
+            additions,
+            deletions,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn git_commit_files(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    hash: String,
+) -> CommandResult<Vec<GitCommitFile>> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || list_commit_files(&root, &hash))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
 #[tauri::command]
 pub async fn git_branches(
     window: tauri::WebviewWindow,
@@ -1105,6 +1163,13 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Однострочный коммит: без тела и соавторов.
         assert_eq!(log[1].body, "");
         assert!(log[1].co_authors.is_empty());
+
+        // Файлы конкретного коммита: b.txt добавлен вторым коммитом.
+        let files = list_commit_files(root, &log[0].hash).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "b.txt");
+        assert_eq!(files[0].additions, Some(1));
+        assert!(list_commit_files(root, "not-a-hash").is_err());
 
         switch_branch(root, "main").unwrap();
         let branches = list_branches(root).unwrap();

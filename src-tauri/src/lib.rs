@@ -21,7 +21,7 @@ use update_cache::{
 use agent_sessions::agent_session_locate;
 use git_changes::{
     git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_file_diff, git_log, git_revert_file, git_switch_branch, GitWatchState,
+    git_commit_files, git_file_diff, git_log, git_revert_file, git_switch_branch, GitWatchState,
 };
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use terminal_snapshots::{
@@ -643,6 +643,7 @@ pub fn run() {
             git_branches,
             git_switch_branch,
             git_log,
+            git_commit_files,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,

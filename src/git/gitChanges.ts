@@ -252,6 +252,19 @@ export function fetchLog(
   return invoke<GitCommitInfo[]>("git_log", { workspaceId, limit });
 }
 
+export type GitCommitFile = {
+  path: string;
+  additions?: number;
+  deletions?: number;
+};
+
+export function fetchCommitFiles(
+  workspaceId: string,
+  hash: string,
+): Promise<GitCommitFile[]> {
+  return invoke<GitCommitFile[]>("git_commit_files", { workspaceId, hash });
+}
+
 // «2 ч. назад» / «2h ago» — компактная подпись давности коммита.
 export function formatRelativeTime(
   epochMs: number,

@@ -19,6 +19,8 @@ export const en: Record<MessageKey, string> = {
   "git.historyEmpty": "No commits yet",
   "git.copyHash": "Copy the full hash",
   "git.commitCoAuthor": "Co-author:",
+  "git.commitDate": "Date:",
+  "git.commitFiles": "Files ({count}):",
   "git.commitPlaceholder": "Commit message",
   "git.commitButton": "Commit",
   "git.copyDiff": "Copy diff",

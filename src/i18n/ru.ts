@@ -18,6 +18,8 @@ export const ru = {
   "git.historyEmpty": "Коммитов ещё нет",
   "git.copyHash": "Скопировать полный хеш",
   "git.commitCoAuthor": "Соавтор:",
+  "git.commitDate": "Дата:",
+  "git.commitFiles": "Файлы ({count}):",
   "git.commitPlaceholder": "Сообщение коммита",
   "git.commitButton": "Коммит",
   "git.copyDiff": "Скопировать diff",
