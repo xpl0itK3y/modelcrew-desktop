@@ -28,6 +28,7 @@ describe("agent catalog", () => {
     expect(matchAgent("Codex")?.agent.id).toBe("codex");
     expect(matchAgent(" agy ")?.agent.id).toBe("antigravity");
     expect(matchAgent("kilo")?.agent.id).toBe("kilocode");
+    expect(matchAgent("grok")?.agent.id).toBe("grok");
     expect(matchAgent("zsh")).toBeNull();
     expect(matchAgent("vim")).toBeNull();
   });

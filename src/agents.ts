@@ -55,6 +55,13 @@ export const AGENTS: AgentDefinition[] = [
     resumeSession: ["--session"],
   },
   {
+    id: "grok",
+    processNames: ["grok"],
+    resumeLast: ["-c"],
+    resumePicker: ["--resume"],
+    resumeSession: ["--resume"],
+  },
+  {
     id: "antigravity",
     processNames: ["agy"],
     resumeLast: ["--continue"],
@@ -115,7 +122,8 @@ type AgentRecord = {
   sessionId?: string;
 };
 
-const SESSION_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+// Буквы/цифры/дефис/подчёркивание: uuid (claude, codex, agy) и ses_… (opencode).
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 const RECORDS_STORAGE_KEY = "modelcrew.terminalAgents";
 

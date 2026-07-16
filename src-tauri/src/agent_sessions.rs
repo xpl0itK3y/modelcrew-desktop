@@ -20,7 +20,7 @@ fn is_session_id(value: &str) -> bool {
         && value.len() <= 128
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 /// Кодирование пути проекта в имя папки, как это делает Claude Code:
@@ -177,6 +177,175 @@ pub fn locate_codex_session(
     best.map(|(_, id)| id)
 }
 
+/// OpenCode/Kilo: сессии в SQLite (`<data>/opencode.db`, таблица `session`
+/// с колонками id/directory/time_created). Читаем только на чтение.
+pub fn locate_opencode_session(
+    db_path: &Path,
+    cwd: &str,
+    since: SystemTime,
+    exclude: &[String],
+) -> Option<String> {
+    if !db_path.is_file() {
+        return None;
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, time_created FROM session \
+             WHERE directory = ?1 AND parent_id IS NULL \
+             ORDER BY time_created DESC LIMIT 50",
+        )
+        .ok()?;
+    let rows = statement
+        .query_map([cwd], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .ok()?;
+    let mut best: Option<(Duration, String)> = None;
+    for row in rows.flatten() {
+        let (id, created_ms) = row;
+        if !is_session_id(&id) || exclude.iter().any(|entry| entry == &id) {
+            continue;
+        }
+        let instant = UNIX_EPOCH + Duration::from_millis(created_ms.max(0) as u64);
+        if !within_window(instant, since) {
+            continue;
+        }
+        let dist = distance(instant, since);
+        if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
+            best = Some((dist, id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Antigravity (agy): папки-разговоры `<cli>/brain/<uuid>/` плюс карта
+/// `cache/last_conversations.json` «папка проекта → id последнего разговора».
+pub fn locate_antigravity_session(
+    cli_dir: &Path,
+    cwd: &str,
+    since: SystemTime,
+    exclude: &[String],
+) -> Option<String> {
+    let mut candidates: Vec<(Duration, String)> = Vec::new();
+    if let Ok(entries) = fs::read_dir(cli_dir.join("brain")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !is_session_id(name) || exclude.iter().any(|id| id == name) {
+                continue;
+            }
+            let Some(instant) = file_instant(&path) else {
+                continue;
+            };
+            // У активного разговора mtime папки обновляется — окно шире.
+            if !within_window(instant, since) {
+                continue;
+            }
+            candidates.push((distance(instant, since), name.to_string()));
+        }
+    }
+    // Карта «cwd → последний разговор» разрешает неоднозначность между
+    // параллельными проектами: у brain-папок нет собственного cwd.
+    let mapped: Option<String> = fs::read_to_string(
+        cli_dir.join("cache/last_conversations.json"),
+    )
+    .ok()
+    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+    .and_then(|value| {
+        value
+            .get(cwd)
+            .and_then(|id| id.as_str())
+            .map(str::to_string)
+    })
+    .filter(|id| is_session_id(id) && !exclude.iter().any(|entry| entry == id));
+
+    if let Some(mapped_id) = &mapped {
+        if candidates.iter().any(|(_, id)| id == mapped_id) {
+            return Some(mapped_id.clone());
+        }
+    }
+    if candidates.len() == 1 {
+        return Some(candidates.remove(0).1);
+    }
+    // Несколько кандидатов без карты — не гадаем; ноль кандидатов — карта
+    // как последний шанс (папка могла не попасть в окно по времени).
+    if candidates.is_empty() {
+        return mapped;
+    }
+    None
+}
+
+/// Grok Build: `~/.grok/sessions/**` — идентификатор в имени файла/папки,
+/// принадлежность проекту проверяется по упоминанию cwd в начале файла.
+pub fn locate_grok_session(
+    grok_dir: &Path,
+    cwd: &str,
+    since: SystemTime,
+    exclude: &[String],
+) -> Option<String> {
+    let mut best: Option<(Duration, String)> = None;
+    let mut stack = vec![(grok_dir.join("sessions"), 0u8)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if depth < 4 {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !is_session_id(stem) || exclude.iter().any(|id| id == stem) {
+                continue;
+            }
+            let Some(instant) = file_instant(&path) else {
+                continue;
+            };
+            if !within_window(instant, since) {
+                continue;
+            }
+            if !file_mentions_cwd(&path, cwd) {
+                continue;
+            }
+            let dist = distance(instant, since);
+            if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
+                best = Some((dist, stem.to_string()));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Дешёвая проверка принадлежности файла сессии проекту: cwd упомянут в
+/// первых килобайтах (метаданные пишутся в начале).
+fn file_mentions_cwd(path: &Path, cwd: &str) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut head = vec![0_u8; 8 * 1024];
+    let Ok(read) = file.read(&mut head) else {
+        return false;
+    };
+    head.truncate(read);
+    String::from_utf8_lossy(&head).contains(cwd)
+}
+
 fn claude_config_dir(home: &Path) -> PathBuf {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
@@ -187,6 +356,43 @@ fn codex_home_dir(home: &Path) -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".codex"))
+}
+
+fn xdg_data_home(home: &Path) -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"))
+}
+
+/// OPENCODE_DATA_DIR может быть списком через запятую.
+fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
+    if let Some(raw) = std::env::var_os("OPENCODE_DATA_DIR") {
+        return raw
+            .to_string_lossy()
+            .split(',')
+            .filter(|part| !part.trim().is_empty())
+            .map(|part| PathBuf::from(part.trim()).join("opencode.db"))
+            .collect();
+    }
+    vec![xdg_data_home(home).join("opencode/opencode.db")]
+}
+
+fn kilo_db_candidates(home: &Path) -> Vec<PathBuf> {
+    let data = xdg_data_home(home);
+    // Форк opencode: имя каталога данных зависит от дистрибуции.
+    vec![
+        data.join("kilo/opencode.db"),
+        data.join("kilocode/opencode.db"),
+        data.join("kilo/kilo.db"),
+    ]
+}
+
+fn antigravity_cli_dir(home: &Path) -> PathBuf {
+    home.join(".gemini/antigravity-cli")
+}
+
+fn grok_dir(home: &Path) -> PathBuf {
+    home.join(".grok")
 }
 
 #[tauri::command]
@@ -212,7 +418,17 @@ pub fn agent_session_locate(
     Ok(match agent.as_str() {
         "claude" => locate_claude_session(&claude_config_dir(&home), &cwd, since, &exclude),
         "codex" => locate_codex_session(&codex_home_dir(&home), &cwd, since, &exclude),
-        // Для остальных агентов адаптеров пока нет — мягкий фолбэк на фронте.
+        "opencode" => opencode_db_candidates(&home)
+            .iter()
+            .find_map(|db| locate_opencode_session(db, &cwd, since, &exclude)),
+        "kilocode" => kilo_db_candidates(&home)
+            .iter()
+            .find_map(|db| locate_opencode_session(db, &cwd, since, &exclude)),
+        "antigravity" => {
+            locate_antigravity_session(&antigravity_cli_dir(&home), &cwd, since, &exclude)
+        }
+        "grok" => locate_grok_session(&grok_dir(&home), &cwd, since, &exclude),
+        // Для прочих агентов адаптеров нет — мягкий фолбэк на фронте.
         _ => None,
     })
 }
@@ -327,6 +543,107 @@ mod tests {
             Some(uuid)
         );
         assert_eq!(locate_codex_session(&home, "/tmp/proj", since, &[uuid.into()]), None);
+    }
+
+    #[test]
+    fn opencode_locator_queries_sessions_by_directory() {
+        let dir = temp_dir("opencode");
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("opencode.db");
+        let connection = rusqlite::Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE session (
+                    id TEXT PRIMARY KEY,
+                    parent_id TEXT,
+                    directory TEXT NOT NULL,
+                    time_created INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO session VALUES ('ses_target', NULL, '/tmp/proj', {now_ms});
+                 INSERT INTO session VALUES ('ses_other', NULL, '/tmp/other', {now_ms});
+                 INSERT INTO session VALUES ('ses_child', 'ses_target', '/tmp/proj', {now_ms});
+                 INSERT INTO session VALUES ('ses_old', NULL, '/tmp/proj', 1000);"
+            ))
+            .unwrap();
+        drop(connection);
+
+        let since = SystemTime::now();
+        assert_eq!(
+            locate_opencode_session(&db_path, "/tmp/proj", since, &[]).as_deref(),
+            Some("ses_target")
+        );
+        assert_eq!(
+            locate_opencode_session(&db_path, "/tmp/proj", since, &["ses_target".into()]),
+            None
+        );
+        assert_eq!(
+            locate_opencode_session(&dir.join("missing.db"), "/tmp/proj", since, &[]),
+            None
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn antigravity_locator_uses_brain_dirs_and_folder_map() {
+        let cli = temp_dir("agy");
+        let since = SystemTime::now();
+        fs::create_dir_all(cli.join("brain/aaaa-1111")).unwrap();
+        fs::create_dir_all(cli.join("brain/bbbb-2222")).unwrap();
+        fs::create_dir_all(cli.join("cache")).unwrap();
+        fs::write(
+            cli.join("cache/last_conversations.json"),
+            b"{\"/tmp/proj\":\"bbbb-2222\",\"/tmp/other\":\"aaaa-1111\"}",
+        )
+        .unwrap();
+
+        // Два кандидата в окне — решает карта «папка → разговор».
+        assert_eq!(
+            locate_antigravity_session(&cli, "/tmp/proj", since, &[]).as_deref(),
+            Some("bbbb-2222")
+        );
+        // Занятый id отдаёт оставшегося единственного кандидата.
+        assert_eq!(
+            locate_antigravity_session(&cli, "/tmp/proj", since, &["bbbb-2222".into()])
+                .as_deref(),
+            Some("aaaa-1111")
+        );
+        let _ = fs::remove_dir_all(cli);
+    }
+
+    #[test]
+    fn grok_locator_matches_cwd_mention_in_session_head() {
+        let grok = temp_dir("grok");
+        let day = grok.join("sessions/nested");
+        fs::create_dir_all(&day).unwrap();
+        fs::write(
+            day.join("sess-target.jsonl"),
+            b"{\"cwd\":\"/tmp/proj\",\"model\":\"grok\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            day.join("sess-other.jsonl"),
+            b"{\"cwd\":\"/tmp/other\"}\n",
+        )
+        .unwrap();
+
+        let since = SystemTime::now();
+        assert_eq!(
+            locate_grok_session(&grok, "/tmp/proj", since, &[]).as_deref(),
+            Some("sess-target")
+        );
+        assert_eq!(
+            locate_grok_session(&grok, "/tmp/proj", since, &["sess-target".into()]),
+            None
+        );
+        let _ = fs::remove_dir_all(grok);
     }
 
     #[test]
