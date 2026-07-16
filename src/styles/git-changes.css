@@ -48,10 +48,16 @@
 .git-file-list {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  padding: 8px;
 }
 
+/* Каждый файл — отдельная карточка, чтобы список не сливался в полотно. */
 .git-file {
-  border-bottom: 1px solid var(--mc-border);
+  overflow: hidden;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-surface);
 }
 
 .git-file-header {
@@ -59,9 +65,9 @@
   width: 100%;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border: none;
-  background: transparent;
+  background: var(--mc-surface-raised);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -157,12 +163,19 @@
 
 .git-diff-gutter {
   flex: none;
-  width: 34px;
-  padding-right: 8px;
+  width: 30px;
+  padding-right: 7px;
   box-sizing: border-box;
   color: var(--mc-text-faint);
   text-align: right;
   user-select: none;
+}
+
+/* Разрыв между ханками вместо служебной строки @@ … @@. */
+.git-diff-gap {
+  height: 0;
+  margin: 5px 0;
+  border-top: 1px dashed var(--mc-border);
 }
 
 .git-diff-text {
@@ -185,11 +198,6 @@
 
 .git-diff-line.is-del .git-diff-text {
   color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
-}
-
-.git-diff-line.is-hunk {
-  color: var(--mc-text-faint);
-  background: var(--mc-surface-raised);
 }
 
 /* Реал-тайм: свежедобавленная агентом строка вспыхивает и гаснет. */
