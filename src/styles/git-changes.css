@@ -562,6 +562,36 @@
   color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
 }
 
+/* Счётчики уже видимого файла изменились: вспышка шапки и пружинка цифр. */
+.git-file-header.is-updated {
+  animation: git-file-flash 650ms ease-out;
+}
+
+.git-file-header.is-updated .git-file-counts {
+  animation: git-counts-pop 300ms cubic-bezier(0.34, 1.35, 0.64, 1);
+}
+
+@keyframes git-file-flash {
+  from {
+    background: color-mix(in srgb, var(--mc-accent) 20%, var(--mc-surface-raised));
+  }
+  to {
+    background: var(--mc-surface-raised);
+  }
+}
+
+@keyframes git-counts-pop {
+  from {
+    transform: scale(0.65);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 /* Появление новой карточки (файл или коммит) при открытой панели. */
 .git-file.is-arriving,
 .git-commit.is-arriving {
@@ -724,7 +754,9 @@
 @media (prefers-reduced-motion: reduce) {
   .git-diff-line.is-fresh,
   .git-file.is-arriving,
-  .git-commit.is-arriving {
+  .git-commit.is-arriving,
+  .git-file-header.is-updated,
+  .git-file-header.is-updated .git-file-counts {
     animation: none;
   }
 }
