@@ -341,7 +341,9 @@
   height: auto;
   right: 34px;
   bottom: 24px;
-  z-index: 60;
+  /* Выше сэшей dockview (z-index 99): разделители не просвечивают сквозь
+     оверлей и не перехватывают мышь под ним. */
+  z-index: 120;
   display: flex;
   width: min(400px, calc(100% - 68px));
   transition:
