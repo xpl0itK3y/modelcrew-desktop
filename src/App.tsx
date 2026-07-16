@@ -465,6 +465,13 @@ export default function App() {
               rightHeaderActionsComponent={GroupActions}
               onReady={onReady}
               theme={dockviewTheme}
+              // Дроп-зоны у краёв всей сетки: перетащить терминал в любой
+              // край (полноширинная строка/колонка) реально попасть — родная
+              // зона активации в 10px практически неуловима.
+              dndEdges={{
+                activationSize: { type: "pixels", value: 28 },
+                size: { type: "percentage", value: 30 },
+              }}
             />
           ) : (
             <div className="workspace-loading">{t("workspace.checking")}</div>
