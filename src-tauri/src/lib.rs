@@ -20,7 +20,8 @@ use update_cache::{
 };
 use agent_sessions::agent_session_locate;
 use git_changes::{
-    git_changes_summary, git_changes_unwatch, git_changes_watch, git_file_diff, GitWatchState,
+    git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit, git_file_diff,
+    git_revert_file, GitWatchState,
 };
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use terminal_snapshots::{
@@ -637,6 +638,8 @@ pub fn run() {
             git_file_diff,
             git_changes_watch,
             git_changes_unwatch,
+            git_commit,
+            git_revert_file,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,

@@ -104,6 +104,24 @@ export function GridIcon(props: IconProps) {
   );
 }
 
+export function CopyIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="5.5" y="5.5" width="7" height="7" rx="1.5" />
+      <path d="M10.5 5.5v-1a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 4.5V9A1.5 1.5 0 0 0 5 10.5h.5" />
+    </svg>
+  );
+}
+
+export function UndoIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 6.5h6a3 3 0 0 1 0 6H6" />
+      <path d="M6 4L3.5 6.5L6 9" />
+    </svg>
+  );
+}
+
 export function DiffIcon(props: IconProps) {
   // «±» как у счётчика изменений в Warp: плюс сверху, минус снизу.
   return (

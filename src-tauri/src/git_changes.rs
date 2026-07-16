@@ -408,6 +408,78 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
     })
 }
 
+// ---------- Действия: коммит и откат файла ----------
+
+const MAX_COMMIT_MESSAGE_CHARS: usize = 4000;
+
+pub fn commit_all(root: &Path, message: &str) -> CommandResult<()> {
+    let message = message.trim();
+    if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "message"));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    run_git(&toplevel, &["add", "-A"])?;
+    run_git(&toplevel, &["commit", "-m", message])?;
+    Ok(())
+}
+
+// Возвращает файл к состоянию HEAD; новые файлы удаляются. Подтверждение —
+// на фронтенде, команда выполняет уже принятое решение.
+pub fn revert_file(root: &Path, path: &str) -> CommandResult<()> {
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let in_head = run_git(&toplevel, &["ls-tree", "HEAD", "--", path])
+        .map(|stdout| !stdout.is_empty())
+        .unwrap_or(false);
+    if in_head {
+        run_git(&toplevel, &["checkout", "HEAD", "--", path])?;
+        return Ok(());
+    }
+    let tracked = run_git(&toplevel, &["ls-files", "--error-unmatch", "--", path]).is_ok();
+    if tracked {
+        // Добавлен в индекс, но не в HEAD: убираем и из индекса, и с диска.
+        run_git(&toplevel, &["rm", "-fq", "--", path])?;
+        return Ok(());
+    }
+    std::fs::remove_file(toplevel.join(path))
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn git_commit(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    message: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || commit_all(&root, &message))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_revert_file(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || revert_file(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
 // ---------- Реал-тайм: вотчер рабочего дерева ----------
 
 // Событие внутри .git интересно только когда меняется состояние репозитория
@@ -738,5 +810,47 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let plain = tempfile::tempdir().unwrap();
         let empty = collect_summary(plain.path()).unwrap();
         assert!(!empty.is_repo);
+    }
+
+    #[test]
+    fn commits_and_reverts_in_a_real_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "user.name", "t"]);
+        git(&["config", "user.email", "t@t"]);
+        std::fs::write(root.join("a.txt"), "original\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+
+        // Откат правки отслеживаемого файла возвращает содержимое HEAD.
+        std::fs::write(root.join("a.txt"), "edited\n").unwrap();
+        revert_file(root, "a.txt").unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "original\n");
+
+        // Откат нового файла удаляет его.
+        std::fs::write(root.join("fresh.txt"), "temp\n").unwrap();
+        revert_file(root, "fresh.txt").unwrap();
+        assert!(!root.join("fresh.txt").exists());
+
+        // Коммит из панели забирает всё, включая новые файлы.
+        std::fs::write(root.join("a.txt"), "committed\n").unwrap();
+        std::fs::write(root.join("new.txt"), "brand new\n").unwrap();
+        commit_all(root, "panel commit").unwrap();
+        let summary = collect_summary(root).unwrap();
+        assert!(summary.files.is_empty());
+        assert!(commit_all(root, "   ").is_err());
     }
 }

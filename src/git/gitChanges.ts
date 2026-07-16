@@ -189,6 +189,23 @@ export function fetchFileDiff(
   return invoke<GitFileDiff>("git_file_diff", { workspaceId, path });
 }
 
+// Мгновенное обновление после действия из панели (commit/откат), не дожидаясь
+// вотчера или очередного тика поллинга.
+export function refreshGitChanges(workspaceId: string): Promise<void> {
+  return refresh(workspaceId);
+}
+
+export function commitAll(
+  workspaceId: string,
+  message: string,
+): Promise<void> {
+  return invoke("git_commit", { workspaceId, message });
+}
+
+export function revertFile(workspaceId: string, path: string): Promise<void> {
+  return invoke("git_revert_file", { workspaceId, path });
+}
+
 // ---------- Парсер unified diff для отрисовки ----------
 
 export type DiffLine = {

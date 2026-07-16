@@ -477,6 +477,25 @@ export default function App() {
             >
               <div className="git-drawer-header">
                 <span className="git-drawer-title">{t("git.panelTitle")}</span>
+                {gitSummary?.isRepo && (
+                  <span className="git-drawer-branch" title={t("git.branch")}>
+                    {gitSummary.branch ?? t("git.detachedHead")}
+                    {gitSummary.ahead ? ` ↑${gitSummary.ahead}` : ""}
+                    {gitSummary.behind ? ` ↓${gitSummary.behind}` : ""}
+                  </span>
+                )}
+                <span className="git-drawer-spacer" />
+                {gitSummary?.isRepo &&
+                  aggregateCounts(gitSummary).files > 0 && (
+                    <span className="git-file-counts">
+                      <span className="git-count-add">
+                        +{aggregateCounts(gitSummary).additions}
+                      </span>
+                      <span className="git-count-del">
+                        −{aggregateCounts(gitSummary).deletions}
+                      </span>
+                    </span>
+                  )}
                 <button
                   type="button"
                   className="icon-button"
