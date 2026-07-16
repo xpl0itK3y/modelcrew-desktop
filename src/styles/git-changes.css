@@ -331,8 +331,9 @@
 .git-drawer {
   position: absolute;
   top: 0;
-  right: 8px;
-  bottom: 16px;
+  /* Отступы как у поповера уведомлений: панель не липнет к краям окна. */
+  right: 16px;
+  bottom: 24px;
   z-index: 60;
   display: flex;
   width: min(400px, calc(100% - 48px));
