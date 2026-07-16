@@ -6,9 +6,12 @@ import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
   loadEagerSessionRestore,
+  loadGridOrientation,
   loadTerminalHistoryIsolation,
   saveEagerSessionRestore,
+  saveGridOrientation,
   saveTerminalHistoryIsolation,
+  type GridOrientation,
 } from "../../terminal/preferences";
 import {
   AGENTS,
@@ -46,6 +49,9 @@ export function TerminalTab(props: TerminalTabProps) {
   );
   const [eagerRestore, setEagerRestore] = useState(() =>
     loadEagerSessionRestore(),
+  );
+  const [gridOrientation, setGridOrientation] = useState<GridOrientation>(
+    () => loadGridOrientation(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -179,6 +185,37 @@ export function TerminalTab(props: TerminalTabProps) {
             agents: AGENTS.map((agent) => agent.label).join(" · "),
           })}
         </p>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.gridOrientation")}</div>
+        <div
+          className="shell-options"
+          role="group"
+          aria-label={t("settings.gridOrientation")}
+        >
+          {(["columns", "rows"] as const).map((orientation) => (
+            <button
+              key={orientation}
+              type="button"
+              aria-pressed={gridOrientation === orientation}
+              className={`shell-option ${
+                gridOrientation === orientation ? "is-selected" : ""
+              }`}
+              onClick={() => {
+                setGridOrientation(orientation);
+                saveGridOrientation(orientation);
+              }}
+            >
+              {t(
+                orientation === "columns"
+                  ? "settings.gridColumns"
+                  : "settings.gridRows",
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">{t("settings.gridOrientationNote")}</p>
       </div>
 
       <div className="settings-section">

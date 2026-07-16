@@ -1,5 +1,30 @@
 const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
 const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
+const GRID_ORIENTATION_STORAGE_KEY = "modelcrew.gridOrientation";
+
+// Ориентация дерева при выравнивании сеткой: columns — парные горизонтальные
+// границы, rows — парные вертикальные (сквозной в дереве бывает только одна
+// ось, это выбор пользователя).
+export type GridOrientation = "columns" | "rows";
+
+export function loadGridOrientation(): GridOrientation {
+  try {
+    return localStorage.getItem(GRID_ORIENTATION_STORAGE_KEY) === "rows"
+      ? "rows"
+      : "columns";
+  } catch {
+    return "columns";
+  }
+}
+
+export function saveGridOrientation(orientation: GridOrientation): void {
+  try {
+    localStorage.setItem(GRID_ORIENTATION_STORAGE_KEY, orientation);
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}
+
 const EAGER_RESTORE_STORAGE_KEY = "modelcrew.eagerSessionRestore";
 
 // Оживлять ли при старте все сессии активного проекта разом (PTY + агенты),

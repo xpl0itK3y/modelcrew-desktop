@@ -160,6 +160,11 @@ export const en: Record<MessageKey, string> = {
   "settings.agentResumeOff": "Off",
   "settings.agentResumeInsert": "Type the command",
   "settings.agentResumeAuto": "Run automatically",
+  "settings.gridOrientation": "Terminal grid",
+  "settings.gridColumns": "Columns",
+  "settings.gridRows": "Rows",
+  "settings.gridOrientationNote":
+    "Columns: the divider between a terminal and the one below moves only that pair. Rows: the same for left/right pairs. The other axis always stays continuous in a grid.",
   "settings.sessionRestore": "Session restore",
   "settings.sessionRestoreAll": "All project sessions",
   "settings.sessionRestoreActive": "Active session only",

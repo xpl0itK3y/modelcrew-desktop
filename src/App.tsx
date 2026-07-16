@@ -54,6 +54,7 @@ import {
 import { isMac, WORKSPACE_NAME } from "./constants";
 import { loadShell, saveShell } from "./shell";
 import {
+  loadGridOrientation,
   loadTerminalFontSize,
   saveTerminalFontSize,
 } from "./terminal/preferences";
@@ -369,7 +370,7 @@ export default function App() {
   }, [activeGitWorkspaceId]);
 
   // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
-  // Дерево «колонками»: горизонтальные границы двигают только свою пару.
+  // Ориентация дерева — из настроек (Терминал → «Сетка терминалов»).
   const arrangeGrid = useCallback(() => {
     const api = apiRef.current;
     if (!api) {
@@ -377,7 +378,7 @@ export default function App() {
     }
     suppressCleanupRef.current = true;
     try {
-      arrangeEvenGrid(api, "columns");
+      arrangeEvenGrid(api, loadGridOrientation());
     } finally {
       suppressCleanupRef.current = false;
     }

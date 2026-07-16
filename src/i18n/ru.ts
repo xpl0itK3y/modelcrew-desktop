@@ -159,6 +159,11 @@ export const ru = {
   "settings.agentResumeOff": "Выключено",
   "settings.agentResumeInsert": "Подставить команду",
   "settings.agentResumeAuto": "Запускать автоматически",
+  "settings.gridOrientation": "Сетка терминалов",
+  "settings.gridColumns": "Колонками",
+  "settings.gridRows": "Строками",
+  "settings.gridOrientationNote":
+    "«Колонками» — граница между верхним и нижним терминалом двигает только свою пару. «Строками» — то же для границы между левым и правым. Сквозной в сетке всегда остаётся другая ось.",
   "settings.sessionRestore": "Восстановление сессий",
   "settings.sessionRestoreAll": "Все сессии проекта",
   "settings.sessionRestoreActive": "Только активная",
