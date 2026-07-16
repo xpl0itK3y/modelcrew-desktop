@@ -83,21 +83,32 @@
   padding: 8px;
 }
 
-/* Каждый файл — отдельная карточка, чтобы список не сливался в полотно. */
+/* Каждый файл — отдельная карточка, чтобы список не сливался в полотно.
+   overflow здесь нельзя: он ломает липкую шапку. Углы скругляют дети. */
 .git-file {
-  overflow: hidden;
   border: 1px solid var(--mc-border);
   border-radius: 8px;
   background: var(--mc-surface);
 }
 
+.git-file > :last-child {
+  border-bottom-left-radius: 7px;
+  border-bottom-right-radius: 7px;
+}
+
+/* Шапка файла липнет к верху при скролле: имя и счётчики всегда видны,
+   пока пользователь листает длинный diff этого файла. */
 .git-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   width: 100%;
   align-items: center;
   gap: 6px;
   padding: 4px 10px 4px 0;
   box-sizing: border-box;
+  border-radius: 7px 7px 0 0;
   background: var(--mc-surface-raised);
 }
 
