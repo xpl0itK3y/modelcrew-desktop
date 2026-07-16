@@ -126,7 +126,8 @@ export const ru = {
     "Не удалось перезапустить {failed} из {total} терминалов — они продолжают работать в прежней оболочке",
   "settings.agentResume": "Возобновление агентов",
   "settings.agentResumeNote":
-    "После перезапуска приложения восстановленный терминал сам продолжит последний диалог агента (Claude, Codex, OpenCode, Kilo, Antigravity).",
+    "После перезапуска приложения восстановленный терминал сам продолжит диалог агента — каждая панель свой чат.",
+  "settings.agentResumeSupported": "Поддерживаются: {agents}.",
   "settings.agentResumeOff": "Выключено",
   "settings.agentResumeInsert": "Подставить команду",
   "settings.agentResumeAuto": "Запускать автоматически",

@@ -11,6 +11,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type AgentDefinition = {
   id: string;
+  // Человекочитаемое имя для настроек.
+  label: string;
   // Имена foreground-процессов, по которым агент распознаётся (watcher
   // заголовков уже отдаёт их, например "codex" или "claude").
   processNames: string[];
@@ -28,6 +30,7 @@ export type AgentDefinition = {
 export const AGENTS: AgentDefinition[] = [
   {
     id: "claude",
+    label: "Claude Code",
     processNames: ["claude"],
     resumeLast: ["--continue"],
     resumePicker: ["--resume"],
@@ -35,6 +38,7 @@ export const AGENTS: AgentDefinition[] = [
   },
   {
     id: "codex",
+    label: "Codex",
     processNames: ["codex"],
     resumeLast: ["resume", "--last"],
     resumePicker: ["resume"],
@@ -42,6 +46,7 @@ export const AGENTS: AgentDefinition[] = [
   },
   {
     id: "opencode",
+    label: "OpenCode",
     processNames: ["opencode"],
     resumeLast: ["--continue"],
     resumePicker: ["--continue"],
@@ -49,6 +54,7 @@ export const AGENTS: AgentDefinition[] = [
   },
   {
     id: "kilocode",
+    label: "Kilo Code",
     processNames: ["kilocode", "kilo"],
     resumeLast: ["--continue"],
     resumePicker: ["--continue"],
@@ -56,13 +62,55 @@ export const AGENTS: AgentDefinition[] = [
   },
   {
     id: "grok",
+    label: "Grok Build",
     processNames: ["grok"],
     resumeLast: ["-c"],
     resumePicker: ["--resume"],
     resumeSession: ["--resume"],
   },
   {
+    id: "cursor",
+    label: "Cursor",
+    processNames: ["cursor-agent"],
+    resumeLast: ["--continue"],
+    resumePicker: ["resume"],
+    resumeSession: ["--resume"],
+  },
+  {
+    id: "gemini",
+    label: "Gemini CLI",
+    processNames: ["gemini"],
+    resumeLast: ["--resume"],
+    resumePicker: ["--resume"],
+    resumeSession: ["--resume"],
+  },
+  {
+    id: "qwen",
+    label: "Qwen Code",
+    processNames: ["qwen"],
+    resumeLast: ["--continue"],
+    resumePicker: ["--resume"],
+    resumeSession: ["--resume"],
+  },
+  {
+    id: "aider",
+    label: "Aider",
+    processNames: ["aider"],
+    // У aider одна история на репозиторий, адресных сессий нет.
+    resumeLast: ["--restore-chat-history"],
+    resumePicker: ["--restore-chat-history"],
+  },
+  {
+    id: "amp",
+    label: "Amp",
+    processNames: ["amp"],
+    resumeLast: ["threads", "continue"],
+    resumePicker: ["threads", "continue"],
+    resumeSession: ["threads", "continue"],
+  },
+  {
     id: "antigravity",
+    label: "Antigravity",
     processNames: ["agy"],
     resumeLast: ["--continue"],
     resumePicker: ["--continue"],

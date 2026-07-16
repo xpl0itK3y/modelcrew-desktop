@@ -127,7 +127,8 @@ export const en: Record<MessageKey, string> = {
     "Could not restart {failed} of {total} terminals — they are still running in the previous shell",
   "settings.agentResume": "Agent session resume",
   "settings.agentResumeNote":
-    "After the app restarts, a restored terminal continues the agent's last conversation on its own (Claude, Codex, OpenCode, Kilo, Antigravity).",
+    "After the app restarts, a restored terminal resumes the agent's conversation on its own — each panel gets its own chat.",
+  "settings.agentResumeSupported": "Supported: {agents}.",
   "settings.agentResumeOff": "Off",
   "settings.agentResumeInsert": "Type the command",
   "settings.agentResumeAuto": "Run automatically",

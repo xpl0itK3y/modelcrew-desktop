@@ -9,6 +9,7 @@ import {
   saveTerminalHistoryIsolation,
 } from "../../terminal/preferences";
 import {
+  AGENTS,
   loadAgentResumeMode,
   saveAgentResumeMode,
   type AgentResumeMode,
@@ -168,6 +169,11 @@ export function TerminalTab(props: TerminalTabProps) {
           ))}
         </div>
         <p className="settings-note">{t("settings.agentResumeNote")}</p>
+        <p className="settings-note">
+          {t("settings.agentResumeSupported", {
+            agents: AGENTS.map((agent) => agent.label).join(" · "),
+          })}
+        </p>
       </div>
 
       <div className="settings-section">

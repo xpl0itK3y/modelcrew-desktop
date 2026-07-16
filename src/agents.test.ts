@@ -29,6 +29,11 @@ describe("agent catalog", () => {
     expect(matchAgent(" agy ")?.agent.id).toBe("antigravity");
     expect(matchAgent("kilo")?.agent.id).toBe("kilocode");
     expect(matchAgent("grok")?.agent.id).toBe("grok");
+    expect(matchAgent("cursor-agent")?.agent.id).toBe("cursor");
+    expect(matchAgent("gemini")?.agent.id).toBe("gemini");
+    expect(matchAgent("qwen")?.agent.id).toBe("qwen");
+    expect(matchAgent("aider")?.agent.id).toBe("aider");
+    expect(matchAgent("amp")?.agent.id).toBe("amp");
     expect(matchAgent("zsh")).toBeNull();
     expect(matchAgent("vim")).toBeNull();
   });
@@ -106,6 +111,17 @@ describe("agent catalog", () => {
     expect(buildAgentResume(getAgentRecord("panel-2")!, false)).toBe(
       "codex resume abc-123",
     );
+
+    // Многословные команды и агент без адресного resume.
+    expect(
+      buildAgentResume({ agentId: "amp", command: "amp", sessionId: "T-1" }, false),
+    ).toBe("amp threads continue T-1");
+    expect(
+      buildAgentResume(
+        { agentId: "aider", command: "aider", sessionId: "ignored" },
+        false,
+      ),
+    ).toBe("aider --restore-chat-history");
   });
 
   it("rejects malformed session ids everywhere", () => {
