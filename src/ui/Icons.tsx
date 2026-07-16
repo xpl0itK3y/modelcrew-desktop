@@ -104,13 +104,11 @@ export function GridIcon(props: IconProps) {
   );
 }
 
-export function GitBranchIcon(props: IconProps) {
+export function DiffIcon(props: IconProps) {
+  // «±» как у счётчика изменений в Warp: плюс сверху, минус снизу.
   return (
     <svg {...base(props)}>
-      <circle cx="4.5" cy="4" r="1.8" />
-      <circle cx="4.5" cy="12" r="1.8" />
-      <circle cx="11.5" cy="5.5" r="1.8" />
-      <path d="M4.5 5.8v4.4M11.5 7.3c0 2.2-2.5 2.9-5 3.2" />
+      <path d="M8 2.8v5M5.5 5.3h5M5.5 11.8h5" />
     </svg>
   );
 }

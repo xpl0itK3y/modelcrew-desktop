@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BellIcon,
-  GitBranchIcon,
+  DiffIcon,
   GridIcon,
   PlusIcon,
   SidebarIcon,
@@ -237,7 +237,7 @@ export function Titlebar(props: TitlebarProps) {
             aria-label={t("titlebar.gitChanges")}
             onClick={props.onOpenGitChanges}
           >
-            <GitBranchIcon />
+            <DiffIcon />
             {props.gitCounts.files > 0 && (
               <span className="git-titlebar-badge" aria-hidden="true">
                 <span className="git-count-add">
