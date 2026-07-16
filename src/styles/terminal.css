@@ -21,8 +21,43 @@
   --dv-scrollbar-background-color: var(--mc-scrollbar);
   --dv-sash-color: transparent;
   --dv-active-sash-color: var(--mc-accent);
+  /* Разделитель подсвечивается почти сразу — видно, что его можно тянуть. */
+  --dv-active-sash-transition-delay: 0.12s;
+  --dv-active-sash-transition-duration: 0.12s;
   --dv-tab-close-icon-size: 12px;
   --dv-background-color: transparent;
+}
+
+/* Сам разделитель — 4px, поймать сложно. Невидимое расширение зоны захвата
+   (приём dockview для тач-экранов) включено и для мыши: тянуть границы
+   между терминалами становится легко. */
+.dockview-theme-modelcrew
+  .dv-split-view-container
+  .dv-sash-container
+  > .dv-sash:not(.dv-disabled)::before {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+
+.dockview-theme-modelcrew
+  .dv-split-view-container.dv-horizontal
+  > .dv-sash-container
+  > .dv-sash:not(.dv-disabled)::before {
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  right: -6px;
+}
+
+.dockview-theme-modelcrew
+  .dv-split-view-container.dv-vertical
+  > .dv-sash-container
+  > .dv-sash:not(.dv-disabled)::before {
+  left: 0;
+  right: 0;
+  top: -6px;
+  bottom: -6px;
 }
 
 /* Плотная сетка: тонкие рамки, лёгкое скругление; активная — розовая рамка */
