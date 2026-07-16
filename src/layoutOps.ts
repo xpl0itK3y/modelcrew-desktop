@@ -106,10 +106,19 @@ export function gridDimensions(count: number): { rows: number; cols: number } {
   return { rows: Math.max(1, Math.ceil(count / cols)), cols };
 }
 
+// Ориентация дерева сетки. В дереве-раскладке независимы границы только
+// одной оси: columns — раздельные горизонтальные (терминал можно поднимать
+// не трогая соседей), rows — раздельные вертикальные. Повторное нажатие
+// кнопки-сетки переключает ориентацию.
+export type GridOrientation = "columns" | "rows";
+
 // Перестраивает раскладку активной сессии в ровную сетку. Инстансы xterm
 // живут вне dockview, поэтому пересоздание панелей с теми же id сохраняет
 // PTY, буферы и заголовки; вызывающий обязан подавить cleanup на время.
-export function arrangeEvenGrid(api: DockviewApi): boolean {
+export function arrangeEvenGrid(
+  api: DockviewApi,
+  orientation: GridOrientation = "columns",
+): boolean {
   const panels = api.panels.filter(
     (panel) => panel.view?.contentComponent === "terminal",
   );
@@ -132,14 +141,32 @@ export function arrangeEvenGrid(api: DockviewApi): boolean {
 
   api.closeAllGroups();
 
-  // Дерево строится КОЛОНКАМИ: у каждой колонки свой горизонтальный
-  // разделитель, поэтому один терминал можно поднимать/опускать, не двигая
-  // соседние колонки. Общим остаётся только вертикальный разделитель колонок
-  // — в дереве-раскладке независимыми могут быть лишь границы одной оси.
   const grid: IDockviewPanel[][] = [];
   meta.forEach((entry, index) => {
     const row = Math.floor(index / cols);
     const col = index % cols;
+    const first = row === 0 && col === 0;
+    // columns: сначала полновысотные колонки, затем деление каждой вниз.
+    // rows: сначала полноширинные строки, затем деление каждой вправо.
+    const position = first
+      ? {}
+      : orientation === "columns"
+        ? row === 0
+          ? { position: { direction: "right" as const } }
+          : {
+              position: {
+                referencePanel: grid[row - 1][col],
+                direction: "below" as const,
+              },
+            }
+        : col === 0
+          ? { position: { direction: "below" as const } }
+          : {
+              position: {
+                referencePanel: grid[row][col - 1],
+                direction: "right" as const,
+              },
+            };
     const panel = api.addPanel({
       id: entry.id,
       component: "terminal",
@@ -148,17 +175,7 @@ export function arrangeEvenGrid(api: DockviewApi): boolean {
       params: entry.params,
       minimumWidth: PANEL_MIN_WIDTH,
       minimumHeight: PANEL_MIN_HEIGHT,
-      ...(row === 0
-        ? col === 0
-          ? {}
-          : // Новая колонка — полновысотная, у правого края всего грида.
-            { position: { direction: "right" as const } }
-        : {
-            position: {
-              referencePanel: grid[row - 1][col],
-              direction: "below" as const,
-            },
-          }),
+      ...position,
     });
     (grid[row] ??= [])[col] = panel;
   });
@@ -166,12 +183,21 @@ export function arrangeEvenGrid(api: DockviewApi): boolean {
   // Сплиты делят место пополам неравномерно — приводим к равным долям.
   const rowHeight = Math.floor(api.height / rows);
   const colWidth = Math.floor(api.width / cols);
-  for (const panel of grid[0]) {
-    panel?.api.setSize({ width: colWidth });
-  }
-  for (const row of grid) {
-    for (const panel of row) {
-      panel?.api.setSize({ height: rowHeight });
+  if (orientation === "columns") {
+    for (const panel of grid[0]) {
+      panel?.api.setSize({ width: colWidth });
+    }
+    for (const row of grid) {
+      for (const panel of row) {
+        panel?.api.setSize({ height: rowHeight });
+      }
+    }
+  } else {
+    for (const row of grid) {
+      row[0]?.api.setSize({ height: rowHeight });
+      for (const panel of row) {
+        panel?.api.setSize({ width: colWidth });
+      }
     }
   }
   return true;

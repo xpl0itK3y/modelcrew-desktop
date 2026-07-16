@@ -369,6 +369,9 @@ export default function App() {
   }, [activeGitWorkspaceId]);
 
   // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
+  // Повторное нажатие переключает ориентацию дерева (колонки ⇄ строки) —
+  // независимой в дереве-раскладке может быть только одна ось границ.
+  const gridOrientationRef = useRef<"columns" | "rows">("columns");
   const arrangeGrid = useCallback(() => {
     const api = apiRef.current;
     if (!api) {
@@ -376,7 +379,10 @@ export default function App() {
     }
     suppressCleanupRef.current = true;
     try {
-      arrangeEvenGrid(api);
+      if (arrangeEvenGrid(api, gridOrientationRef.current)) {
+        gridOrientationRef.current =
+          gridOrientationRef.current === "columns" ? "rows" : "columns";
+      }
     } finally {
       suppressCleanupRef.current = false;
     }
