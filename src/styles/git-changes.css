@@ -251,12 +251,17 @@
 
 .git-diff-gutter {
   flex: none;
-  width: 30px;
-  padding-right: 7px;
+  width: 38px;
+  padding-right: 9px;
   box-sizing: border-box;
   color: var(--mc-text-faint);
   text-align: right;
   user-select: none;
+}
+
+/* Номер удалённой строки — из старой версии файла, слегка притушен. */
+.git-diff-line.is-del .git-diff-gutter {
+  opacity: 0.55;
 }
 
 /* Разрыв между ханками вместо служебной строки @@ … @@. */
