@@ -7,6 +7,8 @@
 // бинаря; команда всегда собирается из этого каталога, так что подделанное
 // хранилище не может подсунуть произвольную строку в оболочку.
 
+import { invoke } from "@tauri-apps/api/core";
+
 export type AgentDefinition = {
   id: string;
   // Имена foreground-процессов, по которым агент распознаётся (watcher
@@ -17,6 +19,9 @@ export type AgentDefinition = {
   // Аргументы «показать список диалогов» — для второй и последующих панелей
   // того же агента в той же папке, чтобы не открыть везде один и тот же чат.
   resumePicker: string[];
+  // Аргументы точного возобновления: id сессии добавляется последним.
+  // Отсутствует у агентов без адресного resume.
+  resumeSession?: string[];
 };
 
 // Флаги сверены с документацией CLI (июль 2026).
@@ -26,30 +31,35 @@ export const AGENTS: AgentDefinition[] = [
     processNames: ["claude"],
     resumeLast: ["--continue"],
     resumePicker: ["--resume"],
+    resumeSession: ["--resume"],
   },
   {
     id: "codex",
     processNames: ["codex"],
     resumeLast: ["resume", "--last"],
     resumePicker: ["resume"],
+    resumeSession: ["resume"],
   },
   {
     id: "opencode",
     processNames: ["opencode"],
     resumeLast: ["--continue"],
     resumePicker: ["--continue"],
+    resumeSession: ["--session"],
   },
   {
     id: "kilocode",
     processNames: ["kilocode", "kilo"],
     resumeLast: ["--continue"],
     resumePicker: ["--continue"],
+    resumeSession: ["--session"],
   },
   {
     id: "antigravity",
     processNames: ["agy"],
     resumeLast: ["--continue"],
     resumePicker: ["--continue"],
+    resumeSession: ["--conversation"],
   },
 ];
 
@@ -99,7 +109,13 @@ export function matchAgent(
 type AgentRecord = {
   agentId: string;
   command: string;
+  // Момент обнаружения агента — окно поиска его файла сессии.
+  detectedAt: number;
+  // Точный id сессии агента (uuid), когда локатор его нашёл.
+  sessionId?: string;
 };
+
+const SESSION_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
 
 const RECORDS_STORAGE_KEY = "modelcrew.terminalAgents";
 
@@ -121,9 +137,21 @@ function loadRecords(): Record<string, AgentRecord> {
         typeof (value as AgentRecord).agentId === "string" &&
         typeof (value as AgentRecord).command === "string"
       ) {
+        const candidate = value as AgentRecord;
+        const sessionId =
+          typeof candidate.sessionId === "string" &&
+          SESSION_ID_PATTERN.test(candidate.sessionId)
+            ? candidate.sessionId
+            : undefined;
         records[id] = {
-          agentId: (value as AgentRecord).agentId,
-          command: (value as AgentRecord).command,
+          agentId: candidate.agentId,
+          command: candidate.command,
+          detectedAt:
+            typeof candidate.detectedAt === "number" &&
+            Number.isFinite(candidate.detectedAt)
+              ? candidate.detectedAt
+              : 0,
+          ...(sessionId ? { sessionId } : {}),
         };
       }
     }
@@ -143,10 +171,12 @@ function saveRecords(records: Record<string, AgentRecord>): void {
 
 // Watcher заголовков зовёт это на каждое имя foreground-процесса: агент в
 // фокусе — записываем, обычная команда/оболочка — запись снимается.
+// Возвращает true, когда в панели работает известный агент, — сигнал
+// планировать привязку точной сессии.
 export function rememberAgentProcess(
   terminalId: string,
   processName: string,
-): void {
+): boolean {
   const records = loadRecords();
   const matched = matchAgent(processName);
   const existing = records[terminalId];
@@ -155,16 +185,21 @@ export function rememberAgentProcess(
       existing?.agentId === matched.agent.id &&
       existing.command === matched.command
     ) {
-      return;
+      return true;
     }
-    records[terminalId] = { agentId: matched.agent.id, command: matched.command };
-  } else {
-    if (!existing) {
-      return;
-    }
-    delete records[terminalId];
+    records[terminalId] = {
+      agentId: matched.agent.id,
+      command: matched.command,
+      detectedAt: Date.now(),
+    };
+    saveRecords(records);
+    return true;
   }
-  saveRecords(records);
+  if (existing) {
+    delete records[terminalId];
+    saveRecords(records);
+  }
+  return false;
 }
 
 export function discardAgentRecord(terminalId: string): void {
@@ -190,17 +225,48 @@ export function pruneAgentRecords(keepIds: string[]): void {
   }
 }
 
-export function getAgentRecord(
-  terminalId: string,
-): { agentId: string; command: string } | null {
+export function getAgentRecord(terminalId: string): AgentRecord | null {
   return loadRecords()[terminalId] ?? null;
+}
+
+// Привязывает панели точный id сессии агента (результат работы локатора).
+export function bindAgentSession(terminalId: string, sessionId: string): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return;
+  }
+  const records = loadRecords();
+  const record = records[terminalId];
+  if (!record || record.sessionId === sessionId) {
+    return;
+  }
+  records[terminalId] = { ...record, sessionId };
+  saveRecords(records);
+}
+
+// Сессии этого агента, уже занятые другими панелями: локатор их пропускает,
+// чтобы шесть клаудов в одном проекте получили шесть разных чатов.
+export function boundAgentSessionIds(
+  agentId: string,
+  exceptTerminalId: string,
+): string[] {
+  const ids: string[] = [];
+  for (const [terminalId, record] of Object.entries(loadRecords())) {
+    if (
+      terminalId !== exceptTerminalId &&
+      record.agentId === agentId &&
+      record.sessionId
+    ) {
+      ids.push(record.sessionId);
+    }
+  }
+  return ids;
 }
 
 // Собирает shell-строку возобновления. picker: в этой папке уже возобновлялась
 // панель того же агента — вместо «последнего диалога» открываем список, чтобы
 // не продолжить один и тот же чат дважды.
 export function buildAgentResume(
-  record: { agentId: string; command: string },
+  record: { agentId: string; command: string; sessionId?: string },
   picker: boolean,
 ): string | null {
   const agent = AGENTS.find((entry) => entry.id === record.agentId);
@@ -212,6 +278,72 @@ export function buildAgentResume(
   const command = agent.processNames.includes(record.command)
     ? record.command
     : agent.processNames[0];
+  // Точный id (перепроверенный по формату) — продолжаем ровно свой чат.
+  if (
+    record.sessionId &&
+    SESSION_ID_PATTERN.test(record.sessionId) &&
+    agent.resumeSession
+  ) {
+    return [command, ...agent.resumeSession, record.sessionId].join(" ");
+  }
   const args = picker ? agent.resumePicker : agent.resumeLast;
   return [command, ...args].join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Привязка сессии через Rust-локатор. Файл сессии может появиться с задержкой
+// (после первого сообщения), поэтому несколько попыток с нарастающей паузой.
+
+const isTauri = "__TAURI_INTERNALS__" in window;
+const LOCATE_ATTEMPT_DELAYS_MS = [1_500, 6_000, 20_000];
+
+const pendingBindings = new Set<string>();
+
+async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
+  const record = getAgentRecord(terminalId);
+  if (!record || record.sessionId) {
+    return true; // привязка не нужна или уже есть
+  }
+  const agent = AGENTS.find((entry) => entry.id === record.agentId);
+  if (!agent?.resumeSession) {
+    return true; // у агента нет адресного resume
+  }
+  try {
+    const found = await invoke<string | null>("agent_session_locate", {
+      agent: record.agentId,
+      cwd,
+      sinceEpochMs: Math.max(0, Math.round(record.detectedAt)),
+      exclude: boundAgentSessionIds(record.agentId, terminalId),
+    });
+    if (found) {
+      bindAgentSession(terminalId, found);
+      return true;
+    }
+  } catch {
+    // Локатор — best-effort: без id останется мягкий фолбэк на --continue.
+  }
+  return false;
+}
+
+// Зовётся watcher'ом при обнаружении агента в панели.
+export function scheduleAgentSessionBinding(
+  terminalId: string,
+  cwd: string,
+): void {
+  if (!isTauri || pendingBindings.has(terminalId)) {
+    return;
+  }
+  pendingBindings.add(terminalId);
+  let attempt = 0;
+  const tryLocate = () => {
+    void locateOnce(terminalId, cwd).then((done) => {
+      attempt += 1;
+      if (done || attempt >= LOCATE_ATTEMPT_DELAYS_MS.length) {
+        pendingBindings.delete(terminalId);
+        return;
+      }
+      window.setTimeout(tryLocate, LOCATE_ATTEMPT_DELAYS_MS[attempt]);
+    });
+  };
+  window.setTimeout(tryLocate, LOCATE_ATTEMPT_DELAYS_MS[0]);
 }

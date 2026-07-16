@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  bindAgentSession,
+  boundAgentSessionIds,
   buildAgentResume,
   getAgentRecord,
   discardAgentRecord,
@@ -8,7 +10,13 @@ import {
   pruneAgentRecords,
   rememberAgentProcess,
   saveAgentResumeMode,
+  scheduleAgentSessionBinding,
 } from "./agents";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
 
 describe("agent catalog", () => {
   beforeEach(() => {
@@ -29,6 +37,7 @@ describe("agent catalog", () => {
     expect(getAgentRecord("panel-1")).toEqual({
       agentId: "claude",
       command: "claude",
+      detectedAt: expect.any(Number),
     });
 
     // Агент завершился — foreground снова оболочка.
@@ -67,6 +76,85 @@ describe("agent catalog", () => {
 
     pruneAgentRecords([]);
     expect(getAgentRecord("panel-2")).toBeNull();
+  });
+
+  it("resumes an exact session when one is bound", () => {
+    rememberAgentProcess("panel-1", "claude");
+    bindAgentSession("panel-1", "0195c9a1-1111-4222-8333-444455556666");
+    const record = getAgentRecord("panel-1")!;
+    expect(buildAgentResume(record, false)).toBe(
+      "claude --resume 0195c9a1-1111-4222-8333-444455556666",
+    );
+    // picker-режим не важен, когда есть точный id.
+    expect(buildAgentResume(record, true)).toBe(
+      "claude --resume 0195c9a1-1111-4222-8333-444455556666",
+    );
+
+    rememberAgentProcess("panel-2", "codex");
+    bindAgentSession("panel-2", "abc-123");
+    expect(buildAgentResume(getAgentRecord("panel-2")!, false)).toBe(
+      "codex resume abc-123",
+    );
+  });
+
+  it("rejects malformed session ids everywhere", () => {
+    rememberAgentProcess("panel-1", "claude");
+    bindAgentSession("panel-1", "bad id; rm -rf /");
+    expect(getAgentRecord("panel-1")!.sessionId).toBeUndefined();
+    // Подделанный id в хранилище не попадает в команду.
+    expect(
+      buildAgentResume(
+        { agentId: "claude", command: "claude", sessionId: "x; whoami" },
+        false,
+      ),
+    ).toBe("claude --continue");
+  });
+
+  it("collects bound session ids of other panels for the exclude list", () => {
+    rememberAgentProcess("panel-1", "claude");
+    rememberAgentProcess("panel-2", "claude");
+    rememberAgentProcess("panel-3", "codex");
+    bindAgentSession("panel-1", "session-a");
+    bindAgentSession("panel-3", "session-c");
+
+    expect(boundAgentSessionIds("claude", "panel-2")).toEqual(["session-a"]);
+    expect(boundAgentSessionIds("claude", "panel-1")).toEqual([]);
+  });
+
+  it("binds the located session via the scheduler", async () => {
+    vi.useFakeTimers();
+    try {
+      rememberAgentProcess("panel-1", "claude");
+      invokeMock.mockResolvedValue("located-session-id");
+
+      scheduleAgentSessionBinding("panel-1", "/tmp/proj");
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(invokeMock).toHaveBeenCalledWith(
+        "agent_session_locate",
+        expect.objectContaining({ agent: "claude", cwd: "/tmp/proj" }),
+      );
+      expect(getAgentRecord("panel-1")!.sessionId).toBe("located-session-id");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries the locator until the session file appears", async () => {
+    vi.useFakeTimers();
+    try {
+      rememberAgentProcess("panel-1", "codex");
+      invokeMock.mockResolvedValueOnce(null).mockResolvedValueOnce("late-id");
+
+      scheduleAgentSessionBinding("panel-1", "/tmp/proj");
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(getAgentRecord("panel-1")!.sessionId).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(7_000);
+
+      expect(getAgentRecord("panel-1")!.sessionId).toBe("late-id");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists the resume mode and defaults to auto", () => {

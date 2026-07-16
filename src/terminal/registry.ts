@@ -263,6 +263,12 @@ export function getRunningTerminalCount(): number {
   return runningEntries().length;
 }
 
+// Владелец терминала — для привязки сессий агентов (панель может быть
+// скрыта в другой сессии/воркспейсе и отсутствовать в dockview).
+export function getTerminalWorkspaceId(id: string): string | null {
+  return registry.get(id)?.workspaceId ?? null;
+}
+
 export type RestartTerminalsResult = {
   total: number;
   restarted: number;

@@ -8,10 +8,14 @@ import { DockviewApi, DockviewReadyEvent } from "dockview";
 import { listen } from "@tauri-apps/api/event";
 import {
   destroyTerminal,
+  getTerminalWorkspaceId,
   isManualTitle,
   rememberAutoTitle,
 } from "./terminal/registry";
-import { rememberAgentProcess } from "./agents";
+import {
+  rememberAgentProcess,
+  scheduleAgentSessionBinding,
+} from "./agents";
 import { addPanel, localizeDefaultPanelTitles } from "./layoutOps";
 import {
   activeSession,
@@ -108,8 +112,22 @@ export function useDockviewSetup({
           (titleEvent) => {
             rememberAutoTitle(titleEvent.payload.id, titleEvent.payload.title);
             // Агент в фокусе панели — кандидат на авто-возобновление после
-            // полного перезапуска приложения.
-            rememberAgentProcess(titleEvent.payload.id, titleEvent.payload.title);
+            // полного перезапуска приложения. Точную сессию ищет локатор в
+            // папке проекта панели.
+            if (
+              rememberAgentProcess(
+                titleEvent.payload.id,
+                titleEvent.payload.title,
+              )
+            ) {
+              const workspaceId = getTerminalWorkspaceId(titleEvent.payload.id);
+              const folder = workspacesRef.current.list.find(
+                (workspace) => workspace.id === workspaceId,
+              )?.folder?.canonicalPath;
+              if (folder) {
+                scheduleAgentSessionBinding(titleEvent.payload.id, folder);
+              }
+            }
             const panel = event.api.getPanel(titleEvent.payload.id);
             const titleKind = panel?.api.getParameters<{
               titleKind?: string;
