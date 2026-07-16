@@ -57,6 +57,11 @@ attached `PKGBUILD`). Runtime dependencies — WebKitGTK, GStreamer audio
 plugins, tray support — are declared in every package, and the AppImage
 bundles GStreamer so notification sounds work out of the box.
 
+System notification banners on Linux use the standard
+`org.freedesktop.Notifications` D-Bus service: desktop environments provide
+it out of the box, while bare window managers (Hyprland, i3, sway) need a
+notification daemon such as `mako` or `dunst` running.
+
 ## Development
 
 ```bash
