@@ -178,10 +178,15 @@
   white-space: nowrap;
 }
 
-/* Раскрытая карточка показывает тему целиком. */
+/* Раскрытая карточка показывает тему целиком, мета-строка переносится. */
 .git-commit.is-expanded .git-commit-subject {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.git-commit.is-expanded .git-commit-meta {
+  flex-wrap: wrap;
+  white-space: normal;
 }
 
 .git-commit-details {

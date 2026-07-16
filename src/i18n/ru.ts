@@ -17,7 +17,6 @@ export const ru = {
   "git.switchBranch": "Переключить ветку",
   "git.historyEmpty": "Коммитов ещё нет",
   "git.copyHash": "Скопировать полный хеш",
-  "git.commitAuthor": "Автор:",
   "git.commitCoAuthor": "Соавтор:",
   "git.commitPlaceholder": "Сообщение коммита",
   "git.commitButton": "Коммит",

@@ -18,7 +18,6 @@ export const en: Record<MessageKey, string> = {
   "git.switchBranch": "Switch branch",
   "git.historyEmpty": "No commits yet",
   "git.copyHash": "Copy the full hash",
-  "git.commitAuthor": "Author:",
   "git.commitCoAuthor": "Co-author:",
   "git.commitPlaceholder": "Commit message",
   "git.commitButton": "Commit",
