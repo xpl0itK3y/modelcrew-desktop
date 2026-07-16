@@ -137,6 +137,27 @@ describe("agent catalog", () => {
     ).toBe("claude --continue");
   });
 
+  it("strips duplicate session bindings during pruning", () => {
+    rememberAgentProcess("panel-1", "agy");
+    rememberAgentProcess("panel-2", "agy");
+    rememberAgentProcess("panel-3", "claude");
+    bindAgentSession("panel-1", "conv-1");
+    // Дубль в хранилище имитирует наследие старой гонки локаторов.
+    localStorage.setItem(
+      "modelcrew.terminalAgents",
+      JSON.stringify({
+        "panel-1": { agentId: "antigravity", command: "agy", detectedAt: 1, sessionId: "conv-1" },
+        "panel-2": { agentId: "antigravity", command: "agy", detectedAt: 2, sessionId: "conv-1" },
+        "panel-3": { agentId: "claude", command: "claude", detectedAt: 3, sessionId: "conv-1" },
+      }),
+    );
+    pruneAgentRecords(["panel-1", "panel-2", "panel-3"]);
+    expect(getAgentRecord("panel-1")!.sessionId).toBe("conv-1");
+    expect(getAgentRecord("panel-2")!.sessionId).toBeUndefined();
+    // Совпадающий id у другого агента — не дубль.
+    expect(getAgentRecord("panel-3")!.sessionId).toBe("conv-1");
+  });
+
   it("refuses to bind a session already taken by another panel", () => {
     rememberAgentProcess("panel-1", "agy");
     rememberAgentProcess("panel-2", "agy");

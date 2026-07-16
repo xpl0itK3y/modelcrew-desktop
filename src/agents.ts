@@ -289,6 +289,24 @@ export function pruneAgentRecords(keepIds: string[]): void {
       changed = true;
     }
   }
+  // Самолечение: один чат агента не может принадлежать двум панелям
+  // (наследие гонки локаторов в старых версиях). У лишних панелей привязка
+  // снимается — они возобновятся фолбэком и перепривяжутся к своим чатам.
+  const seen = new Set<string>();
+  for (const id of Object.keys(records).sort()) {
+    const record = records[id];
+    if (!record.sessionId) {
+      continue;
+    }
+    const key = `${record.agentId}:${record.sessionId}`;
+    if (seen.has(key)) {
+      const { sessionId: _dup, ...rest } = record;
+      records[id] = rest;
+      changed = true;
+    } else {
+      seen.add(key);
+    }
+  }
   if (changed) {
     saveRecords(records);
   }
