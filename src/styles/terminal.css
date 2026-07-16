@@ -27,7 +27,8 @@
 
 /* Плотная сетка: тонкие рамки, лёгкое скругление; активная — розовая рамка */
 .dockview-theme-modelcrew .dv-groupview {
-  border-radius: 6px;
+  /* Радиус как у карточек в панели изменений — единый вид. */
+  border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--mc-panel-border);
   box-sizing: border-box;
@@ -48,7 +49,7 @@
 .dockview-theme-modelcrew .dv-drop-target-selection {
   animation: drop-pulse 900ms ease-in-out infinite;
   border: 1px solid var(--mc-accent);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 @keyframes drop-pulse {
