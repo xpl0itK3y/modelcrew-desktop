@@ -1,3 +1,4 @@
+mod agent_sessions;
 mod command_error;
 mod terminal_snapshots;
 #[cfg(windows)]
@@ -12,6 +13,7 @@ use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
     LinuxUpdaterState,
 };
+use agent_sessions::agent_session_locate;
 use pty::{PtyManager, ShellInfo, SpawnOptions};
 use terminal_snapshots::{
     terminal_snapshot_delete, terminal_snapshot_load, terminal_snapshot_save,
@@ -620,6 +622,7 @@ pub fn run() {
             terminal_snapshot_load,
             terminal_snapshot_delete,
             terminal_snapshots_prune,
+            agent_session_locate,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,

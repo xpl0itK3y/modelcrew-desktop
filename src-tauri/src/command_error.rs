@@ -34,6 +34,8 @@ pub enum ErrorCode {
     TerminalSnapshotInvalidId,
     TerminalSnapshotTooLarge,
     TerminalSnapshotStorageFailed,
+    AgentSessionInvalidId,
+    AgentSessionLookupFailed,
     UpdaterUnsupportedPlatform,
     UpdaterInvalidVersion,
     UpdaterOperationInProgress,
