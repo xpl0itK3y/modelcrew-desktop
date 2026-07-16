@@ -35,6 +35,7 @@ function controller(center: NotificationCenterState): AppUpdaterController {
     ensureChecked: vi.fn(async () => {}),
     installUpdate: vi.fn(async () => {}),
     openRelease: vi.fn(async () => {}),
+    dismissNotification: vi.fn(),
   };
 }
 

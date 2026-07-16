@@ -71,6 +71,8 @@ export const en: Record<MessageKey, string> = {
   "update.errorInstall": "Could not install the downloaded update.",
   "update.retry": "Try again",
   "update.close": "Close update notifications",
+  "update.dismiss": "Dismiss notification",
+  "update.clearAll": "Clear all",
   "update.resize": "Drag to resize",
   "update.notificationsTitle": "Notifications",
   "update.refreshingNotifications": "Refreshing notifications…",

@@ -269,6 +269,7 @@ export function Titlebar(props: TitlebarProps) {
               closing={popoverPresence.closing}
               onInstall={() => void props.updater.installUpdate()}
               onOpenRelease={() => void props.updater.openRelease()}
+              onDismiss={(id) => props.updater.dismissNotification(id)}
               onClose={() => closeNotifications()}
             />
           )}

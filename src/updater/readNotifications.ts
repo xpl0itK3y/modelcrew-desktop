@@ -50,3 +50,42 @@ export function markNotificationIdsRead(
   }
   return nextIds;
 }
+
+// Скрытые пользователем уведомления (анонсы). Хранятся так же, как read-ids:
+// повторная доставка того же анонса не должна воскресить скрытую карточку.
+export const DISMISSED_NOTIFICATIONS_STORAGE_KEY =
+  "modelcrew.notifications.dismissedIds.v1";
+
+export function loadDismissedNotificationIds(): string[] {
+  try {
+    const value = localStorage.getItem(DISMISSED_NOTIFICATIONS_STORAGE_KEY);
+    if (!value) {
+      return [];
+    }
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return normalizeReadIds(
+      parsed.filter((id): id is string => typeof id === "string"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function markNotificationIdsDismissed(
+  currentIds: readonly string[],
+  dismissedIds: readonly string[],
+): string[] {
+  const nextIds = normalizeReadIds([...currentIds, ...dismissedIds]);
+  try {
+    localStorage.setItem(
+      DISMISSED_NOTIFICATIONS_STORAGE_KEY,
+      JSON.stringify(nextIds),
+    );
+  } catch {
+    // Скрытие действует в текущей сессии, даже если хранилище недоступно.
+  }
+  return nextIds;
+}

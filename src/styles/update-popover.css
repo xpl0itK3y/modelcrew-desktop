@@ -158,3 +158,25 @@
     animation: none;
   }
 }
+
+.update-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-popover-clear {
+  padding: 3px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mc-text-faint);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.update-popover-clear:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}

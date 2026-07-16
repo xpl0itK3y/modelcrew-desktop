@@ -72,4 +72,7 @@ export type AppUpdaterController = {
   ensureChecked: () => Promise<void>;
   installUpdate: () => Promise<void>;
   openRelease: () => Promise<void>;
+  // Скрывает уведомление по id. Карточки обновлений (kind "update")
+  // защищены: ими управляет машина состояний апдейтера.
+  dismissNotification: (id: string) => void;
 };

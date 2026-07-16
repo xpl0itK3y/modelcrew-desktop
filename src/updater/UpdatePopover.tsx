@@ -18,6 +18,8 @@ type UpdatePopoverProps = {
   closing?: boolean;
   onInstall: () => void;
   onOpenRelease: () => void;
+  // Скрыть уведомление (доступно только для анонсов, не для обновлений).
+  onDismiss: (id: string) => void;
   onClose: () => void;
 };
 
@@ -145,6 +147,10 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
 
     const showInitialLoading =
       props.center.items.length === 0 && props.center.sync === "initial";
+    // «Очистить» скрывает все анонсы разом; обновления остаются.
+    const dismissibleIds = props.center.items
+      .filter((item) => item.kind === "announcement")
+      .map((item) => item.id);
 
     return (
       <div
@@ -175,15 +181,30 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
               </span>
             )}
           </div>
-          <button
-            type="button"
-            className="icon-button update-popover-close"
-            aria-label={t("update.close")}
-            title={t("update.close")}
-            onClick={props.onClose}
-          >
-            <CloseIcon />
-          </button>
+          <div className="update-popover-actions">
+            {dismissibleIds.length > 0 && (
+              <button
+                type="button"
+                className="update-popover-clear"
+                onClick={() => {
+                  for (const id of dismissibleIds) {
+                    props.onDismiss(id);
+                  }
+                }}
+              >
+                {t("update.clearAll")}
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-button update-popover-close"
+              aria-label={t("update.close")}
+              title={t("update.close")}
+              onClick={props.onClose}
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
         <div className="update-popover-content">
@@ -212,6 +233,15 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                       className="update-card is-announcement"
                       aria-labelledby={titleId}
                     >
+                      <button
+                        type="button"
+                        className="icon-button update-card-dismiss"
+                        title={t("update.dismiss")}
+                        aria-label={t("update.dismiss")}
+                        onClick={() => props.onDismiss(item.id)}
+                      >
+                        <CloseIcon />
+                      </button>
                       <div className="update-card-header">
                         <span className="update-card-icon" aria-hidden="true">
                           <BellIcon />

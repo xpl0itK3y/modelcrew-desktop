@@ -8,6 +8,10 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Locale } from "../i18n";
+import {
+  loadDismissedNotificationIds,
+  markNotificationIdsDismissed,
+} from "./readNotifications";
 import type {
   AppUpdaterController,
   InstallUpdateTarget,
@@ -616,6 +620,23 @@ export function useAppUpdater({
     setCenter,
   ]);
 
+  const dismissNotification = useCallback(
+    (id: string) => {
+      const item = centerRef.current.items.find((entry) => entry.id === id);
+      // Карточку обновления скрыть нельзя: её жизненным циклом управляет
+      // машина состояний (установка/замена новой версией).
+      if (!item || item.kind === "update") {
+        return;
+      }
+      markNotificationIdsDismissed(loadDismissedNotificationIds(), [id]);
+      setCenter((current) => ({
+        ...current,
+        items: current.items.filter((entry) => entry.id !== id),
+      }));
+    },
+    [setCenter],
+  );
+
   const openRelease = useCallback(async () => {
     const notification = findUpdateNotification(centerRef.current.items);
     if (!notification) {
@@ -715,5 +736,6 @@ export function useAppUpdater({
     ensureChecked,
     installUpdate,
     openRelease,
+    dismissNotification,
   };
 }

@@ -31,6 +31,7 @@ function renderPopover(center: NotificationCenterState) {
   const callbacks = {
     onInstall: vi.fn(),
     onOpenRelease: vi.fn(),
+    onDismiss: vi.fn(),
     onClose: vi.fn(),
   };
   render(<UpdatePopover center={center} {...callbacks} />);
@@ -44,6 +45,7 @@ describe("UpdatePopover", () => {
     const callbacks = {
       onInstall: vi.fn(),
       onOpenRelease: vi.fn(),
+      onDismiss: vi.fn(),
       onClose: vi.fn(),
     };
     const { rerender } = render(
@@ -219,6 +221,67 @@ describe("UpdatePopover", () => {
     expect(
       screen.getByText("Лента объявлений готова к подключению"),
     ).toBeInTheDocument();
+  });
+
+  it("dismisses announcements but never update cards", () => {
+    const callbacks = renderPopover({
+      sync: "settled",
+      items: [
+        notification("ready"),
+        {
+          id: "announcement:welcome",
+          kind: "announcement",
+          title: "Новые возможности ModelCrew",
+          summary: "Информационная карточка.",
+          highlights: [],
+        },
+      ],
+    });
+
+    // Крестик скрытия есть только у анонса; карточка обновления защищена.
+    const dismissButtons = screen.getAllByRole("button", {
+      name: "Скрыть уведомление",
+    });
+    expect(dismissButtons).toHaveLength(1);
+
+    fireEvent.click(dismissButtons[0]);
+    expect(callbacks.onDismiss).toHaveBeenCalledWith("announcement:welcome");
+    expect(callbacks.onDismiss).not.toHaveBeenCalledWith("update:0.0.2");
+  });
+
+  it("clears all announcements at once from the header", () => {
+    const callbacks = renderPopover({
+      sync: "settled",
+      items: [
+        notification("ready"),
+        {
+          id: "announcement:one",
+          kind: "announcement",
+          title: "Один",
+          summary: "",
+          highlights: [],
+        },
+        {
+          id: "announcement:two",
+          kind: "announcement",
+          title: "Два",
+          summary: "",
+          highlights: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Очистить" }));
+    expect(callbacks.onDismiss).toHaveBeenCalledTimes(2);
+    expect(callbacks.onDismiss).toHaveBeenCalledWith("announcement:one");
+    expect(callbacks.onDismiss).toHaveBeenCalledWith("announcement:two");
+  });
+
+  it("hides the clear button when only an update card is present", () => {
+    renderPopover({ sync: "settled", items: [notification("ready")] });
+    expect(
+      screen.queryByRole("button", { name: "Очистить" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses the English catalog", () => {

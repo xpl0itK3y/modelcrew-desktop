@@ -70,6 +70,8 @@ export const ru = {
   "update.errorInstall": "Не удалось установить загруженное обновление.",
   "update.retry": "Повторить",
   "update.close": "Закрыть уведомления",
+  "update.dismiss": "Скрыть уведомление",
+  "update.clearAll": "Очистить",
   "update.resize": "Потяните, чтобы изменить высоту",
   "update.notificationsTitle": "Уведомления",
   "update.refreshingNotifications": "Обновляем уведомления…",

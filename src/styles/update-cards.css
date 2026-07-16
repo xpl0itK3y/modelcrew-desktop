@@ -67,10 +67,25 @@
 }
 
 .update-card {
+  position: relative;
   box-sizing: border-box;
   padding: 15px 16px 16px;
   border-bottom: 1px solid var(--mc-border);
   background: transparent;
+}
+
+/* Крестик скрытия — только на карточках анонсов. */
+.update-card-dismiss {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  color: var(--mc-text-faint);
+}
+
+.update-card-dismiss:hover {
+  color: var(--mc-text-bright);
 }
 
 .update-card:last-child {
