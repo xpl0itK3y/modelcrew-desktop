@@ -6,9 +6,7 @@ export const ru = {
 
   "titlebar.toggleSidebar": "Показать или скрыть боковую панель",
   "titlebar.newTerminal": "Новый терминал в сетку",
-  "titlebar.arrangeGrid": "Выровнять терминалы сеткой (повторный клик — другая ось)",
-  "layout.gridColumns": "Сетка колонками: раздельные горизонтальные границы",
-  "layout.gridRows": "Сетка строками: раздельные вертикальные границы",
+  "titlebar.arrangeGrid": "Выровнять терминалы сеткой",
   "titlebar.gitChanges": "Изменения в проекте",
   "git.panelTitle": "Изменения",
   "git.close": "Закрыть панель изменений",
