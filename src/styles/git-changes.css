@@ -5,6 +5,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--mc-bg);
@@ -87,6 +88,9 @@
 /* Каждый файл — отдельная карточка, чтобы список не сливался в полотно.
    overflow здесь нельзя: он ломает липкую шапку. Углы скругляют дети. */
 .git-file {
+  /* Без overflow:hidden (ломает sticky) карточка-flex-элемент не сжималась
+     бы ниже ширины самой длинной строки diff — прижимаем явно. */
+  min-width: 0;
   border: 1px solid var(--mc-border);
   border-radius: 8px;
   background: var(--mc-surface);
