@@ -369,21 +369,34 @@ export default function App() {
   }, [activeGitWorkspaceId]);
 
   // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
-  // Всегда «колонками»: горизонтальные границы раздельные — один терминал
-  // можно поднимать/опускать, не двигая соседние колонки.
+  // Повторное нажатие переключает вариант (в дереве-раскладке «только пару»
+  // могут двигать границы лишь одной оси), тост подсказывает, какой применён.
+  const gridOrientationRef = useRef<"columns" | "rows">("columns");
   const arrangeGrid = useCallback(() => {
     const api = apiRef.current;
     if (!api) {
       return;
     }
+    const orientation = gridOrientationRef.current;
     suppressCleanupRef.current = true;
     try {
-      arrangeEvenGrid(api, "columns");
+      if (!arrangeEvenGrid(api, orientation)) {
+        return;
+      }
     } finally {
       suppressCleanupRef.current = false;
     }
+    gridOrientationRef.current =
+      orientation === "columns" ? "rows" : "columns";
+    showToast(
+      t(
+        orientation === "columns"
+          ? "layout.gridColumns"
+          : "layout.gridRows",
+      ),
+    );
     schedulePersist();
-  }, [schedulePersist]);
+  }, [schedulePersist, showToast, t]);
 
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
