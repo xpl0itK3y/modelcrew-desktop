@@ -27,7 +27,9 @@
 }
 
 .git-tabs {
-  display: inline-flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--mc-border);
@@ -36,6 +38,8 @@
 }
 
 .git-tab {
+  position: relative;
+  z-index: 1;
   padding: 3px 10px;
   border: none;
   border-radius: 5px;
@@ -44,7 +48,23 @@
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease;
+  transition: color 160ms ease;
+}
+
+/* Подсветку рисует скользящая пилюля, сами вкладки остаются прозрачными. */
+.git-tab-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 4px);
+  border-radius: 5px;
+  background: var(--mc-surface-active);
+  transition: transform 190ms cubic-bezier(0.3, 0, 0.2, 1.2);
+}
+
+.git-tab-indicator.is-second {
+  transform: translateX(calc(100% + 2px));
 }
 
 /* Контент вкладки коротко въезжает при переключении. */
@@ -68,7 +88,6 @@
 }
 
 .git-tab.is-active {
-  background: var(--mc-surface-active);
   color: var(--mc-text-bright);
 }
 
@@ -809,5 +828,9 @@
   .git-file-header.is-updated .git-file-counts,
   .git-view {
     animation: none;
+  }
+
+  .git-tab-indicator {
+    transition: none;
   }
 }
