@@ -343,7 +343,8 @@
   bottom: 24px;
   z-index: 60;
   display: flex;
-  width: min(400px, calc(100% - 48px));
+  width: min(400px, calc(100% - 68px));
+  transition: width 180ms cubic-bezier(0.2, 0, 0.13, 1);
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--mc-border);
@@ -351,6 +352,12 @@
   background: var(--mc-surface-raised);
   box-shadow: -14px 0 40px var(--mc-shadow);
   animation: git-drawer-in 160ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+/* Развёрнутый режим: панель занимает почти всю область терминалов,
+   отступы симметричные. */
+.git-drawer.is-maximized {
+  width: calc(100% - 68px);
 }
 
 .git-drawer.is-closing {
@@ -415,6 +422,7 @@
   .git-drawer,
   .git-drawer.is-closing {
     animation: none;
+    transition: none;
   }
 }
 

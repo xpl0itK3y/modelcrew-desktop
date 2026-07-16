@@ -11,6 +11,8 @@ export const en: Record<MessageKey, string> = {
   "titlebar.gitChanges": "Project changes",
   "git.panelTitle": "Changes",
   "git.close": "Close the changes panel",
+  "git.maximize": "Expand the panel",
+  "git.restore": "Restore the normal size",
   "git.commitPlaceholder": "Commit message",
   "git.commitButton": "Commit",
   "git.copyDiff": "Copy diff",

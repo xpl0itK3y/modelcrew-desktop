@@ -370,6 +370,7 @@ export default function App() {
 
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
+  const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
   const gitDrawerPresence = useAnimatedPresence(
     gitDrawerOpen && activeGitWorkspaceId ? activeGitWorkspaceId : null,
     160,
@@ -471,8 +472,8 @@ export default function App() {
           {gitDrawerPresence && (
             <aside
               className={`git-drawer ${
-                gitDrawerPresence.closing ? "is-closing" : ""
-              }`}
+                gitDrawerMaximized ? "is-maximized" : ""
+              } ${gitDrawerPresence.closing ? "is-closing" : ""}`}
               aria-label={t("git.panelTitle")}
             >
               <div className="git-drawer-header">
@@ -496,6 +497,20 @@ export default function App() {
                       </span>
                     </span>
                   )}
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={t(
+                    gitDrawerMaximized ? "git.restore" : "git.maximize",
+                  )}
+                  aria-label={t(
+                    gitDrawerMaximized ? "git.restore" : "git.maximize",
+                  )}
+                  aria-pressed={gitDrawerMaximized}
+                  onClick={() => setGitDrawerMaximized((value) => !value)}
+                >
+                  <MaximizeIcon />
+                </button>
                 <button
                   type="button"
                   className="icon-button"

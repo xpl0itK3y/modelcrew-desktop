@@ -10,6 +10,8 @@ export const ru = {
   "titlebar.gitChanges": "Изменения в проекте",
   "git.panelTitle": "Изменения",
   "git.close": "Закрыть панель изменений",
+  "git.maximize": "Развернуть панель",
+  "git.restore": "Свернуть к обычному размеру",
   "git.commitPlaceholder": "Сообщение коммита",
   "git.commitButton": "Коммит",
   "git.copyDiff": "Скопировать diff",
