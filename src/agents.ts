@@ -299,17 +299,36 @@ export function getAgentRecord(terminalId: string): AgentRecord | null {
 }
 
 // Привязывает панели точный id сессии агента (результат работы локатора).
-export function bindAgentSession(terminalId: string, sessionId: string): void {
+export function bindAgentSession(
+  terminalId: string,
+  sessionId: string,
+): boolean {
   if (!SESSION_ID_PATTERN.test(sessionId)) {
-    return;
+    return false;
   }
   const records = loadRecords();
   const record = records[terminalId];
-  if (!record || record.sessionId === sessionId) {
-    return;
+  if (!record) {
+    return false;
+  }
+  if (record.sessionId === sessionId) {
+    return true;
+  }
+  // Локаторы панелей бегут параллельно: пока эта панель ждала ответа, другая
+  // могла занять тот же id (exclude его ещё не знал). Тогда привязку
+  // отклоняем — вызывающий повторит поиск уже с обновлённым exclude.
+  for (const [otherId, other] of Object.entries(records)) {
+    if (
+      otherId !== terminalId &&
+      other.agentId === record.agentId &&
+      other.sessionId === sessionId
+    ) {
+      return false;
+    }
   }
   records[terminalId] = { ...record, sessionId };
   saveRecords(records);
+  return true;
 }
 
 // Сессии этого агента, уже занятые другими панелями: локатор их пропускает,
@@ -384,8 +403,7 @@ async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
       sinceEpochMs: Math.max(0, Math.round(record.detectedAt)),
       exclude: boundAgentSessionIds(record.agentId, terminalId),
     });
-    if (found) {
-      bindAgentSession(terminalId, found);
+    if (found && bindAgentSession(terminalId, found)) {
       return true;
     }
   } catch {

@@ -396,9 +396,9 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
   // иначе байты перемешиваются с инициализацией шелла.
   entry.pendingResume = mode === "auto" ? `${line}\r` : line;
   scheduleResumeInjection(entry, RESUME_FALLBACK_MS);
-  // Инъекция разовая: когда агент реально запустится, watcher запишет его
-  // заново — уже для следующего перезапуска.
-  discardAgentRecord(entry.id);
+  // Запись сохраняем: у возобновлённого чата mtime файлов старый, и повторный
+  // локатор его не найдёт — точный sessionId должен пережить все рестарты.
+  // Если агент не поднимется, watcher сотрёт запись после серии промахов.
 }
 
 async function spawnTerminal(
@@ -504,6 +504,7 @@ export async function destroyTerminal(id: string): Promise<void> {
   autoTitles.delete(id);
   // Закрытие панели — намеренное: её история больше не восстановится.
   discardSnapshot(id);
+  discardAgentRecord(id);
   entry.outputGeneration += 1;
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);

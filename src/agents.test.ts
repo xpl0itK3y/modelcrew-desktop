@@ -137,6 +137,30 @@ describe("agent catalog", () => {
     ).toBe("claude --continue");
   });
 
+  it("refuses to bind a session already taken by another panel", () => {
+    rememberAgentProcess("panel-1", "agy");
+    rememberAgentProcess("panel-2", "agy");
+    expect(bindAgentSession("panel-1", "conv-1")).toBe(true);
+    // Гонка локаторов: вторая панель получила тот же id до обновления exclude.
+    expect(bindAgentSession("panel-2", "conv-1")).toBe(false);
+    expect(getAgentRecord("panel-2")!.sessionId).toBeUndefined();
+    // Повторная привязка того же id к той же панели — идемпотентный успех.
+    expect(bindAgentSession("panel-1", "conv-1")).toBe(true);
+    // Другой агент может использовать совпадающий id — пространства раздельны.
+    rememberAgentProcess("panel-3", "codex");
+    expect(bindAgentSession("panel-3", "conv-1")).toBe(true);
+  });
+
+  it("keeps the bound session across repeated foreground detections", () => {
+    rememberAgentProcess("panel-1", "claude");
+    bindAgentSession("panel-1", "0195c9a1-1111-4222-8333-444455556666");
+    // Watcher видит того же агента снова (после resume) — id не теряется.
+    rememberAgentProcess("panel-1", "claude");
+    expect(getAgentRecord("panel-1")!.sessionId).toBe(
+      "0195c9a1-1111-4222-8333-444455556666",
+    );
+  });
+
   it("collects bound session ids of other panels for the exclude list", () => {
     rememberAgentProcess("panel-1", "claude");
     rememberAgentProcess("panel-2", "claude");
