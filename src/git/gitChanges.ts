@@ -202,8 +202,16 @@ export function commitAll(
   return invoke("git_commit", { workspaceId, message });
 }
 
-export function revertFile(workspaceId: string, path: string): Promise<void> {
-  return invoke("git_revert_file", { workspaceId, path });
+export function revertFile(
+  workspaceId: string,
+  path: string,
+  origPath?: string,
+): Promise<void> {
+  return invoke("git_revert_file", {
+    workspaceId,
+    path,
+    ...(origPath === undefined ? {} : { origPath }),
+  });
 }
 
 // ---------- Парсер unified diff для отрисовки ----------

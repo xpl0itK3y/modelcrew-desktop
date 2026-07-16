@@ -426,14 +426,20 @@ pub fn commit_all(root: &Path, message: &str) -> CommandResult<()> {
 }
 
 // Возвращает файл к состоянию HEAD; новые файлы удаляются. Подтверждение —
-// на фронтенде, команда выполняет уже принятое решение.
-pub fn revert_file(root: &Path, path: &str) -> CommandResult<()> {
+// на фронтенде, команда выполняет уже принятое решение. Для переименованного
+// файла orig_path указывает старое имя: оно восстанавливается из HEAD.
+pub fn revert_file(root: &Path, path: &str, orig_path: Option<&str>) -> CommandResult<()> {
     if !is_safe_repo_path(path) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
     }
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    if let Some(orig) = orig_path {
+        if is_safe_repo_path(orig) {
+            run_git(&toplevel, &["checkout", "HEAD", "--", orig])?;
+        }
+    }
     let in_head = run_git(&toplevel, &["ls-tree", "HEAD", "--", path])
         .map(|stdout| !stdout.is_empty())
         .unwrap_or(false);
@@ -472,12 +478,15 @@ pub async fn git_revert_file(
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
+    orig_path: Option<String>,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || revert_file(&root, &path))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        revert_file(&root, &path, orig_path.as_deref())
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Реал-тайм: вотчер рабочего дерева ----------
@@ -837,13 +846,20 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
         // Откат правки отслеживаемого файла возвращает содержимое HEAD.
         std::fs::write(root.join("a.txt"), "edited\n").unwrap();
-        revert_file(root, "a.txt").unwrap();
+        revert_file(root, "a.txt", None).unwrap();
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "original\n");
 
         // Откат нового файла удаляет его.
         std::fs::write(root.join("fresh.txt"), "temp\n").unwrap();
-        revert_file(root, "fresh.txt").unwrap();
+        revert_file(root, "fresh.txt", None).unwrap();
         assert!(!root.join("fresh.txt").exists());
+
+        // Откат переименования: старое имя возвращается, новое исчезает.
+        git(&["mv", "a.txt", "b.txt"]);
+        revert_file(root, "b.txt", Some("a.txt")).unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "original\n");
+        assert!(!root.join("b.txt").exists());
+        assert!(collect_summary(root).unwrap().files.is_empty());
 
         // Коммит из панели забирает всё, включая новые файлы.
         std::fs::write(root.join("a.txt"), "committed\n").unwrap();
