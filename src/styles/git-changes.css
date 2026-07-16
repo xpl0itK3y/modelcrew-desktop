@@ -562,6 +562,23 @@
   color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
 }
 
+/* Появление новой карточки (файл или коммит) при открытой панели. */
+.git-file.is-arriving,
+.git-commit.is-arriving {
+  animation: git-card-in 240ms cubic-bezier(0.2, 0, 0.13, 1) backwards;
+}
+
+@keyframes git-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* Реал-тайм: свежедобавленная агентом строка вспыхивает и гаснет. */
 .git-diff-line.is-fresh {
   animation: git-line-fresh 1.2s ease-out;
@@ -705,7 +722,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .git-diff-line.is-fresh {
+  .git-diff-line.is-fresh,
+  .git-file.is-arriving,
+  .git-commit.is-arriving {
     animation: none;
   }
 }
