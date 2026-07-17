@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.5
+
+### Русский
+
+Добавлены встроенная Git-панель, уведомления фоновых агентов, сетка терминалов и сохранение обновлений между перезапусками.
+
+- Просматривайте изменения, diff, ветки и историю Git прямо в ModelCrew
+- Создавайте коммиты, переключайте ветки и откатывайте отдельные файлы
+- Получайте звук, системное уведомление и badge, когда фоновый агент завершил работу
+- Выравнивайте терминалы в ровную сетку с выбранной ориентацией
+- Скачанные обновления остаются готовыми к установке после перезапуска
+
+### English
+
+Added an integrated Git panel, background-agent alerts, even terminal grids, and downloaded updates that persist across restarts.
+
+- Review changes, diffs, branches, and Git history directly in ModelCrew
+- Create commits, switch branches, and revert individual files
+- Get sound, system notifications, and app badges when a background agent finishes
+- Arrange terminals into an even grid with a configurable orientation
+- Downloaded updates remain ready to install after the application restarts
+
 ## 0.0.4
 
 ### Русский
