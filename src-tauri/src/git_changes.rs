@@ -545,6 +545,47 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
     Ok(branches)
 }
 
+// Фоновый fetch: обновляет refs/remotes, чтобы ↑/↓ показывали реальное
+// расхождение с сервером. Никогда не спрашивает пароль (терминала у него
+// нет) и обрывает зависший HTTP: лучше тихо не получиться, чем повиснуть.
+pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "http.lowSpeedLimit=1000",
+            "-c",
+            "http.lowSpeedTime=15",
+            "fetch",
+            "--quiet",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+        .current_dir(&toplevel)
+        .output()
+        .map_err(|error| CommandError::new(ErrorCode::GitUnavailable).with_debug(error))?;
+    if !output.status.success() {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_debug(String::from_utf8_lossy(&output.stderr).chars().take(1024).collect::<String>()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn git_fetch_upstream(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || fetch_upstream(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
 pub fn switch_branch(root: &Path, name: &str, remote: bool) -> CommandResult<()> {
     if !is_safe_ref_name(name) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("branch", name));
@@ -1256,6 +1297,44 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             branches.iter().find(|branch| branch.is_current).unwrap().name,
             "feature/x"
         );
+
+        // Кто-то запушил в main с другой машины: fetch обновляет refs/remotes,
+        // и статус показывает отставание (стрелка ↓ в панели).
+        switch_branch(root, "main", false).unwrap();
+        let run_at = |dir: &Path, args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        run_at(root, &["branch", "--set-upstream-to=origin/main", "main"]);
+        let clone_dir = tempfile::tempdir().unwrap();
+        let clone_path = clone_dir.path().join("clone");
+        run_at(
+            clone_dir.path(),
+            &[
+                "clone",
+                "--quiet",
+                "--branch",
+                "main",
+                remote_dir.path().to_str().unwrap(),
+                clone_path.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(clone_path.join("c.txt"), "three\n").unwrap();
+        run_at(&clone_path, &["add", "."]);
+        run_at(&clone_path, &["commit", "--quiet", "-m", "from another machine"]);
+        run_at(&clone_path, &["push", "--quiet", "origin", "main"]);
+
+        fetch_upstream(root).unwrap();
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(summary.behind, Some(1));
 
         // Пустой репозиторий: история пуста, а не ошибка.
         let fresh = tempfile::tempdir().unwrap();

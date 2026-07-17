@@ -42,6 +42,9 @@ const POLL_INTERVAL_MS = 3_000;
 const WATCHED_POLL_INTERVAL_MS = 60_000;
 // После ошибки (папка недоступна, git отсутствует) опрос замедляется.
 const ERROR_POLL_INTERVAL_MS = 15_000;
+// Фоновый git fetch: обновляет знание о сервере, чтобы ↓ («нужно спуллить»)
+// показывалось без ручного fetch. Ошибки (офлайн, нет remote) — тихо.
+const FETCH_INTERVAL_MS = 5 * 60_000;
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -50,6 +53,7 @@ type Listener = (summary: GitChangesSummary) => void;
 type WatchEntry = {
   listeners: Set<Listener>;
   timer: number | undefined;
+  fetchTimer: number | undefined;
   inFlight: boolean;
   lastKey: string | null;
   last: GitChangesSummary | null;
@@ -139,6 +143,7 @@ export function subscribeGitChanges(
     entry = {
       listeners: new Set(),
       timer: undefined,
+      fetchTimer: undefined,
       inFlight: false,
       lastKey: null,
       last: null,
@@ -162,6 +167,12 @@ export function subscribeGitChanges(
       .catch(() => {
         target.watched = false; // остаёмся на поллинге
       });
+    // Знание о сервере: fetch сразу и далее по интервалу. Обновлённые
+    // refs/remotes подхватит вотчер, и ↑/↓ пересчитаются сами.
+    const fetchOnce = () =>
+      void invoke("git_fetch_upstream", { workspaceId }).catch(() => {});
+    fetchOnce();
+    entry.fetchTimer = window.setInterval(fetchOnce, FETCH_INTERVAL_MS);
   }
   void refresh(workspaceId);
   return () => {
@@ -173,6 +184,8 @@ export function subscribeGitChanges(
     if (current.listeners.size === 0) {
       window.clearTimeout(current.timer);
       current.timer = undefined;
+      window.clearInterval(current.fetchTimer);
+      current.fetchTimer = undefined;
       current.watched = false;
       if (isTauri) {
         void invoke("git_changes_unwatch", { workspaceId }).catch(() => {});
