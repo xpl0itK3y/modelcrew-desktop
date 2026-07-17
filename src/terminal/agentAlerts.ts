@@ -99,6 +99,9 @@ export type AgentAlertTracker = {
   activityBytes: number;
   quietTimer: number | undefined;
   muteUntil: number;
+  // Пользователь что-то печатал в панель в этой сессии. Без этого агент
+  // «ждёт» по определению (восстановлен и простаивает) — не событие.
+  engaged: boolean;
 };
 
 export function createAgentAlertTracker(): AgentAlertTracker {
@@ -107,6 +110,7 @@ export function createAgentAlertTracker(): AgentAlertTracker {
     activityBytes: 0,
     quietTimer: undefined,
     muteUntil: 0,
+    engaged: false,
   };
 }
 
@@ -129,8 +133,15 @@ export function trackAgentOutput(
   data: string | ArrayBuffer,
   getContext: () => AgentAlertContext,
 ): void {
+  // Состояние сканера OSC/BEL ведём всегда — иначе разрывы между чанками
+  // сломают разбор после того, как пользователь начнёт работать.
   const scan = scanTerminalAttention(data, tracker.scanState);
   tracker.scanState = scan.state;
+  // Пока пользователь не работал с панелью, её вывод не повод сигналить:
+  // восстановленный агент простаивает штатно.
+  if (!tracker.engaged) {
+    return;
+  }
   const muted = Date.now() < tracker.muteUntil;
   if (scan.bells > 0 && !muted) {
     void raiseAgentAlert(terminalId, "bell", getContext());
@@ -148,6 +159,16 @@ export function trackAgentOutput(
       void raiseAgentAlert(terminalId, "idle", getContext());
     }, AGENT_IDLE_QUIET_MS);
   }
+}
+
+// Пользователь напечатал в панель: с этого момента её сигналы имеют смысл.
+// Заодно сбрасываем накопление и таймер тишины — идёт живой ввод.
+export function markAgentPanelEngaged(
+  tracker: AgentAlertTracker,
+  terminalId: string,
+): void {
+  tracker.engaged = true;
+  acknowledgeAgentPanel(tracker, terminalId);
 }
 
 // Пользователь ответил панели: сигнал снят, накопление и таймер — заново.

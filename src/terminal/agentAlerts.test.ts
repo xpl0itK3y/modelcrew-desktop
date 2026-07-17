@@ -31,6 +31,7 @@ import {
   clearAgentAttention,
   createAgentAlertTracker,
   getAgentAttentionCount,
+  markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   scanTerminalAttention,
   setWorkspaceNameResolver,
@@ -93,6 +94,17 @@ describe("agent attention store", () => {
 });
 
 describe("trackAgentOutput", () => {
+  const hidden = { visible: false, workspaceId: "ws-1" };
+  const shown = { visible: true, workspaceId: "ws-1" };
+
+  // Панель, с которой пользователь уже работал: только для таких сигналы
+  // вообще имеют смысл.
+  function engaged(id: string) {
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, id);
+    return tracker;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -102,12 +114,36 @@ describe("trackAgentOutput", () => {
     clearAgentAttention("panel-2");
   });
 
+  it("stays silent for a restored panel the user has not touched", async () => {
+    // Корень фантомного бейджа: восстановленный агент дорисовал транскрипт
+    // и замолк — с ним не работали, это не событие.
+    const restored = createAgentAlertTracker();
+    trackAgentOutput(
+      restored,
+      "restored-panel",
+      `\x07${"a".repeat(AGENT_IDLE_MIN_BYTES)}`,
+      () => hidden,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
+    await settle();
+    expect(mocks.playSound).not.toHaveBeenCalled();
+    expect(getAgentAttentionCount()).toBe(0);
+
+    // Пользователь напечатал — панель «живая», дальше сигналы работают.
+    markAgentPanelEngaged(restored, "restored-panel");
+    trackAgentOutput(restored, "restored-panel", "\x07", () => hidden);
+    await settle();
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    clearAgentAttention("restored-panel");
+    vi.useRealTimers();
+  });
+
   it("rings immediately on a terminal bell and marks attention", async () => {
     setWorkspaceNameResolver((id) =>
       id === "ws-1" ? "Crypto-Sentiment-Pulse" : null,
     );
-    const tracker = createAgentAlertTracker();
-    trackAgentOutput(tracker, "bell-panel", "работаю…\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    const tracker = engaged("bell-panel");
+    trackAgentOutput(tracker, "bell-panel", "работаю…\x07", () => shown);
     await settle();
 
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
@@ -125,9 +161,9 @@ describe("trackAgentOutput", () => {
   });
 
   it("fires an idle alert only after enough output and full silence", async () => {
-    const tracker = createAgentAlertTracker();
+    const tracker = engaged("idle-panel");
     // Мало вывода — тишина не считается сигналом.
-    trackAgentOutput(tracker, "idle-panel", "x".repeat(100), () => ({ visible: true, workspaceId: "ws-1" }));
+    trackAgentOutput(tracker, "idle-panel", "x".repeat(100), () => shown);
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
     expect(mocks.playSound).not.toHaveBeenCalled();
 
@@ -136,10 +172,10 @@ describe("trackAgentOutput", () => {
       tracker,
       "idle-panel",
       "y".repeat(AGENT_IDLE_MIN_BYTES),
-      () => ({ visible: true, workspaceId: "ws-1" }),
+      () => shown,
     );
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS - 500);
-    trackAgentOutput(tracker, "idle-panel", "ещё строки", () => ({ visible: true, workspaceId: "ws-1" }));
+    trackAgentOutput(tracker, "idle-panel", "ещё строки", () => shown);
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS - 500);
     expect(mocks.playSound).not.toHaveBeenCalled();
 
@@ -152,42 +188,42 @@ describe("trackAgentOutput", () => {
   });
 
   it("stays silent right after spawn, for plain shells and when watched", async () => {
-    // Глушение после запуска: восстановленный TUI рисует и замолкает штатно.
-    const muted = createAgentAlertTracker();
+    // Глушение после запуска: даже с engaged-панелью TUI рисует и замолкает.
+    const muted = engaged("mute-panel");
     muteAlertsAfterSpawn(muted);
     trackAgentOutput(
       muted,
       "mute-panel",
       `\x07${"z".repeat(AGENT_IDLE_MIN_BYTES)}`,
-      () => ({ visible: true, workspaceId: "ws-1" }),
+      () => shown,
     );
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
     expect(mocks.playSound).not.toHaveBeenCalled();
     // Окно глушения истекло — сигналы снова работают.
     await vi.advanceTimersByTimeAsync(SPAWN_ALERT_MUTE_MS);
-    trackAgentOutput(muted, "mute-panel", "\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    trackAgentOutput(muted, "mute-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
     clearAgentAttention("mute-panel");
     mocks.playSound.mockClear();
 
-    // Панель без агента (обычный шелл) не сигналит.
+    // Панель без агента (обычный шелл) не сигналит, хоть и engaged.
     mocks.record.value = null;
-    const shell = createAgentAlertTracker();
-    trackAgentOutput(shell, "shell-panel", "\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    const shell = engaged("shell-panel");
+    trackAgentOutput(shell, "shell-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).not.toHaveBeenCalled();
 
     // Пользователь смотрит на панель (видна + окно в фокусе) — тихо.
     mocks.record.value = { agentId: "claude", command: "claude" };
     mocks.windowFocused.value = true;
-    const watched = createAgentAlertTracker();
-    trackAgentOutput(watched, "watch-panel", "\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    const watched = engaged("watch-panel");
+    trackAgentOutput(watched, "watch-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).not.toHaveBeenCalled();
 
     // …а если панель скрыта (другая сессия) — сигнал даже при фокусе окна.
-    trackAgentOutput(watched, "watch-panel", "\x07", () => ({ visible: false, workspaceId: "ws-1" }));
+    trackAgentOutput(watched, "watch-panel", "\x07", () => hidden);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
     clearAgentAttention("watch-panel");
@@ -195,16 +231,16 @@ describe("trackAgentOutput", () => {
   });
 
   it("throttles repeated bells from the same panel", async () => {
-    const tracker = createAgentAlertTracker();
-    trackAgentOutput(tracker, "throttle-panel", "\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    const tracker = engaged("throttle-panel");
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => shown);
     await settle();
-    trackAgentOutput(tracker, "throttle-panel", "\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
 
     // Спустя тайм-аут — можно снова.
     await vi.advanceTimersByTimeAsync(16_000);
-    trackAgentOutput(tracker, "throttle-panel", "\x07", () => ({ visible: true, workspaceId: "ws-1" }));
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(2);
     clearAgentAttention("throttle-panel");

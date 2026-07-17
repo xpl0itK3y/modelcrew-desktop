@@ -22,6 +22,7 @@ import {
   clearAgentAttention,
   createAgentAlertTracker,
   disposeAgentAlertTracker,
+  markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   trackAgentOutput,
   type AgentAlertTracker,
@@ -478,8 +479,9 @@ async function spawnTerminal(
   const output = createLiveOutputChannel(entry, generation);
 
   entry.term.onData((data) => {
-    // Пользователь ответил панели: сигнал «ждёт» снят, счёт тишины заново.
-    acknowledgeAgentPanel(entry.alerts, entry.id);
+    // Пользователь работает с панелью: сигнал «ждёт» снят, отсчёт заново,
+    // и с этого момента её сигналы вообще имеют смысл.
+    markAgentPanelEngaged(entry.alerts, entry.id);
     if (!entry.exited) {
       void invoke("pty_write", { id: entry.id, data }).catch(() => {});
     }
