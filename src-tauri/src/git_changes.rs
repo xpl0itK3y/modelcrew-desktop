@@ -62,8 +62,22 @@ pub struct GitFileDiff {
     pub diff: String,
 }
 
+// Команда git без консольного окна: на Windows каждый дочерний процесс с
+// консолью мигает окном, а статус мы гоняем постоянно.
+fn git_command() -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 fn run_git(root: &Path, args: &[&str]) -> CommandResult<Vec<u8>> {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-c")
         .arg("core.quotepath=false")
         .args(args)
@@ -497,7 +511,7 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             let mut parts = line.split('\u{1f}');
             let head = parts.next()?;
             let name = parts.next()?;
-            let date = parts.next().and_then(|value| value.parse::<i64>().ok());
+            let date = parts.next().and_then(|value| value.trim().parse::<i64>().ok());
             Some(GitBranch {
                 name: name.to_owned(),
                 is_current: head == "*",
@@ -533,7 +547,7 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             if short_name == "HEAD" || local_names.contains(short_name) {
                 continue;
             }
-            let date = parts.next().and_then(|value| value.parse::<i64>().ok());
+            let date = parts.next().and_then(|value| value.trim().parse::<i64>().ok());
             branches.push(GitBranch {
                 name: full_name.to_owned(),
                 is_current: false,
@@ -552,7 +566,7 @@ pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    let output = Command::new("git")
+    let output = git_command()
         .args([
             "-c",
             "http.lowSpeedLimit=1000",
@@ -633,7 +647,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
             let short_hash = parts.next()?.to_owned();
             let author = parts.next()?.to_owned();
             let author_email = parts.next()?.to_owned();
-            let epoch = parts.next().and_then(|value| value.parse::<i64>().ok())?;
+            let epoch = parts.next().and_then(|value| value.trim().parse::<i64>().ok())?;
             let subject = parts.next()?.to_owned();
             let refs = parts
                 .next()
