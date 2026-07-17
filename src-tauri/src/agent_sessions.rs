@@ -43,9 +43,7 @@ fn file_instant(path: &Path) -> Option<SystemTime> {
 }
 
 fn within_window(instant: SystemTime, since: SystemTime) -> bool {
-    let low = since
-        .checked_sub(LOCATE_SLACK_BEFORE)
-        .unwrap_or(UNIX_EPOCH);
+    let low = since.checked_sub(LOCATE_SLACK_BEFORE).unwrap_or(UNIX_EPOCH);
     let high = since + LOCATE_WINDOW_AFTER;
     instant >= low && instant <= high
 }
@@ -188,11 +186,9 @@ pub fn locate_opencode_session(
     if !db_path.is_file() {
         return None;
     }
-    let connection = rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok()?;
+    let connection =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
     let mut statement = connection
         .prepare(
             "SELECT id, time_created FROM session \
@@ -256,18 +252,16 @@ pub fn locate_antigravity_session(
     }
     // Карта «cwd → последний разговор» разрешает неоднозначность между
     // параллельными проектами: у brain-папок нет собственного cwd.
-    let mapped: Option<String> = fs::read_to_string(
-        cli_dir.join("cache/last_conversations.json"),
-    )
-    .ok()
-    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-    .and_then(|value| {
-        value
-            .get(cwd)
-            .and_then(|id| id.as_str())
-            .map(str::to_string)
-    })
-    .filter(|id| is_session_id(id) && !exclude.iter().any(|entry| entry == id));
+    let mapped: Option<String> = fs::read_to_string(cli_dir.join("cache/last_conversations.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| {
+            value
+                .get(cwd)
+                .and_then(|id| id.as_str())
+                .map(str::to_string)
+        })
+        .filter(|id| is_session_id(id) && !exclude.iter().any(|entry| entry == id));
 
     if let Some(mapped_id) = &mapped {
         if candidates.iter().any(|(_, id)| id == mapped_id) {
@@ -407,8 +401,7 @@ pub fn agent_session_locate(
     super::ensure_main_window(&window)?;
     for id in &exclude {
         if !is_session_id(id) {
-            return Err(CommandError::new(ErrorCode::AgentSessionInvalidId)
-                .with_context("id", id));
+            return Err(CommandError::new(ErrorCode::AgentSessionInvalidId).with_context("id", id));
         }
     }
     let since = UNIX_EPOCH + Duration::from_millis(since_epoch_ms);
@@ -452,7 +445,8 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, b"{}\n").unwrap();
         let file = fs::File::options().write(true).open(path).unwrap();
-        file.set_times(fs::FileTimes::new().set_modified(at)).unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(at))
+            .unwrap();
     }
 
     #[test]
@@ -489,12 +483,7 @@ mod tests {
         // Не-сессии игнорируются.
         touch_with_mtime(&project.join("notes.txt"), since);
 
-        let found = locate_claude_session(
-            &config,
-            "/tmp/proj",
-            since,
-            &["claimed-session".into()],
-        );
+        let found = locate_claude_session(&config, "/tmp/proj", since, &["claimed-session".into()]);
         assert_eq!(found.as_deref(), Some("fresh-session"));
     }
 
@@ -533,16 +522,18 @@ mod tests {
         .unwrap();
 
         // Сессия другого проекта в том же окне.
-        let other = day.join(
-            "rollout-2026-07-16T10-00-01-0195c9a1-9999-4888-8777-666655554444.jsonl",
-        );
+        let other =
+            day.join("rollout-2026-07-16T10-00-01-0195c9a1-9999-4888-8777-666655554444.jsonl");
         fs::write(&other, b"{\"payload\":{\"cwd\":\"/tmp/other\"}}\n").unwrap();
 
         assert_eq!(
             locate_codex_session(&home, "/tmp/proj", since, &[]).as_deref(),
             Some(uuid)
         );
-        assert_eq!(locate_codex_session(&home, "/tmp/proj", since, &[uuid.into()]), None);
+        assert_eq!(
+            locate_codex_session(&home, "/tmp/proj", since, &[uuid.into()]),
+            None
+        );
     }
 
     #[test]
@@ -611,8 +602,7 @@ mod tests {
         );
         // Занятый id отдаёт оставшегося единственного кандидата.
         assert_eq!(
-            locate_antigravity_session(&cli, "/tmp/proj", since, &["bbbb-2222".into()])
-                .as_deref(),
+            locate_antigravity_session(&cli, "/tmp/proj", since, &["bbbb-2222".into()]).as_deref(),
             Some("aaaa-1111")
         );
         let _ = fs::remove_dir_all(cli);
@@ -628,11 +618,7 @@ mod tests {
             b"{\"cwd\":\"/tmp/proj\",\"model\":\"grok\"}\n",
         )
         .unwrap();
-        fs::write(
-            day.join("sess-other.jsonl"),
-            b"{\"cwd\":\"/tmp/other\"}\n",
-        )
-        .unwrap();
+        fs::write(day.join("sess-other.jsonl"), b"{\"cwd\":\"/tmp/other\"}\n").unwrap();
 
         let since = SystemTime::now();
         assert_eq!(

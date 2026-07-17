@@ -37,9 +37,7 @@ fn validate_snapshot_id(id: &str) -> CommandResult<()> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
     {
-        return Err(
-            CommandError::new(ErrorCode::TerminalSnapshotInvalidId).with_context("id", id)
-        );
+        return Err(CommandError::new(ErrorCode::TerminalSnapshotInvalidId).with_context("id", id));
     }
     Ok(())
 }

@@ -1,38 +1,36 @@
 mod agent_sessions;
 mod command_error;
 mod git_changes;
-mod terminal_snapshots;
-#[cfg(windows)]
-mod win_proc;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod pty;
+mod terminal_snapshots;
 mod update_cache;
+#[cfg(windows)]
+mod win_proc;
 mod workspace_roots;
 
-use command_error::{CommandError, CommandResult, ErrorCode};
-use linux_updater::{
-    updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
-    LinuxUpdaterState,
-};
-use update_cache::{
-    updater_install_self_update, updater_prepare_self_update, SelfUpdaterState,
-};
 use agent_sessions::agent_session_locate;
+use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
     git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_revert_file,
     git_switch_branch, GitWatchState,
 };
-use pty::{PtyManager, ShellInfo, SpawnOptions};
-use terminal_snapshots::{
-    terminal_snapshot_delete, terminal_snapshot_load, terminal_snapshot_save,
-    terminal_snapshots_prune,
+use linux_updater::{
+    updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
+    LinuxUpdaterState,
 };
+use pty::{PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Emitter, Manager, RunEvent};
 use tauri_plugin_dialog::DialogExt;
+use terminal_snapshots::{
+    terminal_snapshot_delete, terminal_snapshot_load, terminal_snapshot_save,
+    terminal_snapshots_prune,
+};
+use update_cache::{updater_install_self_update, updater_prepare_self_update, SelfUpdaterState};
 use workspace_roots::{BindOutcome, WorkspaceRootBinding, WorkspaceRoots};
 
 #[derive(Clone, Serialize)]
@@ -494,16 +492,16 @@ fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandRes
             }
             tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32)
         });
-        window
-            .set_overlay_icon(icon)
-            .map_err(|error| CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error))?;
+        window.set_overlay_icon(icon).map_err(|error| {
+            CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
+        })?;
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        window
-            .set_badge_count(count)
-            .map_err(|error| CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error))?;
+        window.set_badge_count(count).map_err(|error| {
+            CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
+        })?;
     }
     Ok(())
 }

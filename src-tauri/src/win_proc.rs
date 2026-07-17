@@ -4,8 +4,7 @@
 
 use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-    TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -63,8 +62,7 @@ pub fn creation_time(pid: u32) -> Option<u64> {
         let mut user: FILETIME = std::mem::zeroed();
         let ok = GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user);
         CloseHandle(handle);
-        (ok != 0).then(|| {
-            (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime)
-        })
+        (ok != 0)
+            .then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
     }
 }

@@ -741,8 +741,8 @@ mod tests {
                 b"echo PRO\"BE\"_${CLAUDECODE:-clean}_${CLAUDE_CODE_SESSION_ID:-clean}\n",
             )
             .expect("запись в PTY");
-        let output = wait_for_output(&out_rx, "PROBE_", Duration::from_secs(10))
-            .expect("эхо из шелла");
+        let output =
+            wait_for_output(&out_rx, "PROBE_", Duration::from_secs(10)).expect("эхо из шелла");
         assert!(
             output.contains("PROBE_clean_clean"),
             "маркеры агента протекли в терминал: {output}"
@@ -841,7 +841,7 @@ mod tests {
                         cwd: test_cwd(),
                         cols: 80,
                         rows: 24,
-                    history_dir: None,
+                        history_dir: None,
                     },
                     move |bytes| {
                         let _ = out_tx.send(bytes);
@@ -889,7 +889,7 @@ mod tests {
                 cwd: PathBuf::from("/nonexistent/workspace/folder"),
                 cols: 80,
                 rows: 24,
-                    history_dir: None,
+                history_dir: None,
             },
             |_| {},
             |_| {},
@@ -910,7 +910,7 @@ mod tests {
                 cwd: test_cwd(),
                 cols: 80,
                 rows: 24,
-                    history_dir: None,
+                history_dir: None,
             },
             |_| {},
             |_| {},
