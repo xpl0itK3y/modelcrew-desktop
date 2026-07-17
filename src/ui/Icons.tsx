@@ -104,6 +104,15 @@ export function GridIcon(props: IconProps) {
   );
 }
 
+export function PencilIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M11.5 2.7l1.8 1.8-7 7L4 12.5l1-2.3z" />
+      <path d="M10.3 3.9l1.8 1.8" />
+    </svg>
+  );
+}
+
 export function CopyIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

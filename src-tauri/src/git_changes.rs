@@ -416,6 +416,122 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
     })
 }
 
+// ---------- Правка файла в панели ----------
+
+// Файлы крупнее в редактор не грузим и не сохраняем — не текстовый сценарий.
+const MAX_EDIT_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_WRITE_BYTES: usize = 5 * 1024 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileContent {
+    pub content: String,
+    pub is_binary: bool,
+    pub too_large: bool,
+    // Файл существует на диске (удалённый откроется пустым — сохранение
+    // воссоздаст его).
+    pub exists: bool,
+}
+
+pub fn read_repo_file(root: &Path, path: &str) -> CommandResult<GitFileContent> {
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let full = toplevel.join(path);
+    let metadata = match std::fs::metadata(&full) {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            return Ok(GitFileContent {
+                content: String::new(),
+                is_binary: false,
+                too_large: false,
+                exists: false,
+            });
+        }
+    };
+    if !metadata.is_file() {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    if metadata.len() > MAX_EDIT_BYTES {
+        return Ok(GitFileContent {
+            content: String::new(),
+            is_binary: false,
+            too_large: true,
+            exists: true,
+        });
+    }
+    let bytes = std::fs::read(&full)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    if count_text_lines(&bytes).is_none() {
+        return Ok(GitFileContent {
+            content: String::new(),
+            is_binary: true,
+            too_large: false,
+            exists: true,
+        });
+    }
+    Ok(GitFileContent {
+        content: String::from_utf8_lossy(&bytes).into_owned(),
+        is_binary: false,
+        too_large: false,
+        exists: true,
+    })
+}
+
+pub fn write_repo_file(root: &Path, path: &str, content: &str) -> CommandResult<()> {
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    if content.len() > MAX_WRITE_BYTES {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "too-large")
+        );
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let full = toplevel.join(path);
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    }
+    std::fs::write(&full, content)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn git_read_file(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> CommandResult<GitFileContent> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || read_repo_file(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_write_file(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+    content: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || write_repo_file(&root, &path, &content))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
 // ---------- Ветки и история ----------
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1567,6 +1683,49 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .iter()
             .find(|file| file.path == path)
             .unwrap_or_else(|| panic!("{path} not in summary"))
+    }
+
+    #[test]
+    fn reads_and_writes_files_within_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let init = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+
+        std::fs::write(root.join("edit me.txt"), "одна\nдве\n").unwrap();
+
+        // Чтение существующего текстового файла (юникод, пробел в имени).
+        let read = read_repo_file(root, "edit me.txt").unwrap();
+        assert!(read.exists && !read.is_binary && !read.too_large);
+        assert_eq!(read.content, "одна\nдве\n");
+
+        // Правка и запись, затем повторное чтение видит новую версию.
+        write_repo_file(root, "edit me.txt", "одна\nДВЕ\nтри\n").unwrap();
+        assert_eq!(
+            read_repo_file(root, "edit me.txt").unwrap().content,
+            "одна\nДВЕ\nтри\n"
+        );
+
+        // Сохранение воссоздаёт отсутствующий файл во вложенной папке.
+        assert!(!read_repo_file(root, "sub/new.txt").unwrap().exists);
+        write_repo_file(root, "sub/new.txt", "создан\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("sub/new.txt")).unwrap(),
+            "создан\n"
+        );
+
+        // Бинарный файл: редактирование недоступно.
+        std::fs::write(root.join("blob.bin"), [0_u8, 1, 2, 0]).unwrap();
+        assert!(read_repo_file(root, "blob.bin").unwrap().is_binary);
+
+        // Побег из корня и абсолютные пути отклоняются на чтении и записи.
+        assert!(read_repo_file(root, "../escape.txt").is_err());
+        assert!(write_repo_file(root, "/etc/passwd", "x").is_err());
+        assert!(write_repo_file(root, "../../evil", "x").is_err());
     }
 
     #[test]

@@ -14,8 +14,8 @@ use agent_sessions::agent_session_locate;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_revert_file,
-    git_switch_branch, GitWatchState,
+    git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_read_file, git_revert_file,
+    git_switch_branch, git_write_file, GitWatchState,
 };
 use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
@@ -682,6 +682,8 @@ pub fn run() {
             git_changes_unwatch,
             git_commit,
             git_revert_file,
+            git_read_file,
+            git_write_file,
             git_branches,
             git_switch_branch,
             git_log,

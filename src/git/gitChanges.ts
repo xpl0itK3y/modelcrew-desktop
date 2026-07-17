@@ -227,6 +227,28 @@ export function revertFile(
   });
 }
 
+export type GitFileContent = {
+  content: string;
+  isBinary: boolean;
+  tooLarge: boolean;
+  exists: boolean;
+};
+
+export function readRepoFile(
+  workspaceId: string,
+  path: string,
+): Promise<GitFileContent> {
+  return invoke<GitFileContent>("git_read_file", { workspaceId, path });
+}
+
+export function writeRepoFile(
+  workspaceId: string,
+  path: string,
+  content: string,
+): Promise<void> {
+  return invoke("git_write_file", { workspaceId, path, content });
+}
+
 // ---------- Ветки и история ----------
 
 export type GitBranchInfo = {

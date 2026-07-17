@@ -657,6 +657,79 @@
   color: var(--mc-text-faint);
 }
 
+/* ---------- Редактор файла ---------- */
+
+.git-editor {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--mc-border);
+  background: var(--mc-surface);
+}
+
+.git-editor-area {
+  width: 100%;
+  min-height: 220px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px 12px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--mc-text-bright);
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.git-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--mc-border);
+}
+
+.git-editor-hint {
+  flex: 1;
+  color: var(--mc-text-faint);
+  font-size: 10.5px;
+}
+
+.git-editor-cancel {
+  padding: 6px 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.git-editor-cancel:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}
+
+.git-editor-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--mc-border);
+  color: #d9a03f;
+  font-size: 11.5px;
+}
+
+.git-editor-conflict .git-editor-actions {
+  padding: 0;
+  border: none;
+  justify-content: flex-end;
+}
+
 /* ---------- Diff ---------- */
 
 .git-diff {
