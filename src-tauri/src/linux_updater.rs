@@ -13,8 +13,7 @@ use tauri::ipc::Channel;
 #[cfg(target_os = "linux")]
 use crate::update_cache::{
     check_for_version, clear_cached, load_cached, parse_exact_version, sha256_bytes, sha256_file,
-    store_cached, updater_public_key, verify_cached, verify_cached_update_signature,
-    CachedUpdateMeta,
+    store_cached, updater_public_key, verify_cached_update_signature, CachedUpdateMeta,
 };
 #[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
@@ -861,6 +860,8 @@ fn run_package_installer(kind: LinuxPackageKind, package: &Path) -> CommandResul
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    use std::io::Write;
 
     fn evidence(
         pacman_owns_executable: bool,
