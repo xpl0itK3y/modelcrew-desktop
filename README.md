@@ -4,6 +4,12 @@
 
 # ModelCrew
 
+[![Release](https://img.shields.io/github/v/release/xpl0itK3y/modelcrew-desktop?label=release&color=e8567c)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-backend-CE412B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-supported-4fb864)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
+
 **A fast terminal workspace for running AI coding agents side by side.**
 
 </div>
@@ -20,23 +26,36 @@ themselves after the running program.
 
 ## Features
 
-- **Fleet grid layout** — new terminals split the grid automatically
-  (row-based), drag splits to resize, zoom any panel to full window.
+- **Fleet grid layout** — new terminals split the grid automatically, drag
+  splits to resize (wide grab zones), zoom any panel to full window, and a
+  one-click titlebar button evens everything into a tidy grid.
 - **Projects → sessions → terminals** — each workspace is bound to a project
   folder (one folder = one project, enforced by the backend); sessions keep
   independent layouts and get friendly codenames like `amber-lynx`.
 - **Native PTY backend** — real pseudo-terminals via Rust `portable-pty`,
   batched output, WebGL rendering; panel titles follow the foreground
   process (`codex`, `vim`, …).
-- **Persistent state** — layouts, projects, and sessions survive restarts.
-- **Session restore** — terminals reopen with their previous text, and a
-  panel that was running an agent (Claude Code, Codex, OpenCode, Kilo,
-  Antigravity) automatically resumes its last conversation.
+- **Session restore** — every session of the project comes back alive at
+  launch: terminals reopen with their previous text, and each panel that was
+  running an agent resumes **its own** conversation (precise per-panel
+  session binding for Claude Code, Codex, OpenCode, Kilo, Antigravity,
+  Grok and more — eleven CLIs supported).
+- **Agent alerts** — when an out-of-sight agent finishes or waits for your
+  decision, ModelCrew plays a sound, shows a system banner naming the agent
+  and the project, and counts waiting panels on the app icon badge
+  (Dock counter on macOS/Linux, overlay dot on Windows).
+- **Git panel** — a slide-over showing uncommitted changes in real time as
+  agents edit files: per-file diffs with live counters, commit box, one-click
+  file revert, branch switcher (including server-only branches), commit
+  history with authors, bodies, co-authors and unpushed markers.
+- **Per-panel command history** — each terminal keeps its own shell history
+  (zsh, bash, fish), so arrow-up never leaks commands between panels.
+- **Resilient updates** — signed auto-updates download in the background
+  into a persistent cache, so a restart never re-downloads; release
+  announcements and progress live in the notification center.
 - **Settings** — interface language (English/Russian), six themes, accent
-  colors, shell picker, terminal font size, and notification sounds.
-- **Notification center** — automatic signed updates with download progress,
-  release announcements, an unread-count badge on the bell, and a resizable
-  popover.
+  colors, shell picker, terminal font size, notification sounds, and
+  per-feature toggles.
 - **Cross-platform** — macOS, Windows, and Linux installers with
   auto-update.
 
