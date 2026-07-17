@@ -78,6 +78,19 @@ export type TerminalEntry = {
 
 const registry = new Map<string, TerminalEntry>();
 
+// Пользователь вернулся в окно: панели на экране он теперь видит, их
+// сигналы «агент ждёт» сняты. Панели скрытых сессий остаются в счётчике —
+// до них взгляд ещё не дошёл.
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", () => {
+    for (const entry of registry.values()) {
+      if (entry.container.isConnected) {
+        clearAgentAttention(entry.id);
+      }
+    }
+  });
+}
+
 export function applyTerminalTheme(themeId: ThemeId): void {
   currentTerminalTheme = getAppTheme(themeId).terminal;
   for (const entry of registry.values()) {
