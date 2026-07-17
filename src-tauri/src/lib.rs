@@ -465,6 +465,49 @@ fn workspace_unregister_root(
     state.unbind(&workspace_id)
 }
 
+// Бейдж непрочитанного на иконке приложения: счётчик в Dock (macOS) и на
+// иконках доков Linux; на Windows числовых бейджей нет — красная точка
+// поверх иконки в панели задач.
+#[tauri::command]
+fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandResult<()> {
+    ensure_main_window(&window)?;
+    let count = count.filter(|value| *value > 0);
+
+    #[cfg(target_os = "windows")]
+    {
+        let icon = count.map(|_| {
+            const SIZE: usize = 32;
+            let mut rgba = vec![0_u8; SIZE * SIZE * 4];
+            let center = (SIZE as f32 - 1.0) / 2.0;
+            for y in 0..SIZE {
+                for x in 0..SIZE {
+                    let dx = x as f32 - center;
+                    let dy = y as f32 - center;
+                    if (dx * dx + dy * dy).sqrt() <= center {
+                        let index = (y * SIZE + x) * 4;
+                        rgba[index] = 0xe0;
+                        rgba[index + 1] = 0x4c;
+                        rgba[index + 2] = 0x4c;
+                        rgba[index + 3] = 0xff;
+                    }
+                }
+            }
+            tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32)
+        });
+        window
+            .set_overlay_icon(icon)
+            .map_err(|error| CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        window
+            .set_badge_count(count)
+            .map_err(|error| CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn app_set_locale(
     window: tauri::WebviewWindow,
@@ -652,6 +695,7 @@ pub fn run() {
             workspace_pick_root,
             workspace_unregister_root,
             app_set_locale,
+            app_set_badge,
             updater_install_target,
             updater_prepare_linux_package,
             updater_install_linux_package,

@@ -8,6 +8,7 @@ import {
   getOrCreateTerminal,
   isManualTitle,
 } from "../terminal/registry";
+import { clearAgentAttention } from "../terminal/agentAlerts";
 
 export { destroyTerminal };
 
@@ -25,6 +26,8 @@ export function TerminalPanel(
     const entry = getOrCreateTerminal(props.api.id);
     let mounted = true;
     host.appendChild(entry.container);
+    // Панель на экране — сигнал «агент ждёт» для неё снят.
+    clearAgentAttention(entry.id);
     fitTerminal(entry);
     // Панель знает только владельца. Фактический cwd разрешает Rust-реестр,
     // поэтому восстановленные панели одного воркспейса не могут разъехаться.

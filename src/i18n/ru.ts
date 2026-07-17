@@ -178,6 +178,13 @@ export const ru = {
   "settings.agentResumeOff": "Выключено",
   "settings.agentResumeInsert": "Подставить команду",
   "settings.agentResumeAuto": "Запускать автоматически",
+  "settings.agentAlerts": "Уведомления от агентов",
+  "settings.agentAlertsOn": "Включены",
+  "settings.agentAlertsOff": "Выключены",
+  "settings.agentAlertsNote":
+    "Звук и системное уведомление, когда агент вне поля зрения закончил работу или ждёт ответа: терминальный звонок либо тишина после активности. Счётчик ожидающих панелей попадает на иконку приложения.",
+  "terminal.agentWaiting": "{agent} ждёт ответа",
+  "terminal.agentIdle": "{agent} закончил работу или ждёт вас",
   "settings.gridOrientation": "Сетка терминалов",
   "settings.gridColumns": "Колонками",
   "settings.gridRows": "Строками",

@@ -9,6 +9,11 @@ import {
 } from "./Icons";
 import { useI18n } from "../i18n";
 import { useAnimatedPresence } from "./useAnimatedPresence";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  getAgentAttentionCount,
+  subscribeAgentAttention,
+} from "../terminal/agentAlerts";
 import { UpdatePopover } from "../updater/UpdatePopover";
 import {
   loadReadNotificationIds,
@@ -43,6 +48,12 @@ function collapseHome(path: string): string {
 export function Titlebar(props: TitlebarProps) {
   const { t } = useI18n();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // Панели, где агент ждёт ответа: вместе с непрочитанными уведомлениями
+  // образуют бейдж на иконке приложения (Dock / панель задач).
+  const [agentAttention, setAgentAttention] = useState(() =>
+    getAgentAttentionCount(),
+  );
+  useEffect(() => subscribeAgentAttention(setAgentAttention), []);
   // Поповер остаётся в DOM на время exit-анимации после закрытия.
   const popoverPresence = useAnimatedPresence(notificationsOpen || null, 150);
   const [readNotificationIds, setReadNotificationIds] = useState(() =>
@@ -70,6 +81,19 @@ export function Titlebar(props: TitlebarProps) {
         item.phase === "ready" ||
         item.phase === "manual"),
   ).length;
+
+  // Бейдж на иконке приложения: непрочитанные уведомления + агенты, ждущие
+  // ответа. Ноль убирает бейдж.
+  const dockBadge = unreadCount + agentAttention;
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+    void invoke("app_set_badge", {
+      count: dockBadge > 0 ? dockBadge : null,
+    }).catch(() => {});
+  }, [dockBadge]);
+
   const notificationLabel = latestAttentionItem
     ? t("titlebar.updateReady", { version: latestAttentionItem.version })
     : t("titlebar.notifications");

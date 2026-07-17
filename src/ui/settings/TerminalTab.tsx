@@ -5,9 +5,11 @@ import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
+  loadAgentAlertsEnabled,
   loadEagerSessionRestore,
   loadGridOrientation,
   loadTerminalHistoryIsolation,
+  saveAgentAlertsEnabled,
   saveEagerSessionRestore,
   saveGridOrientation,
   saveTerminalHistoryIsolation,
@@ -52,6 +54,9 @@ export function TerminalTab(props: TerminalTabProps) {
   );
   const [gridOrientation, setGridOrientation] = useState<GridOrientation>(
     () => loadGridOrientation(),
+  );
+  const [agentAlerts, setAgentAlerts] = useState(() =>
+    loadAgentAlertsEnabled(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -185,6 +190,37 @@ export function TerminalTab(props: TerminalTabProps) {
             agents: AGENTS.map((agent) => agent.label).join(" · "),
           })}
         </p>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.agentAlerts")}</div>
+        <div
+          className="shell-options"
+          role="group"
+          aria-label={t("settings.agentAlerts")}
+        >
+          {[true, false].map((enabled) => (
+            <button
+              key={String(enabled)}
+              type="button"
+              aria-pressed={agentAlerts === enabled}
+              className={`shell-option ${
+                agentAlerts === enabled ? "is-selected" : ""
+              }`}
+              onClick={() => {
+                setAgentAlerts(enabled);
+                saveAgentAlertsEnabled(enabled);
+              }}
+            >
+              {t(
+                enabled
+                  ? "settings.agentAlertsOn"
+                  : "settings.agentAlertsOff",
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">{t("settings.agentAlertsNote")}</p>
       </div>
 
       <div className="settings-section">

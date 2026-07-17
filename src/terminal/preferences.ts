@@ -1,5 +1,24 @@
 const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
 const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
+const AGENT_ALERTS_STORAGE_KEY = "modelcrew.agentAlerts";
+
+// Уведомления «агент закончил/ждёт ответа» для панелей вне поля зрения.
+export function loadAgentAlertsEnabled(): boolean {
+  try {
+    return localStorage.getItem(AGENT_ALERTS_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function saveAgentAlertsEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(AGENT_ALERTS_STORAGE_KEY, enabled ? "on" : "off");
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}
+
 const GRID_ORIENTATION_STORAGE_KEY = "modelcrew.gridOrientation";
 
 // Ориентация дерева при выравнивании сеткой: columns — парные горизонтальные

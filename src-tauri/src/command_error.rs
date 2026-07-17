@@ -11,6 +11,7 @@ pub enum ErrorCode {
     MainWindowOnly,
     InvalidLocale,
     AppMenuUpdateFailed,
+    AppBadgeUpdateFailed,
     WorkspaceInvalidId,
     WorkspaceRootConflict,
     WorkspaceRootNotRegistered,
