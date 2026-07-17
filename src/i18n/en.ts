@@ -19,6 +19,10 @@ export const en: Record<MessageKey, string> = {
   "git.remoteBranches": "On the server",
   "git.remoteBranchHint":
     "This branch only exists on the server: switching creates a tracking local copy",
+  "git.mergedBadge": "merged",
+  "git.mergedHint": "Already merged into the current branch — safe to delete",
+  "git.unpushed": "not pushed",
+  "git.unpushedHint": "This commit only exists on this computer — the server has not seen it",
   "git.historyEmpty": "No commits yet",
   "git.copyHash": "Copy the full hash",
   "git.commitCoAuthor": "Co-author:",

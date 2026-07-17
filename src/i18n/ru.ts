@@ -18,6 +18,10 @@ export const ru = {
   "git.remoteBranches": "На сервере",
   "git.remoteBranchHint":
     "Ветка есть только на сервере: переключение создаст локальную копию со слежением",
+  "git.mergedBadge": "влита",
+  "git.mergedHint": "Ветка уже влита в текущую — её можно удалить",
+  "git.unpushed": "не запушен",
+  "git.unpushedHint": "Коммит есть только на этом компьютере — сервер его ещё не видел",
   "git.historyEmpty": "Коммитов ещё нет",
   "git.copyHash": "Скопировать полный хеш",
   "git.commitCoAuthor": "Соавтор:",

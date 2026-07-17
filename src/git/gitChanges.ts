@@ -234,6 +234,8 @@ export type GitBranchInfo = {
   isCurrent: boolean;
   // Есть только на сервере: переключение создаст локальную со слежением.
   isRemote: boolean;
+  // Уже влита в текущую ветку — кандидат на удаление.
+  isMerged: boolean;
   lastCommitAt?: number;
 };
 
@@ -244,6 +246,8 @@ export type GitCommitInfo = {
   author: string;
   authorEmail: string;
   epochMs: number;
+  // Коммит есть только на этом компьютере.
+  unpushed: boolean;
   refs: string[];
   body?: string;
   coAuthors?: string[];

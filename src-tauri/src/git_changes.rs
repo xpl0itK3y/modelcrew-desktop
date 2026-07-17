@@ -432,6 +432,8 @@ pub struct GitBranch {
     // Ветка существует только на сервере: переключение создаст локальную
     // копию со слежением.
     pub is_remote: bool,
+    // Уже влита в текущую ветку (её коммиты — предки HEAD).
+    pub is_merged: bool,
     // Unix-время последнего коммита в миллисекундах (для сортировки/подписи).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_commit_at: Option<i64>,
@@ -446,6 +448,8 @@ pub struct GitCommitInfo {
     pub author: String,
     pub author_email: String,
     pub epoch_ms: i64,
+    // Коммит есть только локально: upstream его ещё не видел.
+    pub unpushed: bool,
     // Декорации коммита: ветки/теги, указывающие на него.
     pub refs: Vec<String>,
     // Тело коммита без трейлеров Co-authored-by (они в co_authors).
@@ -504,6 +508,22 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             "--format=%(HEAD)%1f%(refname:short)%1f%(committerdate:unix)",
         ],
     )?;
+    // Локальные ветки, уже влитые в текущую: их коммиты — предки HEAD.
+    let merged: std::collections::HashSet<String> =
+        run_git(
+            &toplevel,
+            // HEAD обязателен: без него --merged принимает --format за коммит.
+            &["branch", "--merged", "HEAD", "--format=%(refname:short)"],
+        )
+            .map(|raw| {
+                String::from_utf8_lossy(&raw)
+                    .lines()
+                    .map(|line| line.trim().to_owned())
+                    .filter(|line| !line.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
     let text = String::from_utf8_lossy(&raw);
     let mut branches: Vec<GitBranch> = text
         .lines()
@@ -512,9 +532,11 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             let head = parts.next()?;
             let name = parts.next()?;
             let date = parts.next().and_then(|value| value.trim().parse::<i64>().ok());
+            let is_current = head == "*";
             Some(GitBranch {
+                is_merged: !is_current && merged.contains(name),
                 name: name.to_owned(),
-                is_current: head == "*",
+                is_current,
                 is_remote: false,
                 last_commit_at: date.map(|seconds| seconds * 1000),
             })
@@ -552,6 +574,7 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
                 name: full_name.to_owned(),
                 is_current: false,
                 is_remote: true,
+                is_merged: false,
                 last_commit_at: date.map(|seconds| seconds * 1000),
             });
         }
@@ -634,6 +657,19 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
         // Пустой репозиторий без коммитов — не ошибка, а пустая история.
         Err(_) => return Ok(Vec::new()),
     };
+    // Коммиты, которых ещё нет на upstream текущей ветки. Без upstream
+    // сравнивать не с чем — тогда пометок нет.
+    let unpushed: std::collections::HashSet<String> =
+        run_git(&toplevel, &["rev-list", "-n", "600", "@{upstream}..HEAD"])
+            .map(|raw| {
+                String::from_utf8_lossy(&raw)
+                    .lines()
+                    .map(|line| line.trim().to_owned())
+                    .filter(|line| !line.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
     let text = String::from_utf8_lossy(&raw);
     Ok(text
         .split('\u{1e}')
@@ -663,6 +699,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
             let (body, co_authors) =
                 split_body_and_co_authors(parts.next().unwrap_or_default());
             Some(GitCommitInfo {
+                unpushed: unpushed.contains(hash),
                 hash: hash.to_owned(),
                 short_hash,
                 subject,
@@ -1349,6 +1386,26 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         fetch_upstream(root).unwrap();
         let summary = collect_summary(root).unwrap();
         assert_eq!(summary.behind, Some(1));
+
+        // Вливаем feature/x в main: ветка получает пометку «влита», а
+        // merge-коммит — «не запушен» (его нет на origin/main).
+        run_at(root, &["merge", "--quiet", "--no-edit", "feature/x"]);
+        let branches = list_branches(root).unwrap();
+        let feature = branches
+            .iter()
+            .find(|branch| branch.name == "feature/x")
+            .unwrap();
+        assert!(feature.is_merged);
+        let main = branches.iter().find(|branch| branch.name == "main").unwrap();
+        assert!(!main.is_merged); // текущая ветка не помечается
+
+        let log = list_log(root, 10).unwrap();
+        assert!(log[0].unpushed, "свежий merge ещё не на сервере");
+        let pushed_first = log
+            .iter()
+            .find(|commit| commit.subject == "first commit")
+            .unwrap();
+        assert!(!pushed_first.unpushed, "запушенный коммит без пометки");
 
         // Пустой репозиторий: история пуста, а не ошибка.
         let fresh = tempfile::tempdir().unwrap();
