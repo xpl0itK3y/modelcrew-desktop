@@ -5,6 +5,7 @@ import {
   buildAgentResume,
   getAgentRecord,
   discardAgentRecord,
+  isShellProcess,
   loadAgentResumeMode,
   matchAgent,
   pruneAgentRecords,
@@ -38,7 +39,7 @@ describe("agent catalog", () => {
     expect(matchAgent("vim")).toBeNull();
   });
 
-  it("records the agent while it is in the foreground and clears it after", () => {
+  it("keeps transient subprocesses but clears an explicit shell immediately", () => {
     rememberAgentProcess("panel-1", "claude");
     expect(getAgentRecord("panel-1")).toEqual({
       agentId: "claude",
@@ -47,18 +48,29 @@ describe("agent catalog", () => {
     });
 
     // Вспышка подпроцесса (TUI запустил команду) запись не стирает.
-    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "git");
     rememberAgentProcess("panel-1", "node");
     expect(getAgentRecord("panel-1")).not.toBeNull();
     // Агент вернулся в foreground — счётчик промахов сброшен.
     rememberAgentProcess("panel-1", "claude");
-    rememberAgentProcess("panel-1", "zsh");
-    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "cargo");
+    rememberAgentProcess("panel-1", "node");
     expect(getAgentRecord("panel-1")).not.toBeNull();
 
-    // Устойчивая смена: три тика подряд не-агент — агент завершился.
+    // Watcher пришлёт только один zsh: этого достаточно.
     rememberAgentProcess("panel-1", "zsh");
     expect(getAgentRecord("panel-1")).toBeNull();
+  });
+
+  it("recognizes Unix and Windows shell names from the title watcher", () => {
+    expect(isShellProcess("/bin/zsh")).toBe(true);
+    expect(isShellProcess("-bash")).toBe(true);
+    expect(isShellProcess("fish")).toBe(true);
+    expect(isShellProcess("nu")).toBe(true);
+    expect(isShellProcess("PowerShell.EXE")).toBe(true);
+    expect(isShellProcess("C:\\Windows\\System32\\cmd.exe")).toBe(true);
+    expect(isShellProcess("git")).toBe(false);
+    expect(isShellProcess("cargo")).toBe(false);
   });
 
   it("builds resume commands for the latest chat and for the picker", () => {

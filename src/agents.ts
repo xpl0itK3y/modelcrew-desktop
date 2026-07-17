@@ -226,10 +226,44 @@ function saveRecords(records: Record<string, AgentRecord>): void {
 }
 
 // TUI-агенты (codex и др.) гоняют подпроцессы: foreground на тик-другой
-// становится не-агентом, хотя агент жив. Запись стирается только после
-// устойчивой смены — короткая вспышка (или тик в момент Cmd+Q) её не убьёт.
+// становится git/cargo/node, хотя агент жив. Для таких смен оставляем допуск.
+// Возврат к явной оболочке — другой случай: watcher шлёт событие только
+// при смене имени, поэтому ждать ещё два тика нельзя: их не будет.
 const AGENT_MISS_TOLERANCE = 3;
 const agentMisses = new Map<string, number>();
+
+// friendly_name на backend уже снимает путь, login-prefix `-` и
+// Windows-суффикс .exe. Но функция остаётся терпимой к старым/
+// внешним вызовам, где может прийти полное имя или .exe.
+const SHELL_PROCESS_NAMES = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "dash",
+  "ash",
+  "ksh",
+  "mksh",
+  "csh",
+  "tcsh",
+  "nu",
+  "xonsh",
+  "elvish",
+  "pwsh",
+  "powershell",
+  "cmd",
+]);
+
+export function isShellProcess(processName: string): boolean {
+  const base = processName
+    .trim()
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/^[-]+/, "")
+    .replace(/\.exe$/i, "")
+    .toLowerCase();
+  return base !== undefined && SHELL_PROCESS_NAMES.has(base);
+}
 
 // Watcher заголовков зовёт это на каждое имя foreground-процесса: агент в
 // фокусе — записываем, устойчивый не-агент — запись снимается.
@@ -259,6 +293,15 @@ export function rememberAgentProcess(
     return true;
   }
   if (existing) {
+    // agent → shell — это штатный возврат в prompt. Чистим сразу,
+    // иначе запись останется навсегда: watcher не повторяет
+    // события для неизменившегося foreground-имени.
+    if (isShellProcess(processName)) {
+      agentMisses.delete(terminalId);
+      delete records[terminalId];
+      saveRecords(records);
+      return false;
+    }
     const misses = (agentMisses.get(terminalId) ?? 0) + 1;
     if (misses < AGENT_MISS_TOLERANCE) {
       agentMisses.set(terminalId, misses);
@@ -272,6 +315,7 @@ export function rememberAgentProcess(
 }
 
 export function discardAgentRecord(terminalId: string): void {
+  agentMisses.delete(terminalId);
   const records = loadRecords();
   if (records[terminalId]) {
     delete records[terminalId];
@@ -285,6 +329,7 @@ export function pruneAgentRecords(keepIds: string[]): void {
   let changed = false;
   for (const id of Object.keys(records)) {
     if (!keep.has(id)) {
+      agentMisses.delete(id);
       delete records[id];
       changed = true;
     }
