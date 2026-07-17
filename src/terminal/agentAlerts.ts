@@ -84,6 +84,86 @@ export function clearAgentAttention(id: string): void {
   }
 }
 
+// ---------- Учёт вывода панели ----------
+
+// Минимум «живого» вывода, после которого тишина считается сигналом.
+export const AGENT_IDLE_MIN_BYTES = 1_200;
+// Тишина после активности, означающая «закончил или ждёт».
+export const AGENT_IDLE_QUIET_MS = 6_000;
+// Первые секунды после запуска панели не сигналят: восстановленный TUI
+// агента штатно рисует экран и замолкает.
+export const SPAWN_ALERT_MUTE_MS = 25_000;
+
+export type AgentAlertTracker = {
+  scanState: AttentionScanState;
+  activityBytes: number;
+  quietTimer: number | undefined;
+  muteUntil: number;
+};
+
+export function createAgentAlertTracker(): AgentAlertTracker {
+  return {
+    scanState: 0,
+    activityBytes: 0,
+    quietTimer: undefined,
+    muteUntil: 0,
+  };
+}
+
+export function muteAlertsAfterSpawn(tracker: AgentAlertTracker): void {
+  tracker.muteUntil = Date.now() + SPAWN_ALERT_MUTE_MS;
+}
+
+// Живой вывод PTY: звонок BEL — мгновенный сигнал, тишина после активного
+// вывода — отложенный. isPanelVisible читается в момент срабатывания:
+// панель могла смениться за время тишины.
+export function trackAgentOutput(
+  tracker: AgentAlertTracker,
+  terminalId: string,
+  data: string | ArrayBuffer,
+  isPanelVisible: () => boolean,
+): void {
+  const scan = scanTerminalAttention(data, tracker.scanState);
+  tracker.scanState = scan.state;
+  const muted = Date.now() < tracker.muteUntil;
+  if (scan.bells > 0 && !muted) {
+    void raiseAgentAlert(terminalId, "bell", isPanelVisible());
+  }
+  tracker.activityBytes +=
+    typeof data === "string" ? data.length : data.byteLength;
+  if (tracker.quietTimer !== undefined) {
+    window.clearTimeout(tracker.quietTimer);
+    tracker.quietTimer = undefined;
+  }
+  if (tracker.activityBytes >= AGENT_IDLE_MIN_BYTES && !muted) {
+    tracker.quietTimer = window.setTimeout(() => {
+      tracker.quietTimer = undefined;
+      tracker.activityBytes = 0;
+      void raiseAgentAlert(terminalId, "idle", isPanelVisible());
+    }, AGENT_IDLE_QUIET_MS);
+  }
+}
+
+// Пользователь ответил панели: сигнал снят, накопление и таймер — заново.
+export function acknowledgeAgentPanel(
+  tracker: AgentAlertTracker,
+  terminalId: string,
+): void {
+  clearAgentAttention(terminalId);
+  tracker.activityBytes = 0;
+  if (tracker.quietTimer !== undefined) {
+    window.clearTimeout(tracker.quietTimer);
+    tracker.quietTimer = undefined;
+  }
+}
+
+export function disposeAgentAlertTracker(tracker: AgentAlertTracker): void {
+  if (tracker.quietTimer !== undefined) {
+    window.clearTimeout(tracker.quietTimer);
+    tracker.quietTimer = undefined;
+  }
+}
+
 // ---------- Отправка уведомления ----------
 
 // Повторные сигналы одной панели не чаще, чем раз в этот интервал.

@@ -18,10 +18,13 @@ import {
   loadAgentResumeMode,
 } from "../agents";
 import {
+  acknowledgeAgentPanel,
   clearAgentAttention,
-  raiseAgentAlert,
-  scanTerminalAttention,
-  type AttentionScanState,
+  createAgentAlertTracker,
+  disposeAgentAlertTracker,
+  muteAlertsAfterSpawn,
+  trackAgentOutput,
+  type AgentAlertTracker,
 } from "./agentAlerts";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
@@ -69,13 +72,8 @@ export type TerminalEntry = {
   // (пауза в выводе после старта), а не вперемешку с её инициализацией.
   pendingResume: string | null;
   resumeTimer: number | undefined;
-  // Детекция «агент ждёт»: состояние сканера BEL, накопленный вывод и
-  // таймер тишины. spawnQuietUntil глушит сигналы сразу после старта —
-  // восстановленный TUI агента рисует экран и «замолкает» штатно.
-  attentionScanState: AttentionScanState;
-  agentActivityBytes: number;
-  agentQuietTimer: number | undefined;
-  spawnQuietUntil: number;
+  // Детекция «агент ждёт»: сканер BEL, накопленный вывод, таймер тишины.
+  alerts: AgentAlertTracker;
 };
 
 const registry = new Map<string, TerminalEntry>();
@@ -115,11 +113,7 @@ export function getTerminalStatus(id: string): TerminalStatus {
 function markExited(entry: TerminalEntry): void {
   entry.exited = true;
   // Оболочки больше нет — ждать некому.
-  clearAgentAttention(entry.id);
-  if (entry.agentQuietTimer !== undefined) {
-    window.clearTimeout(entry.agentQuietTimer);
-    entry.agentQuietTimer = undefined;
-  }
+  acknowledgeAgentPanel(entry.alerts, entry.id);
   for (const listener of statusListeners) {
     listener(entry.id, "exited");
   }
@@ -175,10 +169,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     everAttached: false,
     pendingResume: null,
     resumeTimer: undefined,
-    attentionScanState: 0,
-    agentActivityBytes: 0,
-    agentQuietTimer: undefined,
-    spawnQuietUntil: 0,
+    alerts: createAgentAlertTracker(),
   };
   registry.set(id, entry);
   return entry;
@@ -255,44 +246,20 @@ function scheduleResumeInjection(entry: TerminalEntry, quietMs: number): void {
   }, quietMs);
 }
 
-// Минимум «живого» вывода, после которого тишина считается сигналом: экран
-// приветствия/эхо-строки не в счёт, а рабочая сессия агента — да.
-const AGENT_IDLE_MIN_BYTES = 1_200;
-// Тишина после активности, означающая «закончил или ждёт».
-const AGENT_IDLE_QUIET_MS = 6_000;
-// Первые секунды после запуска панели не сигналят: восстановленный агент
-// штатно рисует TUI и замолкает.
-const SPAWN_ALERT_MUTE_MS = 25_000;
-
 function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   entry.term.write(typeof data === "string" ? data : new Uint8Array(data));
   markSnapshotDirty(entry.id);
   if (entry.pendingResume !== null) {
     scheduleResumeInjection(entry, RESUME_QUIET_MS);
   }
-
-  // Детекция «агент ждёт»: звонок BEL — мгновенный сигнал, тишина после
-  // активного вывода — отложенный. Принадлежность панели агенту проверяет
-  // raiseAgentAlert, здесь только дешёвый учёт байтов.
-  const scan = scanTerminalAttention(data, entry.attentionScanState);
-  entry.attentionScanState = scan.state;
-  const muted = Date.now() < entry.spawnQuietUntil;
-  if (scan.bells > 0 && !muted) {
-    void raiseAgentAlert(entry.id, "bell", entry.container.isConnected);
-  }
-  entry.agentActivityBytes +=
-    typeof data === "string" ? data.length : data.byteLength;
-  if (entry.agentQuietTimer !== undefined) {
-    window.clearTimeout(entry.agentQuietTimer);
-    entry.agentQuietTimer = undefined;
-  }
-  if (entry.agentActivityBytes >= AGENT_IDLE_MIN_BYTES && !muted) {
-    entry.agentQuietTimer = window.setTimeout(() => {
-      entry.agentQuietTimer = undefined;
-      entry.agentActivityBytes = 0;
-      void raiseAgentAlert(entry.id, "idle", entry.container.isConnected);
-    }, AGENT_IDLE_QUIET_MS);
-  }
+  // Детекция «агент ждёт»: принадлежность панели агенту проверяется в
+  // момент сигнала, здесь только дешёвый учёт вывода.
+  trackAgentOutput(
+    entry.alerts,
+    entry.id,
+    data,
+    () => entry.container.isConnected,
+  );
 }
 
 function createLiveOutputChannel(
@@ -419,7 +386,7 @@ export function ensureSpawned(
   }
   entry.spawned = true;
   entry.workspaceId = workspaceId || null;
-  entry.spawnQuietUntil = Date.now() + SPAWN_ALERT_MUTE_MS;
+  muteAlertsAfterSpawn(entry.alerts);
 
   const spawnPromise = spawnTerminal(entry, workspaceId);
   entry.spawnPromise = spawnPromise;
@@ -501,12 +468,7 @@ async function spawnTerminal(
 
   entry.term.onData((data) => {
     // Пользователь ответил панели: сигнал «ждёт» снят, счёт тишины заново.
-    clearAgentAttention(entry.id);
-    entry.agentActivityBytes = 0;
-    if (entry.agentQuietTimer !== undefined) {
-      window.clearTimeout(entry.agentQuietTimer);
-      entry.agentQuietTimer = undefined;
-    }
+    acknowledgeAgentPanel(entry.alerts, entry.id);
     if (!entry.exited) {
       void invoke("pty_write", { id: entry.id, data }).catch(() => {});
     }
@@ -576,9 +538,7 @@ export async function destroyTerminal(id: string): Promise<void> {
   if (entry.resumeTimer !== undefined) {
     window.clearTimeout(entry.resumeTimer);
   }
-  if (entry.agentQuietTimer !== undefined) {
-    window.clearTimeout(entry.agentQuietTimer);
-  }
+  disposeAgentAlertTracker(entry.alerts);
   entry.pendingResume = null;
   entry.term.dispose();
   entry.container.remove();

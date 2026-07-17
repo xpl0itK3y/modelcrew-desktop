@@ -1,16 +1,46 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  windowFocused: { value: false },
+  record: { value: null as { agentId: string; command: string } | null },
+  playSound: vi.fn(),
+  systemNotification: vi.fn(async () => {}),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ isFocused: async () => true }),
+  getCurrentWindow: () => ({
+    isFocused: async () => mocks.windowFocused.value,
+  }),
+}));
+vi.mock("../agents", () => ({
+  AGENTS: [{ id: "claude", label: "Claude Code" }],
+  getAgentRecord: () => mocks.record.value,
+}));
+vi.mock("../sound", () => ({ playNotificationSound: mocks.playSound }));
+vi.mock("../notifications", () => ({
+  sendSystemNotification: mocks.systemNotification,
 }));
 
 import {
+  AGENT_IDLE_MIN_BYTES,
+  AGENT_IDLE_QUIET_MS,
+  SPAWN_ALERT_MUTE_MS,
+  acknowledgeAgentPanel,
   clearAgentAttention,
+  createAgentAlertTracker,
   getAgentAttentionCount,
+  muteAlertsAfterSpawn,
   scanTerminalAttention,
   subscribeAgentAttention,
+  trackAgentOutput,
 } from "./agentAlerts";
+
+// Ожидание микрозадач: raiseAgentAlert асинхронно спрашивает фокус окна.
+async function settle() {
+  await vi.advanceTimersByTimeAsync(0);
+}
 
 describe("scanTerminalAttention", () => {
   it("counts plain bells", () => {
@@ -58,5 +88,121 @@ describe("agent attention store", () => {
     clearAgentAttention("missing-panel");
     expect(seen).toHaveLength(1);
     unsubscribe();
+  });
+});
+
+describe("trackAgentOutput", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mocks.windowFocused.value = false;
+    mocks.record.value = { agentId: "claude", command: "claude" };
+    clearAgentAttention("panel-1");
+    clearAgentAttention("panel-2");
+  });
+
+  it("rings immediately on a terminal bell and marks attention", async () => {
+    const tracker = createAgentAlertTracker();
+    trackAgentOutput(tracker, "bell-panel", "работаю…\x07", () => true);
+    await settle();
+
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringContaining("Claude Code"),
+      "",
+    );
+    expect(getAgentAttentionCount()).toBe(1);
+
+    // Ответ пользователя гасит сигнал.
+    acknowledgeAgentPanel(tracker, "bell-panel");
+    expect(getAgentAttentionCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("fires an idle alert only after enough output and full silence", async () => {
+    const tracker = createAgentAlertTracker();
+    // Мало вывода — тишина не считается сигналом.
+    trackAgentOutput(tracker, "idle-panel", "x".repeat(100), () => true);
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
+    expect(mocks.playSound).not.toHaveBeenCalled();
+
+    // Достаточно вывода, но новая порция сбрасывает отсчёт тишины.
+    trackAgentOutput(
+      tracker,
+      "idle-panel",
+      "y".repeat(AGENT_IDLE_MIN_BYTES),
+      () => true,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS - 500);
+    trackAgentOutput(tracker, "idle-panel", "ещё строки", () => true);
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS - 500);
+    expect(mocks.playSound).not.toHaveBeenCalled();
+
+    // Полная тишина — сигнал.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    expect(getAgentAttentionCount()).toBe(1);
+    clearAgentAttention("idle-panel");
+    vi.useRealTimers();
+  });
+
+  it("stays silent right after spawn, for plain shells and when watched", async () => {
+    // Глушение после запуска: восстановленный TUI рисует и замолкает штатно.
+    const muted = createAgentAlertTracker();
+    muteAlertsAfterSpawn(muted);
+    trackAgentOutput(
+      muted,
+      "mute-panel",
+      `\x07${"z".repeat(AGENT_IDLE_MIN_BYTES)}`,
+      () => true,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
+    expect(mocks.playSound).not.toHaveBeenCalled();
+    // Окно глушения истекло — сигналы снова работают.
+    await vi.advanceTimersByTimeAsync(SPAWN_ALERT_MUTE_MS);
+    trackAgentOutput(muted, "mute-panel", "\x07", () => true);
+    await settle();
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    clearAgentAttention("mute-panel");
+    mocks.playSound.mockClear();
+
+    // Панель без агента (обычный шелл) не сигналит.
+    mocks.record.value = null;
+    const shell = createAgentAlertTracker();
+    trackAgentOutput(shell, "shell-panel", "\x07", () => true);
+    await settle();
+    expect(mocks.playSound).not.toHaveBeenCalled();
+
+    // Пользователь смотрит на панель (видна + окно в фокусе) — тихо.
+    mocks.record.value = { agentId: "claude", command: "claude" };
+    mocks.windowFocused.value = true;
+    const watched = createAgentAlertTracker();
+    trackAgentOutput(watched, "watch-panel", "\x07", () => true);
+    await settle();
+    expect(mocks.playSound).not.toHaveBeenCalled();
+
+    // …а если панель скрыта (другая сессия) — сигнал даже при фокусе окна.
+    trackAgentOutput(watched, "watch-panel", "\x07", () => false);
+    await settle();
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    clearAgentAttention("watch-panel");
+    vi.useRealTimers();
+  });
+
+  it("throttles repeated bells from the same panel", async () => {
+    const tracker = createAgentAlertTracker();
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => true);
+    await settle();
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => true);
+    await settle();
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+
+    // Спустя тайм-аут — можно снова.
+    await vi.advanceTimersByTimeAsync(16_000);
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => true);
+    await settle();
+    expect(mocks.playSound).toHaveBeenCalledTimes(2);
+    clearAgentAttention("throttle-panel");
+    vi.useRealTimers();
   });
 });
