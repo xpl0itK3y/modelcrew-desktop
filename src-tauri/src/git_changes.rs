@@ -1419,6 +1419,106 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     #[test]
+    fn survives_a_messy_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Дэн")
+                .env("GIT_AUTHOR_EMAIL", "d@t")
+                .env("GIT_COMMITTER_NAME", "Дэн")
+                .env("GIT_COMMITTER_EMAIL", "d@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+
+        // Юникод и пробелы в именах, кириллица в коммитах.
+        std::fs::write(root.join("файл с пробелами.txt"), "раз\nдва\n").unwrap();
+        std::fs::write(root.join("old-name.txt"), "stable content\nline\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "начальный коммит — юникод ✓"]);
+
+        // Переименование + бинарник + новый юникод-файл.
+        git(&["mv", "old-name.txt", "new-name.txt"]);
+        std::fs::write(root.join("blob.bin"), [0_u8, 159, 146, 150, 0, 7]).unwrap();
+        std::fs::write(root.join("ещё файл.md"), "# привет\n").unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        let by_path = |path: &str| {
+            summary
+                .files
+                .iter()
+                .find(|file| file.path == path)
+                .unwrap_or_else(|| panic!("{path} not in summary"))
+        };
+        let renamed = by_path("new-name.txt");
+        assert_eq!(renamed.status, "renamed");
+        assert_eq!(renamed.orig_path.as_deref(), Some("old-name.txt"));
+        let binary = by_path("blob.bin");
+        assert_eq!(binary.status, "untracked");
+        assert_eq!(binary.additions, None, "бинарник без счётчиков строк");
+        assert_eq!(by_path("ещё файл.md").additions, Some(1));
+
+        let binary_diff = collect_file_diff(root, "blob.bin").unwrap();
+        assert!(binary_diff.is_binary);
+        let unicode_diff = collect_file_diff(root, "ещё файл.md").unwrap();
+        assert!(unicode_diff.diff.contains("+# привет"));
+
+        // Гигантский файл: diff обрезается, но не ломается.
+        let huge = "строка наполнения диффа\n".repeat(80_000);
+        std::fs::write(root.join("huge.txt"), &huge).unwrap();
+        let huge_diff = collect_file_diff(root, "huge.txt").unwrap();
+        assert!(huge_diff.truncated);
+        assert!(huge_diff.diff.len() <= MAX_DIFF_BYTES + 1024);
+        std::fs::remove_file(root.join("huge.txt")).unwrap();
+
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "вторая ревизия"]);
+
+        // Конфликт слияния: файл получает статус conflicted, сводка живёт.
+        git(&["checkout", "--quiet", "-b", "clash"]);
+        std::fs::write(root.join("новый файл.md"), "версия из clash\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "clash version"]);
+        git(&["checkout", "--quiet", "main"]);
+        std::fs::write(root.join("новый файл.md"), "версия из main\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "main version"]);
+        let merge = Command::new("git")
+            .args(["merge", "clash"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(!merge.status.success(), "merge must conflict");
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(by_path_in(&summary, "новый файл.md").status, "conflicted");
+        git(&["merge", "--abort"]);
+
+        // Detached HEAD: ветки нет, но история и статус работают.
+        let log = list_log(root, 10).unwrap();
+        assert!(log[0].subject.contains("main version"));
+        git(&["checkout", "--quiet", &log[1].hash]);
+        let summary = collect_summary(root).unwrap();
+        assert!(summary.is_repo);
+        assert_eq!(summary.branch, None, "detached HEAD — без имени ветки");
+        assert!(!list_log(root, 5).unwrap().is_empty());
+        let branches = list_branches(root).unwrap();
+        assert!(branches.iter().all(|branch| !branch.is_current));
+    }
+
+    fn by_path_in<'s>(summary: &'s GitChangesSummary, path: &str) -> &'s GitChangedFile {
+        summary
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap_or_else(|| panic!("{path} not in summary"))
+    }
+
+    #[test]
     fn commits_and_reverts_in_a_real_repository() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

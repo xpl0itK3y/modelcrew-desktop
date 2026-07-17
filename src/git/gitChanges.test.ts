@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 import {
   aggregateCounts,
+  formatRelativeTime,
   parseUnifiedDiff,
   type GitChangesSummary,
 } from "./gitChanges";
@@ -37,6 +38,16 @@ describe("parseUnifiedDiff", () => {
       { kind: "add", newLine: 11, text: "added line" },
       { kind: "add", newLine: 12, text: "another added" },
       { kind: "context", oldLine: 12, newLine: 13, text: "tail context" },
+    ]);
+  });
+
+  it("parses single-line hunk headers without counts", () => {
+    // git сокращает "@@ -5,1 +7,1 @@" до "@@ -5 +7 @@".
+    const lines = parseUnifiedDiff("@@ -5 +7 @@\n-old\n+new\n");
+    expect(lines).toEqual([
+      { kind: "hunk", text: "@@ -5 +7 @@" },
+      { kind: "del", oldLine: 5, text: "old" },
+      { kind: "add", newLine: 7, text: "new" },
     ]);
   });
 
@@ -74,6 +85,25 @@ describe("aggregateCounts", () => {
       deletions: 0,
       files: 0,
     });
+  });
+});
+
+describe("formatRelativeTime", () => {
+  it("scales units from seconds to years in both locales", () => {
+    const now = Date.UTC(2026, 6, 17, 12, 0, 0);
+    const minute = 60_000;
+    expect(formatRelativeTime(now - 30_000, "ru", now)).toContain("секунд");
+    expect(formatRelativeTime(now - 5 * minute, "ru", now)).toContain("минут");
+    expect(formatRelativeTime(now - 3 * 60 * minute, "ru", now)).toContain("час");
+    expect(formatRelativeTime(now - 4 * 24 * 60 * minute, "ru", now)).toContain(
+      "дн",
+    );
+    expect(
+      formatRelativeTime(now - 3 * 30 * 24 * 60 * minute, "ru", now),
+    ).toContain("месяц");
+    expect(
+      formatRelativeTime(now - 2 * 365 * 24 * 60 * minute, "en", now),
+    ).toContain("year");
   });
 });
 
