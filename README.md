@@ -7,7 +7,9 @@
 [![Release](https://img.shields.io/github/v/release/xpl0itK3y/modelcrew-desktop?label=release&color=e8567c)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-backend-CE412B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)](https://vitejs.dev)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-supported-4fb864)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
 [![License](https://img.shields.io/badge/license-MIT-6f7bde)](LICENSE)
 
@@ -16,7 +18,7 @@
 Six agents, six panels — with live git diffs, per-panel history,
 and a nudge the moment one of them needs you.
 
-[**Features**](#-features) · [**Supported agents**](#-supported-agents) · [**Install**](#-install) · [**Shortcuts**](#-keyboard-shortcuts) · [**Development**](#-development)
+[**Features**](#features) · [**Supported agents**](#supported-agents) · [**Install**](#install) · [**Shortcuts**](#keyboard-shortcuts) · [**Development**](#development)
 
 </div>
 
@@ -27,68 +29,21 @@ can run on a separate model, and you stay in control of quality, cost,
 security, and the level of autonomy.
 
 The current release is the **terminal foundation** — a desktop terminal
-manager built on **Tauri 2**, **React**, **xterm.js**, **dockview**, and a
-Rust **portable-pty** backend. Terminals arrange themselves into a fleet
-grid, live inside project workspaces, are driven by mouse and hotkeys, and
-title themselves after the running program.
+manager built on **Tauri 2**, **React 18**, **TypeScript**, **Vite**,
+**xterm.js**, **dockview**, and a Rust **portable-pty** backend. Terminals
+arrange themselves into a fleet grid, live inside project workspaces, are
+driven by mouse and hotkeys, and title themselves after the running program.
 
-## ✨ Features
+## Features
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-
-### 🧩 Fleet grid layout
-New terminals split the grid automatically. Drag the wide grab zones to
-resize, zoom any panel to full window, or even everything into a tidy grid
-with one titlebar click.
-
-  </td>
-    <td width="50%" valign="top">
-
-### ♻️ Session restore
-Every session of a project comes back alive at launch — terminals reopen
-with their previous text and each panel resumes **its own** agent
-conversation, bound precisely per panel.
-
-  </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-
-### 🔀 Live git panel
-A slide-over that shows uncommitted changes **in real time** as agents edit
-files: per-file diffs with live counters, a commit box, one-click revert,
-a branch switcher, and full commit history.
-
-  </td>
-    <td width="50%" valign="top">
-
-### 🔔 Agent alerts
-When an out-of-sight agent finishes or waits for your decision, ModelCrew
-plays a sound, shows a system banner naming the agent and project, and
-badges the app icon with the count of waiting panels.
-
-  </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-
-### ⌨️ Per-panel history
-Each terminal keeps its own shell history (zsh, bash, fish), so pressing
-arrow-up never leaks commands between panels.
-
-  </td>
-    <td width="50%" valign="top">
-
-### ⬆️ Resilient updates
-Signed auto-updates download in the background into a persistent cache — a
-restart never re-downloads — with progress and release notes in the
-notification center.
-
-  </td>
-  </tr>
-</table>
+| Feature | What it does |
+|---|---|
+| **Fleet grid layout** | New terminals split the grid automatically. Drag the wide grab zones to resize, zoom any panel to full window, or arrange everything into a tidy grid with one titlebar click. |
+| **Session restore** | Every session of a project comes back alive at launch — terminals reopen with their previous text and each panel resumes **its own** agent conversation, bound precisely per panel. |
+| **Live git panel** | A slide-over showing uncommitted changes in real time as agents edit files: per-file diffs with live counters, a commit box, one-click revert, a branch switcher, and full commit history. |
+| **Agent alerts** | When an out-of-sight agent finishes or waits for your decision, ModelCrew plays a sound, shows a system banner naming the agent and project, and badges the app icon with the count of waiting panels. |
+| **Per-panel history** | Each terminal keeps its own shell history (zsh, bash, fish), so pressing arrow-up never leaks commands between panels. |
+| **Resilient updates** | Signed auto-updates download in the background into a persistent cache — a restart never re-downloads — with progress and release notes in the notification center. |
 
 **Also inside:** projects → sessions → terminals (one folder = one project,
 enforced by the backend, friendly codenames like `amber-lynx`) · native PTY
@@ -97,7 +52,7 @@ foreground process · six themes, accent colors, shell picker, font size and
 notification sounds · English / Russian interface · macOS, Windows and Linux
 installers with auto-update.
 
-## 🤖 Supported agents
+## Supported agents
 
 Each panel remembers **which** conversation it was running and resumes
 exactly that one — six Claude Code panels get six different chats. Eleven
@@ -110,7 +65,7 @@ CLIs are recognized:
 
 </div>
 
-## 📦 Install
+## Install
 
 Download installers from the
 [**Releases**](https://github.com/xpl0itK3y/modelcrew-desktop/releases) page:
@@ -137,7 +92,7 @@ notification sounds work out of the box.
 > provide it out of the box; bare window managers (Hyprland, i3, sway) need
 > a notification daemon such as `mako` or `dunst` running.
 
-## ⌨️ Keyboard shortcuts
+## Keyboard shortcuts
 
 | macOS | Windows / Linux | Action |
 |---|---|---|
@@ -159,7 +114,7 @@ notification sounds work out of the box.
 - Double-click a project or session in the sidebar to rename it.
 - The gear in the title bar opens Settings (appearance, terminal, notifications).
 
-## 🛠 Development
+## Development
 
 ```bash
 npm install
@@ -202,7 +157,7 @@ Key setup, package formats, and manual verification are described in
 
 </details>
 
-## 🗺 Roadmap
+## Roadmap
 
 The terminal foundation is shipping. Built on top of it, next:
 
@@ -211,7 +166,7 @@ The terminal foundation is shipping. Built on top of it, next:
 - [ ] Memory with a relation graph
 - [ ] Built-in browser preview
 
-## 📄 License
+## License
 
 [MIT](LICENSE) © Denis
 
