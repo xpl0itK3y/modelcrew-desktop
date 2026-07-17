@@ -229,36 +229,33 @@
   white-space: normal;
 }
 
+/* Высота анимируется grid-переходом: 0fr → 1fr и обратно. */
+.git-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.git-reveal.is-open {
+  grid-template-rows: 1fr;
+}
+
+.git-reveal-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .git-commit-details {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px solid var(--mc-border);
-  /* Раскрытие: детали проявляются сверху вниз. */
-  animation: git-details-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+  transition: opacity 200ms ease;
 }
 
-@keyframes git-details-in {
-  from {
-    opacity: 0;
-    transform: translateY(-5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Сворачивание: детали растворяются, уезжая обратно вверх. */
+/* Сворачивание: контент тает, пока высота плавно уходит в ноль. */
 .git-commit-details.is-closing {
-  animation: git-details-out 160ms ease-in forwards;
+  opacity: 0;
   pointer-events: none;
-}
-
-@keyframes git-details-out {
-  to {
-    opacity: 0;
-    transform: translateY(-5px);
-  }
 }
 
 .git-commit-body {
@@ -852,10 +849,13 @@
   .git-commit.is-arriving,
   .git-file-header.is-updated,
   .git-file-header.is-updated .git-file-counts,
-  .git-view,
-  .git-commit-details,
-  .git-commit-details.is-closing {
+  .git-view {
     animation: none;
+  }
+
+  .git-reveal,
+  .git-commit-details {
+    transition: none;
   }
 
   .git-tab-indicator {
