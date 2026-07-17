@@ -360,6 +360,17 @@
   text-overflow: ellipsis;
 }
 
+/* Удалённые ветки (origin/…) — нейтральные, чтобы не выглядели тревогой. */
+.git-commit-ref.is-remote {
+  background: color-mix(in srgb, #5c9de0 16%, transparent);
+  color: #5c9de0;
+}
+
+.git-commit-ref.is-tag {
+  background: color-mix(in srgb, #d9a03f 16%, transparent);
+  color: #d9a03f;
+}
+
 /* ---------- Коммит из панели ---------- */
 
 .git-commit-row {
