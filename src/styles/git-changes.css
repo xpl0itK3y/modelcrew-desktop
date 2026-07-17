@@ -248,6 +248,19 @@
   }
 }
 
+/* Сворачивание: детали растворяются, уезжая обратно вверх. */
+.git-commit-details.is-closing {
+  animation: git-details-out 160ms ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes git-details-out {
+  to {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+
 .git-commit-body {
   margin: 0 0 6px;
   color: var(--mc-text-muted);
@@ -840,7 +853,8 @@
   .git-file-header.is-updated,
   .git-file-header.is-updated .git-file-counts,
   .git-view,
-  .git-commit-details {
+  .git-commit-details,
+  .git-commit-details.is-closing {
     animation: none;
   }
 
