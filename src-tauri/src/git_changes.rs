@@ -1484,6 +1484,8 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "user.name", "Дэн"]);
+        git(&["config", "user.email", "d@t"]);
 
         // Юникод и пробелы в именах, кириллица в коммитах.
         std::fs::write(root.join("файл с пробелами.txt"), "раз\nдва\n").unwrap();
