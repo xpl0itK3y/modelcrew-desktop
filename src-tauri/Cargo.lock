@@ -2198,6 +2198,8 @@ dependencies = [
 name = "modelcrew-desktop"
 version = "0.0.4"
 dependencies = [
+ "base64 0.22.1",
+ "minisign-verify",
  "notify",
  "portable-pty",
  "rusqlite",

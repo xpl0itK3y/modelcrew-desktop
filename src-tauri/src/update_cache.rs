@@ -5,6 +5,8 @@
 // скачивание идёт на Rust-стороне, чтобы байты можно было сохранить на диск.
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use minisign_verify::{PublicKey, Signature};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -104,14 +106,10 @@ pub fn pending_update_dir(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
 
 // Читает кеш с диска. Устаревший артефакт (обновление уже применено или файл
 // пропал) удаляется на месте, чтобы не занимать место до следующего релиза.
-pub fn load_cached(
-    dir: &Path,
-    current_version: &Version,
-) -> Option<(CachedUpdateMeta, PathBuf)> {
+pub fn load_cached(dir: &Path, current_version: &Version) -> Option<(CachedUpdateMeta, PathBuf)> {
     let raw = fs::read_to_string(dir.join(META_FILE)).ok()?;
     let meta: CachedUpdateMeta = serde_json::from_str(&raw).ok()?;
-    let fresh = Version::parse(&meta.version)
-        .is_ok_and(|version| version > *current_version);
+    let fresh = Version::parse(&meta.version).is_ok_and(|version| version > *current_version);
     let artifact = dir.join(ARTIFACT_FILE);
     if !fresh || !artifact.is_file() {
         clear_cached(dir);
@@ -124,15 +122,84 @@ pub fn verify_cached(meta: &CachedUpdateMeta, artifact: &Path) -> bool {
     sha256_file(artifact).is_ok_and(|(sha256, size)| sha256 == meta.sha256 && size == meta.size)
 }
 
+pub(crate) fn updater_public_key(app: &tauri::AppHandle) -> CommandResult<String> {
+    app.config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|config| config.get("pubkey"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            CommandError::new(ErrorCode::UpdaterCacheInvalid)
+                .with_context("reason", "updaterPublicKey")
+        })
+}
+
+fn decode_signed_text(value: &str, field: &str) -> CommandResult<String> {
+    let decoded = BASE64.decode(value).map_err(|error| {
+        CommandError::new(ErrorCode::UpdaterCacheInvalid)
+            .with_context("reason", field)
+            .with_debug(error)
+    })?;
+    String::from_utf8(decoded).map_err(|error| {
+        CommandError::new(ErrorCode::UpdaterCacheInvalid)
+            .with_context("reason", field)
+            .with_debug(error)
+    })
+}
+
+/// Re-verifies bytes loaded from the user-writable persistent cache against
+/// the signature from the freshly fetched updater manifest. SHA-256 beside the
+/// artifact only detects accidental corruption; it is not a trust boundary.
+pub(crate) fn verify_update_signature(
+    bytes: &[u8],
+    release_signature: &str,
+    public_key: &str,
+) -> CommandResult<()> {
+    let public_key =
+        PublicKey::decode(&decode_signed_text(public_key, "publicKey")?).map_err(|error| {
+            CommandError::new(ErrorCode::UpdaterCacheInvalid)
+                .with_context("reason", "publicKey")
+                .with_debug(error)
+        })?;
+    let signature = Signature::decode(&decode_signed_text(release_signature, "signature")?)
+        .map_err(|error| {
+            CommandError::new(ErrorCode::UpdaterCacheInvalid)
+                .with_context("reason", "signature")
+                .with_debug(error)
+        })?;
+    public_key.verify(bytes, &signature, true).map_err(|error| {
+        CommandError::new(ErrorCode::UpdaterCacheInvalid)
+            .with_context("reason", "signature")
+            .with_debug(error)
+    })
+}
+
+pub(crate) fn verify_cached_update_signature(
+    cache_dir: &Path,
+    bytes: &[u8],
+    release_signature: &str,
+    public_key: &str,
+) -> CommandResult<()> {
+    match verify_update_signature(bytes, release_signature, public_key) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // A failed signature is not a retryable installer failure. Remove
+            // both user-writable files so the next check must download again.
+            clear_cached(cache_dir);
+            Err(error)
+        }
+    }
+}
+
 // Пишет артефакт, затем метаданные (наличие meta.json означает, что артефакт
 // записан целиком); обе записи идут через rename для атомарности.
-pub fn store_cached(
-    dir: &Path,
-    meta: &CachedUpdateMeta,
-    bytes: &[u8],
-) -> CommandResult<PathBuf> {
-    let write_failed =
-        |error: std::io::Error| CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error);
+pub fn store_cached(dir: &Path, meta: &CachedUpdateMeta, bytes: &[u8]) -> CommandResult<PathBuf> {
+    let write_failed = |error: std::io::Error| {
+        CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error)
+    };
     fs::create_dir_all(dir).map_err(write_failed)?;
     let _ = fs::remove_file(dir.join(META_FILE));
 
@@ -202,7 +269,7 @@ fn build_updater(
         .map_err(|error| CommandError::new(ErrorCode::UpdaterCheckFailed).with_debug(error))
 }
 
-async fn check_for_version(
+pub(crate) async fn check_for_version(
     app: &tauri::AppHandle,
     target: Option<&str>,
     version: &str,
@@ -318,11 +385,15 @@ async fn install_self_update(
         meta.kind == SELF_UPDATE_KIND && meta.version == version && meta.target == cache_target
     });
     let Some((meta, artifact)) = cached else {
-        return Err(CommandError::new(ErrorCode::UpdaterCacheMissing).with_context("version", &version));
+        return Err(
+            CommandError::new(ErrorCode::UpdaterCacheMissing).with_context("version", &version)
+        );
     };
     if !verify_cached(&meta, &artifact) {
         clear_cached(&dir);
-        return Err(CommandError::new(ErrorCode::UpdaterCacheInvalid).with_context("version", &version));
+        return Err(
+            CommandError::new(ErrorCode::UpdaterCacheInvalid).with_context("version", &version)
+        );
     }
 
     // Свежая сверка с манифестом: если релиз заменили, кеш недействителен.
@@ -331,8 +402,10 @@ async fn install_self_update(
         clear_cached(&dir);
         CommandError::new(ErrorCode::UpdaterCacheInvalid).with_debug(error)
     })?;
-    // Подпись артефакта проверена плагином при скачивании; целостность файла
-    // на диске подтверждена sha256 выше.
+    // Кеш переживает перезапуск и доступен пользователю, поэтому локального
+    // sha256 недостаточно: связываем байты со свежей подписью из манифеста.
+    let public_key = updater_public_key(&app)?;
+    verify_cached_update_signature(&dir, &bytes, &update.signature, &public_key)?;
     update
         .install(bytes)
         .map_err(|error| CommandError::new(ErrorCode::UpdaterInstallFailed).with_debug(error))?;
@@ -452,5 +525,39 @@ mod tests {
         assert!(parse_exact_version("v1.2.3").is_err());
         assert!(parse_exact_version("1.2.3 ").is_err());
         assert!(parse_exact_version("01.2.3").is_err());
+    }
+
+    #[test]
+    fn cached_bytes_must_match_the_fresh_manifest_signature() {
+        const PUBLIC_KEY: &str = "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        const SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=\ntrusted comment: timestamp:1555779966\tfile:test\nQtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==";
+        let public_key = BASE64.encode(PUBLIC_KEY);
+        let signature = BASE64.encode(SIGNATURE);
+
+        verify_update_signature(b"test", &signature, &public_key).unwrap();
+        let error = verify_update_signature(b"tampered", &signature, &public_key).unwrap_err();
+        assert_eq!(error.code, ErrorCode::UpdaterCacheInvalid);
+        assert_eq!(error.context["reason"], "signature");
+    }
+
+    #[test]
+    fn signature_mismatch_evicts_the_untrusted_cache() {
+        const PUBLIC_KEY: &str = "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        const SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=\ntrusted comment: timestamp:1555779966\tfile:test\nQtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==";
+        let dir = tempfile::tempdir().unwrap();
+        let tampered = b"tampered";
+        store_cached(dir.path(), &meta("0.2.0", tampered), tampered).unwrap();
+
+        let error = verify_cached_update_signature(
+            dir.path(),
+            tampered,
+            &BASE64.encode(SIGNATURE),
+            &BASE64.encode(PUBLIC_KEY),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, ErrorCode::UpdaterCacheInvalid);
+        assert!(!dir.path().join(ARTIFACT_FILE).exists());
+        assert!(!dir.path().join(META_FILE).exists());
     }
 }

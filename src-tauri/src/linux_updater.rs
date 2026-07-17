@@ -12,8 +12,9 @@ use tauri::ipc::Channel;
 
 #[cfg(target_os = "linux")]
 use crate::update_cache::{
-    clear_cached, load_cached, parse_exact_version, sha256_bytes, sha256_file,
-    store_cached, verify_cached, CachedUpdateMeta,
+    check_for_version, clear_cached, load_cached, parse_exact_version, sha256_bytes, sha256_file,
+    store_cached, updater_public_key, verify_cached, verify_cached_update_signature,
+    CachedUpdateMeta,
 };
 #[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
@@ -47,7 +48,6 @@ impl LinuxPackageKind {
             Self::Pacman => "pacman",
         }
     }
-
 }
 
 impl std::fmt::Display for LinuxPackageKind {
@@ -382,8 +382,7 @@ async fn prepare_linux_package(
     if let Some(cached) = cached {
         let _ = on_progress.send(LinuxUpdateProgress::Verifying);
         if verify_cached_package(&cached).is_ok()
-            && verify_package_version(cached.package_kind, &cached.path, &requested_version)
-                .is_ok()
+            && verify_package_version(cached.package_kind, &cached.path, &requested_version).is_ok()
         {
             return Ok(PreparedLinuxPackageInfo {
                 version,
@@ -526,18 +525,45 @@ async fn install_linux_package(
                 .with_context("target", &target)
         })?;
 
+    // The package and its SHA metadata share a user-writable cache. Fetch the
+    // current manifest and verify the cached bytes before invoking a privileged
+    // package manager; version metadata alone cannot establish authenticity.
+    let update = check_for_version(&app, Some(&target), &version).await?;
+    let signature = update.signature;
+    let public_key = updater_public_key(&app)?;
+    let cache_dir = crate::update_cache::pending_update_dir(&app)?;
+    let signature_cache_dir = cache_dir.clone();
+
     let install_snapshot = prepared.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let install_result = tauri::async_runtime::spawn_blocking(move || {
         verify_cached_package(&install_snapshot)?;
         verify_package_version(
             install_snapshot.package_kind,
             &install_snapshot.path,
             &requested_version,
         )?;
+        let bytes = std::fs::read(&install_snapshot.path)
+            .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheInvalid).with_debug(error))?;
+        verify_cached_update_signature(&signature_cache_dir, &bytes, &signature, &public_key)?;
         run_package_installer(install_snapshot.package_kind, &install_snapshot.path)
     })
     .await
-    .map_err(|error| CommandError::new(ErrorCode::UpdaterInstallFailed).with_debug(error))??;
+    .map_err(|error| CommandError::new(ErrorCode::UpdaterInstallFailed).with_debug(error))?;
+
+    if let Err(error) = install_result {
+        if error.code == ErrorCode::UpdaterCacheInvalid {
+            let mut cached = state.prepared()?;
+            if cached.as_ref().is_some_and(|entry| {
+                entry.version == prepared.version
+                    && entry.package_kind == prepared.package_kind
+                    && entry.target == prepared.target
+            }) {
+                cached.take();
+            }
+            clear_cached(&cache_dir);
+        }
+        return Err(error);
+    }
 
     // Keep the verified package for all failure paths, including a dismissed
     // polkit prompt. It is removed only after the package manager succeeds.
