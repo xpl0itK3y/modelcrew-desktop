@@ -313,6 +313,7 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
             "status",
             "--porcelain=v2",
             "--branch",
+            "--untracked-files=all",
             "-z",
         ],
     )?;
@@ -334,10 +335,7 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
             let (additions, deletions) = if file_status == "untracked" {
                 (untracked_line_count(&toplevel, &path), Some(0))
             } else {
-                counts
-                    .get(&path)
-                    .copied()
-                    .unwrap_or((Some(0), Some(0)))
+                counts.get(&path).copied().unwrap_or((Some(0), Some(0)))
             };
             GitChangedFile {
                 path,
@@ -377,11 +375,7 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
     };
 
     // Известен ли путь git-у: для untracked файла diff собирается вручную.
-    let tracked = run_git(
-        &toplevel,
-        &["ls-files", "--error-unmatch", "--", path],
-    )
-    .is_ok();
+    let tracked = run_git(&toplevel, &["ls-files", "--error-unmatch", "--", path]).is_ok();
     let raw = if tracked {
         run_git(&toplevel, &["diff", "HEAD", "--", path])
             .or_else(|_| run_git(&toplevel, &["diff", "--", path]))?
@@ -400,8 +394,8 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
         synthesize_added_diff(path, &String::from_utf8_lossy(&bytes)).into_bytes()
     };
 
-    let is_binary = tracked
-        && String::from_utf8_lossy(&raw[..raw.len().min(4096)]).contains("Binary files ");
+    let is_binary =
+        tracked && String::from_utf8_lossy(&raw[..raw.len().min(4096)]).contains("Binary files ");
     let truncated = raw.len() > MAX_DIFF_BYTES;
     let clipped = if truncated {
         // Режем по границе строки, чтобы не рвать UTF-8 и разметку диффа.
@@ -509,20 +503,19 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
         ],
     )?;
     // Локальные ветки, уже влитые в текущую: их коммиты — предки HEAD.
-    let merged: std::collections::HashSet<String> =
-        run_git(
-            &toplevel,
-            // HEAD обязателен: без него --merged принимает --format за коммит.
-            &["branch", "--merged", "HEAD", "--format=%(refname:short)"],
-        )
-            .map(|raw| {
-                String::from_utf8_lossy(&raw)
-                    .lines()
-                    .map(|line| line.trim().to_owned())
-                    .filter(|line| !line.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+    let merged: std::collections::HashSet<String> = run_git(
+        &toplevel,
+        // HEAD обязателен: без него --merged принимает --format за коммит.
+        &["branch", "--merged", "HEAD", "--format=%(refname:short)"],
+    )
+    .map(|raw| {
+        String::from_utf8_lossy(&raw)
+            .lines()
+            .map(|line| line.trim().to_owned())
+            .filter(|line| !line.is_empty())
+            .collect()
+    })
+    .unwrap_or_default();
 
     let text = String::from_utf8_lossy(&raw);
     let mut branches: Vec<GitBranch> = text
@@ -531,7 +524,9 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             let mut parts = line.split('\u{1f}');
             let head = parts.next()?;
             let name = parts.next()?;
-            let date = parts.next().and_then(|value| value.trim().parse::<i64>().ok());
+            let date = parts
+                .next()
+                .and_then(|value| value.trim().parse::<i64>().ok());
             let is_current = head == "*";
             Some(GitBranch {
                 is_merged: !is_current && merged.contains(name),
@@ -569,7 +564,9 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             if short_name == "HEAD" || local_names.contains(short_name) {
                 continue;
             }
-            let date = parts.next().and_then(|value| value.trim().parse::<i64>().ok());
+            let date = parts
+                .next()
+                .and_then(|value| value.trim().parse::<i64>().ok());
             branches.push(GitBranch {
                 name: full_name.to_owned(),
                 is_current: false,
@@ -604,8 +601,12 @@ pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
         .output()
         .map_err(|error| CommandError::new(ErrorCode::GitUnavailable).with_debug(error))?;
     if !output.status.success() {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed)
-            .with_debug(String::from_utf8_lossy(&output.stderr).chars().take(1024).collect::<String>()));
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_debug(
+            String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .take(1024)
+                .collect::<String>(),
+        ));
     }
     Ok(())
 }
@@ -683,7 +684,9 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
             let short_hash = parts.next()?.to_owned();
             let author = parts.next()?.to_owned();
             let author_email = parts.next()?.to_owned();
-            let epoch = parts.next().and_then(|value| value.trim().parse::<i64>().ok())?;
+            let epoch = parts
+                .next()
+                .and_then(|value| value.trim().parse::<i64>().ok())?;
             let subject = parts.next()?.to_owned();
             let refs = parts
                 .next()
@@ -696,8 +699,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
                         .collect()
                 })
                 .unwrap_or_default();
-            let (body, co_authors) =
-                split_body_and_co_authors(parts.next().unwrap_or_default());
+            let (body, co_authors) = split_body_and_co_authors(parts.next().unwrap_or_default());
             Some(GitCommitInfo {
                 unpushed: unpushed.contains(hash),
                 hash: hash.to_owned(),
@@ -823,7 +825,9 @@ const MAX_COMMIT_MESSAGE_CHARS: usize = 4000;
 pub fn commit_all(root: &Path, message: &str) -> CommandResult<()> {
     let message = message.trim();
     if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "message"));
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "message")
+        );
     }
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
@@ -890,11 +894,9 @@ pub async fn git_revert_file(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        revert_file(&root, &path, orig_path.as_deref())
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || revert_file(&root, &path, orig_path.as_deref()))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Реал-тайм: вотчер рабочего дерева ----------
@@ -905,9 +907,9 @@ pub fn is_relevant_event_path(repo_root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(repo_root) else {
         return true; // событие вне корня — перестрахуемся и проверим
     };
-    let mut components = relative.components().map(|part| {
-        part.as_os_str().to_string_lossy().into_owned()
-    });
+    let mut components = relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned());
     let Some(first) = components.next() else {
         return true;
     };
@@ -948,8 +950,8 @@ fn spawn_watch(
 
     let (event_sender, event_receiver) = std::sync::mpsc::channel::<()>();
     let filter_root = root.clone();
-    let mut watcher = notify::recommended_watcher(
-        move |event: Result<notify::Event, notify::Error>| {
+    let mut watcher =
+        notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
             let Ok(event) = event else {
                 return;
             };
@@ -960,8 +962,7 @@ fn spawn_watch(
             {
                 let _ = event_sender.send(());
             }
-        },
-    )?;
+        })?;
     watcher.watch(&root, notify::RecursiveMode::Recursive)?;
 
     std::thread::spawn(move || {
@@ -1210,10 +1211,16 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(summary.branch.as_deref(), Some("main"));
         assert_eq!(summary.files.len(), 2);
         let fresh = &summary.files[0];
-        assert_eq!((fresh.path.as_str(), fresh.status), ("fresh.txt", "untracked"));
+        assert_eq!(
+            (fresh.path.as_str(), fresh.status),
+            ("fresh.txt", "untracked")
+        );
         assert_eq!(fresh.additions, Some(1));
         let tracked = &summary.files[1];
-        assert_eq!((tracked.path.as_str(), tracked.status), ("tracked.txt", "modified"));
+        assert_eq!(
+            (tracked.path.as_str(), tracked.status),
+            ("tracked.txt", "modified")
+        );
         assert_eq!(tracked.additions, Some(2));
         assert_eq!(tracked.deletions, Some(1));
 
@@ -1222,6 +1229,26 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(diff.diff.contains("-two"));
         let fresh_diff = collect_file_diff(root, "fresh.txt").unwrap();
         assert!(fresh_diff.diff.contains("+hello"));
+
+        // Git's default porcelain output collapses a wholly-untracked directory
+        // to `directory/`. The panel needs actual files so diff and revert keep
+        // their file semantics instead of trying to read/remove a directory.
+        std::fs::create_dir_all(root.join("nested/deep")).unwrap();
+        std::fs::write(root.join("nested/deep/new.txt"), "inside\n").unwrap();
+        let nested_summary = collect_summary(root).unwrap();
+        let nested = nested_summary
+            .files
+            .iter()
+            .find(|file| file.path == "nested/deep/new.txt")
+            .expect("nested untracked file must not be collapsed to a directory");
+        assert_eq!(nested.status, "untracked");
+        assert_eq!(nested.additions, Some(1));
+        assert!(collect_file_diff(root, &nested.path)
+            .unwrap()
+            .diff
+            .contains("+inside"));
+        revert_file(root, &nested.path, None).unwrap();
+        assert!(!root.join("nested/deep/new.txt").exists());
 
         // Папка без git — не ошибка, а «не репозиторий».
         let plain = tempfile::tempdir().unwrap();
@@ -1235,7 +1262,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "Long description line.\n\nCo-authored-by: Alex <a@t>\nCo-Authored-By: Kim <k@t>",
         );
         assert_eq!(body, "Long description line.");
-        assert_eq!(co_authors, vec!["Alex <a@t>".to_owned(), "Kim <k@t>".to_owned()]);
+        assert_eq!(
+            co_authors,
+            vec!["Alex <a@t>".to_owned(), "Kim <k@t>".to_owned()]
+        );
         let (empty_body, none) = split_body_and_co_authors("");
         assert_eq!(empty_body, "");
         assert!(none.is_empty());
@@ -1315,7 +1345,11 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         switch_branch(root, "main", false).unwrap();
         let branches = list_branches(root).unwrap();
         assert_eq!(
-            branches.iter().find(|branch| branch.is_current).unwrap().name,
+            branches
+                .iter()
+                .find(|branch| branch.is_current)
+                .unwrap()
+                .name,
             "main"
         );
         assert!(switch_branch(root, "no-such-branch", false).is_err());
@@ -1329,7 +1363,12 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .output()
             .unwrap();
         assert!(bare.status.success());
-        git(&["remote", "add", "origin", remote_dir.path().to_str().unwrap()]);
+        git(&[
+            "remote",
+            "add",
+            "origin",
+            remote_dir.path().to_str().unwrap(),
+        ]);
         git(&["push", "--quiet", "origin", "main", "feature/x"]);
         git(&["branch", "-D", "feature/x"]);
 
@@ -1345,7 +1384,11 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         switch_branch(root, "origin/feature/x", true).unwrap();
         let branches = list_branches(root).unwrap();
         assert_eq!(
-            branches.iter().find(|branch| branch.is_current).unwrap().name,
+            branches
+                .iter()
+                .find(|branch| branch.is_current)
+                .unwrap()
+                .name,
             "feature/x"
         );
 
@@ -1380,7 +1423,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         );
         std::fs::write(clone_path.join("c.txt"), "three\n").unwrap();
         run_at(&clone_path, &["add", "."]);
-        run_at(&clone_path, &["commit", "--quiet", "-m", "from another machine"]);
+        run_at(
+            &clone_path,
+            &["commit", "--quiet", "-m", "from another machine"],
+        );
         run_at(&clone_path, &["push", "--quiet", "origin", "main"]);
 
         fetch_upstream(root).unwrap();
@@ -1396,7 +1442,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .find(|branch| branch.name == "feature/x")
             .unwrap();
         assert!(feature.is_merged);
-        let main = branches.iter().find(|branch| branch.name == "main").unwrap();
+        let main = branches
+            .iter()
+            .find(|branch| branch.name == "main")
+            .unwrap();
         assert!(!main.is_merged); // текущая ветка не помечается
 
         let log = list_log(root, 10).unwrap();
@@ -1544,7 +1593,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Откат правки отслеживаемого файла возвращает содержимое HEAD.
         std::fs::write(root.join("a.txt"), "edited\n").unwrap();
         revert_file(root, "a.txt", None).unwrap();
-        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "original\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "original\n"
+        );
 
         // Откат нового файла удаляет его.
         std::fs::write(root.join("fresh.txt"), "temp\n").unwrap();
@@ -1554,7 +1606,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Откат переименования: старое имя возвращается, новое исчезает.
         git(&["mv", "a.txt", "b.txt"]);
         revert_file(root, "b.txt", Some("a.txt")).unwrap();
-        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "original\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "original\n"
+        );
         assert!(!root.join("b.txt").exists());
         assert!(collect_summary(root).unwrap().files.is_empty());
 
