@@ -186,6 +186,7 @@ export const en: Record<MessageKey, string> = {
     "Sound and a system notification when an out-of-sight agent finishes or waits for input: a terminal bell or silence after activity. Waiting panels are counted on the app icon badge.",
   "terminal.agentWaiting": "{agent} is waiting for your reply",
   "terminal.agentIdle": "{agent} finished or is waiting for you",
+  "terminal.agentProject": "Project: {project}",
   "settings.gridOrientation": "Terminal grid",
   "settings.gridColumns": "Columns",
   "settings.gridRows": "Rows",

@@ -254,12 +254,10 @@ function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   }
   // Детекция «агент ждёт»: принадлежность панели агенту проверяется в
   // момент сигнала, здесь только дешёвый учёт вывода.
-  trackAgentOutput(
-    entry.alerts,
-    entry.id,
-    data,
-    () => entry.container.isConnected,
-  );
+  trackAgentOutput(entry.alerts, entry.id, data, () => ({
+    visible: entry.container.isConnected,
+    workspaceId: entry.workspaceId,
+  }));
 }
 
 function createLiveOutputChannel(

@@ -114,20 +114,26 @@ export function muteAlertsAfterSpawn(tracker: AgentAlertTracker): void {
   tracker.muteUntil = Date.now() + SPAWN_ALERT_MUTE_MS;
 }
 
+// Контекст панели в момент сигнала: видимость и владелец-проект.
+export type AgentAlertContext = {
+  visible: boolean;
+  workspaceId: string | null;
+};
+
 // Живой вывод PTY: звонок BEL — мгновенный сигнал, тишина после активного
-// вывода — отложенный. isPanelVisible читается в момент срабатывания:
-// панель могла смениться за время тишины.
+// вывода — отложенный. Контекст читается в момент срабатывания: панель
+// могла смениться за время тишины.
 export function trackAgentOutput(
   tracker: AgentAlertTracker,
   terminalId: string,
   data: string | ArrayBuffer,
-  isPanelVisible: () => boolean,
+  getContext: () => AgentAlertContext,
 ): void {
   const scan = scanTerminalAttention(data, tracker.scanState);
   tracker.scanState = scan.state;
   const muted = Date.now() < tracker.muteUntil;
   if (scan.bells > 0 && !muted) {
-    void raiseAgentAlert(terminalId, "bell", isPanelVisible());
+    void raiseAgentAlert(terminalId, "bell", getContext());
   }
   tracker.activityBytes +=
     typeof data === "string" ? data.length : data.byteLength;
@@ -139,7 +145,7 @@ export function trackAgentOutput(
     tracker.quietTimer = window.setTimeout(() => {
       tracker.quietTimer = undefined;
       tracker.activityBytes = 0;
-      void raiseAgentAlert(terminalId, "idle", isPanelVisible());
+      void raiseAgentAlert(terminalId, "idle", getContext());
     }, AGENT_IDLE_QUIET_MS);
   }
 }
@@ -166,6 +172,17 @@ export function disposeAgentAlertTracker(tracker: AgentAlertTracker): void {
 
 // ---------- Отправка уведомления ----------
 
+// Имя проекта по id воркспейса: список проектов живёт в React-состоянии
+// App, модуль получает к нему доступ через зарегистрированный резолвер.
+let workspaceNameResolver: (workspaceId: string) => string | null = () =>
+  null;
+
+export function setWorkspaceNameResolver(
+  resolver: (workspaceId: string) => string | null,
+): void {
+  workspaceNameResolver = resolver;
+}
+
 // Повторные сигналы одной панели не чаще, чем раз в этот интервал.
 const MIN_ALERT_GAP_MS = 15_000;
 const lastAlertAt = new Map<string, number>();
@@ -175,7 +192,7 @@ export type AgentAlertKind = "bell" | "idle";
 export async function raiseAgentAlert(
   terminalId: string,
   kind: AgentAlertKind,
-  panelVisible: boolean,
+  context: AgentAlertContext,
 ): Promise<void> {
   if (!loadAgentAlertsEnabled()) {
     return;
@@ -196,7 +213,7 @@ export async function raiseAgentAlert(
     // Веб-превью: фокус неизвестен, уведомление не шлём.
     return;
   }
-  if (panelVisible && windowFocused) {
+  if (context.visible && windowFocused) {
     return;
   }
   lastAlertAt.set(terminalId, now);
@@ -206,12 +223,16 @@ export async function raiseAgentAlert(
   const agent =
     AGENTS.find((entry) => entry.id === record.agentId)?.label ??
     record.agentId;
+  const project = context.workspaceId
+    ? workspaceNameResolver(context.workspaceId)
+    : null;
   playNotificationSound();
   void sendSystemNotification(
     translate(
       kind === "bell" ? "terminal.agentWaiting" : "terminal.agentIdle",
       { agent },
     ),
-    "",
+    // Откуда сигнал: имя проекта в теле баннера.
+    project ? translate("terminal.agentProject", { project }) : "",
   );
 }

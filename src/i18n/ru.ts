@@ -185,6 +185,7 @@ export const ru = {
     "Звук и системное уведомление, когда агент вне поля зрения закончил работу или ждёт ответа: терминальный звонок либо тишина после активности. Счётчик ожидающих панелей попадает на иконку приложения.",
   "terminal.agentWaiting": "{agent} ждёт ответа",
   "terminal.agentIdle": "{agent} закончил работу или ждёт вас",
+  "terminal.agentProject": "Проект: {project}",
   "settings.gridOrientation": "Сетка терминалов",
   "settings.gridColumns": "Колонками",
   "settings.gridRows": "Строками",

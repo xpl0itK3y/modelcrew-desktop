@@ -44,6 +44,7 @@ import {
 } from "./theme";
 import { closeGroupAnimated } from "./animations";
 import { arrangeEvenGrid, defaultTerminalTitles } from "./layoutOps";
+import { setWorkspaceNameResolver } from "./terminal/agentAlerts";
 import { sessionDisplayName, type Workspace } from "./persist";
 import {
   formatTerminalCount,
@@ -356,6 +357,16 @@ export default function App() {
   const activeWorkspace = workspaces.list.find(
     (workspace) => workspace.id === workspaces.activeId,
   );
+
+  // Уведомления «агент ждёт» подписывают именем проекта: резолвер отдаёт
+  // отображаемое имя воркспейса по id.
+  useEffect(() => {
+    setWorkspaceNameResolver(
+      (workspaceId) =>
+        workspacesRef.current.list.find((item) => item.id === workspaceId)
+          ?.displayName ?? null,
+    );
+  }, [workspacesRef]);
 
   // Живой агрегат git-изменений активного проекта для бейджа в титлбаре.
   const [gitSummary, setGitSummary] = useState<GitChangesSummary | null>(null);
