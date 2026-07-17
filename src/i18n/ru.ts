@@ -23,6 +23,7 @@ export const ru = {
   "git.unpushed": "не запушен",
   "git.unpushedHint": "Коммит есть только на этом компьютере — сервер его ещё не видел",
   "git.historyEmpty": "Коммитов ещё нет",
+  "git.showMore": "Показать ещё",
   "git.copyHash": "Скопировать полный хеш",
   "git.commitCoAuthor": "Соавтор:",
   "git.commitDate": "Дата:",

@@ -407,6 +407,28 @@
   color: #d9a03f;
 }
 
+.git-history-more {
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px dashed var(--mc-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.git-history-more:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}
+
+.git-history-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* ---------- Коммит из панели ---------- */
 
 .git-commit-row {
