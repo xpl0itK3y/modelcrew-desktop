@@ -48,6 +48,9 @@ function FileDiff(props: {
   const [editingLine, setEditingLine] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
+  // Принудительный перечит diff после правки строки: счётчики +/− могут не
+  // измениться, и тогда countsKey бы не сработал.
+  const [reloadNonce, setReloadNonce] = useState(0);
   // Живое обновление: когда счётчики файла меняются (агент дописал код),
   // раскрытый diff перечитывается и свежие строки подсвечиваются.
   const countsKey = `${props.file.additions ?? "b"}:${props.file.deletions ?? "b"}`;
@@ -70,7 +73,7 @@ function FileDiff(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.workspaceId, props.file.path, countsKey]);
+  }, [props.workspaceId, props.file.path, countsKey, reloadNonce]);
 
   const startEditing = (newLine: number, text: string) => {
     setEditingLine(newLine);
@@ -92,6 +95,9 @@ function FileDiff(props: {
             props.file.path,
             parts.join("\n"),
           );
+          // Перечит diff сразу: правка текста могла не тронуть счётчики,
+          // тогда обновление по countsKey бы не пришло.
+          setReloadNonce((value) => value + 1);
           void refreshGitChanges(props.workspaceId);
         }
       }
