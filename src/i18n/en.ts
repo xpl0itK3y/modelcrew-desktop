@@ -16,6 +16,9 @@ export const en: Record<MessageKey, string> = {
   "git.tabChanges": "Changes",
   "git.tabHistory": "History",
   "git.switchBranch": "Switch branch",
+  "git.remoteBranches": "On the server",
+  "git.remoteBranchHint":
+    "This branch only exists on the server: switching creates a tracking local copy",
   "git.historyEmpty": "No commits yet",
   "git.copyHash": "Copy the full hash",
   "git.commitCoAuthor": "Co-author:",

@@ -219,6 +219,8 @@ export function revertFile(
 export type GitBranchInfo = {
   name: string;
   isCurrent: boolean;
+  // Есть только на сервере: переключение создаст локальную со слежением.
+  isRemote: boolean;
   lastCommitAt?: number;
 };
 
@@ -241,8 +243,9 @@ export function fetchBranches(workspaceId: string): Promise<GitBranchInfo[]> {
 export function switchBranch(
   workspaceId: string,
   branch: string,
+  remote = false,
 ): Promise<void> {
-  return invoke("git_switch_branch", { workspaceId, branch });
+  return invoke("git_switch_branch", { workspaceId, branch, remote });
 }
 
 export function fetchLog(

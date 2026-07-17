@@ -415,6 +415,9 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
 pub struct GitBranch {
     pub name: String,
     pub is_current: bool,
+    // Ветка существует только на сервере: переключение создаст локальную
+    // копию со слежением.
+    pub is_remote: bool,
     // Unix-время последнего коммита в миллисекундах (для сортировки/подписи).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_commit_at: Option<i64>,
@@ -488,7 +491,7 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
         ],
     )?;
     let text = String::from_utf8_lossy(&raw);
-    Ok(text
+    let mut branches: Vec<GitBranch> = text
         .lines()
         .filter_map(|line| {
             let mut parts = line.split('\u{1f}');
@@ -498,20 +501,63 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             Some(GitBranch {
                 name: name.to_owned(),
                 is_current: head == "*",
+                is_remote: false,
                 last_commit_at: date.map(|seconds| seconds * 1000),
             })
         })
-        .collect())
+        .collect();
+
+    // Ветки, существующие только на сервере: без локальной копии их не видно
+    // в refs/heads, но переключиться на них хочется в один клик.
+    let local_names: std::collections::HashSet<String> =
+        branches.iter().map(|branch| branch.name.clone()).collect();
+    if let Ok(raw) = run_git(
+        &toplevel,
+        &[
+            "for-each-ref",
+            "refs/remotes",
+            "--sort=-committerdate",
+            "--format=%(refname:short)%1f%(committerdate:unix)",
+        ],
+    ) {
+        let text = String::from_utf8_lossy(&raw);
+        for line in text.lines() {
+            let mut parts = line.split('\u{1f}');
+            let Some(full_name) = parts.next() else {
+                continue;
+            };
+            // origin/HEAD — указатель, не ветка.
+            let Some((_, short_name)) = full_name.split_once('/') else {
+                continue;
+            };
+            if short_name == "HEAD" || local_names.contains(short_name) {
+                continue;
+            }
+            let date = parts.next().and_then(|value| value.parse::<i64>().ok());
+            branches.push(GitBranch {
+                name: full_name.to_owned(),
+                is_current: false,
+                is_remote: true,
+                last_commit_at: date.map(|seconds| seconds * 1000),
+            });
+        }
+    }
+    Ok(branches)
 }
 
-pub fn switch_branch(root: &Path, name: &str) -> CommandResult<()> {
+pub fn switch_branch(root: &Path, name: &str, remote: bool) -> CommandResult<()> {
     if !is_safe_ref_name(name) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("branch", name));
     }
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    run_git(&toplevel, &["checkout", name])?;
+    if remote {
+        // Создаёт локальную ветку со слежением за серверной и переключается.
+        run_git(&toplevel, &["checkout", "--track", name])?;
+    } else {
+        run_git(&toplevel, &["checkout", name])?;
+    }
     Ok(())
 }
 
@@ -653,12 +699,15 @@ pub async fn git_switch_branch(
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     branch: String,
+    remote: Option<bool>,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || switch_branch(&root, &branch))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        switch_branch(&root, &branch, remote.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1171,13 +1220,42 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(files[0].additions, Some(1));
         assert!(list_commit_files(root, "not-a-hash").is_err());
 
-        switch_branch(root, "main").unwrap();
+        switch_branch(root, "main", false).unwrap();
         let branches = list_branches(root).unwrap();
         assert_eq!(
             branches.iter().find(|branch| branch.is_current).unwrap().name,
             "main"
         );
-        assert!(switch_branch(root, "no-such-branch").is_err());
+        assert!(switch_branch(root, "no-such-branch", false).is_err());
+
+        // Ветка только на «сервере» (bare-репозиторий): попадает в список с
+        // пометкой is_remote, переключение создаёт локальную со слежением.
+        let remote_dir = tempfile::tempdir().unwrap();
+        let bare = Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .current_dir(remote_dir.path())
+            .output()
+            .unwrap();
+        assert!(bare.status.success());
+        git(&["remote", "add", "origin", remote_dir.path().to_str().unwrap()]);
+        git(&["push", "--quiet", "origin", "main", "feature/x"]);
+        git(&["branch", "-D", "feature/x"]);
+
+        let branches = list_branches(root).unwrap();
+        let remote_only = branches
+            .iter()
+            .find(|branch| branch.name == "origin/feature/x")
+            .expect("remote-only branch listed");
+        assert!(remote_only.is_remote);
+        // main существует локально — origin/main дублем не показывается.
+        assert!(!branches.iter().any(|branch| branch.name == "origin/main"));
+
+        switch_branch(root, "origin/feature/x", true).unwrap();
+        let branches = list_branches(root).unwrap();
+        assert_eq!(
+            branches.iter().find(|branch| branch.is_current).unwrap().name,
+            "feature/x"
+        );
 
         // Пустой репозиторий: история пуста, а не ошибка.
         let fresh = tempfile::tempdir().unwrap();

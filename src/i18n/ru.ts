@@ -15,6 +15,9 @@ export const ru = {
   "git.tabChanges": "Изменения",
   "git.tabHistory": "История",
   "git.switchBranch": "Переключить ветку",
+  "git.remoteBranches": "На сервере",
+  "git.remoteBranchHint":
+    "Ветка есть только на сервере: переключение создаст локальную копию со слежением",
   "git.historyEmpty": "Коммитов ещё нет",
   "git.copyHash": "Скопировать полный хеш",
   "git.commitCoAuthor": "Соавтор:",
