@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
@@ -30,7 +23,7 @@ import {
   type GitCommitInfo,
   type GitFileDiff,
 } from "../git/gitChanges";
-import { CopyIcon, PencilIcon, UndoIcon } from "../ui/Icons";
+import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { useAnimatedPresence } from "../ui/useAnimatedPresence";
 
 // Иконка-статус в списке: одна буква как в git status.
@@ -50,6 +43,11 @@ function FileDiff(props: {
   const { t } = useI18n();
   const [diff, setDiff] = useState<GitFileDiff | null>(null);
   const [failed, setFailed] = useState(false);
+  // Правка строки на месте: номер редактируемой строки (в новой версии
+  // файла) и её текущий текст в поле ввода.
+  const [editingLine, setEditingLine] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
   // Живое обновление: когда счётчики файла меняются (агент дописал код),
   // раскрытый diff перечитывается и свежие строки подсвечиваются.
   const countsKey = `${props.file.additions ?? "b"}:${props.file.deletions ?? "b"}`;
@@ -73,6 +71,37 @@ function FileDiff(props: {
       cancelled = true;
     };
   }, [props.workspaceId, props.file.path, countsKey]);
+
+  const startEditing = (newLine: number, text: string) => {
+    setEditingLine(newLine);
+    setEditValue(text);
+  };
+
+  // Сохраняет одну строку: перечитывает файл, заменяет строку с этим номером
+  // и пишет обратно. Номер новой версии = номер строки в текущем файле.
+  const saveLine = async (newLine: number, text: string) => {
+    setSaving(true);
+    try {
+      const file = await readRepoFile(props.workspaceId, props.file.path);
+      if (!file.isBinary && !file.tooLarge && file.exists) {
+        const parts = file.content.split("\n");
+        if (newLine >= 1 && newLine <= parts.length) {
+          parts[newLine - 1] = text;
+          await writeRepoFile(
+            props.workspaceId,
+            props.file.path,
+            parts.join("\n"),
+          );
+          void refreshGitChanges(props.workspaceId);
+        }
+      }
+    } catch {
+      // Ошибка записи вернёт исходную строку при следующем обновлении diff.
+    } finally {
+      setSaving(false);
+      setEditingLine(null);
+    }
+  };
 
   const lines = useMemo(
     () => (diff ? parseUnifiedDiff(diff.diff) : []),
@@ -121,203 +150,76 @@ function FileDiff(props: {
             <div key={index} className="git-diff-gap" aria-hidden="true" />
           )
         ) : (
-          <div
-            key={index}
-            className={`git-diff-line is-${line.kind} ${
-              line.kind === "add" &&
-              freshTexts.has(`${line.newLine}\0${line.text}`)
-                ? "is-fresh"
-                : ""
-            }`}
-          >
-            {/* Одна колонка номеров, как в Warp: у удалённых — старый номер,
-                у остальных — новый. Цифры не скачут между колонками. */}
-            <span className="git-diff-gutter">
-              {line.kind === "del" ? line.oldLine : line.newLine}
-            </span>
-            <span className="git-diff-text">
-              {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-              {line.text}
-            </span>
-          </div>
+          (() => {
+            // Редактировать можно строки, которые есть в текущем файле:
+            // добавленные и контекстные (у удалённых нет новой версии).
+            const editable = line.kind === "add" || line.kind === "context";
+            const isEditing =
+              editable && editingLine === line.newLine;
+            const sign =
+              line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
+            return (
+              <div
+                key={index}
+                className={`git-diff-line is-${line.kind} ${
+                  editable ? "is-editable" : ""
+                } ${
+                  line.kind === "add" &&
+                  freshTexts.has(`${line.newLine}\0${line.text}`)
+                    ? "is-fresh"
+                    : ""
+                }`}
+                onClick={
+                  editable && !isEditing
+                    ? () => startEditing(line.newLine!, line.text)
+                    : undefined
+                }
+              >
+                <span className="git-diff-gutter">
+                  {line.kind === "del" ? line.oldLine : line.newLine}
+                </span>
+                {isEditing ? (
+                  <span className="git-diff-text">
+                    <span className="git-diff-sign">{sign}</span>
+                    <input
+                      className="git-diff-input"
+                      value={editValue}
+                      spellCheck={false}
+                      disabled={saving}
+                      autoFocus
+                      size={Math.max(editValue.length + 2, 12)}
+                      onChange={(event) => setEditValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void saveLine(line.newLine!, editValue);
+                        } else if (event.key === "Escape") {
+                          setEditingLine(null);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (editValue !== line.text) {
+                          void saveLine(line.newLine!, editValue);
+                        } else {
+                          setEditingLine(null);
+                        }
+                      }}
+                    />
+                  </span>
+                ) : (
+                  <span className="git-diff-text">
+                    {sign}
+                    {line.text}
+                  </span>
+                )}
+              </div>
+            );
+          })()
         ),
       )}
       </div>
       {diff.truncated && (
         <div className="git-diff-note">{t("git.diffTruncated")}</div>
-      )}
-    </div>
-  );
-}
-
-// Правка файла прямо в панели: текстовый редактор поверх карточки. Пока он
-// открыт, diff не показывается, поэтому живое обновление не затирает ввод;
-// сохранение сверяет диск (агент мог переписать файл) и обновляет сводку.
-function FileEditor(props: {
-  workspaceId: string;
-  path: string;
-  onClose: () => void;
-}) {
-  const { t } = useI18n();
-  const { workspaceId, path } = props;
-  const [status, setStatus] = useState<
-    "loading" | "ready" | "binary" | "tooLarge" | "error"
-  >("loading");
-  const [value, setValue] = useState("");
-  const loadedRef = useRef("");
-  const [saving, setSaving] = useState(false);
-  const [conflict, setConflict] = useState(false);
-  const [saveError, setSaveError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    readRepoFile(workspaceId, path)
-      .then((file) => {
-        if (cancelled) {
-          return;
-        }
-        if (file.isBinary) {
-          setStatus("binary");
-        } else if (file.tooLarge) {
-          setStatus("tooLarge");
-        } else {
-          loadedRef.current = file.content;
-          setValue(file.content);
-          setStatus("ready");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus("error");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, path]);
-
-  const dirty = status === "ready" && value !== loadedRef.current;
-
-  const save = async (force: boolean) => {
-    setSaving(true);
-    setSaveError(false);
-    try {
-      if (!force) {
-        // Агент мог переписать файл, пока шла правка — не затираем молча.
-        const current = await readRepoFile(workspaceId, path);
-        if (
-          !current.isBinary &&
-          !current.tooLarge &&
-          current.content !== loadedRef.current &&
-          current.content !== value
-        ) {
-          setConflict(true);
-          setSaving(false);
-          return;
-        }
-      }
-      await writeRepoFile(workspaceId, path, value);
-      void refreshGitChanges(workspaceId);
-      props.onClose();
-    } catch {
-      setSaveError(true);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Escape") {
-      props.onClose();
-      return;
-    }
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      if (dirty) {
-        void save(false);
-      }
-      return;
-    }
-    if (event.key === "Tab") {
-      event.preventDefault();
-      const area = event.currentTarget;
-      const start = area.selectionStart;
-      const end = area.selectionEnd;
-      setValue(value.slice(0, start) + "  " + value.slice(end));
-      requestAnimationFrame(() => {
-        area.selectionStart = area.selectionEnd = start + 2;
-      });
-    }
-  };
-
-  if (status === "loading") {
-    return <div className="git-diff-note">{t("git.diffLoading")}</div>;
-  }
-  if (status === "binary") {
-    return <div className="git-diff-note">{t("git.editBinary")}</div>;
-  }
-  if (status === "tooLarge") {
-    return <div className="git-diff-note">{t("git.editTooLarge")}</div>;
-  }
-  if (status === "error") {
-    return <div className="git-diff-note">{t("git.editLoadFailed")}</div>;
-  }
-
-  return (
-    <div className="git-editor">
-      <textarea
-        className="git-editor-area"
-        value={value}
-        spellCheck={false}
-        autoFocus
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={onKeyDown}
-      />
-      {saveError && (
-        <div className="git-commit-error" role="alert">
-          {t("git.editFailed")}
-        </div>
-      )}
-      {conflict ? (
-        <div className="git-editor-conflict" role="alert">
-          <span>{t("git.editConflict")}</span>
-          <div className="git-editor-actions">
-            <button
-              type="button"
-              className="git-editor-cancel"
-              onClick={() => setConflict(false)}
-            >
-              {t("git.editCancel")}
-            </button>
-            <button
-              type="button"
-              className="git-commit-button"
-              disabled={saving}
-              onClick={() => void save(true)}
-            >
-              {t("git.editOverwrite")}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="git-editor-actions">
-          <span className="git-editor-hint">{t("git.editHint")}</span>
-          <button
-            type="button"
-            className="git-editor-cancel"
-            onClick={props.onClose}
-          >
-            {t("git.editCancel")}
-          </button>
-          <button
-            type="button"
-            className="git-commit-button"
-            disabled={!dirty || saving}
-            onClick={() => void save(false)}
-          >
-            {t("git.editSave")}
-          </button>
-        </div>
       )}
     </div>
   );
@@ -331,7 +233,6 @@ function FileCard(props: {
   const { t } = useI18n();
   // Пользователь открыл панель посмотреть изменения — diff сразу развёрнут.
   const [expanded, setExpanded] = useState(true);
-  const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmingRevert, setConfirmingRevert] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -424,21 +325,6 @@ function FileCard(props: {
             <>
               <button
                 type="button"
-                className={`icon-button git-file-action ${
-                  editing ? "is-active" : ""
-                }`}
-                title={t("git.editFile")}
-                aria-label={t("git.editFile")}
-                aria-pressed={editing}
-                onClick={() => {
-                  setEditing((value) => !value);
-                  setExpanded(true);
-                }}
-              >
-                <PencilIcon />
-              </button>
-              <button
-                type="button"
                 className={`icon-button git-file-action ${copied ? "is-done" : ""}`}
                 title={copied ? t("git.copied") : t("git.copyDiff")}
                 aria-label={t("git.copyDiff")}
@@ -469,17 +355,10 @@ function FileCard(props: {
           )}
         </span>
       </div>
-      {expanded && editing && (
-        <FileEditor
-          workspaceId={workspaceId}
-          path={file.path}
-          onClose={() => setEditing(false)}
-        />
-      )}
-      {expanded && !editing && file.status !== "deleted" && (
+      {expanded && file.status !== "deleted" && (
         <FileDiff workspaceId={workspaceId} file={file} />
       )}
-      {expanded && !editing && file.status === "deleted" && (
+      {expanded && file.status === "deleted" && (
         <div className="git-diff-note">{t("git.fileDeleted")}</div>
       )}
     </div>
