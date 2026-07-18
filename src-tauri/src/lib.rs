@@ -1,6 +1,7 @@
 mod agent_sessions;
 mod command_error;
 mod git_changes;
+mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod pty;
@@ -16,6 +17,10 @@ use git_changes::{
     git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
     git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_read_file, git_revert_file,
     git_switch_branch, git_write_file, GitWatchState,
+};
+use github_auth::{
+    github_auth_available, github_current_user, github_device_poll, github_device_start,
+    github_logout,
 };
 use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
@@ -696,6 +701,11 @@ pub fn run() {
             workspace_unregister_root,
             app_set_locale,
             app_set_badge,
+            github_auth_available,
+            github_device_start,
+            github_device_poll,
+            github_current_user,
+            github_logout,
             updater_install_target,
             updater_prepare_linux_package,
             updater_install_linux_package,

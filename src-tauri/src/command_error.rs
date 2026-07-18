@@ -56,6 +56,8 @@ pub enum ErrorCode {
     GitUnavailable,
     GitNotARepository,
     GitCommandFailed,
+    GithubNotConfigured,
+    GithubRequestFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -34,6 +34,8 @@ tempfile = "3"
 tauri-plugin-notification = "2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 notify = "8"
+# rustls-стек уже включён tauri-plugin-updater; берём json и form.
+reqwest = { version = "0.13", default-features = false, features = ["json", "form"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

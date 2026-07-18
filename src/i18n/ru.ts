@@ -31,6 +31,22 @@ export const ru = {
   "settings.networkAvatarsOff": "Инициалы",
   "settings.networkAvatarsNote":
     "«Из сети» — настоящие аватары с GitHub и Gravatar (по почте автора). Требует интернета и делает запросы к этим сервисам. «Инициалы» — офлайн-кружки, ничего наружу не отправляется.",
+  "github.login": "Войти",
+  "github.loginTitle": "Войти через GitHub",
+  "github.logout": "Выйти",
+  "github.close": "Закрыть",
+  "github.retry": "Ещё раз",
+  "github.openGithub": "Открыть GitHub",
+  "github.copyCode": "Скопировать код",
+  "github.deviceInstructions":
+    "Откройте GitHub и введите этот код (браузер уже открыт):",
+  "github.waiting": "Ждём подтверждения в браузере…",
+  "github.denied": "Доступ не подтверждён",
+  "github.expired": "Код истёк — попробуйте снова",
+  "github.error": "Не удалось войти",
+  "github.notConfigured": "Вход через GitHub не настроен",
+  "github.notConfiguredHint":
+    "Нужно зарегистрировать OAuth App на github.com/settings/developers (включить Device Flow) и указать его Client ID при сборке.",
   "git.allBranches": "Все ветки",
   "git.allBranchesHint":
     "Показать историю всех веток, включая серверные (origin/…). Обновляется фоновым fetch.",

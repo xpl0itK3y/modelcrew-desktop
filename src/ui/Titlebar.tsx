@@ -9,6 +9,7 @@ import {
 } from "./Icons";
 import { useI18n } from "../i18n";
 import { useAnimatedPresence } from "./useAnimatedPresence";
+import { GithubAuth } from "./GithubAuth";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getAgentAttentionCount,
@@ -347,6 +348,7 @@ export function Titlebar(props: TitlebarProps) {
         >
           <SlidersIcon />
         </button>
+        <GithubAuth />
       </div>
     </header>
   );

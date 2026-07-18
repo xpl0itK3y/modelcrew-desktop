@@ -32,6 +32,22 @@ export const en: Record<MessageKey, string> = {
   "settings.networkAvatarsOff": "Initials",
   "settings.networkAvatarsNote":
     "“From the web” shows real avatars from GitHub and Gravatar (by author e-mail). Needs internet and makes requests to those services. “Initials” are offline circles that send nothing out.",
+  "github.login": "Sign in",
+  "github.loginTitle": "Sign in with GitHub",
+  "github.logout": "Sign out",
+  "github.close": "Close",
+  "github.retry": "Try again",
+  "github.openGithub": "Open GitHub",
+  "github.copyCode": "Copy the code",
+  "github.deviceInstructions":
+    "Open GitHub and enter this code (the browser is already open):",
+  "github.waiting": "Waiting for confirmation in the browser…",
+  "github.denied": "Access was not granted",
+  "github.expired": "The code expired — try again",
+  "github.error": "Could not sign in",
+  "github.notConfigured": "GitHub sign-in is not configured",
+  "github.notConfiguredHint":
+    "Register an OAuth App at github.com/settings/developers (enable Device Flow) and set its Client ID at build time.",
   "git.allBranches": "All branches",
   "git.allBranchesHint":
     "Show history across all branches, including server ones (origin/…). Refreshed by the background fetch.",
