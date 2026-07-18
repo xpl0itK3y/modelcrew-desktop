@@ -25,6 +25,8 @@ export const en: Record<MessageKey, string> = {
   "git.unpushedHint": "This commit only exists on this computer — the server has not seen it",
   "git.historyEmpty": "No commits yet",
   "git.showMore": "Show more",
+  "git.viewGraph": "Graph",
+  "git.viewList": "List",
   "git.copyHash": "Copy the full hash",
   "git.commitCoAuthor": "Co-author:",
   "git.commitDate": "Date:",

@@ -560,6 +560,8 @@ pub struct GitCommitInfo {
     pub epoch_ms: i64,
     // Коммит есть только локально: upstream его ещё не видел.
     pub unpushed: bool,
+    // Полные хеши родителей (для графа веток; у merge их несколько).
+    pub parents: Vec<String>,
     // Декорации коммита: ветки/теги, указывающие на него.
     pub refs: Vec<String>,
     // Тело коммита без трейлеров Co-authored-by (они в co_authors).
@@ -767,7 +769,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
         &[
             "log",
             &count,
-            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%b%x1e",
+            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%P%x1f%b%x1e",
         ],
     ) {
         Ok(raw) => raw,
@@ -815,6 +817,15 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
                         .collect()
                 })
                 .unwrap_or_default();
+            let parents = parts
+                .next()
+                .map(|value| {
+                    value
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let (body, co_authors) = split_body_and_co_authors(parts.next().unwrap_or_default());
             Some(GitCommitInfo {
                 unpushed: unpushed.contains(hash),
@@ -824,6 +835,7 @@ pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
                 author,
                 author_email,
                 epoch_ms: epoch * 1000,
+                parents,
                 refs,
                 body,
                 co_authors,
@@ -1447,9 +1459,13 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(log[0].co_authors, vec!["Alex <alex@t>".to_owned()]);
         assert!(log[0].epoch_ms > 0);
         assert!(log[0].refs.iter().any(|entry| entry == "feature/x"));
+        // Родитель второго коммита — первый (для графа веток).
+        assert_eq!(log[0].parents, vec![log[1].hash.clone()]);
         // Однострочный коммит: без тела и соавторов.
         assert_eq!(log[1].body, "");
         assert!(log[1].co_authors.is_empty());
+        // Корневой коммит без родителей.
+        assert!(log[1].parents.is_empty());
 
         // Файлы конкретного коммита: b.txt добавлен вторым коммитом.
         let files = list_commit_files(root, &log[0].hash).unwrap();

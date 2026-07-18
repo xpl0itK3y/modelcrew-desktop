@@ -24,7 +24,39 @@ import {
   type GitFileDiff,
 } from "../git/gitChanges";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
+import { computeCommitGraph } from "../git/commitGraph";
 import { useAnimatedPresence } from "../ui/useAnimatedPresence";
+
+// Палитра дорожек графа и геометрия строки.
+const GRAPH_COLORS = [
+  "#a78bfa",
+  "#e0894c",
+  "#4fb8a8",
+  "#5c9de0",
+  "#e05c9e",
+  "#4fb864",
+  "#d9a03f",
+];
+const LANE_W = 14;
+const GRAPH_ROW_H = 26;
+const GRAPH_DOT_R = 3.6;
+
+function laneColor(index: number): string {
+  return GRAPH_COLORS[index % GRAPH_COLORS.length];
+}
+
+function laneCenter(col: number): number {
+  return col * LANE_W + LANE_W / 2;
+}
+
+// Прямая для вертикальной дорожки, плавная S-кривая для перехода в другую.
+function graphEdgePath(x1: number, y1: number, x2: number, y2: number): string {
+  if (x1 === x2) {
+    return `M${x1} ${y1}L${x2} ${y2}`;
+  }
+  const mid = (y1 + y2) / 2;
+  return `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
+}
 
 // Иконка-статус в списке: одна буква как в git status.
 const STATUS_LETTER: Record<GitChangedFile["status"], string> = {
@@ -583,9 +615,120 @@ function CommitDetails(props: {
 }
 
 // Вкладка «История»: последние коммиты с автором, давностью и ветками.
+// Граф веток: цветные дорожки, точки коммитов, ветвления и слияния — как в
+// редакторах. Клик по строке копирует хеш.
+function CommitGraph(props: {
+  commits: GitCommitInfo[];
+  copiedHash: string | null;
+  onCopy: (commit: GitCommitInfo) => void;
+}) {
+  const { t } = useI18n();
+  const rows = useMemo(
+    () =>
+      computeCommitGraph(
+        props.commits.map((commit) => ({
+          hash: commit.hash,
+          parents: commit.parents,
+        })),
+      ),
+    [props.commits],
+  );
+  const width = (rows[0]?.width ?? 1) * LANE_W;
+
+  return (
+    <div className="git-graph">
+      {props.commits.map((commit, index) => {
+        const row = rows[index];
+        if (!row) {
+          return null;
+        }
+        const isMerge = commit.parents.length > 1;
+        const cx = laneCenter(row.col);
+        return (
+          <button
+            type="button"
+            key={commit.hash}
+            className={`git-graph-row ${
+              props.copiedHash === commit.hash ? "is-copied" : ""
+            }`}
+            title={t("git.copyHash")}
+            onClick={() => props.onCopy(commit)}
+          >
+            <svg
+              className="git-graph-lines"
+              width={width}
+              height={GRAPH_ROW_H}
+              style={{ width, minWidth: width }}
+              aria-hidden="true"
+            >
+              {row.top.map((edge, k) => (
+                <path
+                  key={`t${k}`}
+                  d={graphEdgePath(
+                    laneCenter(edge.fromCol),
+                    0,
+                    laneCenter(edge.toCol),
+                    GRAPH_ROW_H / 2,
+                  )}
+                  fill="none"
+                  stroke={laneColor(edge.color)}
+                  strokeWidth={1.6}
+                />
+              ))}
+              {row.bottom.map((edge, k) => (
+                <path
+                  key={`b${k}`}
+                  d={graphEdgePath(
+                    laneCenter(edge.fromCol),
+                    GRAPH_ROW_H / 2,
+                    laneCenter(edge.toCol),
+                    GRAPH_ROW_H,
+                  )}
+                  fill="none"
+                  stroke={laneColor(edge.color)}
+                  strokeWidth={1.6}
+                />
+              ))}
+              <circle
+                cx={cx}
+                cy={GRAPH_ROW_H / 2}
+                r={GRAPH_DOT_R}
+                fill={isMerge ? "var(--mc-bg)" : laneColor(row.color)}
+                stroke={laneColor(row.color)}
+                strokeWidth={isMerge ? 2 : 0}
+              />
+            </svg>
+            <span className="git-graph-subject" title={commit.subject}>
+              {commit.subject}
+            </span>
+            {commit.refs.map((ref) => {
+              const isTag = ref.startsWith("tag: ");
+              const label = isTag ? ref.slice(5) : ref;
+              const kind = isTag
+                ? "is-tag"
+                : ref.startsWith("origin/")
+                  ? "is-remote"
+                  : "";
+              return (
+                <span key={ref} className={`git-commit-ref ${kind}`}>
+                  {label}
+                </span>
+              );
+            })}
+            <span className="git-graph-author" title={commit.author}>
+              {commit.author}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function HistoryView(props: { workspaceId: string }) {
   const { locale, t } = useI18n();
   const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
+  const [graphMode, setGraphMode] = useState(true);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
   // Сколько коммитов запрашивать; «Показать ещё» наращивает порциями.
@@ -668,9 +811,35 @@ function HistoryView(props: { workspaceId: string }) {
   }
   return (
     <div className="git-history">
-      {commits.map((commit) => {
-        const expanded = expandedHash === commit.hash;
-        return (
+      <div className="git-history-modes" role="group">
+        <button
+          type="button"
+          className={`git-mode ${graphMode ? "is-active" : ""}`}
+          aria-pressed={graphMode}
+          onClick={() => setGraphMode(true)}
+        >
+          {t("git.viewGraph")}
+        </button>
+        <button
+          type="button"
+          className={`git-mode ${!graphMode ? "is-active" : ""}`}
+          aria-pressed={!graphMode}
+          onClick={() => setGraphMode(false)}
+        >
+          {t("git.viewList")}
+        </button>
+      </div>
+      {graphMode ? (
+        <CommitGraph
+          commits={commits}
+          copiedHash={copiedHash}
+          onCopy={(commit) => void copyHash(commit)}
+        />
+      ) : (
+        <div className="git-commit-list">
+          {commits.map((commit) => {
+            const expanded = expandedHash === commit.hash;
+            return (
           <div
             key={commit.hash}
             className={`git-commit ${expanded ? "is-expanded" : ""} ${
@@ -764,8 +933,10 @@ function HistoryView(props: { workspaceId: string }) {
               </RevealHeight>
             )}
           </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
       {canLoadMore && (
         <button
           type="button"

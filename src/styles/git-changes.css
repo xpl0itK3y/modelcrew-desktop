@@ -223,8 +223,101 @@
 .git-history {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   padding: 8px 8px 16px;
+}
+
+/* Список карточек истории — прежний вид со своим зазором. */
+.git-commit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Переключатель «Граф / Список». */
+.git-history-modes {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--mc-border);
+  border-radius: 7px;
+  background: var(--mc-surface);
+}
+
+.git-mode {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.git-mode.is-active {
+  background: var(--mc-surface-active);
+  color: var(--mc-text-bright);
+}
+
+/* ---------- Граф веток ---------- */
+
+.git-graph {
+  display: flex;
+  flex-direction: column;
+  /* Без зазора — линии дорожек должны стыковаться между строками. */
+}
+
+.git-graph-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px 0 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-graph-row:hover {
+  background: var(--mc-hover);
+}
+
+.git-graph-row.is-copied {
+  background: color-mix(in srgb, #4fb864 16%, transparent);
+}
+
+.git-graph-lines {
+  flex: none;
+  overflow: visible;
+}
+
+.git-graph-subject {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mc-text-bright);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-graph-author {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-graph-row .git-commit-ref {
+  flex: none;
 }
 
 .git-commit {
