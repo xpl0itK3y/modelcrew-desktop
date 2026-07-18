@@ -289,23 +289,51 @@ fn parse_github_slug(url: &str) -> Option<(String, String)> {
     Some((owner.to_owned(), repo.to_owned()))
 }
 
-fn origin_url(root: &Path) -> Option<String> {
+// Обёртка над git без консольного окна на Windows; None, если git упал.
+fn git_capture(root: &Path, args: &[&str]) -> Option<String> {
     let mut command = Command::new("git");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let output = command
-        .args(["remote", "get-url", "origin"])
-        .current_dir(root)
-        .output()
+    let output = command.args(args).current_dir(root).output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+fn origin_url(root: &Path) -> Option<String> {
+    git_capture(root, &["remote", "get-url", "origin"]).filter(|url| !url.is_empty())
+}
+
+// Почта, которой подписаны локальные коммиты этого репо (git config user.email).
+fn local_git_email(root: &Path) -> Option<String> {
+    git_capture(root, &["config", "user.email"])
+        .map(|email| email.trim().to_lowercase())
+        .filter(|email| email.contains('@'))
+}
+
+// Профиль вошедшего пользователя (login, avatar) — чтобы подставить его аватар
+// на собственные, ещё не запушенные коммиты.
+async fn current_user_account(
+    client: &reqwest::Client,
+    token: &str,
+) -> Option<(String, String)> {
+    let response = client
+        .get(USER_URL)
+        .header("Accept", "application/vnd.github+json")
+        .bearer_auth(token)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
         .ok()?;
-    if !output.status.success() {
+    if !response.status().is_success() {
         return None;
     }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    (!url.is_empty()).then_some(url)
+    let account: ApiAccount = response.json().await.ok()?;
+    Some((account.login, account.avatar_url))
 }
 
 // Складывает почту → (login, avatar) для автора и коммиттера каждого коммита.
@@ -346,37 +374,53 @@ pub async fn github_commit_avatars(
         return Ok(Vec::new());
     };
     let root = roots.resolve(&workspace_id)?;
-    let Some((owner, repo)) = origin_url(&root).as_deref().and_then(parse_github_slug) else {
-        return Ok(Vec::new());
-    };
-
     let client = http()?;
     let mut map: std::collections::HashMap<String, (String, String)> =
         std::collections::HashMap::new();
-    // До 5 страниц по 100 — покрывает показанную историю, не упираясь в лимиты.
-    for page in 1..=5 {
-        let url =
-            format!("https://api.github.com/repos/{owner}/{repo}/commits?per_page=100&page={page}");
-        let response = client
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .bearer_auth(&token)
-            .timeout(std::time::Duration::from_secs(20))
-            .send()
-            .await
-            .map_err(|error| CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error))?;
-        if !response.status().is_success() {
-            // Приватный репо без scope, rate limit, нет доступа — отдаём что есть.
-            break;
+
+    // Реальные привязки почта→аккаунт из коммитов на GitHub — только если origin
+    // ведёт на GitHub. Иначе (локальный/не-GitHub репо) полагаемся лишь на
+    // локальную привязку ниже.
+    if let Some((owner, repo)) = origin_url(&root).as_deref().and_then(parse_github_slug) {
+        // До 5 страниц по 100 — покрывает показанную историю, не упираясь в лимиты.
+        for page in 1..=5 {
+            let url = format!(
+                "https://api.github.com/repos/{owner}/{repo}/commits?per_page=100&page={page}"
+            );
+            let response = client
+                .get(&url)
+                .header("Accept", "application/vnd.github+json")
+                .bearer_auth(&token)
+                .timeout(std::time::Duration::from_secs(20))
+                .send()
+                .await
+                .map_err(|error| {
+                    CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error)
+                })?;
+            if !response.status().is_success() {
+                // Приватный репо без scope, rate limit, нет доступа — что есть.
+                break;
+            }
+            let entries: Vec<ApiCommitEntry> = match response.json().await {
+                Ok(entries) => entries,
+                Err(_) => break,
+            };
+            let count = entries.len();
+            extract_avatars(&entries, &mut map);
+            if count < 100 {
+                break; // последняя страница
+            }
         }
-        let entries: Vec<ApiCommitEntry> = match response.json().await {
-            Ok(entries) => entries,
-            Err(_) => break,
-        };
-        let count = entries.len();
-        extract_avatars(&entries, &mut map);
-        if count < 100 {
-            break; // последняя страница
+    }
+
+    // Собственные коммиты пользователя могут быть ещё не на GitHub (unpushed) —
+    // их почты нет в commits API. Привязываем локальную git-почту к аватару
+    // вошедшего (обычно это он и есть), не перекрывая реальные привязки.
+    if let Some(email) = local_git_email(&root) {
+        if !map.contains_key(&email) {
+            if let Some(account) = current_user_account(&client, &token).await {
+                map.entry(email).or_insert(account);
+            }
         }
     }
 
