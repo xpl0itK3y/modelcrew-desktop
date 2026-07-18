@@ -39,6 +39,11 @@ import {
 } from "../git/gitChanges";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { computeCommitGraph } from "../git/commitGraph";
+import {
+  githubAvatarForEmail,
+  loadGithubCommitAvatars,
+  subscribeGithubAvatars,
+} from "../git/githubAvatars";
 import { loadNetworkAvatars } from "../terminal/preferences";
 import { useAnimatedPresence } from "../ui/useAnimatedPresence";
 
@@ -81,21 +86,37 @@ function AuthorAvatar(props: { name: string; email?: string }) {
       setUrl(null);
       return;
     }
+    const email = props.email;
     let cancelled = false;
-    setFailed(false);
-    resolveAvatarUrl(props.email)
-      .then((resolved) => {
+    // Приоритет: реальный GitHub-аватар из карты коммиттеров, иначе Gravatar
+    // по почте. Перечитываем и когда карта догрузилась (событие).
+    const resolve = () => {
+      const github = githubAvatarForEmail(email);
+      if (github) {
         if (!cancelled) {
-          setUrl(resolved);
+          setFailed(false);
+          setUrl(github);
         }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setUrl(null);
-        }
-      });
+        return;
+      }
+      setFailed(false);
+      resolveAvatarUrl(email)
+        .then((resolved) => {
+          if (!cancelled) {
+            setUrl(resolved);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setUrl(null);
+          }
+        });
+    };
+    resolve();
+    const unsubscribe = subscribeGithubAvatars(resolve);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [enabled, props.email]);
 
@@ -1661,6 +1682,14 @@ export function GitChangesView(props: { workspaceId: string }) {
       return;
     }
     return subscribeGitChanges(workspaceId, setSummary);
+  }, [workspaceId]);
+
+  // Реальные GitHub-аватарки коммиттеров: тянем карту почта→аватар один раз
+  // при открытии панели (если выполнен вход). AuthorAvatar подхватит её.
+  useEffect(() => {
+    if (workspaceId) {
+      loadGithubCommitAvatars(workspaceId);
+    }
   }, [workspaceId]);
 
   const [view, setView] = useState<"changes" | "history">("changes");

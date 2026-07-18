@@ -55,4 +55,23 @@ export async function githubLogout(): Promise<void> {
   }
 }
 
+export type CommitAvatar = {
+  email: string;
+  avatarUrl: string;
+  login: string;
+};
+
+// Карта «почта → GitHub-аватар» из коммитов origin-репо. Без токена/доступа —
+// пустой список (фронтенд откатится на Gravatar/инициалы).
+export function githubCommitAvatars(
+  workspaceId: string,
+): Promise<CommitAvatar[]> {
+  if (!isTauri) {
+    return Promise.resolve([]);
+  }
+  return invoke<CommitAvatar[]>("github_commit_avatars", { workspaceId }).catch(
+    () => [],
+  );
+}
+
 export { openUrl };

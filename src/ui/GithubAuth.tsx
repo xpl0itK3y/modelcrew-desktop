@@ -10,6 +10,7 @@ import {
   type DeviceStart,
   type GithubUser,
 } from "../github/auth";
+import { refreshGithubCommitAvatars } from "../git/githubAvatars";
 
 type FlowState =
   | { kind: "idle" }
@@ -112,6 +113,8 @@ export function GithubAuth() {
           if (!stopped) {
             setUser(current);
             setFlow({ kind: "idle" });
+            // Появился токен — подтягиваем реальные аватарки коммиттеров.
+            refreshGithubCommitAvatars();
           }
           return;
         }
@@ -142,6 +145,8 @@ export function GithubAuth() {
     setMenuOpen(false);
     await githubLogout();
     setUser(null);
+    // Токена больше нет — карту GitHub-аватарок сбрасываем на Gravatar/инициалы.
+    refreshGithubCommitAvatars();
   };
 
   if (!isTauri) {

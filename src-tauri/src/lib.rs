@@ -19,8 +19,8 @@ use git_changes::{
     git_push, git_read_file, git_revert_file, git_switch_branch, git_write_file, GitWatchState,
 };
 use github_auth::{
-    github_auth_available, github_current_user, github_device_poll, github_device_start,
-    github_logout,
+    github_auth_available, github_commit_avatars, github_current_user, github_device_poll,
+    github_device_start, github_logout,
 };
 use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
@@ -709,6 +709,7 @@ pub fn run() {
             github_device_poll,
             github_current_user,
             github_logout,
+            github_commit_avatars,
             updater_install_target,
             updater_prepare_linux_package,
             updater_install_linux_package,

@@ -4,8 +4,10 @@
 // Служит для аватарок и будущих GitHub-функций.
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::Manager;
 
 // Client ID зарегистрированного OAuth App (публичный, не секрет). Заведи
@@ -230,6 +232,164 @@ pub async fn github_logout(
     Ok(())
 }
 
+// ---------- Аватарки коммиттеров через GitHub commits API ----------
+
+// Карта «почта автора → GitHub-аватар», построенная из коммитов origin-репо.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct CommitAvatar {
+    email: String,
+    avatar_url: String,
+    login: String,
+}
+
+// Разбор ответа GitHub /repos/{o}/{r}/commits: git-идентити (почта) отдельно
+// от привязанного GitHub-аккаунта (может быть null, если коммит не связан).
+#[derive(Deserialize)]
+struct ApiCommitEntry {
+    commit: ApiCommitBody,
+    author: Option<ApiAccount>,
+    committer: Option<ApiAccount>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitBody {
+    author: Option<ApiGitIdentity>,
+    committer: Option<ApiGitIdentity>,
+}
+
+#[derive(Deserialize)]
+struct ApiGitIdentity {
+    email: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiAccount {
+    login: String,
+    avatar_url: String,
+}
+
+// owner/repo из URL origin. Поддержаны https, ssh (git@ и ssh://), git://.
+// Не GitHub — None (тогда аватарок из API просто не будет).
+fn parse_github_slug(url: &str) -> Option<(String, String)> {
+    let url = url.trim();
+    let rest = url
+        .strip_prefix("git@github.com:")
+        .or_else(|| url.strip_prefix("https://github.com/"))
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| url.strip_prefix("git://github.com/"))?;
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let mut parts = rest.splitn(2, '/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim().trim_end_matches('/');
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return None;
+    }
+    Some((owner.to_owned(), repo.to_owned()))
+}
+
+fn origin_url(root: &Path) -> Option<String> {
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let output = command
+        .args(["remote", "get-url", "origin"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!url.is_empty()).then_some(url)
+}
+
+// Складывает почту → (login, avatar) для автора и коммиттера каждого коммита.
+// Первый встреченный аккаунт для почты выигрывает (or_insert_with).
+fn extract_avatars(
+    entries: &[ApiCommitEntry],
+    out: &mut std::collections::HashMap<String, (String, String)>,
+) {
+    let mut add = |identity: &Option<ApiGitIdentity>, account: &Option<ApiAccount>| {
+        if let (Some(identity), Some(account)) = (identity, account) {
+            if let Some(email) = &identity.email {
+                let key = email.trim().to_lowercase();
+                if !key.is_empty() {
+                    out.entry(key)
+                        .or_insert_with(|| (account.login.clone(), account.avatar_url.clone()));
+                }
+            }
+        }
+    };
+    for entry in entries {
+        add(&entry.commit.author, &entry.author);
+        add(&entry.commit.committer, &entry.committer);
+    }
+}
+
+// Строит карту почта→аватар из коммитов origin-репозитория на GitHub. Без
+// токена, без origin или для не-GitHub/приватного репо возвращает пусто —
+// фронтенд тогда откатывается на Gravatar/инициалы.
+#[tauri::command]
+pub async fn github_commit_avatars(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<Vec<CommitAvatar>> {
+    super::ensure_main_window(&window)?;
+    let Some(token) = read_token(&app) else {
+        return Ok(Vec::new());
+    };
+    let root = roots.resolve(&workspace_id)?;
+    let Some((owner, repo)) = origin_url(&root).as_deref().and_then(parse_github_slug) else {
+        return Ok(Vec::new());
+    };
+
+    let client = http()?;
+    let mut map: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    // До 5 страниц по 100 — покрывает показанную историю, не упираясь в лимиты.
+    for page in 1..=5 {
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/commits?per_page=100&page={page}");
+        let response = client
+            .get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .bearer_auth(&token)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|error| CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error))?;
+        if !response.status().is_success() {
+            // Приватный репо без scope, rate limit, нет доступа — отдаём что есть.
+            break;
+        }
+        let entries: Vec<ApiCommitEntry> = match response.json().await {
+            Ok(entries) => entries,
+            Err(_) => break,
+        };
+        let count = entries.len();
+        extract_avatars(&entries, &mut map);
+        if count < 100 {
+            break; // последняя страница
+        }
+    }
+
+    Ok(map
+        .into_iter()
+        .map(|(email, (login, avatar_url))| CommitAvatar {
+            email,
+            avatar_url,
+            login,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,10 +427,9 @@ mod tests {
     // Ответ device-токена: авторизован (access_token) и «ещё ждём» (error).
     #[test]
     fn parses_the_device_token_response() {
-        let authorized: TokenResponse = serde_json::from_str(
-            r#"{"access_token":"gho_x","token_type":"bearer","scope":""}"#,
-        )
-        .unwrap();
+        let authorized: TokenResponse =
+            serde_json::from_str(r#"{"access_token":"gho_x","token_type":"bearer","scope":""}"#)
+                .unwrap();
         assert_eq!(authorized.access_token.as_deref(), Some("gho_x"));
 
         let pending: TokenResponse = serde_json::from_str(
@@ -279,5 +438,53 @@ mod tests {
         .unwrap();
         assert!(pending.access_token.is_none());
         assert_eq!(pending.error.as_deref(), Some("authorization_pending"));
+    }
+
+    #[test]
+    fn parses_github_origin_urls() {
+        let want = Some(("octocat".to_owned(), "Hello-World".to_owned()));
+        assert_eq!(
+            parse_github_slug("https://github.com/octocat/Hello-World.git"),
+            want
+        );
+        assert_eq!(
+            parse_github_slug("git@github.com:octocat/Hello-World.git"),
+            want
+        );
+        assert_eq!(
+            parse_github_slug("ssh://git@github.com/octocat/Hello-World"),
+            want
+        );
+        assert_eq!(
+            parse_github_slug("https://github.com/octocat/Hello-World/"),
+            want
+        );
+        // Не GitHub и неполные пути — None.
+        assert_eq!(parse_github_slug("https://gitlab.com/a/b.git"), None);
+        assert_eq!(parse_github_slug("https://github.com/only-owner"), None);
+    }
+
+    #[test]
+    fn extracts_avatars_by_author_and_committer_email() {
+        let json = r#"[
+          {"commit":{"author":{"email":"Alice@X.com"},"committer":{"email":"bob@x.com"}},
+           "author":{"login":"alice","avatar_url":"https://a"},
+           "committer":{"login":"bob","avatar_url":"https://b"}},
+          {"commit":{"author":{"email":"carol@x.com"}},"author":null,"committer":null}
+        ]"#;
+        let entries: Vec<ApiCommitEntry> = serde_json::from_str(json).unwrap();
+        let mut map = std::collections::HashMap::new();
+        extract_avatars(&entries, &mut map);
+        // Почта нормализуется в нижний регистр.
+        assert_eq!(
+            map.get("alice@x.com").map(|(_, url)| url.as_str()),
+            Some("https://a")
+        );
+        assert_eq!(
+            map.get("bob@x.com").map(|(login, _)| login.as_str()),
+            Some("bob")
+        );
+        // Коммит без привязанного аккаунта (author: null) — почты нет в карте.
+        assert!(!map.contains_key("carol@x.com"));
     }
 }
