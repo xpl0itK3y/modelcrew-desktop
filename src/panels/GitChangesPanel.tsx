@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -981,19 +982,87 @@ function SyncStatus(props: {
   );
 }
 
-// Вкладка «История»: последние коммиты с автором, давностью и ветками.
-// Граф веток: цветные дорожки, точки коммитов, ветвления и слияния — как в
-// редакторах. Клик по строке копирует хеш.
+// Предки коммита (он сам + всё, на чём он стоит) среди загруженных — для
+// подсветки родословной при выборе узла.
+function ancestryOf(startHash: string, commits: GitCommitInfo[]): Set<string> {
+  const parents = new Map<string, string[]>();
+  for (const commit of commits) {
+    parents.set(commit.hash, commit.parents);
+  }
+  const seen = new Set<string>();
+  const stack = [startHash];
+  while (stack.length > 0) {
+    const hash = stack.pop()!;
+    if (seen.has(hash)) {
+      continue;
+    }
+    seen.add(hash);
+    for (const parent of parents.get(hash) ?? []) {
+      if (!seen.has(parent)) {
+        stack.push(parent);
+      }
+    }
+  }
+  return seen;
+}
+
+// Бейдж ветки/тега: клик переключает на неё, не всплывая до выбора коммита.
+// Серверная (origin/…) создаёт локальную со слежением, тег — переход с
+// отделением HEAD. Текущая ветка — некликабельная отметка.
+function RefBadge(props: {
+  refName: string;
+  currentBranch?: string;
+  onSwitch: (name: string, remote: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const isTag = props.refName.startsWith("tag: ");
+  const label = isTag ? props.refName.slice(5) : props.refName;
+  const isRemote = !isTag && props.refName.startsWith("origin/");
+  const isCurrent = !isTag && !isRemote && label === props.currentBranch;
+  const kind = isTag ? "is-tag" : isRemote ? "is-remote" : "";
+  const title = isCurrent
+    ? t("git.refCurrentHint")
+    : isTag
+      ? t("git.checkoutTag", { name: label })
+      : isRemote
+        ? t("git.checkoutRefRemote", { name: label })
+        : t("git.switchToRef", { name: label });
+  return (
+    <button
+      type="button"
+      className={`git-commit-ref ${kind} ${isCurrent ? "is-current" : ""}`}
+      title={title}
+      aria-current={isCurrent || undefined}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!isCurrent) {
+          props.onSwitch(label, isRemote);
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// Вкладка «История»: граф веток — цветные дорожки, точки, ветвления и слияния.
+// Клик по узлу выбирает коммит и раскрывает его детали; родословная выбранного
+// подсвечена, кольцо отмечает HEAD.
 function CommitGraph(props: {
   commits: GitCommitInfo[];
-  copiedHash: string | null;
-  onCopy: (commit: GitCommitInfo) => void;
+  workspaceId: string;
+  selectedHash: string | null;
+  onSelect: (commit: GitCommitInfo) => void;
+  detailsPresence: { item: string; closing: boolean } | null;
+  // Родословная выбранного (он + предки): остальные приглушаются. null — нет.
+  highlighted: Set<string> | null;
   onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
-  // >0 — показать узел незакоммиченных изменений над HEAD (мост к «Изменениям»).
+  onSwitchBranch: (name: string, remote: boolean) => void;
+  currentBranch?: string;
   workingTreeCount: number;
   onOpenChanges: () => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const rows = useMemo(
     () =>
       computeCommitGraph(
@@ -1058,106 +1127,144 @@ function CommitGraph(props: {
         }
         const isMerge = commit.parents.length > 1;
         const cx = laneCenter(row.col);
+        const selected = props.selectedHash === commit.hash;
+        const dimmed =
+          props.highlighted !== null && !props.highlighted.has(commit.hash);
         return (
-          <div
-            key={commit.hash}
-            role="button"
-            tabIndex={0}
-            className={`git-graph-row ${
-              props.copiedHash === commit.hash ? "is-copied" : ""
-            }`}
-            title={t("git.copyHash")}
-            onClick={() => props.onCopy(commit)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              props.onMenu(commit, event.clientX, event.clientY);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+          <Fragment key={commit.hash}>
+            <div
+              role="button"
+              tabIndex={0}
+              className={`git-graph-row ${selected ? "is-selected" : ""} ${
+                dimmed ? "is-dimmed" : ""
+              } ${commit.isHead ? "is-head" : ""}`}
+              onClick={() => props.onSelect(commit)}
+              onContextMenu={(event) => {
                 event.preventDefault();
-                props.onCopy(commit);
-              }
-            }}
-          >
-            <svg
-              className="git-graph-lines"
-              width={width}
-              height={GRAPH_ROW_H}
-              style={{ width, minWidth: width }}
-              aria-hidden="true"
-            >
-              {row.top.map((edge, k) => (
-                <path
-                  key={`t${k}`}
-                  d={graphEdgePath(
-                    laneCenter(edge.fromCol),
-                    0,
-                    laneCenter(edge.toCol),
-                    GRAPH_ROW_H / 2,
-                  )}
-                  fill="none"
-                  stroke={laneColor(edge.color)}
-                  strokeWidth={1.6}
-                />
-              ))}
-              {row.bottom.map((edge, k) => (
-                <path
-                  key={`b${k}`}
-                  d={graphEdgePath(
-                    laneCenter(edge.fromCol),
-                    GRAPH_ROW_H / 2,
-                    laneCenter(edge.toCol),
-                    GRAPH_ROW_H,
-                  )}
-                  fill="none"
-                  stroke={laneColor(edge.color)}
-                  strokeWidth={1.6}
-                />
-              ))}
-              <circle
-                cx={cx}
-                cy={GRAPH_ROW_H / 2}
-                r={GRAPH_DOT_R}
-                fill={isMerge ? "var(--mc-bg)" : laneColor(row.color)}
-                stroke={laneColor(row.color)}
-                strokeWidth={isMerge ? 2 : 0}
-              />
-            </svg>
-            <span className="git-graph-subject" title={commit.subject}>
-              {commit.subject}
-            </span>
-            {commit.refs.map((ref) => {
-              const isTag = ref.startsWith("tag: ");
-              const label = isTag ? ref.slice(5) : ref;
-              const kind = isTag
-                ? "is-tag"
-                : ref.startsWith("origin/")
-                  ? "is-remote"
-                  : "";
-              return (
-                <span key={ref} className={`git-commit-ref ${kind}`}>
-                  {label}
-                </span>
-              );
-            })}
-            <AuthorAvatar name={commit.author} email={commit.authorEmail} />
-            <span className="git-graph-author" title={commit.author}>
-              {commit.author}
-            </span>
-            <button
-              type="button"
-              className="git-commit-menu-btn"
-              title={t("git.commitActions")}
-              aria-label={t("git.commitActions")}
-              onClick={(event) => {
-                event.stopPropagation();
-                const rect = event.currentTarget.getBoundingClientRect();
-                props.onMenu(commit, rect.right, rect.bottom);
+                props.onMenu(commit, event.clientX, event.clientY);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  props.onSelect(commit);
+                }
               }}
             >
-              ⋯
-            </button>
-          </div>
+              <svg
+                className="git-graph-lines"
+                width={width}
+                height={GRAPH_ROW_H}
+                style={{ width, minWidth: width }}
+                aria-hidden="true"
+              >
+                {row.top.map((edge, k) => (
+                  <path
+                    key={`t${k}`}
+                    d={graphEdgePath(
+                      laneCenter(edge.fromCol),
+                      0,
+                      laneCenter(edge.toCol),
+                      GRAPH_ROW_H / 2,
+                    )}
+                    fill="none"
+                    stroke={laneColor(edge.color)}
+                    strokeWidth={1.6}
+                  />
+                ))}
+                {row.bottom.map((edge, k) => (
+                  <path
+                    key={`b${k}`}
+                    d={graphEdgePath(
+                      laneCenter(edge.fromCol),
+                      GRAPH_ROW_H / 2,
+                      laneCenter(edge.toCol),
+                      GRAPH_ROW_H,
+                    )}
+                    fill="none"
+                    stroke={laneColor(edge.color)}
+                    strokeWidth={1.6}
+                  />
+                ))}
+                {commit.isHead && (
+                  // Кольцо HEAD: текущий checkout выделяется акцентом.
+                  <circle
+                    cx={cx}
+                    cy={GRAPH_ROW_H / 2}
+                    r={GRAPH_DOT_R + 2.6}
+                    fill="none"
+                    stroke="var(--mc-accent)"
+                    strokeWidth={1.5}
+                  />
+                )}
+                <circle
+                  cx={cx}
+                  cy={GRAPH_ROW_H / 2}
+                  r={GRAPH_DOT_R}
+                  fill={isMerge ? "var(--mc-bg)" : laneColor(row.color)}
+                  stroke={laneColor(row.color)}
+                  strokeWidth={isMerge ? 2 : 0}
+                />
+              </svg>
+              <span className="git-graph-subject" title={commit.subject}>
+                {commit.subject}
+              </span>
+              {commit.refs.map((ref) => (
+                <RefBadge
+                  key={ref}
+                  refName={ref}
+                  currentBranch={props.currentBranch}
+                  onSwitch={props.onSwitchBranch}
+                />
+              ))}
+              <div className="git-graph-right">
+                <span
+                  className="git-graph-date"
+                  title={new Intl.DateTimeFormat(locale, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(commit.epochMs))}
+                >
+                  {formatRelativeTime(commit.epochMs, locale)}
+                </span>
+                <span className="git-graph-who">
+                  <AuthorAvatar
+                    name={commit.author}
+                    email={commit.authorEmail}
+                  />
+                  <span className="git-graph-author" title={commit.author}>
+                    {commit.author}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="git-commit-menu-btn"
+                  title={t("git.commitActions")}
+                  aria-label={t("git.commitActions")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    props.onMenu(commit, rect.right, rect.bottom);
+                  }}
+                >
+                  ⋯
+                </button>
+              </div>
+            </div>
+            {props.detailsPresence?.item === commit.hash && (
+              <div
+                className="git-graph-details"
+                style={{ paddingLeft: width + 10 }}
+              >
+                <RevealHeight closing={props.detailsPresence.closing}>
+                  <CommitDetails
+                    workspaceId={props.workspaceId}
+                    commit={commit}
+                    closing={props.detailsPresence.closing}
+                  />
+                </RevealHeight>
+              </div>
+            )}
+          </Fragment>
         );
       })}
     </div>
@@ -1169,6 +1276,8 @@ function HistoryView(props: {
   // Незакоммиченных файлов (для узла рабочего дерева) и переход к «Изменениям».
   fileCount: number;
   onOpenChanges: () => void;
+  // Текущая ветка — для выделения её бейджа и клика по чужим.
+  currentBranch?: string;
 }) {
   const { locale, t } = useI18n();
   const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
@@ -1274,6 +1383,27 @@ function HistoryView(props: {
     }
   };
 
+  // Переключение на ветку/тег по клику на бейдж; ошибка (грязное дерево и т.п.)
+  // показывается баннером.
+  const switchTo = async (name: string, remote: boolean) => {
+    try {
+      await switchBranch(props.workspaceId, name, remote);
+      void refreshGitChanges(props.workspaceId);
+      setReloadNonce((value) => value + 1);
+    } catch (error) {
+      setActionError(localizeBackendError(error));
+    }
+  };
+
+  // Родословная выбранного узла (он + предки) — для приглушения остальных в
+  // графе. В списке подсветка не нужна.
+  const highlighted = useMemo(() => {
+    if (!graphMode || !expandedHash || !commits) {
+      return null;
+    }
+    return ancestryOf(expandedHash, commits);
+  }, [graphMode, expandedHash, commits]);
+
   if (commits === null) {
     return <div className="git-empty">{t("git.loading")}</div>;
   }
@@ -1322,9 +1452,16 @@ function HistoryView(props: {
       {graphMode ? (
         <CommitGraph
           commits={commits}
-          copiedHash={copiedHash}
-          onCopy={(commit) => void copyHash(commit)}
+          workspaceId={props.workspaceId}
+          selectedHash={expandedHash}
+          onSelect={(commit) =>
+            setExpandedHash(expandedHash === commit.hash ? null : commit.hash)
+          }
+          detailsPresence={detailsPresence}
+          highlighted={highlighted}
           onMenu={openMenu}
+          onSwitchBranch={(name, remote) => void switchTo(name, remote)}
+          currentBranch={props.currentBranch}
           workingTreeCount={workingTreeCount}
           onOpenChanges={props.onOpenChanges}
         />
@@ -1408,31 +1545,14 @@ function HistoryView(props: {
                   {t("git.unpushed")}
                 </span>
               )}
-              {commit.refs.map((ref) => {
-                // Удалённые ветки и теги отличаются цветом от локальных.
-                const isTag = ref.startsWith("tag: ");
-                const label = isTag ? ref.slice(5) : ref;
-                const kind = isTag
-                  ? "is-tag"
-                  : ref.startsWith("origin/")
-                    ? "is-remote"
-                    : "";
-                return (
-                  <span
-                    key={ref}
-                    className={`git-commit-ref ${kind}`}
-                    title={
-                      isTag
-                        ? t("git.refTag", { name: label })
-                        : ref.startsWith("origin/")
-                          ? t("git.refRemote", { name: label })
-                          : t("git.refLocal", { name: label })
-                    }
-                  >
-                    {label}
-                  </span>
-                );
-              })}
+              {commit.refs.map((ref) => (
+                <RefBadge
+                  key={ref}
+                  refName={ref}
+                  currentBranch={props.currentBranch}
+                  onSwitch={(name, remote) => void switchTo(name, remote)}
+                />
+              ))}
             </div>
             <button
               type="button"
@@ -1617,6 +1737,7 @@ export function GitChangesView(props: { workspaceId: string }) {
               workspaceId={workspaceId}
               fileCount={summary.files.length}
               onOpenChanges={() => setView("changes")}
+              currentBranch={summary.branch}
             />
           ) : summary.files.length === 0 ? (
             <div className="git-empty">{t("git.clean")}</div>

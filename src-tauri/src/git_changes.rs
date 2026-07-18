@@ -560,6 +560,8 @@ pub struct GitCommitInfo {
     pub epoch_ms: i64,
     // Коммит есть только локально: upstream его ещё не видел.
     pub unpushed: bool,
+    // На этот коммит указывает HEAD (текущий checkout) — для кольца в графе.
+    pub is_head: bool,
     // Полные хеши родителей (для графа веток; у merge их несколько).
     pub parents: Vec<String>,
     // Декорации коммита: ветки/теги, указывающие на него.
@@ -912,17 +914,18 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
                 .next()
                 .and_then(|value| value.trim().parse::<i64>().ok())?;
             let subject = parts.next()?.to_owned();
-            let refs = parts
-                .next()
-                .map(|decorations| {
-                    decorations
-                        .split(", ")
-                        .map(|entry| entry.trim().trim_start_matches("HEAD -> "))
-                        .filter(|entry| !entry.is_empty() && *entry != "HEAD")
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
+            // Декорации %D: «HEAD -> main», «HEAD, tag: v1» (detached) и т.п.
+            // Признак HEAD снимаем до чистки, иначе он теряется.
+            let decorations = parts.next().unwrap_or_default();
+            let is_head = decorations
+                .split(", ")
+                .any(|entry| entry.trim() == "HEAD" || entry.trim().starts_with("HEAD -> "));
+            let refs = decorations
+                .split(", ")
+                .map(|entry| entry.trim().trim_start_matches("HEAD -> "))
+                .filter(|entry| !entry.is_empty() && *entry != "HEAD")
+                .map(str::to_owned)
+                .collect();
             let parents = parts
                 .next()
                 .map(|value| {
@@ -935,6 +938,7 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
             let (body, co_authors) = split_body_and_co_authors(parts.next().unwrap_or_default());
             Some(GitCommitInfo {
                 unpushed: unpushed.contains(hash),
+                is_head,
                 hash: hash.to_owned(),
                 short_hash,
                 subject,
@@ -1560,6 +1564,9 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let log = list_log(root, 10, false).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].subject, "second commit");
+        // Верхушка текущей ветки помечена как HEAD, предок — нет.
+        assert!(log[0].is_head);
+        assert!(!log[1].is_head);
         assert_eq!(log[0].author, "Denis");
         assert_eq!(log[0].author_email, "d@t");
         assert_eq!(log[0].body, "Detailed description of the change.");

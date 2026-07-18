@@ -270,6 +270,8 @@ export type GitCommitInfo = {
   epochMs: number;
   // Коммит есть только на этом компьютере.
   unpushed: boolean;
+  // На этот коммит указывает HEAD (текущий checkout).
+  isHead: boolean;
   // Полные хеши родителей (для графа веток).
   parents: string[];
   refs: string[];
