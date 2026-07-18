@@ -27,6 +27,9 @@ export const en: Record<MessageKey, string> = {
   "git.showMore": "Show more",
   "git.viewGraph": "Graph",
   "git.viewList": "List",
+  "git.allBranches": "All branches",
+  "git.allBranchesHint":
+    "Show history across all branches, including server ones (origin/…). Refreshed by the background fetch.",
   "git.copyHash": "Copy the full hash",
   "git.commitCoAuthor": "Co-author:",
   "git.commitDate": "Date:",

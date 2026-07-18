@@ -758,20 +758,24 @@ pub fn switch_branch(root: &Path, name: &str, remote: bool) -> CommandResult<()>
     Ok(())
 }
 
-pub fn list_log(root: &Path, limit: u32) -> CommandResult<Vec<GitCommitInfo>> {
+pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Vec<GitCommitInfo>> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    let limit = limit.clamp(1, 500);
+    let limit = limit.clamp(1, 800);
     let count = format!("-n{limit}");
-    let raw = match run_git(
-        &toplevel,
-        &[
-            "log",
-            &count,
-            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%P%x1f%b%x1e",
-        ],
-    ) {
+    // «Все ветки»: логируем все ссылки (в т.ч. refs/remotes — серверные
+    // ветки), упорядочивая по дате, чтобы граф выглядел как в редакторах.
+    let mut args = vec![
+        "log",
+        count.as_str(),
+        "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%P%x1f%b%x1e",
+    ];
+    if all_branches {
+        args.push("--all");
+        args.push("--date-order");
+    }
+    let raw = match run_git(&toplevel, &args) {
         Ok(raw) => raw,
         // Пустой репозиторий без коммитов — не ошибка, а пустая история.
         Err(_) => return Ok(Vec::new()),
@@ -938,12 +942,15 @@ pub async fn git_log(
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     limit: u32,
+    all: Option<bool>,
 ) -> CommandResult<Vec<GitCommitInfo>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || list_log(&root, limit))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        list_log(&root, limit, all.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Действия: коммит и откат файла ----------
@@ -1450,7 +1457,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(current.name, "feature/x");
         assert!(current.last_commit_at.is_some());
 
-        let log = list_log(root, 10).unwrap();
+        let log = list_log(root, 10, false).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].subject, "second commit");
         assert_eq!(log[0].author, "Denis");
@@ -1580,7 +1587,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .unwrap();
         assert!(!main.is_merged); // текущая ветка не помечается
 
-        let log = list_log(root, 10).unwrap();
+        let log = list_log(root, 10, false).unwrap();
         assert!(log[0].unpushed, "свежий merge ещё не на сервере");
         let pushed_first = log
             .iter()
@@ -1596,7 +1603,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .output()
             .unwrap();
         assert!(init.status.success());
-        assert!(list_log(fresh.path(), 10).unwrap().is_empty());
+        assert!(list_log(fresh.path(), 10, false).unwrap().is_empty());
     }
 
     #[test]
@@ -1681,14 +1688,21 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(by_path_in(&summary, "новый файл.md").status, "conflicted");
         git(&["merge", "--abort"]);
 
+        // «Все ветки»: коммит из невлитой ветки clash не виден в истории
+        // текущей ветки, но появляется с --all (как серверные ветки).
+        let head_only = list_log(root, 50, false).unwrap();
+        assert!(!head_only.iter().any(|c| c.subject == "clash version"));
+        let all_refs = list_log(root, 50, true).unwrap();
+        assert!(all_refs.iter().any(|c| c.subject == "clash version"));
+
         // Detached HEAD: ветки нет, но история и статус работают.
-        let log = list_log(root, 10).unwrap();
+        let log = list_log(root, 10, false).unwrap();
         assert!(log[0].subject.contains("main version"));
         git(&["checkout", "--quiet", &log[1].hash]);
         let summary = collect_summary(root).unwrap();
         assert!(summary.is_repo);
         assert_eq!(summary.branch, None, "detached HEAD — без имени ветки");
-        assert!(!list_log(root, 5).unwrap().is_empty());
+        assert!(!list_log(root, 5, false).unwrap().is_empty());
         let branches = list_branches(root).unwrap();
         assert!(branches.iter().all(|branch| !branch.is_current));
     }

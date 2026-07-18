@@ -292,8 +292,9 @@ export function switchBranch(
 export function fetchLog(
   workspaceId: string,
   limit = 100,
+  all = false,
 ): Promise<GitCommitInfo[]> {
-  return invoke<GitCommitInfo[]>("git_log", { workspaceId, limit });
+  return invoke<GitCommitInfo[]>("git_log", { workspaceId, limit, all });
 }
 
 export type GitCommitFile = {

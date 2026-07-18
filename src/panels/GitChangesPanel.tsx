@@ -729,6 +729,9 @@ function HistoryView(props: { workspaceId: string }) {
   const { locale, t } = useI18n();
   const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
   const [graphMode, setGraphMode] = useState(true);
+  // «Все ветки»: включает в историю локальные и серверные ветки (git --all),
+  // граф становится насыщенным, как в редакторах.
+  const [allBranches, setAllBranches] = useState(false);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
   // Сколько коммитов запрашивать; «Показать ещё» наращивает порциями.
@@ -765,7 +768,7 @@ function HistoryView(props: { workspaceId: string }) {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      fetchLog(props.workspaceId, limit)
+      fetchLog(props.workspaceId, limit, allBranches)
         .then((log) => {
           if (!cancelled) {
             setCommits(log);
@@ -786,7 +789,7 @@ function HistoryView(props: { workspaceId: string }) {
       cancelled = true;
       unsubscribe();
     };
-  }, [props.workspaceId, limit]);
+  }, [props.workspaceId, limit, allBranches]);
 
   // Бэкенд отдаёт максимум 500 за раз; если пришло меньше лимита — история
   // закончилась и кнопка не нужна.
@@ -811,22 +814,36 @@ function HistoryView(props: { workspaceId: string }) {
   }
   return (
     <div className="git-history">
-      <div className="git-history-modes" role="group">
+      <div className="git-history-bar">
+        <div className="git-history-modes" role="group">
+          <button
+            type="button"
+            className={`git-mode ${graphMode ? "is-active" : ""}`}
+            aria-pressed={graphMode}
+            onClick={() => setGraphMode(true)}
+          >
+            {t("git.viewGraph")}
+          </button>
+          <button
+            type="button"
+            className={`git-mode ${!graphMode ? "is-active" : ""}`}
+            aria-pressed={!graphMode}
+            onClick={() => setGraphMode(false)}
+          >
+            {t("git.viewList")}
+          </button>
+        </div>
         <button
           type="button"
-          className={`git-mode ${graphMode ? "is-active" : ""}`}
-          aria-pressed={graphMode}
-          onClick={() => setGraphMode(true)}
+          className={`git-all-branches ${allBranches ? "is-active" : ""}`}
+          aria-pressed={allBranches}
+          title={t("git.allBranchesHint")}
+          onClick={() => {
+            setLimit(100);
+            setAllBranches((value) => !value);
+          }}
         >
-          {t("git.viewGraph")}
-        </button>
-        <button
-          type="button"
-          className={`git-mode ${!graphMode ? "is-active" : ""}`}
-          aria-pressed={!graphMode}
-          onClick={() => setGraphMode(false)}
-        >
-          {t("git.viewList")}
+          ⎇ {t("git.allBranches")}
         </button>
       </div>
       {graphMode ? (

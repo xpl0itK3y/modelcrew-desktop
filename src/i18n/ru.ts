@@ -26,6 +26,9 @@ export const ru = {
   "git.showMore": "Показать ещё",
   "git.viewGraph": "Граф",
   "git.viewList": "Список",
+  "git.allBranches": "Все ветки",
+  "git.allBranchesHint":
+    "Показать историю всех веток, включая серверные (origin/…). Обновляется фоновым fetch.",
   "git.copyHash": "Скопировать полный хеш",
   "git.commitCoAuthor": "Соавтор:",
   "git.commitDate": "Дата:",

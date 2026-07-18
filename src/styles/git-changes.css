@@ -234,15 +234,45 @@
   gap: 2px;
 }
 
+/* Панель управления историей: режим слева, «Все ветки» справа. */
+.git-history-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 /* Переключатель «Граф / Список». */
 .git-history-modes {
   display: inline-flex;
-  align-self: flex-start;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--mc-border);
   border-radius: 7px;
   background: var(--mc-surface);
+}
+
+.git-all-branches {
+  flex: none;
+  padding: 4px 9px;
+  border: 1px solid var(--mc-border);
+  border-radius: 7px;
+  background: var(--mc-surface);
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.git-all-branches:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}
+
+.git-all-branches.is-active {
+  border-color: color-mix(in srgb, var(--mc-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--mc-accent) 14%, transparent);
+  color: var(--mc-text-bright);
 }
 
 .git-mode {
