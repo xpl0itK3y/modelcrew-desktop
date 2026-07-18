@@ -101,6 +101,12 @@ export function selectUnseenNotificationSoundIds(
 const HEALTH_KEY = "modelcrew.audioHealth";
 const AUDIO_HANG_THRESHOLD_MS = 5_000;
 
+// Заморозить процесс проигрыванием может только Linux/WebKitGTK через
+// GStreamer. На macOS/Windows аудио никогда не блокирует поток, поэтому
+// защита там — чистый минус (ложные срабатывания после жёстких завершений).
+const AUDIO_HANG_PROTECTION =
+  typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
+
 // Distinguishes our own in-flight "pending" marker from one left behind by a
 // process that never lived to confirm it.
 const SESSION_ID = (() => {
@@ -166,6 +172,8 @@ function clearAudioHealth(): void {
 // hung the process. Stale "pending" markers from other sessions of the same
 // version are promoted to "broken" so the verdict survives further restarts.
 export function isNotificationSoundSuppressed(): boolean {
+  // Не Linux — зависания не бывает, звук никогда не глушим.
+  if (!AUDIO_HANG_PROTECTION) return false;
   const health = readAudioHealth();
   if (!health) return false;
   if (health.version !== APP_VERSION) {
@@ -199,14 +207,17 @@ function play(file: string | null): void {
   }
   if (typeof Audio === "undefined") return;
   if (isNotificationSoundSuppressed()) return;
-  writeAudioHealth("pending");
-  const startedAt = performance.now();
-  window.setTimeout(() => {
-    // This tick only runs once the risky calls below released the thread; a
-    // long delay means playback stalled the process badly enough to disable.
-    const blockedMs = performance.now() - startedAt;
-    writeAudioHealth(blockedMs > AUDIO_HANG_THRESHOLD_MS ? "broken" : "ok");
-  }, 0);
+  // Метки здоровья ведём только там, где реально возможен зависон (Linux).
+  if (AUDIO_HANG_PROTECTION) {
+    writeAudioHealth("pending");
+    const startedAt = performance.now();
+    window.setTimeout(() => {
+      // Тик отрабатывает, когда рискованные вызовы освободили поток; большая
+      // задержка = проигрывание застопорило процесс — глушим.
+      const blockedMs = performance.now() - startedAt;
+      writeAudioHealth(blockedMs > AUDIO_HANG_THRESHOLD_MS ? "broken" : "ok");
+    }, 0);
+  }
   try {
     if (!element) {
       element = new Audio();

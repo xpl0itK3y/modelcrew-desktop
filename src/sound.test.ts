@@ -59,6 +59,12 @@ describe("notification sounds", () => {
     audioInstances = [];
     playResult = Promise.resolve();
     vi.stubGlobal("Audio", FakeAudio);
+    // Защита от зависания аудио — только на Linux; тесты на неё гоняем под
+    // Linux-UA. Отдельный тест ниже проверяет поведение вне Linux.
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15",
+      configurable: true,
+    });
   });
 
   it("saves and loads the selected sound and falls back for unknown values", async () => {
@@ -104,6 +110,26 @@ describe("notification sounds", () => {
     await Promise.resolve();
 
     expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
+  });
+
+  it("never suppresses audio off Linux, even with a broken marker", async () => {
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit",
+      configurable: true,
+    });
+    const { isNotificationSoundSuppressed, previewNotificationSound } =
+      await import("./sound");
+
+    // Метка «broken» от прошлого запуска на macOS игнорируется.
+    localStorage.setItem(
+      HEALTH_KEY,
+      JSON.stringify({ status: "broken", version: "0.0.5" }),
+    );
+    expect(isNotificationSoundSuppressed()).toBe(false);
+    previewNotificationSound("chime");
+    expect(audioInstances).toHaveLength(1);
+    // Метки здоровья вне Linux не ведём — «broken» осталась нетронутой.
+    expect(storedHealth().status).toBe("broken");
   });
 
   it("brackets an attempt with a pending marker and confirms it survived", async () => {

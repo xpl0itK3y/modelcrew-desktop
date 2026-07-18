@@ -19,6 +19,15 @@ type FlowState =
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
+// URL страницы подтверждения с предзаполненным кодом (github.com/login/device
+// принимает user_code параметром), чтобы не вводить его руками.
+function verificationUrl(device: DeviceStart): string {
+  const separator = device.verificationUri.includes("?") ? "&" : "?";
+  return `${device.verificationUri}${separator}user_code=${encodeURIComponent(
+    device.userCode,
+  )}`;
+}
+
 // Кнопка входа через GitHub и аватар вошедшего в правом углу титлбара.
 export function GithubAuth() {
   const { t } = useI18n();
@@ -63,7 +72,8 @@ export function GithubAuth() {
     try {
       const device = await githubDeviceStart();
       setFlow({ kind: "code", device });
-      void openUrl(device.verificationUri).catch(() => {});
+      // Открываем страницу с уже вписанным кодом — остаётся нажать «Authorize».
+      void openUrl(verificationUrl(device)).catch(() => {});
     } catch (error) {
       // Не настроен Client ID OAuth-приложения — сообщаем понятно.
       const code = (error as { code?: string })?.code;
@@ -298,7 +308,7 @@ function GithubFlowBody(props: {
           <button
             type="button"
             className="github-modal-primary"
-            onClick={() => void openUrl(device.verificationUri)}
+            onClick={() => void openUrl(verificationUrl(device))}
           >
             {t("github.openGithub")}
           </button>
