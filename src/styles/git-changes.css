@@ -370,6 +370,13 @@
   margin-right: 3px;
 }
 
+.git-commit-person .git-avatar {
+  width: 15px;
+  height: 15px;
+  font-size: 8px;
+  margin-right: 4px;
+}
+
 .git-graph-row .git-commit-ref {
   flex: none;
 }

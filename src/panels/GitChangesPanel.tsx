@@ -587,14 +587,19 @@ function CommitDetails(props: {
         </span>
         {exactDate}
       </div>
-      {(commit.coAuthors ?? []).map((coAuthor) => (
-        <div key={coAuthor} className="git-commit-person">
-          <span className="git-commit-person-label">
-            {t("git.commitCoAuthor")}
-          </span>
-          {coAuthor}
-        </div>
-      ))}
+      {(commit.coAuthors ?? []).map((coAuthor) => {
+        // Соавтор в виде «Имя <почта>» — для аватарки берём имя.
+        const name = coAuthor.replace(/\s*<[^>]*>\s*$/, "").trim() || coAuthor;
+        return (
+          <div key={coAuthor} className="git-commit-person">
+            <span className="git-commit-person-label">
+              {t("git.commitCoAuthor")}
+            </span>
+            <AuthorAvatar name={name} />
+            {coAuthor}
+          </div>
+        );
+      })}
       {files === null ? (
         <div className="git-commit-person">{t("git.diffLoading")}</div>
       ) : files.length > 0 ? (
