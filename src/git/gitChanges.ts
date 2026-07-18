@@ -310,6 +310,27 @@ export function fetchCommitFiles(
   return invoke<GitCommitFile[]>("git_commit_files", { workspaceId, hash });
 }
 
+// Аватарка автора: инициалы + детерминированный оттенок из имени. Один автор
+// всегда одного цвета — граф читается «в лицах», как в GitLens.
+export function authorAvatar(name: string): { initials: string; hue: number } {
+  const trimmed = name.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  let initials = "?";
+  if (words.length >= 2) {
+    initials =
+      (Array.from(words[0])[0] ?? "") + (Array.from(words[1])[0] ?? "");
+  } else if (words.length === 1) {
+    initials = Array.from(words[0]).slice(0, 2).join("");
+  }
+  initials = initials.toUpperCase();
+
+  let hash = 0;
+  for (const char of trimmed) {
+    hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  }
+  return { initials, hue: hash % 360 };
+}
+
 // «2 ч. назад» / «2h ago» — компактная подпись давности коммита.
 export function formatRelativeTime(
   epochMs: number,

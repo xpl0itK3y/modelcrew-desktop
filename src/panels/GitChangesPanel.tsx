@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
+  authorAvatar,
   commitAll,
   fetchBranches,
   fetchCommitFiles,
@@ -43,6 +44,21 @@ const GRAPH_DOT_R = 3.6;
 
 function laneColor(index: number): string {
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
+}
+
+// Аватарка автора: цветной кружок с инициалами (цвет из имени).
+function AuthorAvatar(props: { name: string }) {
+  const { initials, hue } = authorAvatar(props.name);
+  return (
+    <span
+      className="git-avatar"
+      style={{ background: `hsl(${hue} 50% 42%)` }}
+      title={props.name}
+      aria-hidden="true"
+    >
+      {initials}
+    </span>
+  );
 }
 
 function laneCenter(col: number): number {
@@ -715,6 +731,7 @@ function CommitGraph(props: {
                 </span>
               );
             })}
+            <AuthorAvatar name={commit.author} />
             <span className="git-graph-author" title={commit.author}>
               {commit.author}
             </span>
@@ -895,6 +912,7 @@ function HistoryView(props: { workspaceId: string }) {
               >
                 {/* В раскрытой карточке имя дополняется почтой прямо здесь,
                     отдельной строки «Автор» нет — без дублей. */}
+                <AuthorAvatar name={commit.author} />
                 {commit.author}
                 {expanded && (
                   <span className="git-commit-email">

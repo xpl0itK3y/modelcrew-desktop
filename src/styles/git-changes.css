@@ -338,12 +338,36 @@
 
 .git-graph-author {
   flex: none;
-  max-width: 40%;
+  max-width: 34%;
   overflow: hidden;
   color: var(--mc-text-faint);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Аватарка автора — цветной кружок с инициалами. */
+.git-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.git-commit-meta .git-avatar {
+  width: 15px;
+  height: 15px;
+  font-size: 8px;
+  margin-right: 3px;
 }
 
 .git-graph-row .git-commit-ref {

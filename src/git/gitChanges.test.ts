@@ -10,10 +10,27 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 import {
   aggregateCounts,
+  authorAvatar,
   formatRelativeTime,
   parseUnifiedDiff,
   type GitChangesSummary,
 } from "./gitChanges";
+
+describe("authorAvatar", () => {
+  it("takes initials from up to two words", () => {
+    expect(authorAvatar("Kenny Van de Maele").initials).toBe("KV");
+    expect(authorAvatar("pewdiepie-archdaemon").initials).toBe("PE");
+    expect(authorAvatar("Денис").initials).toBe("ДЕ");
+    expect(authorAvatar("").initials).toBe("?");
+  });
+
+  it("is deterministic and varies by name", () => {
+    expect(authorAvatar("Denis").hue).toBe(authorAvatar("Denis").hue);
+    expect(authorAvatar("Denis").hue).not.toBe(authorAvatar("Boody").hue);
+    expect(authorAvatar("x").hue).toBeGreaterThanOrEqual(0);
+    expect(authorAvatar("x").hue).toBeLessThan(360);
+  });
+});
 
 const SAMPLE_DIFF = `diff --git a/src/app.ts b/src/app.ts
 index 1111111..2222222 100644
