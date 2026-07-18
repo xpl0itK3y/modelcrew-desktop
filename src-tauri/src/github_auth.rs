@@ -100,8 +100,11 @@ struct TokenResponse {
     error: Option<String>,
 }
 
+// camelCase только на сериализации: во фронтенд уходит avatarUrl, а ответ
+// GitHub /user читается по snake_case-именам полей (avatar_url) как есть —
+// иначе десериализация падает и профиль не подхватывается.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct GithubUser {
     login: String,
     avatar_url: String,
@@ -241,5 +244,40 @@ mod tests {
             http().is_ok(),
             "reqwest Client must build with a rustls crypto provider present"
         );
+    }
+
+    // Ответ GitHub /user идёт в snake_case (avatar_url) — должен читаться; во
+    // фронтенд поле уходит camelCase (avatarUrl).
+    #[test]
+    fn reads_github_user_snake_case_and_serializes_camel_case() {
+        let user: GithubUser = serde_json::from_str(
+            r#"{"login":"octocat","id":1,"avatar_url":"https://avatars.githubusercontent.com/u/1?v=4"}"#,
+        )
+        .expect("GitHub /user must deserialize");
+        assert_eq!(user.login, "octocat");
+        assert_eq!(
+            user.avatar_url,
+            "https://avatars.githubusercontent.com/u/1?v=4"
+        );
+        let json = serde_json::to_string(&user).unwrap();
+        assert!(json.contains("\"avatarUrl\""), "frontend gets camelCase");
+        assert!(!json.contains("avatar_url"));
+    }
+
+    // Ответ device-токена: авторизован (access_token) и «ещё ждём» (error).
+    #[test]
+    fn parses_the_device_token_response() {
+        let authorized: TokenResponse = serde_json::from_str(
+            r#"{"access_token":"gho_x","token_type":"bearer","scope":""}"#,
+        )
+        .unwrap();
+        assert_eq!(authorized.access_token.as_deref(), Some("gho_x"));
+
+        let pending: TokenResponse = serde_json::from_str(
+            r#"{"error":"authorization_pending","error_description":"waiting"}"#,
+        )
+        .unwrap();
+        assert!(pending.access_token.is_none());
+        assert_eq!(pending.error.as_deref(), Some("authorization_pending"));
     }
 }
