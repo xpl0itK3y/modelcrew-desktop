@@ -13,8 +13,31 @@ import {
   authorAvatar,
   formatRelativeTime,
   parseUnifiedDiff,
+  resolveAvatarUrl,
   type GitChangesSummary,
 } from "./gitChanges";
+
+describe("resolveAvatarUrl", () => {
+  it("derives GitHub avatars from noreply emails", async () => {
+    expect(
+      await resolveAvatarUrl("49699333+dependabot[bot]@users.noreply.github.com"),
+    ).toBe("https://avatars.githubusercontent.com/u/49699333?s=48&v=4");
+    expect(await resolveAvatarUrl("octocat@users.noreply.github.com")).toBe(
+      "https://github.com/octocat.png?size=48",
+    );
+  });
+
+  it("falls back to a Gravatar hash for real emails", async () => {
+    const url = await resolveAvatarUrl("Person@Example.com");
+    // Хеш от нормализованной (нижний регистр) почты.
+    expect(url).toMatch(/^https:\/\/www\.gravatar\.com\/avatar\/[0-9a-f]{64}\?/);
+  });
+
+  it("returns null without an email", async () => {
+    expect(await resolveAvatarUrl("")).toBeNull();
+    expect(await resolveAvatarUrl("not-an-email")).toBeNull();
+  });
+});
 
 describe("authorAvatar", () => {
   it("takes initials from up to two words", () => {

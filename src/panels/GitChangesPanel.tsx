@@ -13,6 +13,7 @@ import {
   parseUnifiedDiff,
   readRepoFile,
   refreshGitChanges,
+  resolveAvatarUrl,
   revertFile,
   subscribeGitChanges,
   switchBranch,
@@ -26,6 +27,7 @@ import {
 } from "../git/gitChanges";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { computeCommitGraph } from "../git/commitGraph";
+import { loadNetworkAvatars } from "../terminal/preferences";
 import { useAnimatedPresence } from "../ui/useAnimatedPresence";
 
 // Палитра дорожек графа и геометрия строки.
@@ -46,17 +48,66 @@ function laneColor(index: number): string {
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
 }
 
-// Аватарка автора: цветной кружок с инициалами (цвет из имени).
-function AuthorAvatar(props: { name: string }) {
+// Аватарка автора: реальная (GitHub/Gravatar) при включённой настройке,
+// иначе — цветной кружок с инициалами (цвет из имени). Откат на инициалы
+// при офлайне, отсутствии аватара (404) или выключенной опции.
+function AuthorAvatar(props: { name: string; email?: string }) {
   const { initials, hue } = authorAvatar(props.name);
+  const [enabled, setEnabled] = useState(() => loadNetworkAvatars());
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setEnabled(loadNetworkAvatars());
+    window.addEventListener("modelcrew:network-avatars", onChange);
+    return () =>
+      window.removeEventListener("modelcrew:network-avatars", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || !props.email) {
+      setUrl(null);
+      return;
+    }
+    let cancelled = false;
+    setFailed(false);
+    resolveAvatarUrl(props.email)
+      .then((resolved) => {
+        if (!cancelled) {
+          setUrl(resolved);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, props.email]);
+
+  const showImage = enabled && url !== null && !failed;
   return (
     <span
       className="git-avatar"
-      style={{ background: `hsl(${hue} 50% 42%)` }}
+      style={{
+        background: showImage ? "transparent" : `hsl(${hue} 50% 42%)`,
+      }}
       title={props.name}
       aria-hidden="true"
     >
-      {initials}
+      {showImage ? (
+        <img
+          className="git-avatar-img"
+          src={url}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        initials
+      )}
     </span>
   );
 }
@@ -588,14 +639,16 @@ function CommitDetails(props: {
         {exactDate}
       </div>
       {(commit.coAuthors ?? []).map((coAuthor) => {
-        // Соавтор в виде «Имя <почта>» — для аватарки берём имя.
-        const name = coAuthor.replace(/\s*<[^>]*>\s*$/, "").trim() || coAuthor;
+        // Соавтор в виде «Имя <почта>»: имя — для инициалов, почта — для авы.
+        const emailMatch = coAuthor.match(/<([^>]+)>\s*$/);
+        const name =
+          coAuthor.replace(/\s*<[^>]*>\s*$/, "").trim() || coAuthor;
         return (
           <div key={coAuthor} className="git-commit-person">
             <span className="git-commit-person-label">
               {t("git.commitCoAuthor")}
             </span>
-            <AuthorAvatar name={name} />
+            <AuthorAvatar name={name} email={emailMatch?.[1]} />
             {coAuthor}
           </div>
         );
@@ -736,7 +789,7 @@ function CommitGraph(props: {
                 </span>
               );
             })}
-            <AuthorAvatar name={commit.author} />
+            <AuthorAvatar name={commit.author} email={commit.authorEmail} />
             <span className="git-graph-author" title={commit.author}>
               {commit.author}
             </span>
@@ -917,7 +970,7 @@ function HistoryView(props: { workspaceId: string }) {
               >
                 {/* В раскрытой карточке имя дополняется почтой прямо здесь,
                     отдельной строки «Автор» нет — без дублей. */}
-                <AuthorAvatar name={commit.author} />
+                <AuthorAvatar name={commit.author} email={commit.authorEmail} />
                 {commit.author}
                 {expanded && (
                   <span className="git-commit-email">

@@ -331,6 +331,51 @@ export function authorAvatar(name: string): { initials: string; hue: number } {
   return { initials, hue: hash % 360 };
 }
 
+// URL реальной аватарки по почте автора: GitHub-ноreply → аватар профиля
+// GitHub, иначе Gravatar (d=404 — вернёт 404, если аватара нет, тогда откат
+// на инициалы через onError). null — почты нет. Результат кешируется.
+const avatarUrlCache = new Map<string, Promise<string | null>>();
+
+async function computeAvatarUrl(email: string): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized || !normalized.includes("@")) {
+    return null;
+  }
+  // GitHub noreply с числовым id: 12345+user@users.noreply.github.com
+  const withId = normalized.match(
+    /^(\d+)\+[^@]+@users\.noreply\.github\.com$/,
+  );
+  if (withId) {
+    return `https://avatars.githubusercontent.com/u/${withId[1]}?s=48&v=4`;
+  }
+  // GitHub noreply без id: user@users.noreply.github.com
+  const plain = normalized.match(/^([^@]+)@users\.noreply\.github\.com$/);
+  if (plain) {
+    return `https://github.com/${encodeURIComponent(plain[1])}.png?size=48`;
+  }
+  // Gravatar по SHA-256 почты.
+  try {
+    const bytes = new TextEncoder().encode(normalized);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    return `https://www.gravatar.com/avatar/${hex}?d=404&s=48`;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveAvatarUrl(email: string): Promise<string | null> {
+  const key = email.trim().toLowerCase();
+  let cached = avatarUrlCache.get(key);
+  if (!cached) {
+    cached = computeAvatarUrl(email);
+    avatarUrlCache.set(key, cached);
+  }
+  return cached;
+}
+
 // «2 ч. назад» / «2h ago» — компактная подпись давности коммита.
 export function formatRelativeTime(
   epochMs: number,

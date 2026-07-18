@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ACCENT_COLORS,
   APP_THEMES,
@@ -5,6 +6,10 @@ import {
   type ThemeId,
 } from "../../theme";
 import { type MessageKey, type Locale, useI18n } from "../../i18n";
+import {
+  loadNetworkAvatars,
+  saveNetworkAvatars,
+} from "../../terminal/preferences";
 
 const themeMessageKeys: Record<
   ThemeId,
@@ -66,6 +71,9 @@ type AppearanceTabProps = {
 
 export function AppearanceTab(props: AppearanceTabProps) {
   const { locale, setLocale, t } = useI18n();
+  const [networkAvatars, setNetworkAvatars] = useState(() =>
+    loadNetworkAvatars(),
+  );
 
   return (
     <>
@@ -196,6 +204,37 @@ export function AppearanceTab(props: AppearanceTabProps) {
             onChange={(event) => props.onSelectAccent(event.target.value)}
           />
         </label>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.networkAvatars")}</div>
+        <div
+          className="shell-options"
+          role="group"
+          aria-label={t("settings.networkAvatars")}
+        >
+          {[true, false].map((enabled) => (
+            <button
+              key={String(enabled)}
+              type="button"
+              aria-pressed={networkAvatars === enabled}
+              className={`shell-option ${
+                networkAvatars === enabled ? "is-selected" : ""
+              }`}
+              onClick={() => {
+                setNetworkAvatars(enabled);
+                saveNetworkAvatars(enabled);
+              }}
+            >
+              {t(
+                enabled
+                  ? "settings.networkAvatarsOn"
+                  : "settings.networkAvatarsOff",
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">{t("settings.networkAvatarsNote")}</p>
       </div>
     </>
   );

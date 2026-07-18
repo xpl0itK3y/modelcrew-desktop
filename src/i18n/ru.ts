@@ -26,6 +26,11 @@ export const ru = {
   "git.showMore": "Показать ещё",
   "git.viewGraph": "Граф",
   "git.viewList": "Список",
+  "settings.networkAvatars": "Аватары авторов",
+  "settings.networkAvatarsOn": "Из сети",
+  "settings.networkAvatarsOff": "Инициалы",
+  "settings.networkAvatarsNote":
+    "«Из сети» — настоящие аватары с GitHub и Gravatar (по почте автора). Требует интернета и делает запросы к этим сервисам. «Инициалы» — офлайн-кружки, ничего наружу не отправляется.",
   "git.allBranches": "Все ветки",
   "git.allBranchesHint":
     "Показать историю всех веток, включая серверные (origin/…). Обновляется фоновым fetch.",

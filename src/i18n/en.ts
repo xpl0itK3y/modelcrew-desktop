@@ -27,6 +27,11 @@ export const en: Record<MessageKey, string> = {
   "git.showMore": "Show more",
   "git.viewGraph": "Graph",
   "git.viewList": "List",
+  "settings.networkAvatars": "Author avatars",
+  "settings.networkAvatarsOn": "From the web",
+  "settings.networkAvatarsOff": "Initials",
+  "settings.networkAvatarsNote":
+    "“From the web” shows real avatars from GitHub and Gravatar (by author e-mail). Needs internet and makes requests to those services. “Initials” are offline circles that send nothing out.",
   "git.allBranches": "All branches",
   "git.allBranchesHint":
     "Show history across all branches, including server ones (origin/…). Refreshed by the background fetch.",

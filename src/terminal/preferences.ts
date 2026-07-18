@@ -1,5 +1,26 @@
 const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
 const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
+const NETWORK_AVATARS_STORAGE_KEY = "modelcrew.networkAvatars";
+
+// Аватарки авторов из сети (GitHub/Gravatar). Выкл — офлайн-инициалы.
+// Переключение шлёт событие, чтобы аватарки перерисовались сразу.
+export function loadNetworkAvatars(): boolean {
+  try {
+    return localStorage.getItem(NETWORK_AVATARS_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function saveNetworkAvatars(enabled: boolean): void {
+  try {
+    localStorage.setItem(NETWORK_AVATARS_STORAGE_KEY, enabled ? "on" : "off");
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+  window.dispatchEvent(new Event("modelcrew:network-avatars"));
+}
+
 const AGENT_ALERTS_STORAGE_KEY = "modelcrew.agentAlerts";
 
 // Уведомления «агент закончил/ждёт ответа» для панелей вне поля зрения.
