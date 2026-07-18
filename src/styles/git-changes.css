@@ -1104,7 +1104,8 @@
   .git-commit.is-arriving,
   .git-file-header.is-updated,
   .git-file-header.is-updated .git-file-counts,
-  .git-view {
+  .git-view,
+  .git-history-swap {
     animation: none;
   }
 
@@ -1491,8 +1492,43 @@
 /* ---------- Инлайн-детали коммита в графе ---------- */
 
 .git-graph-details {
+  position: relative;
   padding-right: 10px;
   padding-bottom: 4px;
+}
+
+/* Продолжение дорожек графа сквозь раскрытый блок — линии ветки не рвутся. */
+.git-graph-details-lanes {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.git-graph-lane-through {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.6px;
+  transform: translateX(-50%);
+}
+
+/* ---------- Анимация переключения «Граф ⇄ Список» ---------- */
+
+.git-history-swap {
+  animation: git-swap-in 190ms ease;
+}
+
+@keyframes git-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---------- Кликабельные бейджи веток/тегов ---------- */

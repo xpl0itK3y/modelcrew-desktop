@@ -137,6 +137,22 @@ function graphEdgePath(x1: number, y1: number, x2: number, y2: number): string {
   return `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
 }
 
+// Дорожки, продолжающиеся ниже строки (уникальные колонки нижних рёбер) — их
+// дорисовываем вертикально сквозь раскрытый блок деталей, чтобы граф не рвался.
+function throughLanes(row: {
+  bottom: { toCol: number; color: number }[];
+}): { col: number; color: number }[] {
+  const seen = new Set<number>();
+  const lanes: { col: number; color: number }[] = [];
+  for (const edge of row.bottom) {
+    if (!seen.has(edge.toCol)) {
+      seen.add(edge.toCol);
+      lanes.push({ col: edge.toCol, color: edge.color });
+    }
+  }
+  return lanes;
+}
+
 // Иконка-статус в списке: одна буква как в git status.
 const STATUS_LETTER: Record<GitChangedFile["status"], string> = {
   modified: "M",
@@ -1255,6 +1271,25 @@ function CommitGraph(props: {
                 className="git-graph-details"
                 style={{ paddingLeft: width + 10 }}
               >
+                {/* Продолжаем дорожки сквозь блок деталей (по нижним рёбрам
+                    строки), чтобы линии ветки под раскрытым коммитом не
+                    рвались. */}
+                <span
+                  className="git-graph-details-lanes"
+                  style={{ width }}
+                  aria-hidden="true"
+                >
+                  {throughLanes(row).map((lane) => (
+                    <span
+                      key={lane.col}
+                      className="git-graph-lane-through"
+                      style={{
+                        left: laneCenter(lane.col),
+                        background: laneColor(lane.color),
+                      }}
+                    />
+                  ))}
+                </span>
                 <RevealHeight closing={props.detailsPresence.closing}>
                   <CommitDetails
                     workspaceId={props.workspaceId}
@@ -1449,6 +1484,9 @@ function HistoryView(props: {
           {actionError}
         </div>
       )}
+      {/* key по режиму перемонтирует контент — короткая анимация появления
+          при переключении «Граф ⇄ Список» в обе стороны. */}
+      <div key={graphMode ? "graph" : "list"} className="git-history-swap">
       {graphMode ? (
         <CommitGraph
           commits={commits}
@@ -1581,6 +1619,7 @@ function HistoryView(props: {
           })}
         </div>
       )}
+      </div>
       {canLoadMore && (
         <button
           type="button"
