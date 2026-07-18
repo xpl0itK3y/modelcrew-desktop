@@ -226,3 +226,20 @@ pub async fn github_logout(
     clear_token(&app);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Регрессия: reqwest в нашем дереве идёт с rustls, но feature-unification
+    // может дать его без криптопровайдера — тогда build() Client паникует.
+    // Фича `rustls` (aws-lc-rs) в Cargo.toml включает провайдер; тест
+    // упадёт (паникой), если стек снова окажется без него.
+    #[test]
+    fn builds_an_http_client_with_a_crypto_provider() {
+        assert!(
+            http().is_ok(),
+            "reqwest Client must build with a rustls crypto provider present"
+        );
+    }
+}
