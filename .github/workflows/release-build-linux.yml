@@ -70,6 +70,10 @@ jobs:
 
       - name: Build Linux bundles
         env:
+          # Public OAuth App Client ID for GitHub sign-in, injected at build
+          # time so it stays out of the source tree. An empty secret just
+          # leaves sign-in "not configured" — nothing breaks.
+          GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           # Bundle GStreamer into the AppImage so notification sounds work
           # without the user installing system audio plugins. The deb/rpm
           # declare these as package dependencies instead.

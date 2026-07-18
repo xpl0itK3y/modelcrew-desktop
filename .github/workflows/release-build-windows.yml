@@ -39,6 +39,10 @@ jobs:
 
       - name: Build Windows bundles
         env:
+          # Public OAuth App Client ID for GitHub sign-in, injected at build
+          # time so it stays out of the source tree. An empty secret just
+          # leaves sign-in "not configured" — nothing breaks.
+          GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --ci --target "x86_64-pc-windows-msvc" --bundles "nsis,msi"

@@ -51,6 +51,10 @@ jobs:
 
       - name: Build macOS bundles with ad-hoc signing
         env:
+          # Public OAuth App Client ID for GitHub sign-in, injected at build
+          # time so it stays out of the source tree. An empty secret just
+          # leaves sign-in "not configured" — nothing breaks.
+          GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           APPLE_SIGNING_IDENTITY: "-"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

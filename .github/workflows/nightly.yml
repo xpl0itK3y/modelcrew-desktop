@@ -119,6 +119,9 @@ jobs:
       - name: Build macOS bundles with ad-hoc signing
         if: runner.os == 'macOS'
         env:
+          # Public OAuth App Client ID for GitHub sign-in (empty → not
+          # configured); kept in a secret so it stays out of the repo.
+          GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           APPLE_SIGNING_IDENTITY: "-"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -127,6 +130,9 @@ jobs:
       - name: Build Windows or Linux bundles
         if: runner.os != 'macOS'
         env:
+          # Public OAuth App Client ID for GitHub sign-in (empty → not
+          # configured); kept in a secret so it stays out of the repo.
+          GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           # Bundle GStreamer into the Linux AppImage so audio works without the
           # user installing system plugins (ignored on Windows).
           APPIMAGE_BUNDLE_GSTREAMER: "1"
