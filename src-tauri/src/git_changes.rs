@@ -697,25 +697,22 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
     Ok(branches)
 }
 
-// Фоновый fetch: обновляет refs/remotes, чтобы ↑/↓ показывали реальное
-// расхождение с сервером. Никогда не спрашивает пароль (терминала у него
-// нет) и обрывает зависший HTTP: лучше тихо не получиться, чем повиснуть.
-pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
+// Сетевая git-операция без интерактивных запросов пароля: терминала у неё
+// нет, поэтому GIT_TERMINAL_PROMPT=0 и BatchMode обрывают попытку спросить
+// пароль, а http.lowSpeed* — зависший HTTP. Лучше тихо/быстро упасть с
+// ошибкой, чем повиснуть навсегда.
+fn run_git_network(toplevel: &Path, args: &[&str]) -> CommandResult<()> {
     let output = git_command()
         .args([
             "-c",
             "http.lowSpeedLimit=1000",
             "-c",
             "http.lowSpeedTime=15",
-            "fetch",
-            "--quiet",
         ])
+        .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
-        .current_dir(&toplevel)
+        .current_dir(toplevel)
         .output()
         .map_err(|error| CommandError::new(ErrorCode::GitUnavailable).with_debug(error))?;
     if !output.status.success() {
@@ -729,6 +726,32 @@ pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
     Ok(())
 }
 
+// Фоновый fetch: обновляет refs/remotes, чтобы ↑/↓ показывали реальное
+// расхождение с сервером.
+pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    run_git_network(&toplevel, &["fetch", "--quiet"])
+}
+
+// Забрать изменения с сервера. --ff-only: только перемотка, без авто-merge —
+// если ветки разошлись, честно падаем с ошибкой, ничего не ломая.
+pub fn pull_upstream(root: &Path) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    run_git_network(&toplevel, &["pull", "--ff-only", "--quiet"])
+}
+
+// Отправить локальные коммиты текущей ветки на её upstream.
+pub fn push_upstream(root: &Path) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    run_git_network(&toplevel, &["push", "--quiet"])
+}
+
 #[tauri::command]
 pub async fn git_fetch_upstream(
     window: tauri::WebviewWindow,
@@ -740,6 +763,50 @@ pub async fn git_fetch_upstream(
     tauri::async_runtime::spawn_blocking(move || fetch_upstream(&root))
         .await
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_pull(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || pull_upstream(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_push(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || push_upstream(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_commit_action(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    action: String,
+    hash: String,
+    name: Option<String>,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        commit_action(&root, &action, &hash, name.as_deref())
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 pub fn switch_branch(root: &Path, name: &str, remote: bool) -> CommandResult<()> {
@@ -756,6 +823,41 @@ pub fn switch_branch(root: &Path, name: &str, remote: bool) -> CommandResult<()>
         run_git(&toplevel, &["checkout", name])?;
     }
     Ok(())
+}
+
+// Действие над конкретным коммитом истории. Все варианты — стандартные
+// операции git, которые пользователь осознанно запускает из меню; ошибки
+// (грязное дерево, конфликт cherry-pick/revert) поднимаются наверх и
+// показываются в панели, ничего не проглатывая.
+//   checkout   — перейти на коммит (HEAD отделяется);
+//   branch     — создать ветку `name` от коммита и переключиться на неё;
+//   cherryPick — применить коммит поверх текущей ветки;
+//   revert     — создать коммит, отменяющий данный.
+pub fn commit_action(
+    root: &Path,
+    action: &str,
+    hash: &str,
+    name: Option<&str>,
+) -> CommandResult<()> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    match action {
+        "checkout" => run_git(&toplevel, &["checkout", hash]).map(|_| ()),
+        "branch" => {
+            let Some(name) = name.filter(|candidate| is_safe_ref_name(candidate)) else {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("branch", name.unwrap_or_default()));
+            };
+            run_git(&toplevel, &["checkout", "-b", name, hash]).map(|_| ())
+        }
+        "cherryPick" => run_git(&toplevel, &["cherry-pick", hash]).map(|_| ()),
+        "revert" => run_git(&toplevel, &["revert", "--no-edit", hash]).map(|_| ()),
+        other => Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("action", other)),
+    }
 }
 
 pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Vec<GitCommitInfo>> {
@@ -946,11 +1048,9 @@ pub async fn git_log(
 ) -> CommandResult<Vec<GitCommitInfo>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        list_log(&root, limit, all.unwrap_or(false))
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || list_log(&root, limit, all.unwrap_or(false)))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Действия: коммит и откат файла ----------
@@ -1811,5 +1911,75 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let summary = collect_summary(root).unwrap();
         assert!(summary.files.is_empty());
         assert!(commit_all(root, "   ").is_err());
+    }
+
+    #[test]
+    fn commit_actions_in_a_real_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "user.name", "t"]);
+        git(&["config", "user.email", "t@t"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second"]);
+
+        let log = list_log(root, 10, false).unwrap();
+        let second = log[0].hash.clone();
+        let first = log[1].hash.clone();
+
+        // Некорректные ввод отклоняются до запуска git.
+        assert!(commit_action(root, "checkout", "nope", None).is_err());
+        assert!(commit_action(root, "unknown", &second, None).is_err());
+        assert!(commit_action(root, "branch", &second, Some("bad name")).is_err());
+
+        // Ветка от первого коммита: создаётся и становится текущей.
+        commit_action(root, "branch", &first, Some("from-first")).unwrap();
+        let branches = list_branches(root).unwrap();
+        assert_eq!(
+            branches.iter().find(|b| b.is_current).unwrap().name,
+            "from-first"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\n",
+            "новая ветка стоит на первом коммите"
+        );
+
+        // Cherry-pick второго коммита поверх ветки от первого.
+        commit_action(root, "cherryPick", &second, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\ntwo\n",
+            "cherry-pick принёс изменение второго коммита"
+        );
+
+        // Revert последнего коммита откатывает содержимое новым коммитом.
+        let tip = list_log(root, 1, false).unwrap()[0].hash.clone();
+        commit_action(root, "revert", &tip, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\n",
+            "revert вернул содержимое к состоянию до коммита"
+        );
+
+        // Checkout на коммит отделяет HEAD — текущей ветки нет.
+        commit_action(root, "checkout", &first, None).unwrap();
+        assert_eq!(collect_summary(root).unwrap().branch, None);
     }
 }

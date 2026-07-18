@@ -297,6 +297,36 @@ export function fetchLog(
   return invoke<GitCommitInfo[]>("git_log", { workspaceId, limit, all });
 }
 
+// Действия над коммитом истории: checkout (отделить HEAD), branch (создать
+// ветку от коммита), cherryPick (применить поверх текущей), revert (отменить
+// коммит новым). Ошибки git поднимаются наверх и показываются в панели.
+export type CommitAction = "checkout" | "branch" | "cherryPick" | "revert";
+
+export function commitAction(
+  workspaceId: string,
+  action: CommitAction,
+  hash: string,
+  name?: string,
+): Promise<void> {
+  return invoke("git_commit_action", {
+    workspaceId,
+    action,
+    hash,
+    ...(name === undefined ? {} : { name }),
+  });
+}
+
+// Забрать с сервера (ff-only) и отправить локальные коммиты. Обе — сетевые,
+// без интерактивного запроса пароля: при необходимости авторизации падают с
+// ошибкой, а не виснут.
+export function gitPull(workspaceId: string): Promise<void> {
+  return invoke("git_pull", { workspaceId });
+}
+
+export function gitPush(workspaceId: string): Promise<void> {
+  return invoke("git_push", { workspaceId });
+}
+
 export type GitCommitFile = {
   path: string;
   additions?: number;

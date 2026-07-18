@@ -15,8 +15,8 @@ use agent_sessions::agent_session_locate;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_read_file, git_revert_file,
-    git_switch_branch, git_write_file, GitWatchState,
+    git_commit_action, git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_pull,
+    git_push, git_read_file, git_revert_file, git_switch_branch, git_write_file, GitWatchState,
 };
 use github_auth::{
     github_auth_available, github_current_user, github_device_poll, github_device_start,
@@ -694,6 +694,9 @@ pub fn run() {
             git_log,
             git_commit_files,
             git_fetch_upstream,
+            git_pull,
+            git_push,
+            git_commit_action,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,

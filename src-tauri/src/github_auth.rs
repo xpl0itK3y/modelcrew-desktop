@@ -134,7 +134,11 @@ pub async fn github_device_start(window: tauri::WebviewWindow) -> CommandResult<
         verification_uri: code.verification_uri,
         device_code: code.device_code,
         interval: code.interval.max(5),
-        expires_in: if code.expires_in == 0 { 900 } else { code.expires_in },
+        expires_in: if code.expires_in == 0 {
+            900
+        } else {
+            code.expires_in
+        },
     })
 }
 
@@ -154,10 +158,7 @@ pub async fn github_device_poll(
         .form(&[
             ("client_id", GITHUB_CLIENT_ID),
             ("device_code", device_code.as_str()),
-            (
-                "grant_type",
-                "urn:ietf:params:oauth:grant-type:device_code",
-            ),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
         ])
         .send()
         .await

@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
   authorAvatar,
+  commitAction,
   commitAll,
   fetchBranches,
   fetchCommitFiles,
@@ -10,6 +18,8 @@ import {
   fetchLog,
   formatRelativeTime,
   getGitSummary,
+  gitPull,
+  gitPush,
   parseUnifiedDiff,
   readRepoFile,
   refreshGitChanges,
@@ -18,6 +28,7 @@ import {
   subscribeGitChanges,
   switchBranch,
   writeRepoFile,
+  type CommitAction,
   type GitBranchInfo,
   type GitChangedFile,
   type GitChangesSummary,
@@ -688,6 +699,288 @@ function CommitDetails(props: {
   );
 }
 
+// Плавающее меню действий над коммитом: копирование, ветка отсюда, checkout,
+// cherry-pick, revert. Открывается по ⋯ или правому клику; опасные действия
+// требуют подтверждения прямо в меню, ветка — ввода имени.
+function CommitActionsMenu(props: {
+  workspaceId: string;
+  commit: GitCommitInfo;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onError: (message: string) => void;
+  onDone: () => void;
+}) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<
+    null | "checkout" | "cherryPick" | "revert"
+  >(null);
+  const [branching, setBranching] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [copied, setCopied] = useState<null | "hash" | "message">(null);
+
+  // Закрытие по клику вне и по Esc.
+  useEffect(() => {
+    const onDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) {
+        props.onClose();
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [props]);
+
+  const run = async (action: CommitAction, name?: string) => {
+    setBusy(true);
+    try {
+      await commitAction(props.workspaceId, action, props.commit.hash, name);
+      props.onDone();
+      props.onClose();
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+      props.onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async (kind: "hash" | "message") => {
+    const text =
+      kind === "hash"
+        ? props.commit.hash
+        : props.commit.subject +
+          (props.commit.body ? `\n\n${props.commit.body}` : "");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      window.setTimeout(() => props.onClose(), 650);
+    } catch {
+      props.onClose();
+    }
+  };
+
+  // Фиксированное позиционирование у курсора/кнопки, прижатое к краям экрана.
+  const style: CSSProperties = {
+    position: "fixed",
+    top: Math.max(8, Math.min(props.y, window.innerHeight - 240)),
+    left: Math.max(8, Math.min(props.x, window.innerWidth - 236)),
+  };
+
+  return (
+    <div ref={ref} className="git-actions-menu" role="menu" style={style}>
+      {branching ? (
+        <div className="git-actions-branch">
+          <input
+            autoFocus
+            className="git-actions-input"
+            placeholder={t("git.actionBranchName")}
+            value={branchName}
+            spellCheck={false}
+            disabled={busy}
+            onChange={(event) => setBranchName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && branchName.trim()) {
+                void run("branch", branchName.trim());
+              } else if (event.key === "Escape") {
+                setBranching(false);
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="git-actions-go"
+            disabled={busy || !branchName.trim()}
+            onClick={() => void run("branch", branchName.trim())}
+          >
+            {t("git.actionBranchCreate")}
+          </button>
+        </div>
+      ) : confirm ? (
+        <div className="git-actions-confirm">
+          <span className="git-actions-confirm-text">
+            {confirm === "checkout"
+              ? t("git.actionCheckoutConfirm")
+              : confirm === "cherryPick"
+                ? t("git.actionCherryConfirm")
+                : t("git.actionRevertConfirm")}
+          </span>
+          <div className="git-actions-confirm-row">
+            <button
+              type="button"
+              className="git-actions-cancel"
+              disabled={busy}
+              onClick={() => setConfirm(null)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className="git-actions-danger"
+              disabled={busy}
+              onClick={() => void run(confirm)}
+            >
+              {t("git.actionConfirm")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            onClick={() => void copy("hash")}
+          >
+            {copied === "hash" ? t("git.copied") : t("git.actionCopyHash")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            onClick={() => void copy("message")}
+          >
+            {copied === "message"
+              ? t("git.copied")
+              : t("git.actionCopyMessage")}
+          </button>
+          <div className="git-actions-sep" aria-hidden="true" />
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => setBranching(true)}
+          >
+            {t("git.actionBranch")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => setConfirm("checkout")}
+          >
+            {t("git.actionCheckout")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => setConfirm("cherryPick")}
+          >
+            {t("git.actionCherryPick")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item is-danger"
+            disabled={busy}
+            onClick={() => setConfirm("revert")}
+          >
+            {t("git.actionRevert")}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Индикатор расхождения с сервером в шапке: ↓ забрать (ff-only), ↑ отправить.
+// Клик разворачивает подтверждение, повторный — выполняет. Без upstream (не с
+// чем сравнивать) не показывается; при совпадении — тихая галочка.
+function SyncStatus(props: {
+  workspaceId: string;
+  ahead?: number;
+  behind?: number;
+  onError: (message: string) => void;
+}) {
+  const { t } = useI18n();
+  const { ahead, behind } = props;
+  const [busy, setBusy] = useState<null | "pull" | "push">(null);
+  const [confirm, setConfirm] = useState<null | "pull" | "push">(null);
+
+  // Незакреплённое подтверждение гаснет само.
+  useEffect(() => {
+    if (!confirm) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirm(null), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [confirm]);
+
+  if (ahead === undefined && behind === undefined) {
+    return null; // нет upstream — сравнивать не с чем
+  }
+
+  const run = async (kind: "pull" | "push") => {
+    setBusy(kind);
+    setConfirm(null);
+    try {
+      if (kind === "pull") {
+        await gitPull(props.workspaceId);
+      } else {
+        await gitPush(props.workspaceId);
+      }
+      void refreshGitChanges(props.workspaceId);
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if ((ahead ?? 0) === 0 && (behind ?? 0) === 0) {
+    return (
+      <span className="git-sync is-synced" title={t("git.syncUpToDate")}>
+        ✓
+      </span>
+    );
+  }
+
+  return (
+    <div className="git-sync">
+      {(behind ?? 0) > 0 && (
+        <button
+          type="button"
+          className={`git-sync-btn ${confirm === "pull" ? "is-confirm" : ""}`}
+          disabled={busy !== null}
+          title={t("git.pullTitle")}
+          onClick={() =>
+            confirm === "pull" ? void run("pull") : setConfirm("pull")
+          }
+        >
+          {confirm === "pull" ? t("git.pullConfirm") : `↓${behind}`}
+        </button>
+      )}
+      {(ahead ?? 0) > 0 && (
+        <button
+          type="button"
+          className={`git-sync-btn ${confirm === "push" ? "is-confirm" : ""}`}
+          disabled={busy !== null}
+          title={t("git.pushTitle")}
+          onClick={() =>
+            confirm === "push" ? void run("push") : setConfirm("push")
+          }
+        >
+          {confirm === "push" ? t("git.pushConfirm") : `↑${ahead}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Вкладка «История»: последние коммиты с автором, давностью и ветками.
 // Граф веток: цветные дорожки, точки коммитов, ветвления и слияния — как в
 // редакторах. Клик по строке копирует хеш.
@@ -695,6 +988,10 @@ function CommitGraph(props: {
   commits: GitCommitInfo[];
   copiedHash: string | null;
   onCopy: (commit: GitCommitInfo) => void;
+  onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
+  // >0 — показать узел незакоммиченных изменений над HEAD (мост к «Изменениям»).
+  workingTreeCount: number;
+  onOpenChanges: () => void;
 }) {
   const { t } = useI18n();
   const rows = useMemo(
@@ -708,9 +1005,52 @@ function CommitGraph(props: {
     [props.commits],
   );
   const width = (rows[0]?.width ?? 1) * LANE_W;
+  const head = rows[0];
 
   return (
     <div className="git-graph">
+      {props.workingTreeCount > 0 && head && (
+        <button
+          type="button"
+          className="git-graph-row is-worktree"
+          title={t("git.workingTreeHint")}
+          onClick={props.onOpenChanges}
+        >
+          <svg
+            className="git-graph-lines"
+            width={width}
+            height={GRAPH_ROW_H}
+            style={{ width, minWidth: width }}
+            aria-hidden="true"
+          >
+            {/* Пунктирный поводок от рабочего дерева вниз к точке HEAD. Свой
+                «отросток» вверх у свежего коммита граф не рисует, поэтому
+                тянем линию в его строку (svg — overflow: visible). */}
+            <line
+              x1={laneCenter(head.col)}
+              y1={GRAPH_ROW_H / 2}
+              x2={laneCenter(head.col)}
+              y2={GRAPH_ROW_H + GRAPH_ROW_H / 2}
+              stroke={laneColor(head.color)}
+              strokeWidth={1.6}
+              strokeDasharray="2.5 2.5"
+            />
+            <circle
+              cx={laneCenter(head.col)}
+              cy={GRAPH_ROW_H / 2}
+              r={GRAPH_DOT_R}
+              fill="var(--mc-bg)"
+              stroke={laneColor(head.color)}
+              strokeWidth={1.6}
+            />
+          </svg>
+          <span className="git-graph-subject git-worktree-label">
+            {t("git.workingTree", {
+              count: String(props.workingTreeCount),
+            })}
+          </span>
+        </button>
+      )}
       {props.commits.map((commit, index) => {
         const row = rows[index];
         if (!row) {
@@ -719,14 +1059,25 @@ function CommitGraph(props: {
         const isMerge = commit.parents.length > 1;
         const cx = laneCenter(row.col);
         return (
-          <button
-            type="button"
+          <div
             key={commit.hash}
+            role="button"
+            tabIndex={0}
             className={`git-graph-row ${
               props.copiedHash === commit.hash ? "is-copied" : ""
             }`}
             title={t("git.copyHash")}
             onClick={() => props.onCopy(commit)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              props.onMenu(commit, event.clientX, event.clientY);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                props.onCopy(commit);
+              }
+            }}
           >
             <svg
               className="git-graph-lines"
@@ -793,14 +1144,32 @@ function CommitGraph(props: {
             <span className="git-graph-author" title={commit.author}>
               {commit.author}
             </span>
-          </button>
+            <button
+              type="button"
+              className="git-commit-menu-btn"
+              title={t("git.commitActions")}
+              aria-label={t("git.commitActions")}
+              onClick={(event) => {
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                props.onMenu(commit, rect.right, rect.bottom);
+              }}
+            >
+              ⋯
+            </button>
+          </div>
         );
       })}
     </div>
   );
 }
 
-function HistoryView(props: { workspaceId: string }) {
+function HistoryView(props: {
+  workspaceId: string;
+  // Незакоммиченных файлов (для узла рабочего дерева) и переход к «Изменениям».
+  fileCount: number;
+  onOpenChanges: () => void;
+}) {
   const { locale, t } = useI18n();
   const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
   const [graphMode, setGraphMode] = useState(true);
@@ -812,8 +1181,19 @@ function HistoryView(props: { workspaceId: string }) {
   // Сколько коммитов запрашивать; «Показать ещё» наращивает порциями.
   const [limit, setLimit] = useState(100);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Открытое меню действий над коммитом: коммит и точка привязки на экране.
+  const [menu, setMenu] = useState<{
+    commit: GitCommitInfo;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Немедленная перезагрузка лога после действия (не дожидаясь вотчера).
+  const [reloadNonce, setReloadNonce] = useState(0);
   // Детали остаются смонтированными на время exit-анимации при сворачивании.
   const detailsPresence = useAnimatedPresence(expandedHash, 240);
+  const openMenu = (commit: GitCommitInfo, x: number, y: number) =>
+    setMenu({ commit, x, y });
   // Коммиты, появившиеся при открытой вкладке, въезжают с анимацией;
   // первоначальный список и догруженные «Показать ещё» (они старше уже
   // виденных) показываются сразу.
@@ -864,7 +1244,20 @@ function HistoryView(props: { workspaceId: string }) {
       cancelled = true;
       unsubscribe();
     };
-  }, [props.workspaceId, limit, allBranches]);
+  }, [props.workspaceId, limit, allBranches, reloadNonce]);
+
+  // Незакоммиченные изменения показываем узлом только в обычном виде: в режиме
+  // «все ветки» верхний коммит — не обязательно HEAD, поводок был бы обманчив.
+  const workingTreeCount = allBranches ? 0 : props.fileCount;
+
+  // Ошибка действия гаснет сама.
+  useEffect(() => {
+    if (!actionError) {
+      return;
+    }
+    const timer = window.setTimeout(() => setActionError(null), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [actionError]);
 
   // Бэкенд отдаёт максимум 500 за раз; если пришло меньше лимита — история
   // закончилась и кнопка не нужна.
@@ -921,14 +1314,35 @@ function HistoryView(props: { workspaceId: string }) {
           ⎇ {t("git.allBranches")}
         </button>
       </div>
+      {actionError && (
+        <div className="git-commit-error" role="alert">
+          {actionError}
+        </div>
+      )}
       {graphMode ? (
         <CommitGraph
           commits={commits}
           copiedHash={copiedHash}
           onCopy={(commit) => void copyHash(commit)}
+          onMenu={openMenu}
+          workingTreeCount={workingTreeCount}
+          onOpenChanges={props.onOpenChanges}
         />
       ) : (
         <div className="git-commit-list">
+          {workingTreeCount > 0 && (
+            <button
+              type="button"
+              className="git-worktree-card"
+              title={t("git.workingTreeHint")}
+              onClick={props.onOpenChanges}
+            >
+              <span className="git-worktree-dot" aria-hidden="true" />
+              <span className="git-worktree-text">
+                {t("git.workingTree", { count: String(workingTreeCount) })}
+              </span>
+            </button>
+          )}
           {commits.map((commit) => {
             const expanded = expandedHash === commit.hash;
             return (
@@ -937,6 +1351,10 @@ function HistoryView(props: { workspaceId: string }) {
             className={`git-commit ${expanded ? "is-expanded" : ""} ${
               arrivedHashesRef.current.has(commit.hash) ? "is-arriving" : ""
             }`}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              openMenu(commit, event.clientX, event.clientY);
+            }}
           >
             {/* Клик по карточке раскрывает описание, автора и соавторов. */}
             <button
@@ -1016,6 +1434,19 @@ function HistoryView(props: { workspaceId: string }) {
                 );
               })}
             </div>
+            <button
+              type="button"
+              className="git-commit-menu-btn"
+              title={t("git.commitActions")}
+              aria-label={t("git.commitActions")}
+              onClick={(event) => {
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                openMenu(commit, rect.right, rect.bottom);
+              }}
+            >
+              ⋯
+            </button>
             {detailsPresence?.item === commit.hash && (
               <RevealHeight closing={detailsPresence.closing}>
                 <CommitDetails
@@ -1042,6 +1473,17 @@ function HistoryView(props: { workspaceId: string }) {
         >
           {loadingMore ? t("git.loading") : t("git.showMore")}
         </button>
+      )}
+      {menu && (
+        <CommitActionsMenu
+          workspaceId={props.workspaceId}
+          commit={menu.commit}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          onError={setActionError}
+          onDone={() => setReloadNonce((value) => value + 1)}
+        />
       )}
     </div>
   );
@@ -1148,11 +1590,19 @@ export function GitChangesView(props: { workspaceId: string }) {
                 </button>
               ))}
             </div>
-            <BranchSwitcher
-              workspaceId={workspaceId}
-              currentBranch={summary.branch}
-              onError={setBranchError}
-            />
+            <div className="git-toolbar-right">
+              <SyncStatus
+                workspaceId={workspaceId}
+                ahead={summary.ahead}
+                behind={summary.behind}
+                onError={setBranchError}
+              />
+              <BranchSwitcher
+                workspaceId={workspaceId}
+                currentBranch={summary.branch}
+                onError={setBranchError}
+              />
+            </div>
           </div>
           {branchError && (
             <div className="git-commit-error" role="alert">
@@ -1163,7 +1613,11 @@ export function GitChangesView(props: { workspaceId: string }) {
               переключении «Изменения ⇄ История». */}
           <div key={view} className="git-view">
           {view === "history" ? (
-            <HistoryView workspaceId={workspaceId} />
+            <HistoryView
+              workspaceId={workspaceId}
+              fileCount={summary.files.length}
+              onOpenChanges={() => setView("changes")}
+            />
           ) : summary.files.length === 0 ? (
             <div className="git-empty">{t("git.clean")}</div>
           ) : (
