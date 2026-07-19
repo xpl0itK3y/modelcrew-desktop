@@ -167,6 +167,11 @@
   cursor: wait;
 }
 
+/* Постоянно недоступная опция (напр. «Из сети» без входа) — не «ожидание». */
+.shell-option.is-locked:disabled {
+  cursor: not-allowed;
+}
+
 .shell-option.is-selected {
   border-color: var(--mc-accent);
   color: var(--mc-text-bright);

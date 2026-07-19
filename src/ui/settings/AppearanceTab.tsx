@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ACCENT_COLORS,
   APP_THEMES,
@@ -10,6 +10,7 @@ import {
   loadNetworkAvatars,
   saveNetworkAvatars,
 } from "../../terminal/preferences";
+import { isGithubSignedIn, subscribeGithubAuth } from "../../github/authState";
 
 const themeMessageKeys: Record<
   ThemeId,
@@ -74,6 +75,21 @@ export function AppearanceTab(props: AppearanceTabProps) {
   const [networkAvatars, setNetworkAvatars] = useState(() =>
     loadNetworkAvatars(),
   );
+  // Сетевые аватарки доступны только после входа через GitHub.
+  const [signedIn, setSignedIn] = useState(() => isGithubSignedIn());
+  useEffect(
+    () => subscribeGithubAuth(() => setSignedIn(isGithubSignedIn())),
+    [],
+  );
+  // Настройку могли переключить извне (автовключение при входе) — подхватываем.
+  useEffect(() => {
+    const onChange = () => setNetworkAvatars(loadNetworkAvatars());
+    window.addEventListener("modelcrew:network-avatars", onChange);
+    return () =>
+      window.removeEventListener("modelcrew:network-avatars", onChange);
+  }, []);
+  // Что реально показывается: «Из сети» действует лишь когда пользователь вошёл.
+  const networkActive = signedIn && networkAvatars;
 
   return (
     <>
@@ -217,10 +233,17 @@ export function AppearanceTab(props: AppearanceTabProps) {
             <button
               key={String(enabled)}
               type="button"
-              aria-pressed={networkAvatars === enabled}
+              // «Из сети» доступна только вошедшим; без входа — только «Инициалы».
+              disabled={enabled && !signedIn}
+              aria-pressed={networkActive === enabled}
+              title={
+                enabled && !signedIn
+                  ? t("settings.networkAvatarsSignIn")
+                  : undefined
+              }
               className={`shell-option ${
-                networkAvatars === enabled ? "is-selected" : ""
-              }`}
+                networkActive === enabled ? "is-selected" : ""
+              } ${enabled && !signedIn ? "is-locked" : ""}`}
               onClick={() => {
                 setNetworkAvatars(enabled);
                 saveNetworkAvatars(enabled);
@@ -234,7 +257,11 @@ export function AppearanceTab(props: AppearanceTabProps) {
             </button>
           ))}
         </div>
-        <p className="settings-note">{t("settings.networkAvatarsNote")}</p>
+        <p className="settings-note">
+          {signedIn
+            ? t("settings.networkAvatarsNote")
+            : t("settings.networkAvatarsSignIn")}
+        </p>
       </div>
     </>
   );

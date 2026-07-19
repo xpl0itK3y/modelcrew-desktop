@@ -11,6 +11,8 @@ import {
   type GithubUser,
 } from "../github/auth";
 import { refreshGithubCommitAvatars } from "../git/githubAvatars";
+import { setGithubSignedIn } from "../github/authState";
+import { saveNetworkAvatars } from "../terminal/preferences";
 
 type FlowState =
   | { kind: "idle" }
@@ -47,6 +49,9 @@ export function GithubAuth() {
     void githubCurrentUser().then((current) => {
       if (!cancelled) {
         setUser(current);
+        // На старте: узнаём, вошёл ли пользователь (сохранённая настройка
+        // «Из сети» при этом не трогается — уважаем выбор вернувшегося).
+        setGithubSignedIn(current !== null);
       }
     });
     return () => {
@@ -113,6 +118,11 @@ export function GithubAuth() {
           if (!stopped) {
             setUser(current);
             setFlow({ kind: "idle" });
+            setGithubSignedIn(current !== null);
+            // Только что вошли — автоматически включаем аватарки «Из сети».
+            if (current) {
+              saveNetworkAvatars(true);
+            }
             // Появился токен — подтягиваем реальные аватарки коммиттеров.
             refreshGithubCommitAvatars();
           }
@@ -145,6 +155,8 @@ export function GithubAuth() {
     setMenuOpen(false);
     await githubLogout();
     setUser(null);
+    // Вышли — сетевые аватарки снова недоступны (в коммитах станут инициалы).
+    setGithubSignedIn(false);
     // Токена больше нет — карту GitHub-аватарок сбрасываем на Gravatar/инициалы.
     refreshGithubCommitAvatars();
   };

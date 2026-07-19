@@ -55,6 +55,8 @@ export const ru = {
   "settings.networkAvatarsOff": "Инициалы",
   "settings.networkAvatarsNote":
     "«Из сети» — настоящие аватары с GitHub и Gravatar (по почте автора). Требует интернета и делает запросы к этим сервисам. «Инициалы» — офлайн-кружки, ничего наружу не отправляется.",
+  "settings.networkAvatarsSignIn":
+    "«Из сети» доступна после входа через GitHub — тогда в коммитах и графе показываются настоящие аватары. Без входа — инициалы.",
   "github.login": "Войти",
   "github.loginTitle": "Войти через GitHub",
   "github.logout": "Выйти",

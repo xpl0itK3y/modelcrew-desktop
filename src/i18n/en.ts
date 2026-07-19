@@ -56,6 +56,8 @@ export const en: Record<MessageKey, string> = {
   "settings.networkAvatarsOff": "Initials",
   "settings.networkAvatarsNote":
     "“From the web” shows real avatars from GitHub and Gravatar (by author e-mail). Needs internet and makes requests to those services. “Initials” are offline circles that send nothing out.",
+  "settings.networkAvatarsSignIn":
+    "“From the web” unlocks after you sign in with GitHub — then commits and the graph show real avatars. Until then, initials.",
   "github.login": "Sign in",
   "github.loginTitle": "Sign in with GitHub",
   "github.logout": "Sign out",

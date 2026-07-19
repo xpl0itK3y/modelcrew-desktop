@@ -44,6 +44,7 @@ import {
   loadGithubCommitAvatars,
   subscribeGithubAvatars,
 } from "../git/githubAvatars";
+import { isGithubSignedIn, subscribeGithubAuth } from "../github/authState";
 import { loadNetworkAvatars } from "../terminal/preferences";
 import { useAnimatedPresence } from "../ui/useAnimatedPresence";
 
@@ -65,14 +66,17 @@ function laneColor(index: number): string {
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
 }
 
-// Аватарка автора: реальная (GitHub/Gravatar) при включённой настройке,
-// иначе — цветной кружок с инициалами (цвет из имени). Откат на инициалы
-// при офлайне, отсутствии аватара (404) или выключенной опции.
+// Аватарка автора: реальная (GitHub/Gravatar) — только для вошедшего через
+// GitHub пользователя и при включённой настройке «Из сети». Иначе (не вошёл,
+// офлайн, нет аватара, опция «Инициалы») — цветной кружок с инициалами.
 function AuthorAvatar(props: { name: string; email?: string }) {
   const { initials, hue } = authorAvatar(props.name);
   const [enabled, setEnabled] = useState(() => loadNetworkAvatars());
+  const [signedIn, setSignedIn] = useState(() => isGithubSignedIn());
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // Сетевые аватарки доступны только после входа через GitHub.
+  const networkOn = enabled && signedIn;
 
   useEffect(() => {
     const onChange = () => setEnabled(loadNetworkAvatars());
@@ -81,8 +85,13 @@ function AuthorAvatar(props: { name: string; email?: string }) {
       window.removeEventListener("modelcrew:network-avatars", onChange);
   }, []);
 
+  useEffect(
+    () => subscribeGithubAuth(() => setSignedIn(isGithubSignedIn())),
+    [],
+  );
+
   useEffect(() => {
-    if (!enabled || !props.email) {
+    if (!networkOn || !props.email) {
       setUrl(null);
       return;
     }
@@ -118,9 +127,9 @@ function AuthorAvatar(props: { name: string; email?: string }) {
       cancelled = true;
       unsubscribe();
     };
-  }, [enabled, props.email]);
+  }, [networkOn, props.email]);
 
-  const showImage = enabled && url !== null && !failed;
+  const showImage = networkOn && url !== null && !failed;
   return (
     <span
       className="git-avatar"
