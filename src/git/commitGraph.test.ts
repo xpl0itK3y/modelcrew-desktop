@@ -45,7 +45,7 @@ describe("computeCommitGraph", () => {
     expect(rows[2].bottom).toEqual(
       expect.arrayContaining([
         { fromCol: 0, toCol: 0, color: 0 },
-        { fromCol: 1, toCol: 0, color: 0 },
+        { fromCol: 1, toCol: 0, color: 1 },
       ]),
     );
     // Пока F не слился (строка C), его дорожка проходит через col1.
@@ -102,7 +102,7 @@ describe("computeCommitGraph", () => {
     // сходится к ней уже на своей строке: линия её узла уходит вниз-влево в
     // col0, а к узлу B остаётся одна дорожка.
     expect(rows[1].bottom).toEqual(
-      expect.arrayContaining([{ fromCol: 1, toCol: 0, color: 0 }]),
+      expect.arrayContaining([{ fromCol: 1, toCol: 0, color: 1 }]),
     );
     expect(rows[2].top).toEqual([{ fromCol: 0, toCol: 0, color: 0 }]);
   });
@@ -158,6 +158,21 @@ describe("computeCommitGraph", () => {
     assertLanesConnect(commits);
   });
 
+  it("does not reuse a color while a palette color is still free", () => {
+    const tips = Array.from({ length: 8 }, (_, index) => ({
+      hash: `tip-${index}`,
+      parents: [`root-${index}`],
+    }));
+    const roots = Array.from({ length: 8 }, (_, index) => ({
+      hash: `root-${index}`,
+      parents: [] as string[],
+    }));
+    const rows = assertLanesConnect([...tips, ...roots]);
+    // В палитре семь цветов: первые семь одновременно живых веток обязаны
+    // отличаться; только восьмая имеет право повторить один из них.
+    expect(new Set(rows.slice(0, 7).map((row) => row.color)).size).toBe(7);
+  });
+
   // Обрыв истории: родители самых старых загруженных коммитов не подгружены.
   it("survives commits whose parents are not loaded", () => {
     const commits = [
@@ -208,8 +223,11 @@ describe("computeCommitGraph", () => {
 
 // Инвариант корректного графа: между любыми соседними строками множество
 // дорожек, выходящих снизу (bottom.toCol), совпадает с входящими сверху в
-// следующую (top.fromCol) — иначе линия ветки рвётся. Плюс узлы и все рёбра
-// лежат в пределах ширины. Возвращает строки для дополнительных проверок.
+// следующую (top.fromCol) — иначе линия ветки рвётся. Этого одного мало:
+// дополнительно трассируем каждое ребро узла через все промежуточные строки и
+// проверяем, что оно приходит именно к заявленному parent hash, а не просто к
+// какой-то непрерывной дорожке. Плюс узлы и все рёбра лежат в пределах ширины.
+// Возвращает строки для дополнительных проверок.
 function assertLanesConnect(commits: { hash: string; parents: string[] }[]) {
   const rows = computeCommitGraph(commits);
   const uniqSorted = (values: number[]) =>
@@ -228,6 +246,50 @@ function assertLanesConnect(commits: { hash: string; parents: string[] }[]) {
       expect(edge.toCol).toBeGreaterThanOrEqual(0);
       expect(edge.toCol).toBeLessThan(row.width);
     }
+  }
+
+  const loadedHashes = new Set(commits.map((commit) => commit.hash));
+  // targetsBelow[col] — первый загруженный commit hash, к которому придёт
+  // дорожка с нижней границы текущей строки; null означает родителя за
+  // пределами загруженного окна. Обратный проход вычисляет это за O(edges).
+  let targetsBelow = new Map<number, string | null>();
+  for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex -= 1) {
+    const row = rows[rowIndex];
+    const commit = commits[rowIndex];
+    const parentEdges = row.bottom.filter((edge) => edge.fromCol === row.col);
+    expect(parentEdges).toHaveLength(commit.parents.length);
+    const actualTargets = parentEdges
+      .map((edge) => targetsBelow.get(edge.toCol) ?? null)
+      .sort();
+    const expectedTargets = commit.parents
+      .map((parent) => (loadedHashes.has(parent) ? parent : null))
+      .sort();
+    expect({ hash: commit.hash, actualTargets }).toEqual({
+      hash: commit.hash,
+      actualTargets: expectedTargets,
+    });
+
+    const targetsAbove = new Map<number, string | null>();
+    for (const edge of row.top) {
+      if (edge.toCol === row.col) {
+        targetsAbove.set(edge.fromCol, commit.hash);
+        continue;
+      }
+      const through = row.bottom.filter(
+        (candidate) =>
+          candidate.fromCol === edge.toCol && candidate.toCol === edge.toCol,
+      );
+      if (through.length !== 1) {
+        throw new Error(
+          `row ${rowIndex} lane ${edge.toCol} has ${through.length} continuations`,
+        );
+      }
+      targetsAbove.set(
+        edge.fromCol,
+        targetsBelow.get(through[0].toCol) ?? null,
+      );
+    }
+    targetsBelow = targetsAbove;
   }
   return rows;
 }

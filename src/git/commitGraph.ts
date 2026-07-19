@@ -38,11 +38,34 @@ function firstFreeColumn(lanes: (string | null)[]): number {
 }
 
 export function computeCommitGraph(commits: GraphInput[]): GraphRow[] {
+  // Вход обязан быть обратным топологическим порядком: каждый загруженный
+  // потомок расположен выше любого своего загруженного родителя. Backend
+  // гарантирует это через `git log --topo-order`; без этого уже показанный
+  // родитель нельзя честно соединить с появившимся ниже потомком.
   // lanes[col] — хеш коммита, которого «ждёт» дорожка сверху вниз.
   const lanes: (string | null)[] = [];
   const laneColor: number[] = [];
   let nextColor = 0;
-  const allocColor = () => nextColor++ % COLOR_COUNT;
+  const allocColor = () => {
+    const activeColors = new Set<number>();
+    for (let col = 0; col < lanes.length; col += 1) {
+      if (lanes[col] != null) {
+        activeColors.add(laneColor[col]);
+      }
+    }
+    for (let offset = 0; offset < COLOR_COUNT; offset += 1) {
+      const candidate = (nextColor + offset) % COLOR_COUNT;
+      if (!activeColors.has(candidate)) {
+        nextColor = (candidate + 1) % COLOR_COUNT;
+        return candidate;
+      }
+    }
+    // Одновременно открыто больше дорожек, чем цветов в палитре: повтор
+    // неизбежен, но продолжаем round-robin, а не залипаем на одном цвете.
+    const candidate = nextColor;
+    nextColor = (nextColor + 1) % COLOR_COUNT;
+    return candidate;
+  };
 
   const rows: GraphRow[] = [];
 
@@ -86,7 +109,7 @@ export function computeCommitGraph(commits: GraphInput[]): GraphRow[] {
     }
 
     // Размещаем родителей, не дублируя уже существующие дорожки.
-    const parentCols: number[] = [];
+    const parentEdges: { target: number; color: number }[] = [];
     commit.parents.forEach((parent, index) => {
       let target = lanes.indexOf(parent);
       if (target === -1) {
@@ -101,7 +124,13 @@ export function computeCommitGraph(commits: GraphInput[]): GraphRow[] {
         }
         lanes[target] = parent;
       }
-      parentCols.push(target);
+      // Первый родитель продолжает цвет самого узла до точки присоединения к
+      // уже открытой дорожке. Дополнительные merge-родители используют цвет
+      // своих дорожек, чтобы ветви слияния различались сразу от узла.
+      parentEdges.push({
+        target,
+        color: index === 0 ? color : laneColor[target],
+      });
     });
 
     // Нижние рёбра: сквозные продолжения плюс связи узла с родителями.
@@ -114,8 +143,8 @@ export function computeCommitGraph(commits: GraphInput[]): GraphRow[] {
         bottom.push({ fromCol: c, toCol: c, color: beforeColor[c] });
       }
     }
-    for (const target of parentCols) {
-      bottom.push({ fromCol: col, toCol: target, color: laneColor[target] });
+    for (const edge of parentEdges) {
+      bottom.push({ fromCol: col, toCol: edge.target, color: edge.color });
     }
 
     rows.push({ col, color, width: lanes.length, top, bottom });
