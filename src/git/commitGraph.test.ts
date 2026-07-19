@@ -15,8 +15,24 @@ describe("computeCommitGraph", () => {
     expect(rows.map((r) => r.col)).toEqual([0, 0, 0]);
     expect(rows.map((r) => r.width)).toEqual([1, 1, 1]);
     // Средний коммит соединён линией сверху и снизу в своей колонке.
-    expect(rows[1].top).toEqual([{ fromCol: 0, toCol: 0, color: 0 }]);
-    expect(rows[1].bottom).toEqual([{ fromCol: 0, toCol: 0, color: 0 }]);
+    expect(rows[1].top).toEqual([
+      {
+        fromCol: 0,
+        toCol: 0,
+        color: 0,
+        kind: "commit",
+        targetHash: "B",
+      },
+    ]);
+    expect(rows[1].bottom).toEqual([
+      {
+        fromCol: 0,
+        toCol: 0,
+        color: 0,
+        kind: "commit",
+        targetHash: "A",
+      },
+    ]);
     // Корневой коммит: линия сверху есть, снизу нет.
     expect(rows[2].bottom).toEqual([]);
     // Вершина: линия снизу есть, сверху нет.
@@ -37,21 +53,43 @@ describe("computeCommitGraph", () => {
     const rows = computeCommitGraph(commits);
     // Слияние M: две линии вниз — основная (col0) и ветка (col1).
     expect(rows[0].bottom).toEqual([
-      { fromCol: 0, toCol: 0, color: 0 },
-      { fromCol: 0, toCol: 1, color: 1 },
+      {
+        fromCol: 0,
+        toCol: 0,
+        color: 0,
+        kind: "commit",
+        targetHash: "C",
+      },
+      {
+        fromCol: 0,
+        toCol: 1,
+        color: 1,
+        kind: "commit",
+        targetHash: "F",
+      },
     ]);
     // Feature F (col1): его родитель B уже в col0, поэтому линия узла уходит
     // влево в col0, а сама дорожка B (col0) при этом проходит насквозь.
     expect(rows[2].bottom).toEqual(
       expect.arrayContaining([
-        { fromCol: 0, toCol: 0, color: 0 },
-        { fromCol: 1, toCol: 0, color: 1 },
+        { fromCol: 0, toCol: 0, color: 0, kind: "through" },
+        {
+          fromCol: 1,
+          toCol: 0,
+          color: 1,
+          kind: "commit",
+          targetHash: "B",
+        },
       ]),
     );
     // Пока F не слился (строка C), его дорожка проходит через col1.
     expect(rows[1].bottom).toEqual(
-      expect.arrayContaining([{ fromCol: 1, toCol: 1, color: 1 }]),
+      expect.arrayContaining([
+        { fromCol: 1, toCol: 1, color: 1, kind: "through" },
+      ]),
     );
+    // После схождения ветки локальный gutter снова сжимается до одной колонки.
+    expect(rows.map((row) => row.width)).toEqual([2, 2, 2, 1, 1]);
   });
 
   it("opens a lane per parent of an octopus merge", () => {
@@ -63,13 +101,31 @@ describe("computeCommitGraph", () => {
     ]);
     expect(rows[0].col).toEqual(0);
     expect(rows[0].bottom).toEqual([
-      { fromCol: 0, toCol: 0, color: 0 },
-      { fromCol: 0, toCol: 1, color: 1 },
-      { fromCol: 0, toCol: 2, color: 2 },
+      {
+        fromCol: 0,
+        toCol: 0,
+        color: 0,
+        kind: "commit",
+        targetHash: "A",
+      },
+      {
+        fromCol: 0,
+        toCol: 1,
+        color: 1,
+        kind: "commit",
+        targetHash: "B",
+      },
+      {
+        fromCol: 0,
+        toCol: 2,
+        color: 2,
+        kind: "commit",
+        targetHash: "C",
+      },
     ]);
-    // Три параллельные дорожки — три колонки.
-    expect(rows.every((row) => row.width === 3)).toBe(true);
-    expect(rows.map((r) => r.col)).toEqual([0, 0, 1, 2]);
+    // После каждого корня освободившиеся дорожки сдвигаются влево.
+    expect(rows.map((row) => row.width)).toEqual([3, 3, 2, 1]);
+    expect(rows.map((r) => r.col)).toEqual([0, 0, 0, 0]);
   });
 
   it("places unrelated branch tips in separate lanes", () => {
@@ -79,8 +135,10 @@ describe("computeCommitGraph", () => {
       { hash: "P", parents: [] },
       { hash: "Q", parents: [] },
     ]);
-    // A и B не связаны — разные колонки; P под A, Q под B.
-    expect(rows.map((r) => r.col)).toEqual([0, 1, 0, 1]);
+    // A и B не связаны — разные колонки; после закрытия P дорожка Q явно
+    // переезжает в освободившуюся нулевую колонку.
+    expect(rows.map((r) => r.col)).toEqual([0, 1, 0, 0]);
+    expect(rows.map((r) => r.width)).toEqual([1, 2, 2, 1]);
   });
 
   it("returns an empty layout for no commits", () => {
@@ -102,9 +160,45 @@ describe("computeCommitGraph", () => {
     // сходится к ней уже на своей строке: линия её узла уходит вниз-влево в
     // col0, а к узлу B остаётся одна дорожка.
     expect(rows[1].bottom).toEqual(
-      expect.arrayContaining([{ fromCol: 1, toCol: 0, color: 1 }]),
+      expect.arrayContaining([
+        {
+          fromCol: 1,
+          toCol: 0,
+          color: 1,
+          kind: "commit",
+          targetHash: "B",
+        },
+      ]),
     );
-    expect(rows[2].top).toEqual([{ fromCol: 0, toCol: 0, color: 0 }]);
+    expect(rows[2].top).toEqual([
+      {
+        fromCol: 0,
+        toCol: 0,
+        color: 0,
+        kind: "commit",
+        targetHash: "B",
+      },
+    ]);
+  });
+
+  it("compacts a closed middle lane with an explicit transition", () => {
+    const rows = assertLanesConnect([
+      { hash: "A", parents: ["P"] },
+      { hash: "B", parents: ["Q"] },
+      { hash: "C", parents: ["R"] },
+      { hash: "Q", parents: [] },
+      { hash: "P", parents: [] },
+      { hash: "R", parents: [] },
+    ]);
+
+    expect(rows.map((row) => row.width)).toEqual([1, 2, 3, 3, 2, 1]);
+    expect(rows[3].col).toBe(1);
+    expect(rows[3].bottom).toEqual(
+      expect.arrayContaining([
+        { fromCol: 2, toCol: 1, color: 2, kind: "through" },
+      ]),
+    );
+    expect(rows[3].lanesBelow.map((lane) => lane.col)).toEqual([0, 1]);
   });
 
   // Слияние во «уже существующую» дорожку: второй родитель M — это G, чья
@@ -230,22 +324,57 @@ describe("computeCommitGraph", () => {
 // Возвращает строки для дополнительных проверок.
 function assertLanesConnect(commits: { hash: string; parents: string[] }[]) {
   const rows = computeCommitGraph(commits);
+  const ensure = (condition: boolean, message: string) => {
+    if (!condition) {
+      throw new Error(message);
+    }
+  };
+  const sameValues = <T>(left: T[], right: T[]) =>
+    left.length === right.length &&
+    left.every((value, index) => value === right[index]);
   const uniqSorted = (values: number[]) =>
     [...new Set(values)].sort((a, b) => a - b);
   for (let i = 0; i < rows.length - 1; i += 1) {
     const exiting = uniqSorted(rows[i].bottom.map((edge) => edge.toCol));
     const entering = uniqSorted(rows[i + 1].top.map((edge) => edge.fromCol));
-    expect({ row: i, entering }).toEqual({ row: i, entering: exiting });
+    ensure(
+      sameValues(entering, exiting),
+      `row ${i} boundary differs: ${entering} != ${exiting}`,
+    );
+
+    const below = rows[i].lanesBelow;
+    const above = rows[i + 1].top
+      .map((edge) => ({ col: edge.fromCol, color: edge.color }))
+      .sort((a, b) => a.col - b.col);
+    ensure(
+      above.length === below.length &&
+        above.every(
+          (lane, index) =>
+            lane.col === below[index].col && lane.color === below[index].color,
+        ),
+      `row ${i} boundary lane colors differ`,
+    );
   }
-  for (const row of rows) {
-    expect(row.col).toBeGreaterThanOrEqual(0);
-    expect(row.col).toBeLessThan(row.width);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    ensure(
+      row.col >= 0 && row.col < row.width,
+      `row ${rowIndex} node col ${row.col} is outside width ${row.width}`,
+    );
     for (const edge of [...row.top, ...row.bottom]) {
-      expect(edge.fromCol).toBeGreaterThanOrEqual(0);
-      expect(edge.fromCol).toBeLessThan(row.width);
-      expect(edge.toCol).toBeGreaterThanOrEqual(0);
-      expect(edge.toCol).toBeLessThan(row.width);
+      ensure(
+        edge.fromCol >= 0 &&
+          edge.fromCol < row.width &&
+          edge.toCol >= 0 &&
+          edge.toCol < row.width,
+        `row ${rowIndex} edge ${edge.fromCol}->${edge.toCol} is outside width ${row.width}`,
+      );
     }
+    // Фронтир под строкой всегда плотный: пустых колонок внутри нет.
+    ensure(
+      row.lanesBelow.every((lane, index) => lane.col === index),
+      `row ${rowIndex} frontier is not compact`,
+    );
   }
 
   const loadedHashes = new Set(commits.map((commit) => commit.hash));
@@ -256,28 +385,42 @@ function assertLanesConnect(commits: { hash: string; parents: string[] }[]) {
   for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex -= 1) {
     const row = rows[rowIndex];
     const commit = commits[rowIndex];
-    const parentEdges = row.bottom.filter((edge) => edge.fromCol === row.col);
-    expect(parentEdges).toHaveLength(commit.parents.length);
+    const parentEdges = row.bottom.filter((edge) => edge.kind === "commit");
+    ensure(
+      parentEdges.length === commit.parents.length,
+      `${commit.hash} has ${parentEdges.length} parent edges instead of ${commit.parents.length}`,
+    );
+    ensure(
+      sameValues(
+        parentEdges.map((edge) => edge.targetHash),
+        commit.parents,
+      ),
+      `${commit.hash} parent edge hashes differ`,
+    );
     const actualTargets = parentEdges
       .map((edge) => targetsBelow.get(edge.toCol) ?? null)
       .sort();
     const expectedTargets = commit.parents
       .map((parent) => (loadedHashes.has(parent) ? parent : null))
       .sort();
-    expect({ hash: commit.hash, actualTargets }).toEqual({
-      hash: commit.hash,
-      actualTargets: expectedTargets,
-    });
+    ensure(
+      sameValues(actualTargets, expectedTargets),
+      `${commit.hash} reaches ${actualTargets} instead of ${expectedTargets}`,
+    );
 
     const targetsAbove = new Map<number, string | null>();
     for (const edge of row.top) {
-      if (edge.toCol === row.col) {
+      if (edge.kind === "commit") {
+        ensure(
+          edge.targetHash === commit.hash,
+          `row ${rowIndex} enters ${String(edge.targetHash)} instead of ${commit.hash}`,
+        );
         targetsAbove.set(edge.fromCol, commit.hash);
         continue;
       }
       const through = row.bottom.filter(
         (candidate) =>
-          candidate.fromCol === edge.toCol && candidate.toCol === edge.toCol,
+          candidate.kind === "through" && candidate.fromCol === edge.toCol,
       );
       if (through.length !== 1) {
         throw new Error(

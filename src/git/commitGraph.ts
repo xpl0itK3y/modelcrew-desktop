@@ -1,11 +1,22 @@
-// Раскладка графа коммитов (дорожки/ветвления/слияния) как в VS Code.
+// Раскладка графа коммитов (дорожки/ветвления/слияния) как в Cursor.
 // Чистая функция без DOM: по списку коммитов с их родителями строит для
 // каждой строки колонку узла, цвет и рёбра в верхней и нижней половине
 // строки — их и рисует SVG-жёлоб рядом с историей.
 
+import { GRAPH_COLORS } from "./graphGeometry";
+
 export type GraphEdge = {
   fromCol: number;
   toCol: number;
+  color: number;
+  // Сквозная дорожка либо связь с точкой текущего коммита.
+  kind: "through" | "commit";
+  // Для связей с точкой — hash коммита на соответствующем конце.
+  targetHash?: string;
+};
+
+export type GraphLane = {
+  col: number;
   color: number;
 };
 
@@ -13,12 +24,16 @@ export type GraphRow = {
   // Колонка точки коммита и её цвет (индекс в палитре).
   col: number;
   color: number;
-  // Сколько колонок занимает граф (одинаково по всем строкам — для align).
+  // Локальная ширина строки. Cursor не резервирует место под самый широкий
+  // участок всей истории: текст следует сразу за видимыми дорожками.
   width: number;
   // Рёбра верхней половины (из строки выше в узел/сквозные) и нижней
   // (из узла к родителям/сквозные).
   top: GraphEdge[];
   bottom: GraphEdge[];
+  // Состояние дорожек на нижней границе строки. Нужно, в частности, чтобы
+  // продолжать их через раскрытую карточку деталей.
+  lanesBelow: GraphLane[];
 };
 
 export type GraphInput = {
@@ -26,134 +41,161 @@ export type GraphInput = {
   parents: string[];
 };
 
-const COLOR_COUNT = 7;
-
-function firstFreeColumn(lanes: (string | null)[]): number {
-  const index = lanes.indexOf(null);
-  if (index !== -1) {
-    return index;
-  }
-  lanes.push(null);
-  return lanes.length - 1;
-}
+type Lane = {
+  id: number;
+  targetHash: string;
+  color: number;
+};
 
 export function computeCommitGraph(commits: GraphInput[]): GraphRow[] {
   // Вход обязан быть обратным топологическим порядком: каждый загруженный
   // потомок расположен выше любого своего загруженного родителя. Backend
   // гарантирует это через `git log --topo-order`; без этого уже показанный
   // родитель нельзя честно соединить с появившимся ниже потомком.
-  // lanes[col] — хеш коммита, которого «ждёт» дорожка сверху вниз.
-  const lanes: (string | null)[] = [];
-  const laneColor: number[] = [];
+  // lanes[col] — плотный фронтир дорожек. Объект сохраняет идентичность при
+  // сдвиге колонки, поэтому такой сдвиг всегда получает явное SVG-ребро.
+  let lanes: Lane[] = [];
+  let nextLaneId = 0;
   let nextColor = 0;
-  const allocColor = () => {
-    const activeColors = new Set<number>();
-    for (let col = 0; col < lanes.length; col += 1) {
-      if (lanes[col] != null) {
-        activeColors.add(laneColor[col]);
-      }
+  const allocColor = (active: readonly Lane[], reserved: number[] = []) => {
+    const activeColors = new Set(active.map((lane) => lane.color));
+    for (const color of reserved) {
+      activeColors.add(color);
     }
-    for (let offset = 0; offset < COLOR_COUNT; offset += 1) {
-      const candidate = (nextColor + offset) % COLOR_COUNT;
+    for (let offset = 0; offset < GRAPH_COLORS.length; offset += 1) {
+      const candidate = (nextColor + offset) % GRAPH_COLORS.length;
       if (!activeColors.has(candidate)) {
-        nextColor = (candidate + 1) % COLOR_COUNT;
+        nextColor = (candidate + 1) % GRAPH_COLORS.length;
         return candidate;
       }
     }
     // Одновременно открыто больше дорожек, чем цветов в палитре: повтор
     // неизбежен, но продолжаем round-robin, а не залипаем на одном цвете.
     const candidate = nextColor;
-    nextColor = (nextColor + 1) % COLOR_COUNT;
+    nextColor = (nextColor + 1) % GRAPH_COLORS.length;
     return candidate;
   };
 
   const rows: GraphRow[] = [];
 
   for (const commit of commits) {
-    const before = lanes.slice();
-    const beforeColor = laneColor.slice();
+    const before = lanes;
 
     // Колонка узла: первая дорожка, ждущая этот коммит; иначе новая (вершина
-    // ветки без видимого потомка).
-    let col = before.findIndex((hash) => hash === commit.hash);
-    let color: number;
-    if (col === -1) {
-      col = firstFreeColumn(lanes);
-      color = allocColor();
-      laneColor[col] = color;
-    } else {
-      color = laneColor[col];
-    }
+    // несвязанной ветки без видимого потомка) справа от активного фронтира.
+    const awaitedIndex = before.findIndex(
+      (lane) => lane.targetHash === commit.hash,
+    );
+    const col = awaitedIndex === -1 ? before.length : awaitedIndex;
+    const color =
+      awaitedIndex === -1 ? allocColor(before) : before[awaitedIndex].color;
 
     // Верхние рёбра: сквозные дорожки продолжаются в своей колонке,
     // дорожки, ждавшие этот коммит, сходятся в узел.
-    const top: GraphEdge[] = [];
-    for (let c = 0; c < before.length; c += 1) {
-      const hash = before[c];
-      if (hash == null) {
-        continue;
-      }
-      if (hash === commit.hash) {
-        top.push({ fromCol: c, toCol: col, color: beforeColor[c] });
-      } else {
-        top.push({ fromCol: c, toCol: c, color: beforeColor[c] });
-      }
-    }
+    // Сквозные линии кладём первыми: цветные входы в узел будут нарисованы
+    // поверх них в точках пересечения.
+    const top: GraphEdge[] = [
+      ...before.flatMap((lane, fromCol) =>
+        lane.targetHash === commit.hash
+          ? []
+          : [
+              {
+                fromCol,
+                toCol: fromCol,
+                color: lane.color,
+                kind: "through" as const,
+              },
+            ],
+      ),
+      ...before.flatMap((lane, fromCol) =>
+        lane.targetHash !== commit.hash
+          ? []
+          : [
+              {
+                fromCol,
+                toCol: col,
+                color: lane.color,
+                kind: "commit" as const,
+                targetHash: commit.hash,
+              },
+            ],
+      ),
+    ];
 
-    // Дорожки, ждавшие этот коммит (в т.ч. узла), освобождаем — их продолжат
-    // родители.
-    for (let c = 0; c < lanes.length; c += 1) {
-      if (lanes[c] === commit.hash) {
-        lanes[c] = null;
-      }
-    }
+    // Удаление обработанного узла сжимает фронтир. Сохраняем относительный
+    // порядок остальных дорожек, чтобы свести число пересечений к минимуму.
+    const survivors = before.filter(
+      (lane) => lane.targetHash !== commit.hash,
+    );
+    const after = survivors.slice();
+    let insertionIndex = Math.min(col, after.length);
 
-    // Размещаем родителей, не дублируя уже существующие дорожки.
-    const parentEdges: { target: number; color: number }[] = [];
+    // Размещаем отсутствующих родителей рядом с колонкой узла. Уже открытые
+    // дорожки переиспользуем: несколько потомков честно сходятся в одну точку.
+    const parentEdges: {
+      lane: Lane;
+      color: number;
+      targetHash: string;
+    }[] = [];
     commit.parents.forEach((parent, index) => {
-      let target = lanes.indexOf(parent);
-      if (target === -1) {
-        // Первый родитель продолжает линию узла в его колонке, если та
-        // свободна; иначе (её заняла сходящаяся ветка) — новая колонка.
-        if (index === 0 && lanes[col] == null) {
-          target = col;
-          laneColor[col] = color;
-        } else {
-          target = firstFreeColumn(lanes);
-          laneColor[target] = index === 0 ? color : allocColor();
-        }
-        lanes[target] = parent;
+      let lane = after.find((candidate) => candidate.targetHash === parent);
+      if (!lane) {
+        lane = {
+          id: nextLaneId,
+          targetHash: parent,
+          color: index === 0 ? color : allocColor(after, [color]),
+        };
+        nextLaneId += 1;
+        after.splice(insertionIndex, 0, lane);
+        insertionIndex += 1;
       }
       // Первый родитель продолжает цвет самого узла до точки присоединения к
       // уже открытой дорожке. Дополнительные merge-родители используют цвет
       // своих дорожек, чтобы ветви слияния различались сразу от узла.
       parentEdges.push({
-        target,
-        color: index === 0 ? color : laneColor[target],
+        lane,
+        color: index === 0 ? color : lane.color,
+        targetHash: parent,
       });
     });
 
-    // Нижние рёбра: сквозные продолжения плюс связи узла с родителями.
-    const bottom: GraphEdge[] = [];
-    for (let c = 0; c < before.length; c += 1) {
-      const hash = before[c];
-      // Дорожка проходит насквозь: была до коммита, это не он, и в этой
-      // колонке всё ещё та же дорожка.
-      if (hash != null && hash !== commit.hash && lanes[c] === hash) {
-        bottom.push({ fromCol: c, toCol: c, color: beforeColor[c] });
-      }
-    }
+    // Нижние рёбра: сначала все сквозные переходы (включая сдвиги при
+    // уплотнении), затем связи узла с его родителями.
+    const beforeIndex = new Map(before.map((lane, index) => [lane.id, index]));
+    const afterIndex = new Map(after.map((lane, index) => [lane.id, index]));
+    const bottom: GraphEdge[] = survivors.map((lane) => ({
+      fromCol: beforeIndex.get(lane.id)!,
+      toCol: afterIndex.get(lane.id)!,
+      color: lane.color,
+      kind: "through",
+    }));
     for (const edge of parentEdges) {
-      bottom.push({ fromCol: col, toCol: edge.target, color: edge.color });
+      bottom.push({
+        fromCol: col,
+        toCol: afterIndex.get(edge.lane.id)!,
+        color: edge.color,
+        kind: "commit",
+        targetHash: edge.targetHash,
+      });
     }
 
-    rows.push({ col, color, width: lanes.length, top, bottom });
-  }
-
-  // Единая ширина по максимуму — колонки не «скачут» между строками.
-  const maxWidth = rows.reduce((max, row) => Math.max(max, row.width), 1);
-  for (const row of rows) {
-    row.width = maxWidth;
+    lanes = after;
+    const usedColumns = [
+      col,
+      ...top.flatMap((edge) => [edge.fromCol, edge.toCol]),
+      ...bottom.flatMap((edge) => [edge.fromCol, edge.toCol]),
+    ];
+    rows.push({
+      col,
+      color,
+      width: Math.max(...usedColumns) + 1,
+      top,
+      bottom,
+      lanesBelow: after.map((lane, laneCol) => ({
+        col: laneCol,
+        color: lane.color,
+      })),
+    });
   }
   return rows;
 }
