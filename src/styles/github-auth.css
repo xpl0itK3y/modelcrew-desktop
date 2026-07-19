@@ -8,10 +8,10 @@
 }
 
 .github-login-button {
-  padding: 4px 10px;
-  border: 1px solid var(--mc-border);
+  padding: 4px 8px;
+  border: none;
   border-radius: 7px;
-  background: var(--mc-surface);
+  background: transparent;
   color: var(--mc-text-muted);
   font: inherit;
   font-size: 11.5px;
@@ -20,7 +20,6 @@
 }
 
 .github-login-button:hover {
-  background: var(--mc-hover);
   color: var(--mc-text-bright);
 }
 
