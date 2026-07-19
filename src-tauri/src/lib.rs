@@ -16,8 +16,8 @@ use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
     git_commit_action, git_commit_files, git_fetch_upstream, git_file_diff, git_log, git_pull,
-    git_push, git_read_file, git_revert_file, git_reword_commit, git_switch_branch, git_write_file,
-    GitWatchState,
+    git_pull_rebase, git_push, git_read_file, git_reset_to_upstream, git_revert_file,
+    git_reword_commit, git_switch_branch, git_write_file, GitWatchState,
 };
 use github_auth::{
     github_auth_available, github_commit_avatars, github_current_user, github_device_poll,
@@ -697,6 +697,8 @@ pub fn run() {
             git_fetch_upstream,
             git_pull,
             git_push,
+            git_pull_rebase,
+            git_reset_to_upstream,
             git_commit_action,
             git_reword_commit,
             workspace_reconcile_roots,

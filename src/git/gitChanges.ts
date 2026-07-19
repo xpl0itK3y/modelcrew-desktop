@@ -341,6 +341,18 @@ export function gitPush(workspaceId: string): Promise<void> {
   return invoke("git_push", { workspaceId });
 }
 
+// Забрать с rebase (для разошедшейся ветки): локальные коммиты кладутся поверх
+// серверных. При конфликте бэкенд откатывает rebase и возвращает ошибку.
+export function gitPullRebase(workspaceId: string): Promise<void> {
+  return invoke("git_pull_rebase", { workspaceId });
+}
+
+// Принудительно встать на серверную ветку: локальные коммиты и несохранённые
+// правки отбрасываются (коммиты восстановимы через reflog).
+export function gitResetToUpstream(workspaceId: string): Promise<void> {
+  return invoke("git_reset_to_upstream", { workspaceId });
+}
+
 export type GitCommitFile = {
   path: string;
   additions?: number;

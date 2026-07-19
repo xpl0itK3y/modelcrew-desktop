@@ -757,6 +757,31 @@ pub fn push_upstream(root: &Path) -> CommandResult<()> {
     run_git_network(&toplevel, &["push", "--quiet"])
 }
 
+// Забрать с сервера с rebase: локальные коммиты переносятся поверх серверных —
+// подходит для разошедшейся ветки. При конфликте откатываем rebase, чтобы не
+// оставить репозиторий в разобранном состоянии, и честно сообщаем об ошибке.
+pub fn pull_rebase(root: &Path) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let result = run_git_network(&toplevel, &["pull", "--rebase", "--quiet"]);
+    if result.is_err() {
+        let _ = run_git(&toplevel, &["rebase", "--abort"]);
+    }
+    result
+}
+
+// Принудительно встать точно на серверную ветку: локальные коммиты и
+// несохранённые правки отбрасываются (коммиты восстановимы через reflog).
+pub fn reset_to_upstream(root: &Path) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    run_git_network(&toplevel, &["fetch", "--quiet"])?;
+    run_git(&toplevel, &["reset", "--hard", "--quiet", "@{upstream}"])?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn git_fetch_upstream(
     window: tauri::WebviewWindow,
@@ -792,6 +817,32 @@ pub async fn git_push(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     tauri::async_runtime::spawn_blocking(move || push_upstream(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_pull_rebase(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || pull_rebase(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_reset_to_upstream(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || reset_to_upstream(&root))
         .await
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
@@ -871,16 +922,20 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
     };
     let limit = limit.clamp(1, 800);
     let count = format!("-n{limit}");
-    // «Все ветки»: логируем все ссылки (в т.ч. refs/remotes — серверные
-    // ветки), упорядочивая по дате, чтобы граф выглядел как в редакторах.
+    // Граф строится сверху вниз и предполагает топологический порядок: любой
+    // коммит обязан идти раньше всех своих родителей. Обычный `git log`
+    // сортирует преимущественно по времени и при намеренно/случайно сбитых
+    // датах способен показать общий родитель раньше одного из потомков — такую
+    // последовательность уже невозможно правдиво соединить линиями. Заодно
+    // --topo-order держит параллельные ветки цельными, как нативный git graph.
     let mut args = vec![
         "log",
         count.as_str(),
+        "--topo-order",
         "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%P%x1f%b%x1e",
     ];
     if all_branches {
         args.push("--all");
-        args.push("--date-order");
     }
     let raw = match run_git(&toplevel, &args) {
         Ok(raw) => raw,
@@ -1960,6 +2015,79 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .unwrap();
         assert!(init.status.success());
         assert!(list_log(fresh.path(), 10, false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn log_keeps_every_child_before_its_parents_when_dates_are_skewed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git_at = |args: &[&str], date: &str| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Topology Test")
+                .env("GIT_AUTHOR_EMAIL", "topology@test")
+                .env("GIT_COMMITTER_NAME", "Topology Test")
+                .env("GIT_COMMITTER_EMAIL", "topology@test")
+                .env("GIT_AUTHOR_DATE", date)
+                .env("GIT_COMMITTER_DATE", date)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+
+        git_at(
+            &["init", "--quiet", "--initial-branch=main"],
+            "2026-01-01T00:00:00Z",
+        );
+        // Общий родитель намеренно новее одного из потомков. Без
+        // --topo-order обычный git log может поставить `root` выше `side-1`,
+        // хотя side-1 прямо ссылается на root как на родителя.
+        git_at(
+            &["commit", "--quiet", "--allow-empty", "-m", "root"],
+            "2026-01-05T00:00:00Z",
+        );
+        git_at(&["branch", "side"], "2026-01-05T00:00:00Z");
+        git_at(&["checkout", "--quiet", "side"], "2026-01-05T00:00:00Z");
+        git_at(
+            &["commit", "--quiet", "--allow-empty", "-m", "side-1"],
+            "2026-01-01T00:00:00Z",
+        );
+        git_at(
+            &["commit", "--quiet", "--allow-empty", "-m", "side-2"],
+            "2026-01-02T00:00:00Z",
+        );
+        git_at(&["checkout", "--quiet", "main"], "2026-01-05T00:00:00Z");
+        git_at(
+            &["commit", "--quiet", "--allow-empty", "-m", "main-1"],
+            "2026-01-04T00:00:00Z",
+        );
+        git_at(
+            &["merge", "--quiet", "--no-ff", "side", "-m", "merge"],
+            "2026-01-06T00:00:00Z",
+        );
+
+        for all_branches in [false, true] {
+            let log = list_log(root, 50, all_branches).unwrap();
+            let positions: std::collections::HashMap<&str, usize> = log
+                .iter()
+                .enumerate()
+                .map(|(index, commit)| (commit.hash.as_str(), index))
+                .collect();
+
+            for (child_index, commit) in log.iter().enumerate() {
+                for parent in &commit.parents {
+                    if let Some(parent_index) = positions.get(parent.as_str()) {
+                        assert!(
+                            child_index < *parent_index,
+                            "{} must precede its parent {} in {all_branches:?} history",
+                            commit.subject,
+                            log[*parent_index].subject,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

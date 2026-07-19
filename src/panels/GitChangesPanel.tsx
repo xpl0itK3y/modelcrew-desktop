@@ -20,7 +20,9 @@ import {
   formatRelativeTime,
   getGitSummary,
   gitPull,
+  gitPullRebase,
   gitPush,
+  gitResetToUpstream,
   parseUnifiedDiff,
   readRepoFile,
   refreshGitChanges,
@@ -972,8 +974,12 @@ function SyncStatus(props: {
 }) {
   const { t } = useI18n();
   const { ahead, behind } = props;
-  const [busy, setBusy] = useState<null | "pull" | "push">(null);
+  const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<null | "pull" | "push">(null);
+  // Разошедшаяся ветка: ↓ открывает меню (rebase / сброс к серверу).
+  const [pullMenu, setPullMenu] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Незакреплённое подтверждение гаснет само.
   useEffect(() => {
@@ -984,24 +990,60 @@ function SyncStatus(props: {
     return () => window.clearTimeout(timer);
   }, [confirm]);
 
+  // Меню pull закрывается по клику вне и по Esc.
+  useEffect(() => {
+    if (!pullMenu) {
+      return;
+    }
+    const close = () => {
+      setPullMenu(false);
+      setResetConfirm(false);
+    };
+    const onDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        close();
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pullMenu]);
+
   if (ahead === undefined && behind === undefined) {
     return null; // нет upstream — сравнивать не с чем
   }
 
-  const run = async (kind: "pull" | "push") => {
-    setBusy(kind);
+  // Ветка разошлась: есть и свои коммиты, и серверные — простой ff невозможен.
+  const diverged = (ahead ?? 0) > 0 && (behind ?? 0) > 0;
+
+  const run = async (action: "pull" | "push" | "rebase" | "reset") => {
+    setBusy(true);
     setConfirm(null);
+    setPullMenu(false);
+    setResetConfirm(false);
     try {
-      if (kind === "pull") {
+      if (action === "pull") {
         await gitPull(props.workspaceId);
-      } else {
+      } else if (action === "push") {
         await gitPush(props.workspaceId);
+      } else if (action === "rebase") {
+        await gitPullRebase(props.workspaceId);
+      } else {
+        await gitResetToUpstream(props.workspaceId);
       }
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       props.onError(localizeBackendError(error));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -1014,25 +1056,34 @@ function SyncStatus(props: {
   }
 
   return (
-    <div className="git-sync">
+    <div className="git-sync" ref={rootRef}>
       {(behind ?? 0) > 0 && (
         <button
           type="button"
-          className={`git-sync-btn ${confirm === "pull" ? "is-confirm" : ""}`}
-          disabled={busy !== null}
-          title={t("git.pullTitle")}
-          onClick={() =>
-            confirm === "pull" ? void run("pull") : setConfirm("pull")
-          }
+          className={`git-sync-btn ${
+            confirm === "pull" || pullMenu ? "is-confirm" : ""
+          }`}
+          disabled={busy}
+          title={diverged ? t("git.pullDivergedTitle") : t("git.pullTitle")}
+          onClick={() => {
+            if (diverged) {
+              setPullMenu((value) => !value);
+              setResetConfirm(false);
+            } else if (confirm === "pull") {
+              void run("pull");
+            } else {
+              setConfirm("pull");
+            }
+          }}
         >
-          {confirm === "pull" ? t("git.pullConfirm") : `↓${behind}`}
+          {!diverged && confirm === "pull" ? t("git.pullConfirm") : `↓${behind}`}
         </button>
       )}
       {(ahead ?? 0) > 0 && (
         <button
           type="button"
           className={`git-sync-btn ${confirm === "push" ? "is-confirm" : ""}`}
-          disabled={busy !== null}
+          disabled={busy}
           title={t("git.pushTitle")}
           onClick={() =>
             confirm === "push" ? void run("push") : setConfirm("push")
@@ -1040,6 +1091,33 @@ function SyncStatus(props: {
         >
           {confirm === "push" ? t("git.pushConfirm") : `↑${ahead}`}
         </button>
+      )}
+      {pullMenu && (
+        <div className="git-sync-menu" role="menu">
+          <div className="git-sync-menu-note">{t("git.divergedNote")}</div>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-sync-menu-item"
+            disabled={busy}
+            title={t("git.pullRebaseHint")}
+            onClick={() => void run("rebase")}
+          >
+            {t("git.pullRebase")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-sync-menu-item is-danger"
+            disabled={busy}
+            title={t("git.resetToServerHint")}
+            onClick={() =>
+              resetConfirm ? void run("reset") : setResetConfirm(true)
+            }
+          >
+            {resetConfirm ? t("git.resetConfirm") : t("git.resetToServer")}
+          </button>
+        </div>
       )}
     </div>
   );
