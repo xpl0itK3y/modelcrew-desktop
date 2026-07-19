@@ -317,10 +317,7 @@ fn local_git_email(root: &Path) -> Option<String> {
 
 // Профиль вошедшего пользователя (login, avatar) — чтобы подставить его аватар
 // на собственные, ещё не запушенные коммиты.
-async fn current_user_account(
-    client: &reqwest::Client,
-    token: &str,
-) -> Option<(String, String)> {
+async fn current_user_account(client: &reqwest::Client, token: &str) -> Option<(String, String)> {
     let response = client
         .get(USER_URL)
         .header("Accept", "application/vnd.github+json")

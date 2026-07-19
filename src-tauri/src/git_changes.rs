@@ -560,6 +560,9 @@ pub struct GitCommitInfo {
     pub epoch_ms: i64,
     // Коммит есть только локально: upstream его ещё не видел.
     pub unpushed: bool,
+    // Можно безопасно переписать сообщение: не запушен, не merge и авторства
+    // локального пользователя (git config user.email).
+    pub editable: bool,
     // На этот коммит указывает HEAD (текущий checkout) — для кольца в графе.
     pub is_head: bool,
     // Полные хеши родителей (для графа веток; у merge их несколько).
@@ -897,6 +900,26 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
             })
             .unwrap_or_default();
 
+    // Локальная почта — чтобы отметить «свои» коммиты как редактируемые.
+    let local_email = run_git(&toplevel, &["config", "user.email"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_lowercase())
+        .unwrap_or_default();
+
+    // Коммиты, которых нет ни на одной remote-ветке — их безопасно переписывать.
+    // В отличие от @{upstream} работает и без upstream (тогда всё локально).
+    let local_only: std::collections::HashSet<String> = run_git(
+        &toplevel,
+        &["rev-list", "-n", "2000", "HEAD", "--not", "--remotes"],
+    )
+    .map(|raw| {
+        String::from_utf8_lossy(&raw)
+            .lines()
+            .map(|line| line.trim().to_owned())
+            .filter(|line| !line.is_empty())
+            .collect()
+    })
+    .unwrap_or_default();
+
     let text = String::from_utf8_lossy(&raw);
     Ok(text
         .split('\u{1e}')
@@ -936,8 +959,15 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
                 })
                 .unwrap_or_default();
             let (body, co_authors) = split_body_and_co_authors(parts.next().unwrap_or_default());
+            let is_unpushed = unpushed.contains(hash);
+            // Редактируемо: только локальный (нет на remote), не merge, свой.
+            let editable = local_only.contains(hash)
+                && parents.len() <= 1
+                && !local_email.is_empty()
+                && author_email.to_lowercase() == local_email;
             Some(GitCommitInfo {
-                unpushed: unpushed.contains(hash),
+                unpushed: is_unpushed,
+                editable,
                 is_head,
                 hash: hash.to_owned(),
                 short_hash,
@@ -1134,6 +1164,225 @@ pub async fn git_revert_file(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     tauri::async_runtime::spawn_blocking(move || revert_file(&root, &path, orig_path.as_deref()))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+// ---------- Редактирование сообщения локального коммита ----------
+
+// Полные метаданные коммита — чтобы пересоздать его через commit-tree, сохранив
+// авторство, коммиттера и даты. Меняем только текст сообщения (у цели).
+struct CommitMeta {
+    tree: String,
+    parents: Vec<String>,
+    author_name: String,
+    author_email: String,
+    author_date: String,
+    committer_name: String,
+    committer_email: String,
+    committer_date: String,
+    message: String,
+}
+
+fn read_commit_meta(root: &Path, hash: &str) -> CommandResult<CommitMeta> {
+    // %B (сообщение) идёт последним — может содержать переносы строк.
+    let format = "--format=%T%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B";
+    let raw = run_git(root, &["show", "-s", format, hash])?;
+    let text = String::from_utf8_lossy(&raw);
+    let fields: Vec<&str> = text.splitn(9, '\u{0}').collect();
+    if fields.len() < 9 {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    Ok(CommitMeta {
+        tree: fields[0].trim().to_owned(),
+        parents: fields[1].split_whitespace().map(str::to_owned).collect(),
+        author_name: fields[2].to_owned(),
+        author_email: fields[3].to_owned(),
+        author_date: fields[4].to_owned(),
+        committer_name: fields[5].to_owned(),
+        committer_email: fields[6].to_owned(),
+        committer_date: fields[7].to_owned(),
+        message: fields[8].trim_end().to_owned(),
+    })
+}
+
+// Создаёт коммит из дерева с заданными родителями и метаданными, сообщение —
+// через stdin (произвольный текст). Возвращает хеш нового коммита. Индекс и
+// рабочее дерево не трогаются вовсе.
+fn create_commit(
+    root: &Path,
+    tree: &str,
+    parents: &[String],
+    ident: &CommitMeta,
+    message: &str,
+) -> CommandResult<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut command = git_command();
+    command.arg("commit-tree").arg(tree);
+    for parent in parents {
+        command.arg("-p").arg(parent);
+    }
+    command
+        .env("GIT_AUTHOR_NAME", &ident.author_name)
+        .env("GIT_AUTHOR_EMAIL", &ident.author_email)
+        .env("GIT_AUTHOR_DATE", &ident.author_date)
+        .env("GIT_COMMITTER_NAME", &ident.committer_name)
+        .env("GIT_COMMITTER_EMAIL", &ident.committer_email)
+        .env("GIT_COMMITTER_DATE", &ident.committer_date)
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| CommandError::new(ErrorCode::GitUnavailable).with_debug(error))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| CommandError::new(ErrorCode::GitCommandFailed))?
+        .write_all(message.as_bytes())
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    if !output.status.success() {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_debug(String::from_utf8_lossy(&output.stderr).into_owned()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+fn on_any_remote(root: &Path, hash: &str) -> bool {
+    run_git(root, &["branch", "-r", "--contains", hash])
+        .map(|raw| !String::from_utf8_lossy(&raw).trim().is_empty())
+        .unwrap_or(false)
+}
+
+// Переписывает сообщение локального коммита. Безопасно только для не запушенных
+// коммитов текущей ветки: цель и все идущие после неё (до HEAD) должны быть не
+// на сервере и не merge. Дерево не меняется — конфликтов нет, рабочее дерево
+// остаётся как есть. Старую вершину хранит reflog.
+pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    let message = message.trim();
+    if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "message")
+        );
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+
+    // Текущая ветка (обновляем её ссылку). Detached HEAD не поддерживаем.
+    let branch = run_git(&toplevel, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .ok()
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+        .filter(|name| !name.is_empty());
+    let Some(branch) = branch.filter(|name| is_safe_ref_name(name)) else {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "detached")
+        );
+    };
+
+    // Коммит должен быть на текущей ветке (предок HEAD).
+    run_git(&toplevel, &["merge-base", "--is-ancestor", hash, "HEAD"]).map_err(|_| {
+        CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "not-on-branch")
+    })?;
+
+    // Коммиты после цели до HEAD (first-parent), новейшие первыми.
+    let descendants: Vec<String> = run_git(
+        &toplevel,
+        &["rev-list", "--first-parent", &format!("{hash}..HEAD")],
+    )
+    .map(|raw| {
+        String::from_utf8_lossy(&raw)
+            .lines()
+            .map(|line| line.trim().to_owned())
+            .filter(|line| !line.is_empty())
+            .collect()
+    })
+    .unwrap_or_default();
+
+    // Цель + все потомки: только не запушенные и не merge.
+    let target_meta = read_commit_meta(&toplevel, hash)?;
+    let mut chain: Vec<String> = Vec::with_capacity(descendants.len() + 1);
+    chain.push(hash.to_owned());
+    chain.extend(descendants.iter().cloned());
+    for commit in &chain {
+        if on_any_remote(&toplevel, commit) {
+            return Err(
+                CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "pushed")
+            );
+        }
+        let meta = read_commit_meta(&toplevel, commit)?;
+        if meta.parents.len() > 1 {
+            return Err(
+                CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "merge")
+            );
+        }
+    }
+
+    // Цель — только «своя» (по локальной почте).
+    let local_email = run_git(&toplevel, &["config", "user.email"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_lowercase())
+        .unwrap_or_default();
+    if local_email.is_empty() || target_meta.author_email.to_lowercase() != local_email {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "not-yours")
+        );
+    }
+
+    // Пересоздаём цель с новым сообщением (родители и метаданные — прежние).
+    let new_target = create_commit(
+        &toplevel,
+        &target_meta.tree,
+        &target_meta.parents,
+        &target_meta,
+        message,
+    )?;
+
+    // Проигрываем потомков от старшего к младшему, перецепляя родителя.
+    let mut new_parent = new_target;
+    for descendant in descendants.iter().rev() {
+        let meta = read_commit_meta(&toplevel, descendant)?;
+        new_parent = create_commit(
+            &toplevel,
+            &meta.tree,
+            &[new_parent.clone()],
+            &meta,
+            &meta.message,
+        )?;
+    }
+
+    // Переставляем ветку на переписанную вершину; старую хранит reflog.
+    run_git(
+        &toplevel,
+        &[
+            "update-ref",
+            "-m",
+            "modelcrew: reword commit",
+            &format!("refs/heads/{branch}"),
+            &new_parent,
+        ],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn git_reword_commit(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    hash: String,
+    message: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || reword_commit(&root, &hash, &message))
         .await
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
@@ -1988,5 +2237,143 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Checkout на коммит отделяет HEAD — текущей ветки нет.
         commit_action(root, "checkout", &first, None).unwrap();
         assert_eq!(collect_summary(root).unwrap().branch, None);
+    }
+
+    #[test]
+    fn rewords_a_local_commit_and_preserves_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Me")
+                .env("GIT_AUTHOR_EMAIL", "me@t")
+                .env("GIT_COMMITTER_NAME", "Me")
+                .env("GIT_COMMITTER_EMAIL", "me@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "user.name", "Me"]);
+        git(&["config", "user.email", "me@t"]);
+        std::fs::write(root.join("a.txt"), "1\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        std::fs::write(root.join("a.txt"), "1\n2\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second", "-m", "old body"]);
+        std::fs::write(root.join("a.txt"), "1\n2\n3\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "third"]);
+
+        let before = list_log(root, 10, false).unwrap(); // third, second, first
+        let second = before[1].hash.clone();
+        let third_before = read_commit_meta(root, &before[0].hash).unwrap();
+        assert!(before[1].editable, "свой не запушенный коммит редактируем");
+
+        // Правим сообщение среднего коммита (у него есть потомок third).
+        reword_commit(root, &second, "reworded second\n\nnew body").unwrap();
+
+        let after = list_log(root, 10, false).unwrap();
+        assert_eq!(after.len(), 3);
+        assert_eq!(after[0].subject, "third");
+        assert_eq!(after[1].subject, "reworded second");
+        assert_eq!(after[1].body, "new body");
+        assert_eq!(after[2].subject, "first");
+        // Хеши цели и её потомка изменились, корень — нет.
+        assert_ne!(after[1].hash, second);
+        assert_ne!(after[0].hash, before[0].hash);
+        assert_eq!(after[2].hash, before[2].hash);
+        // Потомок сохранил дерево, сообщение и авторство.
+        let third_after = read_commit_meta(root, &after[0].hash).unwrap();
+        assert_eq!(third_after.tree, third_before.tree);
+        assert_eq!(third_after.message, "third");
+        assert_eq!(third_after.author_email, "me@t");
+        // Рабочее дерево нетронуто и чистое.
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "1\n2\n3\n"
+        );
+        assert!(collect_summary(root).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn refuses_unsafe_rewords() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let run = |args: &[&str], email: &str| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "N")
+                .env("GIT_AUTHOR_EMAIL", email)
+                .env("GIT_COMMITTER_NAME", "N")
+                .env("GIT_COMMITTER_EMAIL", email)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        run(&["init", "--quiet", "--initial-branch=main"], "me@t");
+        run(&["config", "user.name", "Me"], "me@t");
+        run(&["config", "user.email", "me@t"], "me@t");
+        std::fs::write(root.join("a.txt"), "1\n").unwrap();
+        run(&["add", "."], "me@t");
+        run(&["commit", "--quiet", "-m", "mine"], "me@t");
+        // Коммит другого автора.
+        std::fs::write(root.join("b.txt"), "x\n").unwrap();
+        run(&["add", "."], "other@t");
+        run(&["commit", "--quiet", "-m", "theirs"], "other@t");
+
+        let log = list_log(root, 10, false).unwrap(); // theirs, mine
+        let theirs = &log[0];
+        let mine = &log[1];
+        assert!(!theirs.editable, "чужой коммит не редактируем");
+        // Чужой коммит — отказ.
+        assert!(reword_commit(root, &theirs.hash, "x").is_err());
+        // Пустое сообщение — отказ.
+        assert!(reword_commit(root, &mine.hash, "   ").is_err());
+        // Некорректный хеш — отказ.
+        assert!(reword_commit(root, "zzzz", "x").is_err());
+
+        // Merge-коммит — отказ.
+        run(&["checkout", "--quiet", "-b", "feat"], "me@t");
+        std::fs::write(root.join("c.txt"), "y\n").unwrap();
+        run(&["add", "."], "me@t");
+        run(&["commit", "--quiet", "-m", "feat work"], "me@t");
+        run(&["checkout", "--quiet", "main"], "me@t");
+        run(
+            &["merge", "--quiet", "--no-ff", "--no-edit", "feat"],
+            "me@t",
+        );
+        let head = list_log(root, 1, false).unwrap()[0].hash.clone();
+        assert!(
+            reword_commit(root, &head, "x").is_err(),
+            "merge-коммит переписывать нельзя"
+        );
+
+        // Запушенный коммит — отказ (есть на remote-tracking ветке).
+        let remote = tempfile::tempdir().unwrap();
+        Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .current_dir(remote.path())
+            .output()
+            .unwrap();
+        run(
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+            "me@t",
+        );
+        run(&["push", "--quiet", "origin", "main"], "me@t");
+        let pushed = list_log(root, 20, false)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.subject == "mine")
+            .unwrap()
+            .hash;
+        assert!(
+            reword_commit(root, &pushed, "x").is_err(),
+            "запушенный коммит переписывать нельзя"
+        );
     }
 }

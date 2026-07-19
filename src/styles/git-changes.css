@@ -1105,7 +1105,9 @@
   .git-file-header.is-updated,
   .git-file-header.is-updated .git-file-counts,
   .git-view,
-  .git-history-swap {
+  .git-history-swap,
+  .git-reword-backdrop,
+  .git-reword {
     animation: none;
   }
 
@@ -1424,6 +1426,101 @@
   height: 8px;
   border: 1.5px dashed var(--mc-text-faint);
   border-radius: 50%;
+}
+
+/* ---------- Редактор сообщения коммита ---------- */
+
+.git-reword-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--mc-bg) 60%, transparent);
+  backdrop-filter: blur(2px);
+  animation: git-reword-fade 140ms ease;
+}
+
+@keyframes git-reword-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.git-reword {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(460px, 100%);
+  padding: 16px;
+  border: 1px solid var(--mc-border);
+  border-radius: 12px;
+  background: var(--mc-surface-raised);
+  box-shadow: 0 20px 60px var(--mc-shadow);
+  animation: git-reword-in 160ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+@keyframes git-reword-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.git-reword-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--mc-text-bright);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.git-reword-hash {
+  color: var(--mc-text-faint);
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.git-reword-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-surface);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.git-reword-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--mc-accent) 55%, transparent);
+}
+
+.git-reword-hint {
+  color: var(--mc-text-faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.git-reword-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ---------- Граф: выбор, приглушение, колонки, HEAD ---------- */

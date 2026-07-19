@@ -270,6 +270,8 @@ export type GitCommitInfo = {
   epochMs: number;
   // Коммит есть только на этом компьютере.
   unpushed: boolean;
+  // Можно безопасно переписать сообщение (не запушен, не merge, свой).
+  editable: boolean;
   // На этот коммит указывает HEAD (текущий checkout).
   isHead: boolean;
   // Полные хеши родителей (для графа веток).
@@ -316,6 +318,16 @@ export function commitAction(
     hash,
     ...(name === undefined ? {} : { name }),
   });
+}
+
+// Переписать сообщение локального коммита. Бэкенд разрешает только не
+// запушенные свои не-merge коммиты; иначе — ошибка.
+export function rewordCommit(
+  workspaceId: string,
+  hash: string,
+  message: string,
+): Promise<void> {
+  return invoke("git_reword_commit", { workspaceId, hash, message });
 }
 
 // Забрать с сервера (ff-only) и отправить локальные коммиты. Обе — сетевые,

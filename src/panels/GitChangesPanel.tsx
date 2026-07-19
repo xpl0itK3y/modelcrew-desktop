@@ -26,6 +26,7 @@ import {
   refreshGitChanges,
   resolveAvatarUrl,
   revertFile,
+  rewordCommit,
   subscribeGitChanges,
   switchBranch,
   writeRepoFile,
@@ -757,10 +758,13 @@ function CommitActionsMenu(props: {
   onClose: () => void;
   onError: (message: string) => void;
   onDone: () => void;
+  onReword: (commit: GitCommitInfo) => void;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
+  // Редактировать сообщение можно только вошедшему и только свой не запушенный.
+  const canReword = props.commit.editable && isGithubSignedIn();
   const [confirm, setConfirm] = useState<
     null | "checkout" | "cherryPick" | "revert"
   >(null);
@@ -901,6 +905,19 @@ function CommitActionsMenu(props: {
               ? t("git.copied")
               : t("git.actionCopyMessage")}
           </button>
+          {canReword && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item"
+              onClick={() => {
+                props.onReword(props.commit);
+                props.onClose();
+              }}
+            >
+              {t("git.actionReword")}
+            </button>
+          )}
           <div className="git-actions-sep" aria-hidden="true" />
           <button
             type="button"
@@ -1088,6 +1105,88 @@ function RefBadge(props: {
     >
       {label}
     </button>
+  );
+}
+
+// Модальный редактор сообщения коммита: первая строка — заголовок, дальше —
+// описание. Сохранение переписывает локальный коммит (бэкенд проверяет
+// безопасность). Доступен только для редактируемых коммитов вошедшего.
+function RewordEditor(props: {
+  workspaceId: string;
+  commit: GitCommitInfo;
+  onClose: () => void;
+  onError: (message: string) => void;
+  onDone: () => void;
+}) {
+  const { t } = useI18n();
+  const [text, setText] = useState(
+    () =>
+      props.commit.subject +
+      (props.commit.body ? `\n\n${props.commit.body}` : ""),
+  );
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await rewordCommit(props.workspaceId, props.commit.hash, trimmed);
+      props.onDone();
+      props.onClose();
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+      props.onClose();
+    }
+  };
+
+  return (
+    <div className="git-reword-backdrop">
+      <div className="git-reword" role="dialog" aria-modal="true">
+        <div className="git-reword-title">
+          {t("git.actionReword")}
+          <span className="git-reword-hash">{props.commit.shortHash}</span>
+        </div>
+        <textarea
+          className="git-reword-input"
+          value={text}
+          autoFocus
+          spellCheck={false}
+          disabled={busy}
+          rows={7}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              props.onClose();
+            } else if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              void save();
+            }
+          }}
+        />
+        <div className="git-reword-hint">{t("git.rewordHint")}</div>
+        <div className="git-reword-actions">
+          <button
+            type="button"
+            className="git-actions-cancel"
+            disabled={busy}
+            onClick={props.onClose}
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className="git-actions-go"
+            disabled={busy || text.trim().length === 0}
+            onClick={() => void save()}
+          >
+            {t("git.rewordSave")}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1362,6 +1461,8 @@ function HistoryView(props: {
     y: number;
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Открытый редактор сообщения коммита.
+  const [rewording, setRewording] = useState<GitCommitInfo | null>(null);
   // Немедленная перезагрузка лога после действия (не дожидаясь вотчера).
   const [reloadNonce, setReloadNonce] = useState(0);
   // Детали остаются смонтированными на время exit-анимации при сворачивании.
@@ -1672,6 +1773,20 @@ function HistoryView(props: {
           onClose={() => setMenu(null)}
           onError={setActionError}
           onDone={() => setReloadNonce((value) => value + 1)}
+          onReword={setRewording}
+        />
+      )}
+      {rewording && (
+        <RewordEditor
+          workspaceId={props.workspaceId}
+          commit={rewording}
+          onClose={() => setRewording(null)}
+          onError={setActionError}
+          onDone={() => {
+            // Хеш изменился — снимаем выделение старого и перезагружаем лог.
+            setExpandedHash(null);
+            setReloadNonce((value) => value + 1);
+          }}
         />
       )}
     </div>
