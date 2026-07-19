@@ -43,6 +43,16 @@ import {
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { computeCommitGraph } from "../git/commitGraph";
 import {
+  GRAPH_COLORS,
+  GRAPH_DOT_RADIUS,
+  GRAPH_LANE_WIDTH,
+  GRAPH_RING_RADIUS,
+  GRAPH_RING_STROKE_WIDTH,
+  GRAPH_ROW_HEIGHT,
+  GRAPH_STROKE_WIDTH,
+  graphEdgePath,
+} from "../git/graphGeometry";
+import {
   githubAvatarForEmail,
   loadGithubCommitAvatars,
   subscribeGithubAvatars,
@@ -50,20 +60,6 @@ import {
 import { isGithubSignedIn, subscribeGithubAuth } from "../github/authState";
 import { loadNetworkAvatars } from "../terminal/preferences";
 import { useAnimatedPresence } from "../ui/useAnimatedPresence";
-
-// Палитра дорожек графа и геометрия строки.
-const GRAPH_COLORS = [
-  "#a78bfa",
-  "#e0894c",
-  "#4fb8a8",
-  "#5c9de0",
-  "#e05c9e",
-  "#4fb864",
-  "#d9a03f",
-];
-const LANE_W = 14;
-const GRAPH_ROW_H = 26;
-const GRAPH_DOT_R = 3.6;
 
 function laneColor(index: number): string {
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
@@ -158,32 +154,7 @@ function AuthorAvatar(props: { name: string; email?: string }) {
 }
 
 function laneCenter(col: number): number {
-  return col * LANE_W + LANE_W / 2;
-}
-
-// Прямая для вертикальной дорожки, плавная S-кривая для перехода в другую.
-function graphEdgePath(x1: number, y1: number, x2: number, y2: number): string {
-  if (x1 === x2) {
-    return `M${x1} ${y1}L${x2} ${y2}`;
-  }
-  const mid = (y1 + y2) / 2;
-  return `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
-}
-
-// Дорожки, продолжающиеся ниже строки (уникальные колонки нижних рёбер) — их
-// дорисовываем вертикально сквозь раскрытый блок деталей, чтобы граф не рвался.
-function throughLanes(row: {
-  bottom: { toCol: number; color: number }[];
-}): { col: number; color: number }[] {
-  const seen = new Set<number>();
-  const lanes: { col: number; color: number }[] = [];
-  for (const edge of row.bottom) {
-    if (!seen.has(edge.toCol)) {
-      seen.add(edge.toCol);
-      lanes.push({ col: edge.toCol, color: edge.color });
-    }
-  }
-  return lanes;
+  return col * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2;
 }
 
 // Иконка-статус в списке: одна буква как в git status.
@@ -1123,30 +1094,6 @@ function SyncStatus(props: {
   );
 }
 
-// Предки коммита (он сам + всё, на чём он стоит) среди загруженных — для
-// подсветки родословной при выборе узла.
-function ancestryOf(startHash: string, commits: GitCommitInfo[]): Set<string> {
-  const parents = new Map<string, string[]>();
-  for (const commit of commits) {
-    parents.set(commit.hash, commit.parents);
-  }
-  const seen = new Set<string>();
-  const stack = [startHash];
-  while (stack.length > 0) {
-    const hash = stack.pop()!;
-    if (seen.has(hash)) {
-      continue;
-    }
-    seen.add(hash);
-    for (const parent of parents.get(hash) ?? []) {
-      if (!seen.has(parent)) {
-        stack.push(parent);
-      }
-    }
-  }
-  return seen;
-}
-
 // Бейдж ветки/тега: клик переключает на неё, не всплывая до выбора коммита.
 // Серверная (origin/…) создаёт локальную со слежением, тег — переход с
 // отделением HEAD. Текущая ветка — некликабельная отметка.
@@ -1269,16 +1216,14 @@ function RewordEditor(props: {
 }
 
 // Вкладка «История»: граф веток — цветные дорожки, точки, ветвления и слияния.
-// Клик по узлу выбирает коммит и раскрывает его детали; родословная выбранного
-// подсвечена, кольцо отмечает HEAD.
+// Клик по узлу выбирает коммит и раскрывает его детали; полое кольцо отмечает
+// merge-коммиты и текущий HEAD.
 function CommitGraph(props: {
   commits: GitCommitInfo[];
   workspaceId: string;
   selectedHash: string | null;
   onSelect: (commit: GitCommitInfo) => void;
   detailsPresence: { item: string; closing: boolean } | null;
-  // Родословная выбранного (он + предки): остальные приглушаются. null — нет.
-  highlighted: Set<string> | null;
   onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
   onSwitchBranch: (name: string, remote: boolean) => void;
   currentBranch?: string;
@@ -1296,8 +1241,8 @@ function CommitGraph(props: {
       ),
     [props.commits],
   );
-  const width = (rows[0]?.width ?? 1) * LANE_W;
   const head = rows[0];
+  const headWidth = (head?.width ?? 1) * GRAPH_LANE_WIDTH;
 
   return (
     <div className="git-graph">
@@ -1310,9 +1255,9 @@ function CommitGraph(props: {
         >
           <svg
             className="git-graph-lines"
-            width={width}
-            height={GRAPH_ROW_H}
-            style={{ width, minWidth: width }}
+            width={headWidth}
+            height={GRAPH_ROW_HEIGHT}
+            style={{ width: headWidth, minWidth: headWidth }}
             aria-hidden="true"
           >
             {/* Пунктирный поводок от рабочего дерева вниз к точке HEAD. Свой
@@ -1320,20 +1265,20 @@ function CommitGraph(props: {
                 тянем линию в его строку (svg — overflow: visible). */}
             <line
               x1={laneCenter(head.col)}
-              y1={GRAPH_ROW_H / 2}
+              y1={GRAPH_ROW_HEIGHT / 2}
               x2={laneCenter(head.col)}
-              y2={GRAPH_ROW_H + GRAPH_ROW_H / 2}
+              y2={GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2}
               stroke={laneColor(head.color)}
-              strokeWidth={1.6}
-              strokeDasharray="2.5 2.5"
+              strokeWidth={GRAPH_STROKE_WIDTH}
+              strokeDasharray="2 2"
             />
             <circle
               cx={laneCenter(head.col)}
-              cy={GRAPH_ROW_H / 2}
-              r={GRAPH_DOT_R}
+              cy={GRAPH_ROW_HEIGHT / 2}
+              r={GRAPH_RING_RADIUS}
               fill="var(--mc-bg)"
               stroke={laneColor(head.color)}
-              strokeWidth={1.6}
+              strokeWidth={GRAPH_RING_STROKE_WIDTH}
             />
           </svg>
           <span className="git-graph-subject git-worktree-label">
@@ -1350,17 +1295,16 @@ function CommitGraph(props: {
         }
         const isMerge = commit.parents.length > 1;
         const cx = laneCenter(row.col);
+        const rowWidth = row.width * GRAPH_LANE_WIDTH;
         const selected = props.selectedHash === commit.hash;
-        const dimmed =
-          props.highlighted !== null && !props.highlighted.has(commit.hash);
         return (
           <Fragment key={commit.hash}>
             <div
               role="button"
               tabIndex={0}
               className={`git-graph-row ${selected ? "is-selected" : ""} ${
-                dimmed ? "is-dimmed" : ""
-              } ${commit.isHead ? "is-head" : ""}`}
+                commit.isHead ? "is-head" : ""
+              }`}
               onClick={() => props.onSelect(commit)}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -1375,57 +1319,64 @@ function CommitGraph(props: {
             >
               <svg
                 className="git-graph-lines"
-                width={width}
-                height={GRAPH_ROW_H}
-                style={{ width, minWidth: width }}
+                width={rowWidth}
+                height={GRAPH_ROW_HEIGHT}
+                style={{ width: rowWidth, minWidth: rowWidth }}
                 aria-hidden="true"
               >
                 {row.top.map((edge, k) => (
                   <path
-                    key={`t${k}`}
+                    key={`t-${edge.kind}-${edge.fromCol}-${edge.toCol}-${k}`}
                     d={graphEdgePath(
                       laneCenter(edge.fromCol),
                       0,
                       laneCenter(edge.toCol),
-                      GRAPH_ROW_H / 2,
+                      GRAPH_ROW_HEIGHT / 2,
+                      "top",
                     )}
                     fill="none"
                     stroke={laneColor(edge.color)}
-                    strokeWidth={1.6}
+                    strokeWidth={GRAPH_STROKE_WIDTH}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                 ))}
                 {row.bottom.map((edge, k) => (
                   <path
-                    key={`b${k}`}
+                    key={`b-${edge.kind}-${edge.fromCol}-${edge.toCol}-${k}`}
                     d={graphEdgePath(
                       laneCenter(edge.fromCol),
-                      GRAPH_ROW_H / 2,
+                      GRAPH_ROW_HEIGHT / 2,
                       laneCenter(edge.toCol),
-                      GRAPH_ROW_H,
+                      GRAPH_ROW_HEIGHT,
+                      "bottom",
                     )}
                     fill="none"
                     stroke={laneColor(edge.color)}
-                    strokeWidth={1.6}
+                    strokeWidth={GRAPH_STROKE_WIDTH}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                 ))}
-                {commit.isHead && (
-                  // Кольцо HEAD: текущий checkout выделяется акцентом.
-                  <circle
-                    cx={cx}
-                    cy={GRAPH_ROW_H / 2}
-                    r={GRAPH_DOT_R + 2.6}
-                    fill="none"
-                    stroke="var(--mc-accent)"
-                    strokeWidth={1.5}
-                  />
-                )}
                 <circle
                   cx={cx}
-                  cy={GRAPH_ROW_H / 2}
-                  r={GRAPH_DOT_R}
-                  fill={isMerge ? "var(--mc-bg)" : laneColor(row.color)}
-                  stroke={laneColor(row.color)}
-                  strokeWidth={isMerge ? 2 : 0}
+                  cy={GRAPH_ROW_HEIGHT / 2}
+                  r={
+                    isMerge || commit.isHead
+                      ? GRAPH_RING_RADIUS
+                      : GRAPH_DOT_RADIUS
+                  }
+                  fill={
+                    isMerge || commit.isHead
+                      ? "var(--mc-bg)"
+                      : laneColor(row.color)
+                  }
+                  stroke={
+                    commit.isHead ? "var(--mc-accent)" : laneColor(row.color)
+                  }
+                  strokeWidth={
+                    isMerge || commit.isHead ? GRAPH_RING_STROKE_WIDTH : 0
+                  }
                 />
               </svg>
               <span className="git-graph-subject" title={commit.subject}>
@@ -1476,17 +1427,16 @@ function CommitGraph(props: {
             {props.detailsPresence?.item === commit.hash && (
               <div
                 className="git-graph-details"
-                style={{ paddingLeft: width + 10 }}
+                style={{ paddingLeft: rowWidth + 14 }}
               >
-                {/* Продолжаем дорожки сквозь блок деталей (по нижним рёбрам
-                    строки), чтобы линии ветки под раскрытым коммитом не
-                    рвались. */}
+                {/* Продолжаем состояние дорожек с нижней границы строки,
+                    чтобы граф не рвался на раскрытой карточке коммита. */}
                 <span
                   className="git-graph-details-lanes"
-                  style={{ width }}
+                  style={{ width: rowWidth }}
                   aria-hidden="true"
                 >
-                  {throughLanes(row).map((lane) => (
+                  {row.lanesBelow.map((lane) => (
                     <span
                       key={lane.col}
                       className="git-graph-lane-through"
@@ -1524,8 +1474,8 @@ function HistoryView(props: {
   const { locale, t } = useI18n();
   const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
   const [graphMode, setGraphMode] = useState(true);
-  // «Все ветки»: включает в историю локальные и серверные ветки (git --all),
-  // граф становится насыщенным, как в редакторах.
+  // «Все ветки»: включает локальные и серверные ветки (без stash/tag-only
+  // служебных историй), граф становится насыщенным, как в редакторах.
   const [allBranches, setAllBranches] = useState(false);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
@@ -1639,15 +1589,6 @@ function HistoryView(props: {
     }
   };
 
-  // Родословная выбранного узла (он + предки) — для приглушения остальных в
-  // графе. В списке подсветка не нужна.
-  const highlighted = useMemo(() => {
-    if (!graphMode || !expandedHash || !commits) {
-      return null;
-    }
-    return ancestryOf(expandedHash, commits);
-  }, [graphMode, expandedHash, commits]);
-
   if (commits === null) {
     return <div className="git-empty">{t("git.loading")}</div>;
   }
@@ -1705,7 +1646,6 @@ function HistoryView(props: {
             setExpandedHash(expandedHash === commit.hash ? null : commit.hash)
           }
           detailsPresence={detailsPresence}
-          highlighted={highlighted}
           onMenu={openMenu}
           onSwitchBranch={(name, remote) => void switchTo(name, remote)}
           currentBranch={props.currentBranch}
