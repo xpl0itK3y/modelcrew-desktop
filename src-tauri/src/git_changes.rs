@@ -916,10 +916,91 @@ pub fn commit_action(
     }
 }
 
+fn parse_log_records(
+    raw: &[u8],
+    unpushed: &std::collections::HashSet<String>,
+    local_only: &std::collections::HashSet<String>,
+    local_email: &str,
+) -> CommandResult<Vec<GitCommitInfo>> {
+    const FIELD_COUNT: usize = 9;
+    let mut fields = raw.split(|byte| *byte == 0).collect::<Vec<_>>();
+    // `git log -z` завершает и последнюю запись NUL-байтом.
+    if fields.last().is_some_and(|field| field.is_empty()) {
+        fields.pop();
+    }
+    if fields.len() % FIELD_COUNT != 0 {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "invalidLogRecord"));
+    }
+
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let mut commits = Vec::with_capacity(fields.len() / FIELD_COUNT);
+    for record in fields.chunks_exact(FIELD_COUNT) {
+        let hash = text(record[0]);
+        if !is_safe_hash(&hash) {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "invalidLogHash"));
+        }
+        let short_hash = text(record[1]);
+        let author = text(record[2]);
+        let author_email = text(record[3]);
+        let epoch = text(record[4]).parse::<i64>().map_err(|error| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "invalidLogTimestamp")
+                .with_debug(error)
+        })?;
+        let subject = text(record[5]);
+        // Декорации %D: «HEAD -> main», «HEAD, tag: v1» (detached) и т.п.
+        // Признак HEAD снимаем до чистки, иначе он теряется.
+        let decorations = text(record[6]);
+        let is_head = decorations
+            .split(", ")
+            .any(|entry| entry.trim() == "HEAD" || entry.trim().starts_with("HEAD -> "));
+        let refs = decorations
+            .split(", ")
+            .map(|entry| entry.trim().trim_start_matches("HEAD -> "))
+            .filter(|entry| !entry.is_empty() && *entry != "HEAD")
+            .map(str::to_owned)
+            .collect();
+        let parents = text(record[7])
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let (body, co_authors) = split_body_and_co_authors(&text(record[8]));
+        let editable = local_only.contains(&hash)
+            && parents.len() <= 1
+            && !local_email.is_empty()
+            && author_email.to_lowercase() == local_email;
+
+        commits.push(GitCommitInfo {
+            unpushed: unpushed.contains(&hash),
+            editable,
+            is_head,
+            hash,
+            short_hash,
+            subject,
+            author,
+            author_email,
+            epoch_ms: epoch.saturating_mul(1000),
+            parents,
+            refs,
+            body,
+            co_authors,
+        });
+    }
+    Ok(commits)
+}
+
 pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Vec<GitCommitInfo>> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    let head_exists = run_git(&toplevel, &["rev-parse", "--verify", "HEAD"]).is_ok();
+    if !all_branches && !head_exists {
+        // Unborn HEAD: это корректный пустой репозиторий. Прочие ошибки `log`
+        // ниже не маскируем под пустую историю.
+        return Ok(Vec::new());
+    }
     let limit = limit.clamp(1, 800);
     let count = format!("-n{limit}");
     // Граф строится сверху вниз и предполагает топологический порядок: любой
@@ -932,16 +1013,22 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
         "log",
         count.as_str(),
         "--topo-order",
-        "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%D%x1f%P%x1f%b%x1e",
+        "-z",
+        "--decorate-refs-exclude=refs/remotes/*/HEAD",
+        "--format=%H%x00%h%x00%an%x00%ae%x00%at%x00%s%x00%D%x00%P%x00%b",
     ];
     if all_branches {
-        args.push("--all");
+        // Кнопка называется «Все ветки»: stash, notes, bisect и tag-only
+        // компоненты из `--all` здесь неуместны. Теги на достижимых коммитах
+        // всё равно остаются в %D. Detached HEAD добавляем отдельно, потому что
+        // ни одна локальная ветка может на него не указывать.
+        args.push("--branches");
+        args.push("--remotes");
+        if head_exists && run_git(&toplevel, &["symbolic-ref", "--quiet", "HEAD"]).is_err() {
+            args.push("HEAD");
+        }
     }
-    let raw = match run_git(&toplevel, &args) {
-        Ok(raw) => raw,
-        // Пустой репозиторий без коммитов — не ошибка, а пустая история.
-        Err(_) => return Ok(Vec::new()),
-    };
+    let raw = run_git(&toplevel, &args)?;
     // Коммиты, которых ещё нет на upstream текущей ветки. Без upstream
     // сравнивать не с чем — тогда пометок нет.
     let unpushed: std::collections::HashSet<String> =
@@ -975,68 +1062,7 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
     })
     .unwrap_or_default();
 
-    let text = String::from_utf8_lossy(&raw);
-    Ok(text
-        .split('\u{1e}')
-        .filter_map(|record| {
-            let record = record.trim_start_matches(['\n', '\r']);
-            let mut parts = record.split('\u{1f}');
-            let hash = parts.next()?.trim();
-            if hash.is_empty() {
-                return None;
-            }
-            let short_hash = parts.next()?.to_owned();
-            let author = parts.next()?.to_owned();
-            let author_email = parts.next()?.to_owned();
-            let epoch = parts
-                .next()
-                .and_then(|value| value.trim().parse::<i64>().ok())?;
-            let subject = parts.next()?.to_owned();
-            // Декорации %D: «HEAD -> main», «HEAD, tag: v1» (detached) и т.п.
-            // Признак HEAD снимаем до чистки, иначе он теряется.
-            let decorations = parts.next().unwrap_or_default();
-            let is_head = decorations
-                .split(", ")
-                .any(|entry| entry.trim() == "HEAD" || entry.trim().starts_with("HEAD -> "));
-            let refs = decorations
-                .split(", ")
-                .map(|entry| entry.trim().trim_start_matches("HEAD -> "))
-                .filter(|entry| !entry.is_empty() && *entry != "HEAD")
-                .map(str::to_owned)
-                .collect();
-            let parents = parts
-                .next()
-                .map(|value| {
-                    value
-                        .split_whitespace()
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let (body, co_authors) = split_body_and_co_authors(parts.next().unwrap_or_default());
-            let is_unpushed = unpushed.contains(hash);
-            // Редактируемо: только локальный (нет на remote), не merge, свой.
-            let editable = local_only.contains(hash)
-                && parents.len() <= 1
-                && !local_email.is_empty()
-                && author_email.to_lowercase() == local_email;
-            Some(GitCommitInfo {
-                unpushed: is_unpushed,
-                editable,
-                is_head,
-                hash: hash.to_owned(),
-                short_hash,
-                subject,
-                author,
-                author_email,
-                epoch_ms: epoch * 1000,
-                parents,
-                refs,
-                body,
-                co_authors,
-            })
-        })
-        .collect())
+    parse_log_records(&raw, &unpushed, &local_only, &local_email)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -2088,6 +2114,115 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
                 }
             }
         }
+    }
+
+    #[test]
+    fn all_branches_excludes_non_branch_refs_and_includes_detached_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Branch Test")
+                .env("GIT_AUTHOR_EMAIL", "branches@test")
+                .env("GIT_COMMITTER_NAME", "Branch Test")
+                .env("GIT_COMMITTER_EMAIL", "branches@test")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+            output.stdout
+        };
+        let hash = |args: &[&str]| String::from_utf8_lossy(&git(args)).trim().to_owned();
+
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("tracked.txt"), "base\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "root"]);
+        let root_hash = hash(&["rev-parse", "HEAD"]);
+
+        git(&["checkout", "--quiet", "-b", "side"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "side-tip"]);
+        let side_hash = hash(&["rev-parse", "HEAD"]);
+        git(&["checkout", "--quiet", "main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "main-tip"]);
+        let main_hash = hash(&["rev-parse", "HEAD"]);
+
+        // Коммит доступен только через tag: это не ветка и в режиме «Все
+        // ветки» отдельную компоненту графа создавать не должен.
+        let tree = hash(&["rev-parse", "HEAD^{tree}"]);
+        let tag_only_hash = hash(&["commit-tree", tree.as_str(), "-p", "HEAD", "-m", "tag-only"]);
+        git(&["tag", "archived-only", tag_only_hash.as_str()]);
+
+        // refs/stash — служебный merge-граф, а не пользовательская ветка.
+        std::fs::write(root.join("tracked.txt"), "stashed\n").unwrap();
+        git(&["stash", "push", "--quiet", "-m", "hidden-stash"]);
+        let stash_hash = hash(&["rev-parse", "refs/stash"]);
+
+        let branch_log = list_log(root, 50, true).unwrap();
+        let branch_hashes = branch_log
+            .iter()
+            .map(|commit| commit.hash.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(branch_hashes.contains(main_hash.as_str()));
+        assert!(branch_hashes.contains(side_hash.as_str()));
+        assert!(!branch_hashes.contains(tag_only_hash.as_str()));
+        assert!(!branch_hashes.contains(stash_hash.as_str()));
+
+        // Detached HEAD не входит в refs/heads, поэтому добавляется отдельной
+        // starting revision и живёт рядом с обычными ветками.
+        git(&["checkout", "--quiet", "--detach", root_hash.as_str()]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "detached-tip"]);
+        let detached_hash = hash(&["rev-parse", "HEAD"]);
+        let detached_log = list_log(root, 50, true).unwrap();
+        let detached_hashes = detached_log
+            .iter()
+            .map(|commit| commit.hash.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(detached_hashes.contains(detached_hash.as_str()));
+        assert!(detached_hashes.contains(main_hash.as_str()));
+        assert!(detached_hashes.contains(side_hash.as_str()));
+    }
+
+    #[test]
+    fn log_control_characters_cannot_corrupt_parent_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Parser Test")
+                .env("GIT_AUTHOR_EMAIL", "parser@test")
+                .env("GIT_COMMITTER_NAME", "Parser Test")
+                .env("GIT_COMMITTER_EMAIL", "parser@test")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+            output.stdout
+        };
+
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "root"]);
+        let root_hash = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+        let subject = "subject with \u{1f} unit and \u{1e} record separators";
+        let body = "body keeps \u{1e} and \u{1f} as ordinary text";
+        let message_path = root.join("message.txt");
+        std::fs::write(&message_path, format!("{subject}\n\n{body}\n")).unwrap();
+        git(&[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-F",
+            message_path.to_str().unwrap(),
+        ]);
+
+        let log = list_log(root, 10, false).unwrap();
+        assert_eq!(log[0].subject, subject);
+        assert_eq!(log[0].body, body);
+        assert_eq!(log[0].parents, vec![root_hash]);
     }
 
     #[test]
