@@ -1,32 +1,44 @@
 import { describe, expect, it } from "vitest";
-import { graphEdgePath } from "./graphGeometry";
+import {
+  graphIncomingPath,
+  graphLaneCenter,
+  graphParentPath,
+  graphThroughPath,
+} from "./graphGeometry";
 
-describe("graphEdgePath", () => {
-  it("keeps a lane vertical", () => {
-    expect(graphEdgePath(5.5, 0, 5.5, 11, "top")).toBe("M5.5 0V11");
-    expect(graphEdgePath(5.5, 11, 5.5, 22, "bottom")).toBe(
-      "M5.5 11V22",
+describe("VS Code-compatible graph geometry", () => {
+  it("places the first swimlane at x=11", () => {
+    expect(graphLaneCenter(0)).toBe(11);
+    expect(graphLaneCenter(2)).toBe(33);
+  });
+
+  it("draws a stable swimlane vertically", () => {
+    expect(graphThroughPath(0, 0)).toBe("M 11 0 V 22");
+  });
+
+  it("uses two radius-5 arcs when a collapsed lane shifts left", () => {
+    expect(graphThroughPath(2, 0)).toBe(
+      "M 33 0 V 6 A 5 5 0 0 1 28 11 H 16 A 5 5 0 0 0 11 16 V 22",
     );
   });
 
-  it("enters a node with a vertical, rounded and horizontal segment", () => {
-    expect(graphEdgePath(5.5, 0, 16.5, 11, "top")).toBe(
-      "M5.5 0V6Q5.5 11 10.5 11H16.5",
+  it("supports the mirrored transition for partial histories", () => {
+    expect(graphThroughPath(0, 2)).toBe(
+      "M 11 0 V 6 A 5 5 0 0 0 16 11 H 28 A 5 5 0 0 1 33 16 V 22",
     );
   });
 
-  it("leaves a node horizontally and turns down into the target lane", () => {
-    expect(graphEdgePath(5.5, 11, 16.5, 22, "bottom")).toBe(
-      "M5.5 11H11.5Q16.5 11 16.5 16V22",
-    );
-    expect(graphEdgePath(16.5, 11, 5.5, 22, "bottom")).toBe(
-      "M16.5 11H10.5Q5.5 11 5.5 16V22",
+  it("draws the primary and duplicate inputs to a commit", () => {
+    expect(graphIncomingPath(0, 0)).toBe("M 11 0 V 11");
+    expect(graphIncomingPath(2, 0)).toBe(
+      "M 33 0 A 11 11 0 0 1 22 11 H 11",
     );
   });
 
-  it("clamps the corner to a short transition", () => {
-    expect(graphEdgePath(0, 0, 3, 4, "top")).toBe(
-      "M0 0V1Q0 4 3 4H3",
+  it("draws first and additional parent connections", () => {
+    expect(graphParentPath(0, 0, 0)).toBe("M 11 11 V 22");
+    expect(graphParentPath(0, 2, 1)).toBe(
+      "M 22 11 A 11 11 0 0 1 33 22 M 22 11 H 11",
     );
   });
 });

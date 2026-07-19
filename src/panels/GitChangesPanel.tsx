@@ -45,12 +45,19 @@ import { computeCommitGraph } from "../git/commitGraph";
 import {
   GRAPH_COLORS,
   GRAPH_DOT_RADIUS,
+  GRAPH_HEAD_INNER_RADIUS,
+  GRAPH_HEAD_INNER_STROKE_WIDTH,
+  GRAPH_HEAD_OUTER_RADIUS,
   GRAPH_LANE_WIDTH,
-  GRAPH_RING_RADIUS,
-  GRAPH_RING_STROKE_WIDTH,
+  GRAPH_MERGE_INNER_RADIUS,
+  GRAPH_MERGE_OUTER_RADIUS,
+  GRAPH_NODE_STROKE_WIDTH,
   GRAPH_ROW_HEIGHT,
   GRAPH_STROKE_WIDTH,
-  graphEdgePath,
+  graphIncomingPath,
+  graphLaneCenter,
+  graphParentPath,
+  graphThroughPath,
 } from "../git/graphGeometry";
 import {
   githubAvatarForEmail,
@@ -151,10 +158,6 @@ function AuthorAvatar(props: { name: string; email?: string }) {
       )}
     </span>
   );
-}
-
-function laneCenter(col: number): number {
-  return col * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2;
 }
 
 // Иконка-статус в списке: одна буква как в git status.
@@ -1237,12 +1240,15 @@ function CommitGraph(props: {
         props.commits.map((commit) => ({
           hash: commit.hash,
           parents: commit.parents,
+          refs: commit.refs,
+          isHead: commit.isHead,
         })),
+        { currentBranch: props.currentBranch },
       ),
-    [props.commits],
+    [props.commits, props.currentBranch],
   );
   const head = rows[0];
-  const headWidth = (head?.width ?? 1) * GRAPH_LANE_WIDTH;
+  const headWidth = ((head?.width ?? 1) + 1) * GRAPH_LANE_WIDTH;
 
   return (
     <div className="git-graph">
@@ -1264,21 +1270,21 @@ function CommitGraph(props: {
                 «отросток» вверх у свежего коммита граф не рисует, поэтому
                 тянем линию в его строку (svg — overflow: visible). */}
             <line
-              x1={laneCenter(head.col)}
+              x1={graphLaneCenter(head.col)}
               y1={GRAPH_ROW_HEIGHT / 2}
-              x2={laneCenter(head.col)}
+              x2={graphLaneCenter(head.col)}
               y2={GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2}
               stroke={laneColor(head.color)}
               strokeWidth={GRAPH_STROKE_WIDTH}
               strokeDasharray="2 2"
             />
             <circle
-              cx={laneCenter(head.col)}
+              cx={graphLaneCenter(head.col)}
               cy={GRAPH_ROW_HEIGHT / 2}
-              r={GRAPH_RING_RADIUS}
-              fill="var(--mc-bg)"
+              r={GRAPH_HEAD_OUTER_RADIUS}
+              fill="var(--git-graph-node-bg, var(--mc-bg))"
               stroke={laneColor(head.color)}
-              strokeWidth={GRAPH_RING_STROKE_WIDTH}
+              strokeWidth={GRAPH_NODE_STROKE_WIDTH}
             />
           </svg>
           <span className="git-graph-subject git-worktree-label">
@@ -1294,8 +1300,8 @@ function CommitGraph(props: {
           return null;
         }
         const isMerge = commit.parents.length > 1;
-        const cx = laneCenter(row.col);
-        const rowWidth = row.width * GRAPH_LANE_WIDTH;
+        const cx = graphLaneCenter(row.col);
+        const rowWidth = (row.width + 1) * GRAPH_LANE_WIDTH;
         const selected = props.selectedHash === commit.hash;
         return (
           <Fragment key={commit.hash}>
@@ -1324,16 +1330,21 @@ function CommitGraph(props: {
                 style={{ width: rowWidth, minWidth: rowWidth }}
                 aria-hidden="true"
               >
+                {row.through.map((edge, k) => (
+                  <path
+                    key={`x-${edge.fromCol}-${edge.toCol}-${edge.targetHash}-${k}`}
+                    d={graphThroughPath(edge.fromCol, edge.toCol)}
+                    fill="none"
+                    stroke={laneColor(edge.color)}
+                    strokeWidth={GRAPH_STROKE_WIDTH}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ))}
                 {row.top.map((edge, k) => (
                   <path
-                    key={`t-${edge.kind}-${edge.fromCol}-${edge.toCol}-${k}`}
-                    d={graphEdgePath(
-                      laneCenter(edge.fromCol),
-                      0,
-                      laneCenter(edge.toCol),
-                      GRAPH_ROW_HEIGHT / 2,
-                      "top",
-                    )}
+                    key={`t-${edge.fromCol}-${edge.toCol}-${k}`}
+                    d={graphIncomingPath(edge.fromCol, edge.toCol)}
                     fill="none"
                     stroke={laneColor(edge.color)}
                     strokeWidth={GRAPH_STROKE_WIDTH}
@@ -1343,13 +1354,11 @@ function CommitGraph(props: {
                 ))}
                 {row.bottom.map((edge, k) => (
                   <path
-                    key={`b-${edge.kind}-${edge.fromCol}-${edge.toCol}-${k}`}
-                    d={graphEdgePath(
-                      laneCenter(edge.fromCol),
-                      GRAPH_ROW_HEIGHT / 2,
-                      laneCenter(edge.toCol),
-                      GRAPH_ROW_HEIGHT,
-                      "bottom",
+                    key={`b-${edge.fromCol}-${edge.toCol}-${edge.parentIndex}-${k}`}
+                    d={graphParentPath(
+                      edge.fromCol,
+                      edge.toCol,
+                      edge.parentIndex ?? 0,
                     )}
                     fill="none"
                     stroke={laneColor(edge.color)}
@@ -1358,26 +1367,54 @@ function CommitGraph(props: {
                     strokeLinejoin="round"
                   />
                 ))}
-                <circle
-                  cx={cx}
-                  cy={GRAPH_ROW_HEIGHT / 2}
-                  r={
-                    isMerge || commit.isHead
-                      ? GRAPH_RING_RADIUS
-                      : GRAPH_DOT_RADIUS
-                  }
-                  fill={
-                    isMerge || commit.isHead
-                      ? "var(--mc-bg)"
-                      : laneColor(row.color)
-                  }
-                  stroke={
-                    commit.isHead ? "var(--mc-accent)" : laneColor(row.color)
-                  }
-                  strokeWidth={
-                    isMerge || commit.isHead ? GRAPH_RING_STROKE_WIDTH : 0
-                  }
-                />
+                {commit.isHead ? (
+                  <>
+                    <circle
+                      cx={cx}
+                      cy={GRAPH_ROW_HEIGHT / 2}
+                      r={GRAPH_HEAD_OUTER_RADIUS}
+                      fill={laneColor(row.color)}
+                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                      strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+                    />
+                    <circle
+                      cx={cx}
+                      cy={GRAPH_ROW_HEIGHT / 2}
+                      r={GRAPH_HEAD_INNER_RADIUS}
+                      fill="var(--git-graph-node-bg, var(--mc-bg))"
+                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                      strokeWidth={GRAPH_HEAD_INNER_STROKE_WIDTH}
+                    />
+                  </>
+                ) : isMerge ? (
+                  <>
+                    <circle
+                      cx={cx}
+                      cy={GRAPH_ROW_HEIGHT / 2}
+                      r={GRAPH_MERGE_OUTER_RADIUS}
+                      fill={laneColor(row.color)}
+                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                      strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+                    />
+                    <circle
+                      cx={cx}
+                      cy={GRAPH_ROW_HEIGHT / 2}
+                      r={GRAPH_MERGE_INNER_RADIUS}
+                      fill="var(--git-graph-node-bg, var(--mc-bg))"
+                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                      strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+                    />
+                  </>
+                ) : (
+                  <circle
+                    cx={cx}
+                    cy={GRAPH_ROW_HEIGHT / 2}
+                    r={GRAPH_DOT_RADIUS}
+                    fill={laneColor(row.color)}
+                    stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                    strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+                  />
+                )}
               </svg>
               <span className="git-graph-subject" title={commit.subject}>
                 {commit.subject}
@@ -1441,7 +1478,7 @@ function CommitGraph(props: {
                       key={lane.col}
                       className="git-graph-lane-through"
                       style={{
-                        left: laneCenter(lane.col),
+                        left: graphLaneCenter(lane.col),
                         background: laneColor(lane.color),
                       }}
                     />

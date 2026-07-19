@@ -301,6 +301,7 @@
 }
 
 .git-graph-row {
+  --git-graph-node-bg: var(--mc-bg);
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -317,6 +318,7 @@
 }
 
 .git-graph-row:hover {
+  --git-graph-node-bg: var(--mc-hover);
   background: var(--mc-hover);
 }
 
@@ -1589,6 +1591,7 @@
 
 /* Cursor-подобный выбор: нейтральная заливка всей строки без боковой полосы. */
 .git-graph-row.is-selected {
+  --git-graph-node-bg: var(--mc-hover);
   background: var(--mc-hover);
   box-shadow: none;
 }
