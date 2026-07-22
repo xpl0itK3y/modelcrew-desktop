@@ -6643,6 +6643,157 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         );
     }
 
+    // Проверка против настоящего сервера. По умолчанию пропускается: нужна
+    // сеть и права на запись, а обычный прогон тестов не должен ни от того,
+    // ни от другого зависеть. Запуск:
+    //   MODELCREW_TEST_REMOTE=git@github.com:user/repo.git \
+    //     cargo test -- --ignored live_workflow
+    #[test]
+    #[ignore = "требует сети и доступа на запись в указанный репозиторий"]
+    fn live_workflow_against_a_real_remote() {
+        let Ok(remote) = std::env::var("MODELCREW_TEST_REMOTE") else {
+            panic!("не задан MODELCREW_TEST_REMOTE");
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        git_at(
+            dir.path(),
+            &["clone", "--quiet", &remote, work.to_str().unwrap()],
+        );
+        let root = work.as_path();
+        configure(root);
+
+        // Имя уникально для запуска: параллельные прогоны не мешают друг другу,
+        // а забытая ветка на сервере сразу опознаётся по префиксу.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let branch = format!("modelcrew-test/{}-{nanos}", std::process::id());
+
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            live_scenario(root, dir.path(), &remote, &branch)
+        }));
+
+        // Ветку на сервере убираем в любом случае: наш код удалять удалённые
+        // ветки не умеет намеренно, поэтому здесь это делает сам git.
+        let _ = Command::new("git")
+            .args(["push", "--quiet", "origin", "--delete", &branch])
+            .current_dir(root)
+            .output();
+        if let Err(payload) = outcome {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    fn live_scenario(root: &Path, dir: &Path, remote: &str, branch: &str) {
+        // 1. Новая ветка и первая публикация: на сервере её ещё нет.
+        create_branch(root, branch).unwrap();
+        let first = commit_file(root, "live.txt", "first\n", "live: first");
+        assert!(collect_summary(root).unwrap().upstream_ref.is_none());
+        publish_branch(root, branch, &first, None).unwrap();
+
+        let listed = git_at(root, &["ls-remote", "origin", &format!("refs/heads/{branch}")]);
+        assert!(listed.starts_with(&first), "сервер принял ветку: {listed}");
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(
+            summary.upstream_ref.as_deref(),
+            Some(format!("origin/{branch}").as_str())
+        );
+        assert_eq!((summary.ahead, summary.behind), (Some(0), Some(0)));
+
+        // 2. Обычная отправка следующего коммита.
+        let second = commit_file(root, "live.txt", "first\nsecond\n", "live: second");
+        push_upstream(root, branch, &second).unwrap();
+        assert!(git_at(root, &["ls-remote", "origin", &format!("refs/heads/{branch}")])
+            .starts_with(&second));
+
+        // 3. Чужой коммит: вторая рабочая копия того же репозитория.
+        let other = dir.join("other");
+        git_at(dir, &["clone", "--quiet", remote, other.to_str().unwrap()]);
+        configure(&other);
+        git_at(&other, &["checkout", "--quiet", branch]);
+        let theirs = commit_file(&other, "theirs.txt", "colleague\n", "live: colleague");
+        git_at(&other, &["push", "--quiet", "origin", branch]);
+
+        fetch_upstream(root).unwrap();
+        assert_eq!(collect_summary(root).unwrap().behind, Some(1));
+        pull_upstream(root, branch, &second).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), theirs);
+
+        // 4. Расхождение и перенос поверх серверного состояния.
+        let ours = commit_file(root, "ours.txt", "mine\n", "live: mine");
+        let theirs_second = commit_file(&other, "theirs.txt", "colleague\nmore\n", "live: more");
+        git_at(&other, &["push", "--quiet", "origin", branch]);
+        fetch_upstream(root).unwrap();
+        let summary = collect_summary(root).unwrap();
+        assert_eq!((summary.ahead, summary.behind), (Some(1), Some(1)));
+        assert!(
+            pull_upstream(root, branch, &ours).is_err(),
+            "перемотка невозможна на разошедшейся ветке"
+        );
+        pull_rebase(root, branch, &ours).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD~1"]), theirs_second);
+        let rebased = git_at(root, &["rev-parse", "HEAD"]);
+        push_upstream(root, branch, &rebased).unwrap();
+
+        // 5. Выравнивание по серверу: локальный коммит уходит, файл остаётся.
+        let extra = commit_file(root, "extra.txt", "local only\n", "live: local only");
+        reset_to_upstream(root, branch, &extra).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), rebased);
+        assert!(root.join("extra.txt").exists());
+
+        // 6. Отправка с устаревшим подтверждением не проходит.
+        assert_eq!(
+            push_upstream(root, branch, &extra)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("head-moved")
+        );
+
+        // 7. Отказ приходит и с той стороны: сервер ушёл вперёд, а наша
+        // вершина не менялась, поэтому собственные проверки её пропускают —
+        // ошибку обязан вернуть сам push, а не тишина.
+        git_at(&other, &["fetch", "--quiet", "origin"]);
+        git_at(
+            &other,
+            &["reset", "--hard", "--quiet", &format!("origin/{branch}")],
+        );
+        commit_file(&other, "ahead.txt", "server moved\n", "live: server moved");
+        git_at(&other, &["push", "--quiet", "origin", branch]);
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        assert!(
+            push_upstream(root, branch, &head).is_err(),
+            "сервер должен отклонить откат ветки назад"
+        );
+
+        // 8. Недоступный репозиторий не должен подвешивать приложение: без
+        // интерактивного запроса пароля git обязан упасть, а не ждать ввода.
+        let broken = dir.join("broken");
+        std::fs::create_dir(&broken).unwrap();
+        git_at(&broken, &["init", "--quiet", "--initial-branch=main"]);
+        configure(&broken);
+        git_at(
+            &broken,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:xpl0itK3y/modelcrew-no-such-repository.git",
+            ],
+        );
+        let orphan = commit_file(&broken, "x.txt", "x\n", "live: unreachable");
+        let started = std::time::Instant::now();
+        assert!(publish_branch(&broken, "main", &orphan, None).is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "падение вместо ожидания ввода: {:?}",
+            started.elapsed()
+        );
+    }
+
     #[test]
     fn merges_and_rebases_by_exact_ref() {
         let dir = tempfile::tempdir().unwrap();

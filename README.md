@@ -136,6 +136,17 @@ npm test                       # frontend tests (vitest)
 cd src-tauri && cargo test     # backend tests (PTY, git, batching, stress)
 ```
 
+The Git backend is also covered end to end against a real server. Those runs
+need network access and write permission, so they are opt-in:
+
+```bash
+MODELCREW_TEST_REMOTE=git@github.com:you/scratch-repo.git \
+  cargo test -- --ignored live_workflow
+```
+
+It publishes a uniquely named `modelcrew-test/…` branch, drives push, pull,
+divergence and rebase through it, and deletes the branch afterwards.
+
 <details>
 <summary><b>Releases and updates</b></summary>
 
