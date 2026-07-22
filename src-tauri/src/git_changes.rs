@@ -4,7 +4,7 @@
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use crate::workspace_roots::WorkspaceRoots;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -2006,7 +2006,45 @@ fn merge_topological_commits(
     ordered
 }
 
-pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Vec<GitCommitInfo>> {
+// Фильтр журнала. Пустые поля не сужают выборку. Отдельно от `limit`, потому
+// что фильтр применяет сам git — иначе пришлось бы вычитывать всю историю.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogFilter {
+    // Подстрока в сообщении коммита (заголовок и описание).
+    pub text: Option<String>,
+    pub author: Option<String>,
+    // Путь внутри репозитория: остаются только коммиты, менявшие его.
+    pub path: Option<String>,
+}
+
+impl GitLogFilter {
+    fn value(field: &Option<String>) -> Option<&str> {
+        field.as_deref().map(str::trim).filter(|text| !text.is_empty())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        Self::value(&self.text).is_none()
+            && Self::value(&self.author).is_none()
+            && Self::value(&self.path).is_none()
+    }
+}
+
+#[cfg(test)]
+fn list_log_unfiltered(
+    root: &Path,
+    limit: u32,
+    all_branches: bool,
+) -> CommandResult<Vec<GitCommitInfo>> {
+    list_log(root, limit, all_branches, &GitLogFilter::default())
+}
+
+pub fn list_log(
+    root: &Path,
+    limit: u32,
+    all_branches: bool,
+    filter: &GitLogFilter,
+) -> CommandResult<Vec<GitCommitInfo>> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
@@ -2047,11 +2085,34 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
             args.push("HEAD");
         }
     }
+    // Значения уходят одним argv-элементом внутри `--opt=value`, поэтому даже
+    // текст, начинающийся с дефиса, не может стать опцией git.
+    let text = GitLogFilter::value(&filter.text).map(|text| format!("--grep={text}"));
+    let author = GitLogFilter::value(&filter.author).map(|name| format!("--author={name}"));
+    if let Some(grep) = text.as_deref() {
+        // Поиск — по подстроке, а не по регулярному выражению: пользователь
+        // вводит кусок сообщения, а не шаблон.
+        args.push("--fixed-strings");
+        args.push("--regexp-ignore-case");
+        args.push(grep);
+    }
+    if let Some(author) = author.as_deref() {
+        args.push("--regexp-ignore-case");
+        args.push(author);
+    }
+    let path = GitLogFilter::value(&filter.path);
+    if let Some(path) = path {
+        if !is_safe_repo_path(path) {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+        }
+        args.push("--");
+        args.push(path);
+    }
     let raw = run_git(&toplevel, &args)?;
     // Глобальный -n применяется ко всему topo-потоку. Длинная main может
     // полностью вытеснить короткую side-ветку, поэтому вторым упрощённым
     // проходом забираем tips всех branch/remote refs и topology connectors.
-    let supplemental_raw = all_branches
+    let supplemental_raw = (all_branches && filter.is_empty())
         .then(|| {
             run_git(
                 &toplevel,
@@ -2298,12 +2359,20 @@ pub async fn git_log(
     workspace_id: String,
     limit: u32,
     all: Option<bool>,
+    filter: Option<GitLogFilter>,
 ) -> CommandResult<Vec<GitCommitInfo>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || list_log(&root, limit, all.unwrap_or(false)))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        list_log(
+            &root,
+            limit,
+            all.unwrap_or(false),
+            &filter.unwrap_or_default(),
+        )
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Действия: коммит и откат файла ----------
@@ -3683,7 +3752,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(current.name, "feature/x");
         assert!(current.last_commit_at.is_some());
 
-        let log = list_log(root, 10, false).unwrap();
+        let log = list_log_unfiltered(root, 10, false).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].subject, "second commit");
         // Верхушка текущей ветки помечена как HEAD, предок — нет.
@@ -3781,7 +3850,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["remote", "set-head", "origin", "main"]);
         git(&["branch", "-D", "feature/x"]);
 
-        let decorated = list_log(root, 10, false).unwrap();
+        let decorated = list_log_unfiltered(root, 10, false).unwrap();
         assert!(decorated
             .iter()
             .all(|commit| !commit.refs.iter().any(|name| name == "origin/HEAD")));
@@ -3865,7 +3934,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .unwrap();
         assert!(!main.is_merged); // текущая ветка не помечается
 
-        let log = list_log(root, 10, false).unwrap();
+        let log = list_log_unfiltered(root, 10, false).unwrap();
         assert!(log[0].unpushed, "свежий merge ещё не на сервере");
         let pushed_first = log
             .iter()
@@ -3881,7 +3950,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .output()
             .unwrap();
         assert!(init.status.success());
-        assert!(list_log(fresh.path(), 10, false).unwrap().is_empty());
+        assert!(list_log_unfiltered(fresh.path(), 10, false).unwrap().is_empty());
     }
 
     #[test]
@@ -4113,7 +4182,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         );
 
         for all_branches in [false, true] {
-            let log = list_log(root, 50, all_branches).unwrap();
+            let log = list_log_unfiltered(root, 50, all_branches).unwrap();
             let positions: std::collections::HashMap<&str, usize> = log
                 .iter()
                 .enumerate()
@@ -4198,7 +4267,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "fixture должен воспроизводить вытеснение короткой ветки глобальным limit"
         );
 
-        let log = list_log(root, 500, true).unwrap();
+        let log = list_log_unfiltered(root, 500, true).unwrap();
         let positions = log
             .iter()
             .enumerate()
@@ -4269,7 +4338,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["stash", "push", "--quiet", "-m", "hidden-stash"]);
         let stash_hash = hash(&["rev-parse", "refs/stash"]);
 
-        let branch_log = list_log(root, 50, true).unwrap();
+        let branch_log = list_log_unfiltered(root, 50, true).unwrap();
         let branch_hashes = branch_log
             .iter()
             .map(|commit| commit.hash.as_str())
@@ -4293,7 +4362,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["checkout", "--quiet", "--detach", root_hash.as_str()]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "detached-tip"]);
         let detached_hash = hash(&["rev-parse", "HEAD"]);
-        let detached_log = list_log(root, 50, true).unwrap();
+        let detached_log = list_log_unfiltered(root, 50, true).unwrap();
         let detached_hashes = detached_log
             .iter()
             .map(|commit| commit.hash.as_str())
@@ -4344,7 +4413,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             message_path.to_str().unwrap(),
         ]);
 
-        let log = list_log(root, 10, false).unwrap();
+        let log = list_log_unfiltered(root, 10, false).unwrap();
         assert_eq!(log[0].subject, subject);
         assert_eq!(log[0].body, body);
         assert_eq!(log[0].parents, vec![root_hash]);
@@ -4434,19 +4503,19 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
         // «Все ветки»: коммит из невлитой ветки clash не виден в истории
         // текущей ветки, но появляется с --all (как серверные ветки).
-        let head_only = list_log(root, 50, false).unwrap();
+        let head_only = list_log_unfiltered(root, 50, false).unwrap();
         assert!(!head_only.iter().any(|c| c.subject == "clash version"));
-        let all_refs = list_log(root, 50, true).unwrap();
+        let all_refs = list_log_unfiltered(root, 50, true).unwrap();
         assert!(all_refs.iter().any(|c| c.subject == "clash version"));
 
         // Detached HEAD: ветки нет, но история и статус работают.
-        let log = list_log(root, 10, false).unwrap();
+        let log = list_log_unfiltered(root, 10, false).unwrap();
         assert!(log[0].subject.contains("main version"));
         git(&["checkout", "--quiet", &log[1].hash]);
         let summary = collect_summary(root).unwrap();
         assert!(summary.is_repo);
         assert_eq!(summary.branch, None, "detached HEAD — без имени ветки");
-        assert!(!list_log(root, 5, false).unwrap().is_empty());
+        assert!(!list_log_unfiltered(root, 5, false).unwrap().is_empty());
         let branches = list_branches(root).unwrap();
         assert!(branches.iter().all(|branch| !branch.is_current));
     }
@@ -4554,7 +4623,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         commit_all(root, "panel commit\n\nDetailed description").unwrap();
         let summary = collect_summary(root).unwrap();
         assert!(summary.files.is_empty());
-        let commit = list_log(root, 1, false).unwrap().remove(0);
+        let commit = list_log_unfiltered(root, 1, false).unwrap().remove(0);
         assert_eq!(commit.subject, "panel commit");
         assert_eq!(commit.body, "Detailed description");
         assert!(commit_all(root, "   ").is_err());
@@ -4586,7 +4655,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "second"]);
 
-        let log = list_log(root, 10, false).unwrap();
+        let log = list_log_unfiltered(root, 10, false).unwrap();
         let second = log[0].hash.clone();
         let first = log[1].hash.clone();
 
@@ -4617,7 +4686,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         );
 
         // Revert последнего коммита откатывает содержимое новым коммитом.
-        let tip = list_log(root, 1, false).unwrap()[0].hash.clone();
+        let tip = list_log_unfiltered(root, 1, false).unwrap()[0].hash.clone();
         commit_action(root, "revert", &tip, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
@@ -4732,7 +4801,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "side commit"]);
         git(&["checkout", "--quiet", "main"]);
-        let side = list_log(root, 20, true)
+        let side = list_log_unfiltered(root, 20, true)
             .unwrap()
             .into_iter()
             .find(|commit| commit.subject == "side commit")
@@ -4740,7 +4809,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(side.local_only);
         assert!(!side.editable, "боковая ветка не входит в reword-цепочку");
 
-        let before = list_log(root, 10, false).unwrap(); // third, second, first
+        let before = list_log_unfiltered(root, 10, false).unwrap(); // third, second, first
         let second = before[1].hash.clone();
         let third_before = read_commit_meta(root, &before[0].hash).unwrap();
         assert!(third_before
@@ -4753,7 +4822,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Правим сообщение среднего коммита (у него есть потомок third).
         reword_commit(root, &second, "reworded second\n\nnew body").unwrap();
 
-        let after = list_log(root, 10, false).unwrap();
+        let after = list_log_unfiltered(root, 10, false).unwrap();
         assert_eq!(after.len(), 3);
         assert_eq!(after[0].subject, "third");
         assert_eq!(after[1].subject, "reworded second");
@@ -4859,13 +4928,13 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["checkout", "--quiet", "main"]);
         git(&["merge", "--quiet", "--no-ff", "side", "-m", "merge side"]);
 
-        assert!(list_log(root, 20, true)
+        assert!(list_log_unfiltered(root, 20, true)
             .unwrap()
             .iter()
             .all(|commit| !commit.editable));
 
         git(&["commit", "--quiet", "--allow-empty", "-m", "after merge"]);
-        let log = list_log(root, 20, true).unwrap();
+        let log = list_log_unfiltered(root, 20, true).unwrap();
         assert!(
             log.iter()
                 .find(|commit| commit.subject == "after merge")
@@ -4905,7 +4974,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         run(&["add", "."], "other@t");
         run(&["commit", "--quiet", "-m", "theirs"], "other@t");
 
-        let log = list_log(root, 10, false).unwrap(); // theirs, mine
+        let log = list_log_unfiltered(root, 10, false).unwrap(); // theirs, mine
         let theirs = &log[0];
         let mine = &log[1];
         assert!(!theirs.editable, "чужой коммит не редактируем");
@@ -4926,7 +4995,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             &["merge", "--quiet", "--no-ff", "--no-edit", "feat"],
             "me@t",
         );
-        let head = list_log(root, 1, false).unwrap()[0].hash.clone();
+        let head = list_log_unfiltered(root, 1, false).unwrap()[0].hash.clone();
         assert!(
             reword_commit(root, &head, "x").is_err(),
             "merge-коммит переписывать нельзя"
@@ -4944,7 +5013,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "me@t",
         );
         run(&["push", "--quiet", "origin", "main"], "me@t");
-        let pushed = list_log(root, 20, false)
+        let pushed = list_log_unfiltered(root, 20, false)
             .unwrap()
             .into_iter()
             .find(|c| c.subject == "mine")
@@ -5347,7 +5416,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let second = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
             .trim()
             .to_owned();
-        assert!(list_log(root, 1, false).unwrap()[0].local_only);
+        assert!(list_log_unfiltered(root, 1, false).unwrap()[0].local_only);
 
         // Незакоммиченная правка поверх второго коммита тоже должна сохраниться.
         std::fs::write(root.join("a.txt"), "one\ntwo\nworking\n").unwrap();
@@ -5420,11 +5489,11 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["remote", "add", "upstream", remote.path().to_str().unwrap()]);
         git(&["push", "--quiet", "-u", "upstream", "main"]);
 
-        let commit = list_log(root, 1, false).unwrap().remove(0);
+        let commit = list_log_unfiltered(root, 1, false).unwrap().remove(0);
         assert_eq!(commit.remote_refs, vec!["upstream/main"]);
         assert!(!commit.local_only);
         assert!(commit_action(root, "uncommit", &commit.hash, None).is_err());
-        assert!(list_log(root, 1, false).unwrap()[0].is_head);
+        assert!(list_log_unfiltered(root, 1, false).unwrap()[0].is_head);
     }
 
     #[test]
@@ -5537,7 +5606,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     fn subjects(root: &Path) -> Vec<String> {
-        list_log(root, 20, false)
+        list_log_unfiltered(root, 20, false)
             .unwrap()
             .into_iter()
             .map(|commit| commit.subject)
@@ -5656,7 +5725,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         squash_commit(root, &second, "squash", &head).unwrap();
 
         assert_eq!(subjects(root), vec!["third".to_owned(), "first".to_owned()]);
-        let log = list_log(root, 20, false).unwrap();
+        let log = list_log_unfiltered(root, 20, false).unwrap();
         assert_eq!(log[1].body, "second");
         // Содержимое вершины не изменилось, поэтому рабочая папка остаётся верной.
         let tree_after = String::from_utf8_lossy(&git(&["rev-parse", "HEAD^{tree}"]))
@@ -5681,7 +5750,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         squash_commit(root, &head, "fixup", &head).unwrap();
 
         assert_eq!(subjects(root), vec!["first".to_owned()]);
-        assert_eq!(list_log(root, 1, false).unwrap()[0].body, "");
+        assert_eq!(list_log_unfiltered(root, 1, false).unwrap()[0].body, "");
         assert_eq!(
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "one\ntypo fixed\n"
@@ -5740,6 +5809,87 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "one\nediting\n"
         );
+    }
+
+    #[test]
+    fn filters_history_by_message_author_and_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "add the parser"]);
+        std::fs::write(root.join("b.txt"), "two\n").unwrap();
+        git(&["add", "."]);
+        let colleague = Command::new("git")
+            .args(["commit", "--quiet", "-m", "tune the -- renderer"])
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "Sam")
+            .env("GIT_AUTHOR_EMAIL", "sam@t")
+            .env("GIT_COMMITTER_NAME", "Sam")
+            .env("GIT_COMMITTER_EMAIL", "sam@t")
+            .output()
+            .unwrap();
+        assert!(colleague.status.success());
+
+        let by_text = |text: &str| {
+            list_log(
+                root,
+                20,
+                false,
+                &GitLogFilter {
+                    text: Some(text.to_owned()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .into_iter()
+            .map(|commit| commit.subject)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(by_text("parser"), vec!["add the parser".to_owned()]);
+        // Регистр не важен, а текст ищется как подстрока, не как regexp.
+        assert_eq!(by_text("PARSER"), vec!["add the parser".to_owned()]);
+        assert!(by_text("par.er").is_empty());
+        // Значение с ведущим дефисом не должно превратиться в опцию git.
+        assert_eq!(by_text("-- renderer"), vec!["tune the -- renderer".to_owned()]);
+
+        let by_author = list_log(
+            root,
+            20,
+            false,
+            &GitLogFilter {
+                author: Some("sam".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(by_author.len(), 1);
+        assert_eq!(by_author[0].author, "Sam");
+
+        let by_path = list_log(
+            root,
+            20,
+            false,
+            &GitLogFilter {
+                path: Some("a.txt".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(by_path.len(), 1);
+        assert_eq!(by_path[0].subject, "add the parser");
+
+        assert!(list_log(
+            root,
+            20,
+            false,
+            &GitLogFilter {
+                path: Some("../outside".to_owned()),
+                ..Default::default()
+            },
+        )
+        .is_err());
     }
 
     #[test]
