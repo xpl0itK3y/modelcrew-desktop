@@ -1247,8 +1247,71 @@ pub fn reset_to_upstream(
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    validate_branch_name(&toplevel, expected_branch)?;
+    if !is_safe_hash(expected_head) {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+    if repository_operation_in_progress(&toplevel)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    ensure_expected_branch_head(&toplevel, expected_branch, expected_head)?;
+    let upstream_ref = run_git(
+        &toplevel,
+        &["rev-parse", "--symbolic-full-name", "@{upstream}"],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !upstream_ref.starts_with("refs/remotes/")
+        || run_git(&toplevel, &["check-ref-format", &upstream_ref]).is_err()
+    {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed));
+    }
     run_git_network(&toplevel, &["fetch", "--quiet"])?;
-    run_git(&toplevel, &["reset", "--hard", "--quiet", "@{upstream}"])?;
+    // Fetch может занять секунды: непосредственно перед сменой ref
+    // повторно проверяем именно ветку и HEAD, подтверждённые пользователем.
+    if repository_operation_in_progress(&toplevel)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    ensure_expected_branch_head(&toplevel, expected_branch, expected_head)?;
+    let current_upstream = run_git(
+        &toplevel,
+        &["rev-parse", "--symbolic-full-name", "@{upstream}"],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if current_upstream != upstream_ref {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+    let upstream_tip = run_git(
+        &toplevel,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("{upstream_ref}^{{commit}}"),
+        ],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !is_safe_hash(&upstream_tip) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed));
+    }
+    run_git(
+        &toplevel,
+        &[
+            "update-ref",
+            "-m",
+            "modelcrew: align branch with upstream (keep changes)",
+            &format!("refs/heads/{expected_branch}"),
+            &upstream_tip,
+            expected_head,
+        ],
+    )
+    .map_err(|_| {
+        CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+    })?;
     Ok(())
 }
 
@@ -4103,6 +4166,81 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
             .unwrap();
         assert_eq!(head, "feature/empty");
+    }
+
+    #[test]
+    fn reset_to_upstream_rejects_a_stale_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("a.txt"), "base\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "base"]);
+
+        let remote = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .current_dir(remote.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        git(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(&["push", "--quiet", "-u", "origin", "main"]);
+        let upstream = String::from_utf8_lossy(
+            &run_git(root, &["rev-parse", "refs/remotes/origin/main"]).unwrap(),
+        )
+        .trim()
+        .to_owned();
+
+        std::fs::write(root.join("a.txt"), "local commit\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "local"]);
+        let local_head = String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap())
+            .trim()
+            .to_owned();
+        std::fs::write(root.join("a.txt"), "dirty work\n").unwrap();
+
+        assert!(reset_to_upstream(root, "other", &local_head).is_err());
+        assert!(reset_to_upstream(root, "main", &upstream).is_err());
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap()).trim(),
+            local_head
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "dirty work\n"
+        );
+
+        reset_to_upstream(root, "main", &local_head).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap()).trim(),
+            upstream
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "dirty work\n",
+            "выравнивание истории не должно уничтожать рабочие правки"
+        );
+        assert!(
+            run_git(root, &["diff", "--cached", "--quiet"]).is_err(),
+            "изменения убранного локального коммита остаются в индексе"
+        );
+        assert!(
+            run_git(root, &["diff", "--quiet"]).is_err(),
+            "незакоммиченные изменения поверх индекса тоже сохраняются"
+        );
     }
 
     #[test]

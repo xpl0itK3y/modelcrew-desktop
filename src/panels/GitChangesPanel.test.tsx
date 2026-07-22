@@ -85,6 +85,12 @@ function summary(branch: string, path: string): GitChangesSummary {
   };
 }
 
+function emitSummary(workspaceId: string, next: GitChangesSummary): void {
+  mocks.summaries.set(workspaceId, next);
+  for (const listener of mocks.listeners.get(workspaceId) ?? []) {
+    listener(next);
+  }
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -265,6 +271,65 @@ describe("Git action errors", () => {
 });
 
 describe("sync confirmation", () => {
+  it("clears a stale reset confirmation and binds the new one", async () => {
+    const confirmedHead = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      headHash: confirmedHead,
+      ahead: 2,
+      behind: 1,
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(
+      screen.getByTitle("Ветка разошлась с сервером — выберите, как забрать"),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", {
+        name: "Выровнять историю по серверу",
+      }),
+    );
+
+    // Имитируем параллельное переключение ветки после первого подтверждения.
+    const nextHead = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    emitSummary("project-a", {
+      ...summary("other", "from-a.txt"),
+      headHash: nextHead,
+      ahead: 2,
+      behind: 1,
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("menuitem", {
+          name: "Сохранить правки и выровнять?",
+        }),
+      ).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(
+      screen.getByTitle("Ветка разошлась с сервером — выберите, как забрать"),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", {
+        name: "Выровнять историю по серверу",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", {
+        name: "Сохранить правки и выровнять?",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.gitResetToUpstream).toHaveBeenCalledWith(
+        "project-a",
+        "other",
+        nextHead,
+      ),
+    );
+  });
+
   it("passes the confirmed branch and HEAD to push", async () => {
     const head = "cccccccccccccccccccccccccccccccccccccccc";
     mocks.summaries.set("project-a", {

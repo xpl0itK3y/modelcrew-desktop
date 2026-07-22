@@ -73,10 +73,12 @@ export const en: Record<MessageKey, string> = {
   "git.pullDivergedTitle": "Branch has diverged from the server — choose how to pull",
   "git.divergedNote": "Diverged from the server",
   "git.pullRebase": "Pull (rebase)",
-  "git.pullRebaseHint": "Replay your commits on top of the server's (aborts on conflict)",
-  "git.resetToServer": "Reset to the server",
-  "git.resetToServerHint": "Discard local commits and uncommitted changes, match the server exactly (commits are recoverable via reflog)",
-  "git.resetConfirm": "Discard local?",
+  "git.pullRebaseHint":
+    "Replay your commits on top of the server's (resolve or abort conflicts in the terminal)",
+  "git.resetToServer": "Align history with the server",
+  "git.resetToServerHint":
+    "Remove local commits from history while preserving all their changes and current edits",
+  "git.resetConfirm": "Preserve changes and align?",
   "git.syncUpToDate": "In sync with the server",
   "settings.networkAvatars": "Author avatars",
   "settings.networkAvatarsOn": "From the web",
