@@ -2359,7 +2359,7 @@ function GitChangesWorkspaceView(props: {
   };
 
   return (
-    <div className="git-changes-panel">
+    <div className="git-changes-panel git-project-transition">
       {summary === null ? (
         <div className="git-empty">{t("git.loading")}</div>
       ) : !summary.isRepo ? (

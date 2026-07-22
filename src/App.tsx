@@ -369,15 +369,25 @@ export default function App() {
   }, [workspacesRef]);
 
   // Живой агрегат git-изменений активного проекта для бейджа в титлбаре.
-  const [gitSummary, setGitSummary] = useState<GitChangesSummary | null>(null);
+  const [gitSummaryState, setGitSummaryState] = useState<{
+    workspaceId: string;
+    summary: GitChangesSummary;
+  } | null>(null);
   const activeGitWorkspaceId =
     rootRegistryReady && activeWorkspace?.folder ? activeWorkspace.id : null;
+  // Эффект подписки выполняется после render: сводку предыдущего проекта
+  // нельзя показывать даже на этот промежуточный кадр.
+  const gitSummary =
+    gitSummaryState?.workspaceId === activeGitWorkspaceId
+      ? gitSummaryState.summary
+      : null;
   useEffect(() => {
-    setGitSummary(null);
     if (!activeGitWorkspaceId) {
       return;
     }
-    return subscribeGitChanges(activeGitWorkspaceId, setGitSummary);
+    return subscribeGitChanges(activeGitWorkspaceId, (summary) => {
+      setGitSummaryState({ workspaceId: activeGitWorkspaceId, summary });
+    });
   }, [activeGitWorkspaceId]);
 
   // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
@@ -399,10 +409,17 @@ export default function App() {
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
-  const gitDrawerPresence = useAnimatedPresence(
-    gitDrawerOpen && activeGitWorkspaceId ? activeGitWorkspaceId : null,
-    160,
-  );
+  const liveGitDrawerWorkspaceId = gitDrawerOpen
+    ? activeGitWorkspaceId
+    : null;
+  const gitDrawerPresence = useAnimatedPresence(liveGitDrawerWorkspaceId, 160);
+  // При A -> B presence ещё один render хранит A. Пока drawer открыт,
+  // источником истины остаётся активный проект; последнее presence-значение
+  // нужно только после закрытия, чтобы доиграть exit-анимацию.
+  const renderedGitDrawerWorkspaceId =
+    liveGitDrawerWorkspaceId ?? gitDrawerPresence?.item ?? null;
+  const gitDrawerClosing =
+    liveGitDrawerWorkspaceId === null || Boolean(gitDrawerPresence?.closing);
   useEffect(() => {
     if (!gitDrawerOpen) {
       return;
@@ -506,11 +523,11 @@ export default function App() {
           ) : (
             <div className="workspace-loading">{t("workspace.checking")}</div>
           )}
-          {gitDrawerPresence && (
+          {renderedGitDrawerWorkspaceId && (
             <aside
               className={`git-drawer ${
                 gitDrawerMaximized ? "is-maximized" : ""
-              } ${gitDrawerPresence.closing ? "is-closing" : ""}`}
+              } ${gitDrawerClosing ? "is-closing" : ""}`}
               aria-label={t("git.panelTitle")}
             >
               <div className="git-drawer-header">
@@ -558,7 +575,7 @@ export default function App() {
                   <CloseIcon />
                 </button>
               </div>
-              <GitChangesView workspaceId={gitDrawerPresence.item} />
+              <GitChangesView workspaceId={renderedGitDrawerWorkspaceId} />
             </aside>
           )}
         </main>
