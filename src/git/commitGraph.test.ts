@@ -266,6 +266,38 @@ describe("computeCommitGraph", () => {
     expect(rows[1].color).not.toBe(GRAPH_REMOTE_REF_COLOR);
   });
 
+  it("draws a GitHub pull-request merge as a fork and a join", () => {
+    // Форма снята с настоящего репозитория: ветка из четырёх коммитов, влитая
+    // в main через merge-коммит. Самый частый вид истории в жизни.
+    const rows = checked([
+      { hash: "819a10f", parents: ["d4c68e9", "6282808"], refs: ["main"], isHead: true },
+      { hash: "6282808", parents: ["e0da988"], refs: ["origin/feature/panel-demo"] },
+      { hash: "e0da988", parents: ["7619e3e"] },
+      { hash: "7619e3e", parents: ["f708138"] },
+      { hash: "f708138", parents: ["d4c68e9"] },
+      { hash: "d4c68e9", parents: [] },
+    ]);
+
+    // Merge стоит в первой дорожке и расходится на две.
+    expect(rows[0].col).toBe(0);
+    expect(rows[0].bottom).toHaveLength(2);
+    expect(below(rows, 0).map((lane) => lane.split("@")[0])).toEqual([
+      "d4c68e9",
+      "6282808",
+    ]);
+
+    // Коммиты ветки идут отдельной дорожкой, пока main ждёт в первой.
+    for (const index of [1, 2, 3, 4]) {
+      expect(rows[index].col).toBe(1);
+      expect(rows[index].lanesAbove[0].targetHash).toBe("d4c68e9");
+    }
+
+    // Корень собирает обе дорожки обратно в одну точку.
+    expect(rows[5].col).toBe(0);
+    expect(rows[5].top.map((edge) => edge.fromCol).sort()).toEqual([0, 1]);
+    expect(below(rows, 5)).toEqual([]);
+  });
+
   it("preserves another disconnected history after reaching a root", () => {
     const rows = checked([
       { hash: "a", parents: ["root-a"] },
