@@ -15,16 +15,16 @@ use agent_sessions::agent_session_locate;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_amend_commit, git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch,
-    git_commit, git_commit_action, git_commit_files, git_create_branch, git_delete_branch,
-    git_commit_patch, git_compare_file_diff, git_compare_files, git_create_tag, git_delete_tag, git_drop_commit, git_fetch_upstream,
-    git_file_diff, git_log, git_merge_ref, git_publish_branch, git_pull, git_pull_rebase, git_push, git_read_file, git_rename_branch,
-    git_rebase_onto, git_reset_to_commit, git_reset_to_upstream, git_revert_file, git_reword_commit,
+    git_commit, git_commit_action, git_commit_files, git_commit_patch, git_compare_file_diff,
+    git_compare_files, git_create_branch, git_create_tag, git_delete_branch, git_delete_tag,
+    git_drop_commit, git_fetch_upstream, git_file_diff, git_log, git_merge_ref, git_publish_branch,
+    git_pull, git_pull_rebase, git_push, git_read_file, git_rebase_onto, git_rename_branch,
+    git_reset_to_commit, git_reset_to_upstream, git_revert_file, git_reword_commit,
     git_save_commit_patch, git_squash_commit, git_switch_branch, git_write_file, GitWatchState,
 };
 use github_auth::{
     github_auth_available, github_commit_avatars, github_commit_url, github_current_user,
-    github_device_poll,
-    github_device_start, github_logout,
+    github_device_poll, github_device_start, github_logout,
 };
 use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
@@ -636,7 +636,25 @@ fn setup_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// WebKitGTK 2.42+ рисует окно через DMABUF. На части Linux-систем (в первую
+// очередь Arch с системным WebKitGTK) этот путь даёт полностью чёрное окно:
+// процесс жив, но ни один кадр не доходит до экрана. Отключаем DMABUF до
+// инициализации WebKit — иначе переменную он уже не прочитает. Явное значение
+// пользователя не трогаем: на исправных системах DMABUF быстрее.
+#[cfg(target_os = "linux")]
+fn disable_dmabuf_renderer_by_default() {
+    const KEY: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    if std::env::var_os(KEY).is_none() {
+        // Вызывается первой строкой run(), до старта любых потоков, поэтому
+        // гонки за окружение здесь нет.
+        std::env::set_var(KEY, "1");
+    }
+}
+
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    disable_dmabuf_renderer_by_default();
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

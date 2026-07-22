@@ -82,6 +82,38 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --ci --target "${{ matrix.target }}" --bundles "appimage,deb,rpm"
 
+      # AppImage несёт свой WebKitGTK, а тот проигрывает звук только через
+      # GStreamer. Если в образ попали библиотеки GStreamer, но не попали
+      # плагины, звук молча пропадает: пути плагинов у собранного на Ubuntu
+      # ядра указывают в /usr/lib/x86_64-linux-gnu/gstreamer-1.0, которого на
+      # других дистрибутивах нет. Ловим это здесь, а не в отзывах.
+      - name: Check the AppImage audio stack
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
+          appimage="$(find "$bundle" -name '*.AppImage' -print -quit)"
+          test -n "$appimage" || { echo "No AppImage in $bundle" >&2; exit 1; }
+          work="$(mktemp -d)"
+          cp "$appimage" "$work/app.AppImage"
+          chmod +x "$work/app.AppImage"
+          # --appimage-extract разворачивает образ без FUSE.
+          (cd "$work" && ./app.AppImage --appimage-extract >/dev/null)
+          root="$work/squashfs-root"
+          core="$(find "$root" -name 'libgstreamer-1.0.so*' -print -quit || true)"
+          plugins="$(find "$root" -type d -name 'gstreamer-1.0' -print -quit || true)"
+          if [ -n "$core" ] && [ -z "$plugins" ]; then
+            echo "AppImage ships GStreamer libraries without any plugins:" >&2
+            echo "  core:    $core" >&2
+            echo "  plugins: (none)" >&2
+            echo "Notification sounds would be silent on every machine." >&2
+            exit 1
+          fi
+          if [ -n "$plugins" ]; then
+            echo "GStreamer plugins bundled: $(find "$plugins" -name '*.so' | wc -l)"
+          else
+            echo "No bundled GStreamer: the system one will be used."
+          fi
+
       - name: Upload signed Linux bundles
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
