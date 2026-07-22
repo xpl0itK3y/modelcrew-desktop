@@ -146,6 +146,45 @@ describe("GitChangesView workspace lifecycle", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("copies the exact full message without reordering mixed trailers", async () => {
+    const fullMessage =
+      "feat: exact message\n\nBody.\n\nCo-authored-by: Alex <alex@example.com>\nSigned-off-by: Sam <sam@example.com>\nCo-authored-by: Kim <kim@example.com>";
+    mocks.fetchLog.mockResolvedValue([
+      {
+        hash: "2222222222222222222222222222222222222222",
+        shortHash: "2222222",
+        subject: "feat: exact message",
+        author: "Denis",
+        authorEmail: "denis@example.com",
+        epochMs: Date.now(),
+        unpushed: true,
+        localOnly: true,
+        editable: true,
+        isHead: true,
+        parents: ["1111111111111111111111111111111111111111"],
+        refs: ["main"],
+        refDetails: [
+          { name: "main", fullName: "refs/heads/main", kind: "local" },
+        ],
+        remoteRefs: [],
+        fullMessage,
+        body: "Body.\n\nSigned-off-by: Sam <sam@example.com>",
+        coAuthors: ["Alex <alex@example.com>", "Kim <kim@example.com>"],
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Скопировать сообщение" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.writeClipboard).toHaveBeenCalledWith(fullMessage),
+    );
+  });
+
   it("switches a tag as a tag even when its display name looks like a branch", async () => {
     mocks.fetchLog.mockResolvedValue([
       {

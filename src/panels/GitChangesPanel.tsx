@@ -1053,10 +1053,7 @@ function CommitActionsMenu(props: {
 
   const copy = async (kind: "hash" | "message") => {
     const text =
-      kind === "hash"
-        ? props.commit.hash
-        : props.commit.subject +
-          (props.commit.body ? `\n\n${props.commit.body}` : "");
+      kind === "hash" ? props.commit.hash : fullCommitMessage(props.commit);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
@@ -1224,6 +1221,10 @@ function CommitActionsMenu(props: {
       )}
     </div>
   );
+}
+
+function fullCommitMessage(commit: GitCommitInfo): string {
+  return commit.fullMessage;
 }
 
 // Индикатор расхождения с сервером в шапке: ↓ забрать (ff-only), ↑ отправить.

@@ -615,6 +615,10 @@ pub struct GitCommitInfo {
     // Только реальные refs/remotes, указывающие на этот коммит. Нужны UI,
     // чтобы не определять remote по ненадёжному префиксу `origin/`.
     pub remote_refs: Vec<String>,
+    // Полное сообщение в исходном порядке, включая все trailer-строки. Оно
+    // нужно copy/reword: body + co_authors не позволяет восстановить mixed
+    // trailer block без перестановок.
+    pub full_message: String,
     // Тело коммита без трейлеров Co-authored-by (они в co_authors).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub body: String,
@@ -622,21 +626,54 @@ pub struct GitCommitInfo {
     pub co_authors: Vec<String>,
 }
 
-// Отделяет соавторов от остального тела коммита.
+fn co_author_from_trailer(line: &str) -> Option<String> {
+    let (token, value) = line.trim().split_once(':')?;
+    if !token.eq_ignore_ascii_case("co-authored-by") {
+        return None;
+    }
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn is_trailer_line(line: &str) -> bool {
+    let Some((token, value)) = line.trim().split_once(':') else {
+        return false;
+    };
+    !token.is_empty()
+        && !value.trim().is_empty()
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+// Отделяет соавторов только из заключительного trailer block. Упоминание
+// `Co-authored-by:` в примере/цитате посреди описания не является трейлером.
 pub fn split_body_and_co_authors(raw_body: &str) -> (String, Vec<String>) {
-    let mut body_lines = Vec::new();
+    let trimmed = raw_body.trim();
+    if trimmed.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let lines = trimmed.lines().collect::<Vec<_>>();
+    let trailer_start = lines
+        .iter()
+        .rposition(|line| line.trim().is_empty())
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let candidate = &lines[trailer_start..];
+    let is_trailer_block = !candidate.is_empty()
+        && is_trailer_line(candidate[0])
+        && candidate
+            .iter()
+            .all(|line| is_trailer_line(line) || line.starts_with([' ', '\t']));
+    if !is_trailer_block {
+        return (trimmed.to_owned(), Vec::new());
+    }
+
+    let mut body_lines = lines[..trailer_start].to_vec();
     let mut co_authors = Vec::new();
-    for line in raw_body.lines() {
-        let trimmed = line.trim();
-        if let Some(author) = trimmed
-            .strip_prefix("Co-authored-by:")
-            .or_else(|| trimmed.strip_prefix("Co-Authored-By:"))
-            .or_else(|| trimmed.strip_prefix("co-authored-by:"))
-        {
-            let author = author.trim();
-            if !author.is_empty() {
-                co_authors.push(author.to_owned());
-            }
+    for line in candidate {
+        if let Some(author) = co_author_from_trailer(line) {
+            co_authors.push(author);
         } else {
             body_lines.push(line);
         }
@@ -1825,7 +1862,7 @@ fn parse_log_records(
     local_only: &std::collections::HashSet<String>,
     local_email: &str,
 ) -> CommandResult<Vec<GitCommitInfo>> {
-    const FIELD_COUNT: usize = 9;
+    const FIELD_COUNT: usize = 10;
     let mut fields = raw.split(|byte| *byte == 0).collect::<Vec<_>>();
     // `git log -z` завершает и последнюю запись NUL-байтом.
     if fields.last().is_some_and(|field| field.is_empty()) {
@@ -1876,6 +1913,7 @@ fn parse_log_records(
             && !local_email.is_empty()
             && author_email.to_lowercase() == local_email;
 
+        let full_message = text(record[9]).trim_end_matches('\n').to_owned();
         let is_local_only = local_only.contains(&hash);
         commits.push(GitCommitInfo {
             // Без upstream множество upstream_unpushed пусто, но local_only
@@ -1894,6 +1932,7 @@ fn parse_log_records(
             refs,
             ref_details,
             remote_refs: commit_remote_refs,
+            full_message,
             body,
             co_authors,
         });
@@ -1919,6 +1958,7 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
     // датах способен показать общий родитель раньше одного из потомков — такую
     // последовательность уже невозможно правдиво соединить линиями. Заодно
     // --topo-order держит параллельные ветки цельными, как нативный git graph.
+    const LOG_FORMAT: &str = "--format=%H%x00%h%x00%an%x00%ae%x00%at%x00%s%x00%D%x00%P%x00%b%x00%B";
     let mut args = vec![
         "log",
         count.as_str(),
@@ -1926,7 +1966,7 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
         "-z",
         "--decorate=full",
         "--decorate-refs-exclude=refs/remotes/*/HEAD",
-        "--format=%H%x00%h%x00%an%x00%ae%x00%at%x00%s%x00%D%x00%P%x00%b",
+        LOG_FORMAT,
     ];
     if all_branches {
         // Кнопка называется «Все ветки»: stash, notes, bisect и tag-only
@@ -2806,6 +2846,21 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(empty_body, "");
         assert!(none.is_empty());
 
+        let quoted = "Example:\nCo-authored-by: Not A Trailer <example@t>\nThis prose follows it.";
+        let (quoted_body, quoted_authors) = split_body_and_co_authors(quoted);
+        assert_eq!(quoted_body, quoted);
+        assert!(quoted_authors.is_empty());
+
+        let mixed = "Description.\n\nCo-authored-by: Alex <a@t>\nSigned-off-by: Sam <s@t>\nReviewed-by: Pat <p@t>\nco-authored-by: Kim <k@t>";
+        let (mixed_body, mixed_authors) = split_body_and_co_authors(mixed);
+        assert_eq!(
+            mixed_body,
+            "Description.\n\nSigned-off-by: Sam <s@t>\nReviewed-by: Pat <p@t>"
+        );
+        assert_eq!(
+            mixed_authors,
+            vec!["Alex <a@t>".to_owned(), "Kim <k@t>".to_owned()]
+        );
     }
 
     #[test]
@@ -2941,6 +2996,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(log[0].author, "Denis");
         assert_eq!(log[0].author_email, "d@t");
         assert_eq!(log[0].body, "Detailed description of the change.");
+        assert_eq!(
+            log[0].full_message,
+            "second commit\n\nDetailed description of the change.\n\nCo-authored-by: Alex <alex@t>"
+        );
         assert_eq!(log[0].co_authors, vec!["Alex <alex@t>".to_owned()]);
         assert!(log[0].epoch_ms > 0);
         assert!(log[0].refs.iter().any(|entry| entry == "feature/x"));
