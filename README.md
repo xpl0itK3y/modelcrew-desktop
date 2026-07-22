@@ -92,6 +92,14 @@ notification sounds work out of the box.
 > provide it out of the box; bare window managers (Hyprland, i3, sway) need
 > a notification daemon such as `mako` or `dunst` running.
 
+> **Black window on Linux:** WebKitGTK's DMABUF renderer leaves a blank
+> window on some drivers, so ModelCrew sets
+> `WEBKIT_DISABLE_DMABUF_RENDERER=1` unless you set that variable yourself.
+> If a window still stays black, turn accelerated compositing off as well:
+> ```bash
+> WEBKIT_DISABLE_COMPOSITING_MODE=1 modelcrew-desktop
+> ```
+
 ## Keyboard shortcuts
 
 | macOS | Windows / Linux | Action |
