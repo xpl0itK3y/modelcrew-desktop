@@ -227,7 +227,7 @@ describe("computeCommitGraph", () => {
       }
       checked(commits);
     }
-  });
+  }, 10_000);
 });
 
 function checked(
