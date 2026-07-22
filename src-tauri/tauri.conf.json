@@ -40,6 +40,7 @@
     "linux": {
       "deb": {
         "depends": [
+          "git",
           "gstreamer1.0-plugins-good",
           "gstreamer1.0-pulseaudio",
           "libayatana-appindicator3-1"
@@ -47,6 +48,7 @@
       },
       "rpm": {
         "depends": [
+          "git",
           "gstreamer1-plugins-good",
           "libayatana-appindicator-gtk3"
         ]

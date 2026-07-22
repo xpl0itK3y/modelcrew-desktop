@@ -61,6 +61,7 @@ const srcinfo = `pkgbase = modelcrew-bin
 \tdepends = cairo
 \tdepends = desktop-file-utils
 \tdepends = gdk-pixbuf2
+\tdepends = git
 \tdepends = glib2
 \tdepends = gst-plugins-base
 \tdepends = gst-plugins-good

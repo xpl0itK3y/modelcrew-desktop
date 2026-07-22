@@ -3133,6 +3133,8 @@ function GitChangesWorkspaceView(props: {
     <div className="git-changes-panel git-project-transition">
       {summary === null ? (
         <div className="git-empty">{t("git.loading")}</div>
+      ) : summary.gitMissing ? (
+        <div className="git-empty">{t("error.gitUnavailable")}</div>
       ) : !summary.isRepo ? (
         <div className="git-empty">{t("git.notARepo")}</div>
       ) : (

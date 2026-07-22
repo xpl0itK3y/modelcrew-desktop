@@ -32,6 +32,11 @@ pub struct GitChangedFile {
 #[serde(rename_all = "camelCase")]
 pub struct GitChangesSummary {
     pub is_repo: bool,
+    // Самого git в системе нет. Отличается от «папка не репозиторий»: там
+    // показывать нечего, а здесь есть что чинить, и пользователь должен об
+    // этом узнать, а не гадать, куда пропала панель.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub git_missing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +58,7 @@ impl GitChangesSummary {
     fn not_a_repo() -> Self {
         Self {
             is_repo: false,
+            git_missing: false,
             branch: None,
             head_hash: None,
             upstream_ref: None,
@@ -326,8 +332,18 @@ fn repo_toplevel(root: &Path) -> CommandResult<Option<PathBuf>> {
 }
 
 pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Ok(GitChangesSummary::not_a_repo());
+    let toplevel = match repo_toplevel(root) {
+        Ok(Some(toplevel)) => toplevel,
+        Ok(None) => return Ok(GitChangesSummary::not_a_repo()),
+        // Отсутствие git — не повод молча спрятать всю панель: возвращаем
+        // сводку с признаком, чтобы интерфейс объяснил причину.
+        Err(error) if error.code == ErrorCode::GitUnavailable => {
+            return Ok(GitChangesSummary {
+                git_missing: true,
+                ..GitChangesSummary::not_a_repo()
+            })
+        }
+        Err(error) => return Err(error),
     };
 
     let status_raw = run_git(
@@ -388,6 +404,7 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
 
     Ok(GitChangesSummary {
         is_repo: true,
+        git_missing: false,
         branch: status.branch,
         head_hash: status.head_hash,
         upstream_ref: status.upstream_ref,

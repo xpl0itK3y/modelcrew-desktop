@@ -387,3 +387,25 @@ test("prepare-assets rejects an unsigned MSI", () => {
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+// Панель изменений вызывает системный git. Если пакет перестанет объявлять его
+// зависимостью, на чистой машине Git-раздел молча исчезнет.
+test("every Linux package declares git as a runtime dependency", () => {
+  const config = JSON.parse(
+    fs.readFileSync(path.join(rootDirectory, "src-tauri/tauri.conf.json"), "utf8"),
+  );
+  for (const kind of ["deb", "rpm"]) {
+    assert.ok(
+      config.bundle.linux[kind].depends.includes("git"),
+      `${kind} package must depend on git`,
+    );
+  }
+
+  for (const file of [
+    "packaging/aur/PKGBUILD.template",
+    ".github/workflows/release-build-arch.yml",
+  ]) {
+    const text = fs.readFileSync(path.join(rootDirectory, file), "utf8");
+    assert.match(text, /'git'/u, `${file} must list git among the dependencies`);
+  }
+});

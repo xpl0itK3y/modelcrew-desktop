@@ -24,6 +24,8 @@ export type GitChangedFile = {
 
 export type GitChangesSummary = {
   isRepo: boolean;
+  // В системе нет самого git: панель есть, но показать ей нечего.
+  gitMissing?: boolean;
   branch?: string;
   headHash?: string;
   // Точный short ref из `branch.upstream` (например fork/dev или

@@ -458,7 +458,12 @@ export default function App() {
         workspaceFolder={activeWorkspace?.folder?.selectedPath ?? null}
         sidebarVisible={sidebarVisible}
         gitCounts={
-          gitSummary?.isRepo ? aggregateCounts(gitSummary) : null
+          gitSummary?.isRepo
+            ? aggregateCounts(gitSummary)
+            : // git не найден: кнопку оставляем, чтобы панель объяснила причину.
+              gitSummary?.gitMissing
+              ? { files: 0, additions: 0, deletions: 0 }
+              : null
         }
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}

@@ -10,6 +10,7 @@ depends=(
   'cairo'
   'desktop-file-utils'
   'gdk-pixbuf2'
+  'git'
   'glib2'
   'gst-plugins-base'
   'gst-plugins-good'

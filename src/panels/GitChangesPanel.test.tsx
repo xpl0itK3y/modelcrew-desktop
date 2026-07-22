@@ -576,6 +576,21 @@ describe("GitChangesView workspace lifecycle", () => {
     expect(top).toBeLessThanOrEqual(392);
   });
 
+  it("explains a missing git instead of showing an empty panel", async () => {
+    mocks.summaries.set("project-a", {
+      isRepo: false,
+      gitMissing: true,
+      files: [],
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    // Без объяснения пользователь видел бы просто исчезнувшую панель и не знал
+    // бы, что чинить.
+    expect(await screen.findByText(/git не найден/i)).toBeInTheDocument();
+    expect(screen.queryByText("Папка не является git-репозиторием")).not
+      .toBeInTheDocument();
+  });
+
   it("tags the commit the menu was opened on", async () => {
     mocks.fetchLog.mockResolvedValue([taggableCommit()]);
     render(<GitChangesView workspaceId="project-a" />);
