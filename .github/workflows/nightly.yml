@@ -149,10 +149,10 @@ jobs:
           scripts/ci/bundle-gstreamer-appimage.sh
           "src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
 
-      - name: Check the AppImage audio stack
+      - name: Check the AppImage
         if: contains(matrix.bundles, 'appimage')
         run: >-
-          scripts/ci/check-appimage-audio.sh
+          scripts/ci/check-appimage.sh
           "src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
 
       - name: Create build metadata

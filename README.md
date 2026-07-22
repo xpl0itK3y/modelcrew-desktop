@@ -93,6 +93,15 @@ itself so notification sounds work out of the box.
 > provide it out of the box; bare window managers (Hyprland, i3, sway) need
 > a notification daemon such as `mako` or `dunst` running.
 
+> **AppImage requirements:** the image carries its own WebKitGTK, GTK and
+> GStreamer, but never its own `libc`, GPU drivers or `git` — those always
+> come from your system. It therefore needs a distribution at least as new as
+> the one it was built on (Ubuntu 22.04), and `libfuse2` to mount itself. On
+> distributions that ship only FUSE 3, run it without mounting:
+> ```bash
+> ./ModelCrew_x.y.z_linux_x86_64.AppImage --appimage-extract-and-run
+> ```
+
 > **Black window on Linux:** WebKitGTK's DMABUF renderer leaves a blank
 > window on some drivers, so ModelCrew disables it by default. Set
 > `WEBKIT_DISABLE_DMABUF_RENDERER=0` to get the faster path back, or `=1` to
