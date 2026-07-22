@@ -1,3 +1,14 @@
+// Без фичи `custom-protocol` tauri оставляет приложение в dev-режиме: окно
+// грузит devUrl (http://localhost:1420), а в упакованном виде там никто не
+// слушает — пользователь видит чёрный экран с «Connection refused». Обычно
+// фичу включает CLI `tauri build`, поэтому голый `cargo build --release`
+// молча собирал бы нерабочий пакет. Ловим это на компиляции.
+#[cfg(all(not(debug_assertions), dev))]
+compile_error!(
+    "release build without the `custom-protocol` feature would load devUrl \
+     instead of the embedded frontend — build through `tauri build`"
+);
+
 mod agent_sessions;
 mod command_error;
 mod git_changes;

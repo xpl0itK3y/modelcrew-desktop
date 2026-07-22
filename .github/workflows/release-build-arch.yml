@@ -56,11 +56,13 @@ jobs:
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
         run: |
           set -euo pipefail
-          # Фронтенд вшивается в бинарь при компиляции, поэтому собираем его
-          # первым. Бандлеры tauri тут не нужны: пакет для pacman собираем
-          # сами, а deb/rpm/AppImage делает отдельный workflow.
-          npm run build
-          cargo build --release --locked --manifest-path src-tauri/Cargo.toml
+          # Только через CLI tauri: голый `cargo build` не включает фичу
+          # `custom-protocol`, и приложение остаётся в dev-режиме — грузит
+          # http://localhost:1420 вместо вшитого фронтенда и показывает
+          # «Connection refused» на чёрном экране. `--no-bundle` останавливает
+          # CLI после бинаря: пакет для pacman собираем сами, а deb/rpm/AppImage
+          # делает отдельный workflow.
+          npm run tauri build -- --ci --no-bundle
 
       - name: Assemble the pacman package
         run: |
