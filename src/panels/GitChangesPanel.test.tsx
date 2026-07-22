@@ -110,6 +110,102 @@ beforeEach(() => {
 afterEach(() => setLocale("ru"));
 
 describe("GitChangesView workspace lifecycle", () => {
+  it("keeps Co-authored-by trailers visible when editing a message", async () => {
+    const fullMessage =
+      "feat: shared work\n\nDetailed body.  \n\nCo-authored-by: Alex <alex@example.com>\n\n";
+    mocks.fetchLog.mockResolvedValue([
+      {
+        hash: "1111111111111111111111111111111111111111",
+        shortHash: "1111111",
+        subject: "feat: shared work",
+        author: "Denis",
+        authorEmail: "denis@example.com",
+        epochMs: Date.now(),
+        unpushed: true,
+        localOnly: true,
+        editable: true,
+        isHead: true,
+        parents: ["0000000000000000000000000000000000000000"],
+        refs: ["main"],
+        refDetails: [
+          { name: "main", fullName: "refs/heads/main", kind: "local" },
+        ],
+        remoteRefs: [],
+        fullMessage,
+        body: "Detailed body.",
+        coAuthors: ["Alex <alex@example.com>"],
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Изменить сообщение" }));
+
+    const editor = screen.getByRole("dialog").querySelector("textarea");
+    expect(editor).toHaveValue(fullMessage);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(mocks.rewordCommit).toHaveBeenCalledWith(
+        "project-a",
+        "1111111111111111111111111111111111111111",
+        fullMessage,
+      ),
+    );
+  });
+
+  it("keeps the reword editor and edited text open after a backend failure", async () => {
+    mocks.rewordCommit.mockRejectedValueOnce({
+      code: "git_command_failed",
+      context: { reason: "head-moved" },
+    });
+    mocks.fetchLog.mockResolvedValue([
+      {
+        hash: "5555555555555555555555555555555555555555",
+        shortHash: "5555555",
+        subject: "old subject",
+        author: "Denis",
+        authorEmail: "denis@example.com",
+        epochMs: Date.now(),
+        unpushed: true,
+        localOnly: true,
+        editable: true,
+        isHead: true,
+        parents: ["4444444444444444444444444444444444444444"],
+        refs: ["main"],
+        refDetails: [
+          { name: "main", fullName: "refs/heads/main", kind: "local" },
+        ],
+        remoteRefs: [],
+        fullMessage: "old subject\n\nold body",
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Изменить сообщение" }));
+    const editor = screen.getByRole("dialog").querySelector("textarea");
+    expect(editor).not.toBeNull();
+    fireEvent.change(editor!, { target: { value: "new subject\n\nnew body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(mocks.rewordCommit).toHaveBeenCalledWith(
+        "project-a",
+        "5555555555555555555555555555555555555555",
+        "new subject\n\nnew body",
+      ),
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("dialog").querySelector("textarea")).toHaveValue(
+      "new subject\n\nnew body",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "История ветки успела измениться",
+    );
+  });
+
   it("hides uncommit while HEAD is detached", async () => {
     mocks.summaries.set("project-a", {
       ...summary("main", "from-a.txt"),

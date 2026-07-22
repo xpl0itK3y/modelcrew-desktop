@@ -2400,18 +2400,25 @@ struct CommitMeta {
     committer_name: String,
     committer_email: String,
     committer_date: String,
-    message: String,
+    message: Vec<u8>,
 }
 
 fn read_commit_meta(root: &Path, hash: &str) -> CommandResult<CommitMeta> {
-    // %B (сообщение) идёт последним — может содержать переносы строк.
-    let format = "--format=%T%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B";
+    let format = "--format=%T%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI";
     let raw = run_git(root, &["show", "-s", format, hash])?;
     let text = String::from_utf8_lossy(&raw);
-    let fields: Vec<&str> = text.splitn(9, '\u{0}').collect();
-    if fields.len() < 9 {
+    let fields: Vec<&str> = text.splitn(8, '\u{0}').collect();
+    if fields.len() < 8 {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
     }
+    // Pretty-format добавляет/нормализует завершающий перевод строки. Для
+    // потомков читаем message прямо из commit object и воспроизводим байт-в-байт.
+    let object = run_git(root, &["cat-file", "commit", hash])?;
+    let message_start = object
+        .windows(2)
+        .position(|pair| pair == b"\n\n")
+        .map(|index| index + 2)
+        .ok_or_else(|| CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash))?;
     Ok(CommitMeta {
         tree: fields[0].trim().to_owned(),
         parents: fields[1].split_whitespace().map(str::to_owned).collect(),
@@ -2420,8 +2427,8 @@ fn read_commit_meta(root: &Path, hash: &str) -> CommandResult<CommitMeta> {
         author_date: fields[4].to_owned(),
         committer_name: fields[5].to_owned(),
         committer_email: fields[6].to_owned(),
-        committer_date: fields[7].to_owned(),
-        message: fields[8].trim_end().to_owned(),
+        committer_date: fields[7].trim_end().to_owned(),
+        message: object[message_start..].to_vec(),
     })
 }
 
@@ -2433,7 +2440,7 @@ fn create_commit(
     tree: &str,
     parents: &[String],
     ident: &CommitMeta,
-    message: &str,
+    message: &[u8],
 ) -> CommandResult<String> {
     use std::io::Write;
     use std::process::Stdio;
@@ -2460,7 +2467,7 @@ fn create_commit(
         .stdin
         .take()
         .ok_or_else(|| CommandError::new(ErrorCode::GitCommandFailed))?
-        .write_all(message.as_bytes())
+        .write_all(message)
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
     let output = child
         .wait_with_output()
@@ -2485,8 +2492,7 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
     if !is_safe_hash(hash) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
     }
-    let message = message.trim();
-    if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
+    if message.trim().is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
         return Err(
             CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "message")
         );
@@ -2510,16 +2516,18 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
         );
     };
     validate_branch_name(&toplevel, &branch)?;
+    let old_head = run_git(&toplevel, &["rev-parse", "--verify", "HEAD"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
 
     // Коммит должен быть на текущей ветке (предок HEAD).
-    run_git(&toplevel, &["merge-base", "--is-ancestor", hash, "HEAD"]).map_err(|_| {
+    run_git(&toplevel, &["merge-base", "--is-ancestor", hash, &old_head]).map_err(|_| {
         CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "not-on-branch")
     })?;
 
     // Коммиты после цели до HEAD (first-parent), новейшие первыми.
     let descendants: Vec<String> = run_git(
         &toplevel,
-        &["rev-list", "--first-parent", &format!("{hash}..HEAD")],
+        &["rev-list", "--first-parent", &format!("{hash}..{old_head}")],
     )
     .map(|raw| {
         String::from_utf8_lossy(&raw)
@@ -2565,7 +2573,7 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
         &target_meta.tree,
         &target_meta.parents,
         &target_meta,
-        message,
+        message.as_bytes(),
     )?;
 
     // Проигрываем потомков от старшего к младшему, перецепляя родителя.
@@ -2581,7 +2589,8 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
         )?;
     }
 
-    // Переставляем ветку на переписанную вершину; старую хранит reflog.
+    // Compare-and-swap: если терминал или другой Git-клиент успел передвинуть
+    // ветку, update-ref откажется и не затрёт чужую новую вершину.
     run_git(
         &toplevel,
         &[
@@ -2590,6 +2599,7 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
             "modelcrew: reword commit",
             &format!("refs/heads/{branch}"),
             &new_parent,
+            &old_head,
         ],
     )?;
     Ok(())
@@ -4147,16 +4157,48 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         std::fs::write(root.join("a.txt"), "1\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "first"]);
+        git(&["branch", "side"]);
         std::fs::write(root.join("a.txt"), "1\n2\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "second", "-m", "old body"]);
         std::fs::write(root.join("a.txt"), "1\n2\n3\n").unwrap();
         git(&["add", "."]);
-        git(&["commit", "--quiet", "-m", "third"]);
+        let third_message_path = root.join(".git/third-message");
+        std::fs::write(
+            &third_message_path,
+            b"third\n\nbody keeps trailing spaces  \n\n\n",
+        )
+        .unwrap();
+        git(&[
+            "commit",
+            "--quiet",
+            "--cleanup=verbatim",
+            "-F",
+            third_message_path.to_str().unwrap(),
+        ]);
+        std::fs::remove_file(third_message_path).unwrap();
+
+        git(&["checkout", "--quiet", "side"]);
+        std::fs::write(root.join("side.txt"), "side\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "side commit"]);
+        git(&["checkout", "--quiet", "main"]);
+        let side = list_log(root, 20, true)
+            .unwrap()
+            .into_iter()
+            .find(|commit| commit.subject == "side commit")
+            .unwrap();
+        assert!(side.local_only);
+        assert!(!side.editable, "боковая ветка не входит в reword-цепочку");
 
         let before = list_log(root, 10, false).unwrap(); // third, second, first
         let second = before[1].hash.clone();
         let third_before = read_commit_meta(root, &before[0].hash).unwrap();
+        assert!(third_before
+            .message
+            .windows(3)
+            .any(|bytes| bytes == b"  \n"));
+        assert!(third_before.message.ends_with(b"\n\n\n"));
         assert!(before[1].editable, "свой не запушенный коммит редактируем");
 
         // Правим сообщение среднего коммита (у него есть потомок third).
@@ -4175,7 +4217,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Потомок сохранил дерево, сообщение и авторство.
         let third_after = read_commit_meta(root, &after[0].hash).unwrap();
         assert_eq!(third_after.tree, third_before.tree);
-        assert_eq!(third_after.message, "third");
+        assert_eq!(third_after.message, third_before.message);
         assert_eq!(third_after.author_email, "me@t");
         // Рабочее дерево нетронуто и чистое.
         assert_eq!(
@@ -4183,6 +4225,108 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "1\n2\n3\n"
         );
         assert!(collect_summary(root).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn reword_preserves_the_submitted_message_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Me")
+                .env("GIT_AUTHOR_EMAIL", "me@t")
+                .env("GIT_COMMITTER_NAME", "Me")
+                .env("GIT_COMMITTER_EMAIL", "me@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+            output.stdout
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "user.name", "Me"]);
+        git(&["config", "user.email", "me@t"]);
+        let message_path = root.join(".git/verbatim-message");
+        std::fs::write(
+            &message_path,
+            b"  spaced subject  \n\nbody keeps trailing spaces  \n\n\n",
+        )
+        .unwrap();
+        git(&[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--cleanup=verbatim",
+            "-F",
+            message_path.to_str().unwrap(),
+        ]);
+        std::fs::remove_file(message_path).unwrap();
+        let old_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+        let before = read_commit_meta(root, &old_head).unwrap();
+        assert!(before.message.starts_with(b"  spaced subject  \n"));
+        assert!(before.message.ends_with(b"  \n\n\n"));
+
+        let unchanged_message = String::from_utf8(before.message.clone()).unwrap();
+        reword_commit(root, &old_head, &unchanged_message).unwrap();
+
+        let new_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+        let after = read_commit_meta(root, &new_head).unwrap();
+        assert_eq!(after.message, before.message);
+        assert_eq!(
+            new_head, old_head,
+            "байт-в-байт то же сообщение даёт тот же commit"
+        );
+    }
+
+    #[test]
+    fn exposes_reword_only_for_the_safe_first_parent_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Me")
+                .env("GIT_AUTHOR_EMAIL", "me@t")
+                .env("GIT_COMMITTER_NAME", "Me")
+                .env("GIT_COMMITTER_EMAIL", "me@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "user.name", "Me"]);
+        git(&["config", "user.email", "me@t"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
+        git(&["branch", "side"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "main work"]);
+        git(&["checkout", "--quiet", "side"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "side work"]);
+        git(&["checkout", "--quiet", "main"]);
+        git(&["merge", "--quiet", "--no-ff", "side", "-m", "merge side"]);
+
+        assert!(list_log(root, 20, true)
+            .unwrap()
+            .iter()
+            .all(|commit| !commit.editable));
+
+        git(&["commit", "--quiet", "--allow-empty", "-m", "after merge"]);
+        let log = list_log(root, 20, true).unwrap();
+        assert!(
+            log.iter()
+                .find(|commit| commit.subject == "after merge")
+                .unwrap()
+                .editable
+        );
+        assert!(log
+            .iter()
+            .filter(|commit| commit.subject != "after merge")
+            .all(|commit| !commit.editable));
     }
 
     #[test]

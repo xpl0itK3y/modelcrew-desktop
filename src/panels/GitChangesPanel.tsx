@@ -1001,8 +1001,9 @@ function CommitActionsMenu(props: {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
-  // Редактировать сообщение можно только вошедшему и только свой не запушенный.
-  const canReword = props.commit.editable && isGithubSignedIn();
+  // GitHub-авторизация здесь не нужна: бэкенд сверяет автора с локальным
+  // `git config user.email` и разрешает переписывать только локальную историю.
+  const canReword = props.commit.editable;
   const canUncommit =
     Boolean(props.currentBranch) &&
     props.commit.isHead &&
@@ -1505,36 +1506,39 @@ function RewordEditor(props: {
   workspaceId: string;
   commit: GitCommitInfo;
   onClose: () => void;
-  onError: (message: string) => void;
   onDone: () => void;
 }) {
   const { t } = useI18n();
-  const [text, setText] = useState(
-    () =>
-      props.commit.subject +
-      (props.commit.body ? `\n\n${props.commit.body}` : ""),
-  );
+  const [text, setText] = useState(() => fullCommitMessage(props.commit));
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const textLength = Array.from(text).length;
 
   const save = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || busy) {
+    if (!text.trim() || textLength > 4000 || busy) {
       return;
     }
     setBusy(true);
+    setError(null);
     try {
-      await rewordCommit(props.workspaceId, props.commit.hash, trimmed);
+      await rewordCommit(props.workspaceId, props.commit.hash, text);
       props.onDone();
       props.onClose();
     } catch (error) {
-      props.onError(localizeBackendError(error));
-      props.onClose();
+      setError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
     <div className="git-reword-backdrop">
-      <div className="git-reword" role="dialog" aria-modal="true">
+      <div
+        className="git-reword"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("git.actionReword")}
+      >
         <div className="git-reword-title">
           {t("git.actionReword")}
           <span className="git-reword-hash">{props.commit.shortHash}</span>
@@ -1546,8 +1550,15 @@ function RewordEditor(props: {
           spellCheck={false}
           disabled={busy}
           rows={7}
-          onChange={(event) => setText(event.target.value)}
+          maxLength={4000}
+          onChange={(event) => {
+            setText(event.target.value);
+            setError(null);
+          }}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) {
+              return;
+            }
             if (event.key === "Escape") {
               props.onClose();
             } else if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -1557,6 +1568,11 @@ function RewordEditor(props: {
           }}
         />
         <div className="git-reword-hint">{t("git.rewordHint")}</div>
+        {error && (
+          <div className="git-commit-error" role="alert">
+            {error}
+          </div>
+        )}
         <div className="git-reword-actions">
           <button
             type="button"
@@ -1569,7 +1585,7 @@ function RewordEditor(props: {
           <button
             type="button"
             className="git-actions-go"
-            disabled={busy || text.trim().length === 0}
+            disabled={busy || text.trim().length === 0 || textLength > 4000}
             onClick={() => void save()}
           >
             {t("git.rewordSave")}
@@ -2203,7 +2219,6 @@ function HistoryView(props: {
           workspaceId={props.workspaceId}
           commit={rewording}
           onClose={() => setRewording(null)}
-          onError={setActionError}
           onDone={() => {
             // Хеш изменился — снимаем выделение старого и перезагружаем лог.
             setExpandedHash(null);
