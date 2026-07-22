@@ -54,6 +54,9 @@ export const ru = {
   "git.actionCherryConfirm": "Применить этот коммит поверх текущей ветки?",
   "git.actionRevert": "Откатить этот коммит",
   "git.actionRevertConfirm": "Создать коммит, отменяющий этот?",
+  "git.actionUncommit": "Отменить последний локальный коммит",
+  "git.actionUncommitConfirm":
+    "Убрать последний локальный коммит из истории? Его изменения останутся подготовленными и готовыми к повторному коммиту.",
   "git.actionConfirm": "Продолжить",
   "git.actionReword": "Изменить сообщение",
   "git.rewordHint": "Первая строка — заголовок, дальше — описание. ⌘/Ctrl+Enter — сохранить, Esc — отмена.",

@@ -984,11 +984,13 @@ function CommitDetails(props: {
 }
 
 // Плавающее меню действий над коммитом: копирование, ветка отсюда, checkout,
-// cherry-pick, revert. Открывается по ⋯ или правому клику; опасные действия
-// требуют подтверждения прямо в меню, ветка — ввода имени.
+// cherry-pick, revert и безопасная отмена последнего локального коммита.
+// Открывается по ⋯ или правому клику; опасные действия требуют подтверждения
+// прямо в меню, ветка — ввода имени.
 function CommitActionsMenu(props: {
   workspaceId: string;
   commit: GitCommitInfo;
+  currentBranch?: string;
   x: number;
   y: number;
   onClose: () => void;
@@ -1001,8 +1003,14 @@ function CommitActionsMenu(props: {
   const [busy, setBusy] = useState(false);
   // Редактировать сообщение можно только вошедшему и только свой не запушенный.
   const canReword = props.commit.editable && isGithubSignedIn();
+  const canUncommit =
+    Boolean(props.currentBranch) &&
+    props.commit.isHead &&
+    props.commit.localOnly === true &&
+    props.commit.parents.length === 1;
+  const isMerge = props.commit.parents.length > 1;
   const [confirm, setConfirm] = useState<
-    null | "checkout" | "cherryPick" | "revert"
+    null | "checkout" | "cherryPick" | "revert" | "uncommit"
   >(null);
   const [branching, setBranching] = useState(false);
   const [branchName, setBranchName] = useState("");
@@ -1032,6 +1040,7 @@ function CommitActionsMenu(props: {
     setBusy(true);
     try {
       await commitAction(props.workspaceId, action, props.commit.hash, name);
+      await refreshGitChanges(props.workspaceId);
       props.onDone();
       props.onClose();
     } catch (error) {
@@ -1103,7 +1112,9 @@ function CommitActionsMenu(props: {
               ? t("git.actionCheckoutConfirm")
               : confirm === "cherryPick"
                 ? t("git.actionCherryConfirm")
-                : t("git.actionRevertConfirm")}
+                : confirm === "revert"
+                  ? t("git.actionRevertConfirm")
+                  : t("git.actionUncommitConfirm")}
           </span>
           <div className="git-actions-confirm-row">
             <button
@@ -1176,24 +1187,39 @@ function CommitActionsMenu(props: {
           >
             {t("git.actionCheckout")}
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            disabled={busy}
-            onClick={() => setConfirm("cherryPick")}
-          >
-            {t("git.actionCherryPick")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item is-danger"
-            disabled={busy}
-            onClick={() => setConfirm("revert")}
-          >
-            {t("git.actionRevert")}
-          </button>
+          {!isMerge && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item"
+              disabled={busy}
+              onClick={() => setConfirm("cherryPick")}
+            >
+              {t("git.actionCherryPick")}
+            </button>
+          )}
+          {!isMerge && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item is-danger"
+              disabled={busy}
+              onClick={() => setConfirm("revert")}
+            >
+              {t("git.actionRevert")}
+            </button>
+          )}
+          {canUncommit && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item is-danger"
+              disabled={busy}
+              onClick={() => setConfirm("uncommit")}
+            >
+              {t("git.actionUncommit")}
+            </button>
+          )}
         </>
       )}
     </div>
@@ -2097,6 +2123,7 @@ function HistoryView(props: {
         <CommitActionsMenu
           workspaceId={props.workspaceId}
           commit={menu.commit}
+          currentBranch={props.currentBranch}
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}

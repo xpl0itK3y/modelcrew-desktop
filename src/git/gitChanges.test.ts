@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 import {
   aggregateCounts,
   authorAvatar,
+  commitAction,
   createBranch,
   deleteBranch,
   formatRelativeTime,
@@ -53,6 +54,16 @@ describe("git mutation IPC", () => {
       branch: "obsolete",
       force: true,
       expectedTip: "abc123def456",
+    });
+  });
+
+  it("sends the uncommit action without an optional name", async () => {
+    await commitAction("ws-4", "uncommit", "abcdef123456");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_commit_action", {
+      workspaceId: "ws-4",
+      action: "uncommit",
+      hash: "abcdef123456",
     });
   });
 

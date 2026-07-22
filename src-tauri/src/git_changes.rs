@@ -600,6 +600,9 @@ pub struct GitCommitInfo {
     // Можно безопасно переписать сообщение: не запушен, не merge и авторства
     // локального пользователя (git config user.email).
     pub editable: bool,
+    // Коммит недостижим ни из одной remote-tracking ветки. В отличие от
+    // editable не зависит от GitHub-входа, автора и типа коммита.
+    pub local_only: bool,
     // На этот коммит указывает HEAD (текущий checkout) — для кольца в графе.
     pub is_head: bool,
     // Полные хеши родителей (для графа веток; у merge их несколько).
@@ -1396,6 +1399,62 @@ pub fn delete_branch(
     Ok(())
 }
 
+fn uncommit_head(root: &Path, hash: &str) -> CommandResult<()> {
+    if repository_operation_in_progress(root)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    // Detached HEAD не подходит: reset должен передвигать именно локальную
+    // ветку, а не оставлять изменения без именованной точки восстановления.
+    let head_ref = run_git(root, &["symbolic-ref", "--quiet", "HEAD"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+        .map_err(|_| {
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "detached")
+        })?;
+
+    let head = run_git(root, &["rev-parse", "--verify", "HEAD"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if head != hash {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+
+    // Суффикс заставляет Git трактовать 40 hex именно как object id даже при
+    // наличии плохо названной refs/heads/<40-hex>.
+    let commit = format!("{hash}^{{commit}}");
+    let meta = read_commit_meta(root, &commit)?;
+    if meta.parents.len() != 1 {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "parent-count")
+        );
+    }
+    if on_any_remote(root, &commit)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "pushed"));
+    }
+
+    // CAS передвигает именно локальную ветку и не может затереть коммит,
+    // созданный терминалом между проверками. Индекс намеренно не трогаем:
+    // это атомарный эквивалент reset --soft, а отдельный mixed-reset индекса
+    // создал бы гонку с параллельным commit/add в терминале.
+    let parent = &meta.parents[0];
+    run_git(
+        root,
+        &[
+            "update-ref",
+            "-m",
+            "modelcrew: undo local commit",
+            &head_ref,
+            parent,
+            &head,
+        ],
+    )
+    .map_err(|_| {
+        CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+    })?;
+    Ok(())
+}
+
 fn git_internal_path_exists(root: &Path, name: &str) -> CommandResult<bool> {
     let raw = run_git(root, &["rev-parse", "--git-path", name])?;
     let path = PathBuf::from(String::from_utf8_lossy(&raw).trim().to_owned());
@@ -1478,6 +1537,7 @@ pub fn commit_action(
         }
         "cherryPick" => run_history_action(&toplevel, &["cherry-pick", &resolved_commit]),
         "revert" => run_history_action(&toplevel, &["revert", "--no-edit", &resolved_commit]),
+        "uncommit" => uncommit_head(&toplevel, &resolved),
         other => Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("action", other)),
     }
 }
@@ -1525,7 +1585,7 @@ fn parse_commit_refs(decorations: &str) -> (bool, Vec<GitCommitRef>) {
 
 fn parse_log_records(
     raw: &[u8],
-    unpushed: &std::collections::HashSet<String>,
+    upstream_unpushed: &std::collections::HashSet<String>,
     local_only: &std::collections::HashSet<String>,
     local_email: &str,
 ) -> CommandResult<Vec<GitCommitInfo>> {
@@ -1580,9 +1640,13 @@ fn parse_log_records(
             && !local_email.is_empty()
             && author_email.to_lowercase() == local_email;
 
+        let is_local_only = local_only.contains(&hash);
         commits.push(GitCommitInfo {
-            unpushed: unpushed.contains(&hash),
+            // Без upstream множество upstream_unpushed пусто, но local_only
+            // всё равно честно показывает, что коммита нет ни на одном remote.
+            unpushed: upstream_unpushed.contains(&hash) || is_local_only,
             editable,
+            local_only: is_local_only,
             is_head,
             hash,
             short_hash,
@@ -1992,10 +2056,9 @@ fn create_commit(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn on_any_remote(root: &Path, hash: &str) -> bool {
+fn on_any_remote(root: &Path, hash: &str) -> CommandResult<bool> {
     run_git(root, &["branch", "-r", "--contains", hash])
         .map(|raw| !String::from_utf8_lossy(&raw).trim().is_empty())
-        .unwrap_or(false)
 }
 
 // Переписывает сообщение локального коммита. Безопасно только для не запушенных
@@ -2057,7 +2120,7 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
     chain.push(hash.to_owned());
     chain.extend(descendants.iter().cloned());
     for commit in &chain {
-        if on_any_remote(&toplevel, commit) {
+        if on_any_remote(&toplevel, commit)? {
             return Err(
                 CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "pushed")
             );
@@ -3867,6 +3930,118 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
             .unwrap();
         assert_eq!(head, "feature/empty");
+    }
+
+    #[test]
+    fn uncommit_moves_local_head_and_preserves_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+            output.stdout
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(root.join("b.txt"), "committed\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second"]);
+        let second = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+        assert!(list_log(root, 1, false).unwrap()[0].local_only);
+
+        // Незакоммиченная правка поверх второго коммита тоже должна сохраниться.
+        std::fs::write(root.join("a.txt"), "one\ntwo\nworking\n").unwrap();
+        commit_action(root, "uncommit", &second, None).unwrap();
+
+        let head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+        assert_eq!(head, first);
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\ntwo\nworking\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("b.txt")).unwrap(),
+            "committed\n"
+        );
+        assert!(!collect_summary(root).unwrap().files.is_empty());
+        let cached = Command::new("git")
+            .args(["diff", "--cached", "--quiet"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(
+            !cached.success(),
+            "атомарный soft-uncommit оставляет изменения подготовленными"
+        );
+        let stale_error = commit_action(root, "uncommit", &second, None).unwrap_err();
+        assert_eq!(
+            stale_error.context.get("reason").map(String::as_str),
+            Some("head-moved")
+        );
+    }
+
+    #[test]
+    fn reports_remote_refs_for_non_origin_remotes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second"]);
+
+        let remote = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--bare", "--quiet", "--initial-branch=main"])
+            .current_dir(remote.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        git(&["remote", "add", "upstream", remote.path().to_str().unwrap()]);
+        git(&["push", "--quiet", "-u", "upstream", "main"]);
+
+        let commit = list_log(root, 1, false).unwrap().remove(0);
+        assert_eq!(commit.remote_refs, vec!["upstream/main"]);
+        assert!(!commit.local_only);
+        assert!(commit_action(root, "uncommit", &commit.hash, None).is_err());
+        assert!(list_log(root, 1, false).unwrap()[0].is_head);
     }
 
 }

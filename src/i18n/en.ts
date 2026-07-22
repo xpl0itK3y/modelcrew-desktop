@@ -55,6 +55,9 @@ export const en: Record<MessageKey, string> = {
   "git.actionCherryConfirm": "Apply this commit onto the current branch?",
   "git.actionRevert": "Revert this commit",
   "git.actionRevertConfirm": "Create a commit that undoes this one?",
+  "git.actionUncommit": "Undo last local commit",
+  "git.actionUncommitConfirm":
+    "Remove the last local commit from history? Its changes will remain staged and ready to commit again.",
   "git.actionConfirm": "Continue",
   "git.actionReword": "Edit message",
   "git.rewordHint": "First line is the subject, the rest is the description. ⌘/Ctrl+Enter to save, Esc to cancel.",

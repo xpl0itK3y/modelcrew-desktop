@@ -104,6 +104,42 @@ beforeEach(() => {
 afterEach(() => setLocale("ru"));
 
 describe("GitChangesView workspace lifecycle", () => {
+  it("hides uncommit while HEAD is detached", async () => {
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      branch: undefined,
+    });
+    mocks.fetchLog.mockResolvedValue([
+      {
+        hash: "6666666666666666666666666666666666666666",
+        shortHash: "6666666",
+        subject: "detached commit",
+        author: "Denis",
+        authorEmail: "denis@example.com",
+        epochMs: Date.now(),
+        unpushed: true,
+        localOnly: true,
+        editable: false,
+        isHead: true,
+        parents: ["5555555555555555555555555555555555555555"],
+        refs: [],
+        refDetails: [],
+        remoteRefs: [],
+        fullMessage: "detached commit",
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+
+    expect(
+      screen.queryByRole("menuitem", {
+        name: "Отменить последний локальный коммит",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("switches a tag as a tag even when its display name looks like a branch", async () => {
     mocks.fetchLog.mockResolvedValue([
       {

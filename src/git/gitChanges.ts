@@ -351,8 +351,14 @@ export function fetchLog(
 
 // Действия над коммитом истории: checkout (отделить HEAD), branch (создать
 // ветку от коммита), cherryPick (применить поверх текущей), revert (отменить
-// коммит новым). Ошибки git поднимаются наверх и показываются в панели.
-export type CommitAction = "checkout" | "branch" | "cherryPick" | "revert";
+// коммит новым), uncommit (снять локальный HEAD, сохранив изменения). Ошибки
+// git поднимаются наверх и показываются в панели.
+export type CommitAction =
+  | "checkout"
+  | "branch"
+  | "cherryPick"
+  | "revert"
+  | "uncommit";
 
 export function commitAction(
   workspaceId: string,
