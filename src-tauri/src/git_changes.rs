@@ -415,8 +415,15 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
         synthesize_added_diff(path, &String::from_utf8_lossy(&bytes)).into_bytes()
     };
 
-    let is_binary =
-        tracked && String::from_utf8_lossy(&raw[..raw.len().min(4096)]).contains("Binary files ");
+    Ok(diff_payload(path, &raw, tracked))
+}
+
+// Общая упаковка вывода `git diff`: отметка бинарника и обрезка по размеру.
+// `detect_binary` выключается для собранного вручную диффа нового файла — там
+// строка «Binary files» могла бы прийти из самого содержимого.
+fn diff_payload(path: &str, raw: &[u8], detect_binary: bool) -> GitFileDiff {
+    let is_binary = detect_binary
+        && String::from_utf8_lossy(&raw[..raw.len().min(4096)]).contains("Binary files ");
     let truncated = raw.len() > MAX_DIFF_BYTES;
     let clipped = if truncated {
         // Режем по границе строки, чтобы не рвать UTF-8 и разметку диффа.
@@ -426,15 +433,15 @@ pub fn collect_file_diff(root: &Path, path: &str) -> CommandResult<GitFileDiff> 
             .map_or(MAX_DIFF_BYTES, |position| position + 1);
         &raw[..cut]
     } else {
-        &raw[..]
+        raw
     };
 
-    Ok(GitFileDiff {
+    GitFileDiff {
         path: path.to_owned(),
         is_binary,
         truncated,
         diff: String::from_utf8_lossy(clipped).into_owned(),
-    })
+    }
 }
 
 // ---------- Правка файла в панели ----------
@@ -2971,6 +2978,103 @@ pub fn drop_commit(root: &Path, hash: &str, expected_head: &str) -> CommandResul
     // выполнением появились правки, которые пришлось бы затереть.
     ensure_history_snapshot(&toplevel, expected_head)?;
     run_git(&toplevel, &["reset", "--keep", &format!("{tip}^{{commit}}")]).map(|_| ())
+}
+
+// ---------- Сравнение двух состояний ----------
+
+// Сторона сравнения: конкретный коммит или, если хеш не задан, текущее рабочее
+// дерево. Суффикс `^{commit}` не даёт git выбрать одноимённую ветку или тег.
+fn compare_side(hash: Option<&str>) -> CommandResult<Option<String>> {
+    match hash {
+        None => Ok(None),
+        Some(hash) if is_safe_hash(hash) => Ok(Some(format!("{hash}^{{commit}}"))),
+        Some(hash) => {
+            Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash))
+        }
+    }
+}
+
+// Файлы, различающиеся между двумя коммитами (или коммитом и рабочей папкой).
+pub fn compare_files(
+    root: &Path,
+    from: &str,
+    to: Option<&str>,
+) -> CommandResult<Vec<GitCommitFile>> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let from = compare_side(Some(from))?.unwrap_or_default();
+    let to = compare_side(to)?;
+    let mut args = vec!["diff", "--numstat", "-z", from.as_str()];
+    if let Some(to) = to.as_deref() {
+        args.push(to);
+    }
+    let raw = run_git(&toplevel, &args)?;
+    Ok(parse_numstat(&raw)
+        .into_iter()
+        .map(|(path, additions, deletions)| GitCommitFile {
+            path,
+            additions,
+            deletions,
+        })
+        .collect())
+}
+
+pub fn compare_file_diff(
+    root: &Path,
+    from: &str,
+    to: Option<&str>,
+    path: &str,
+) -> CommandResult<GitFileDiff> {
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let from = compare_side(Some(from))?.unwrap_or_default();
+    let to = compare_side(to)?;
+    let mut args = vec!["diff", from.as_str()];
+    if let Some(to) = to.as_deref() {
+        args.push(to);
+    }
+    args.push("--");
+    args.push(path);
+    let raw = run_git(&toplevel, &args)?;
+    Ok(diff_payload(path, &raw, true))
+}
+
+#[tauri::command]
+pub async fn git_compare_files(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    from: String,
+    to: Option<String>,
+) -> CommandResult<Vec<GitCommitFile>> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || compare_files(&root, &from, to.as_deref()))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_compare_file_diff(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    from: String,
+    to: Option<String>,
+    path: String,
+) -> CommandResult<GitFileDiff> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        compare_file_diff(&root, &from, to.as_deref(), &path)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Теги и патчи ----------
@@ -5890,6 +5994,43 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             },
         )
         .is_err());
+    }
+
+    #[test]
+    fn compares_two_commits_and_the_working_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        let first = head_of(&git);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(root.join("b.txt"), "new file\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second"]);
+        let second = head_of(&git);
+
+        let between = compare_files(root, &first, Some(&second)).unwrap();
+        let mut names: Vec<_> = between.iter().map(|file| file.path.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["a.txt", "b.txt"]);
+        let diff = compare_file_diff(root, &first, Some(&second), "a.txt").unwrap();
+        assert!(diff.diff.contains("+two"));
+        assert!(!diff.is_binary);
+
+        // Без второй стороны сравниваем с текущим рабочим деревом.
+        std::fs::write(root.join("a.txt"), "one\ntwo\nworking\n").unwrap();
+        let against_worktree = compare_files(root, &second, None).unwrap();
+        assert_eq!(against_worktree.len(), 1);
+        assert_eq!(against_worktree[0].path, "a.txt");
+        assert!(compare_file_diff(root, &second, None, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+working"));
+
+        assert!(compare_files(root, "not-a-hash", None).is_err());
+        assert!(compare_file_diff(root, &first, None, "../outside").is_err());
     }
 
     #[test]
