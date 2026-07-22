@@ -556,6 +556,26 @@ describe("GitChangesView workspace lifecycle", () => {
     expect(await screen.findByText("+two".slice(1))).toBeInTheDocument();
   });
 
+  it("keeps a long commit menu inside the window", async () => {
+    // Меню открывается у самого низа экрана: без учёта его высоты нижние
+    // пункты оказались бы за краем окна и стали бы недоступны.
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 400,
+    });
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    const trigger = await screen.findByTitle("Действия над коммитом");
+    fireEvent.contextMenu(trigger, { clientX: 10, clientY: 380 });
+
+    const menu = await screen.findByRole("menu");
+    const top = Number.parseFloat(menu.style.top);
+    expect(top).toBeGreaterThanOrEqual(8);
+    expect(top).toBeLessThanOrEqual(392);
+  });
+
   it("tags the commit the menu was opened on", async () => {
     mocks.fetchLog.mockResolvedValue([taggableCommit()]);
     render(<GitChangesView workspaceId="project-a" />);

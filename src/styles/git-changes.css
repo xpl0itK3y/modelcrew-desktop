@@ -145,6 +145,10 @@
   z-index: 5;
   display: flex;
   min-width: 220px;
+  /* Без верхней границы меню растёт по самой длинной ветке и уезжает за левый
+     край панели, где обрезается её overflow. Имена внутри и так сжимаются с
+     многоточием — ограничение просто даёт им это сделать. */
+  max-width: min(340px, calc(100vw - 100px));
   max-height: 260px;
   flex-direction: column;
   overflow-y: auto;
@@ -1118,7 +1122,7 @@
      оверлей и не перехватывают мышь под ним. */
   z-index: 120;
   display: flex;
-  width: min(400px, calc(100% - 68px));
+  width: min(480px, calc(100% - 68px));
   transition:
     width 180ms cubic-bezier(0.2, 0, 0.13, 1),
     right 180ms cubic-bezier(0.2, 0, 0.13, 1),
@@ -1421,6 +1425,13 @@
   display: flex;
   flex-direction: column;
   min-width: 212px;
+  /* Пунктов в меню много (правка истории, теги, патч, сравнение, сброс), и на
+     невысоком окне список не помещался целиком. Ограничение с прокруткой
+     держит его внутри экрана при любом наборе доступных действий. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mc-scrollbar) transparent;
   padding: 4px;
   border: 1px solid var(--mc-border);
   border-radius: 9px;

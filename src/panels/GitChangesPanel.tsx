@@ -1,6 +1,7 @@
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1440,9 +1441,15 @@ function CommitActionsMenu(props: {
   };
 
   // Фиксированное позиционирование у курсора/кнопки, прижатое к краям экрана.
+  // Высоту меню заранее не знаем: набор пунктов зависит от коммита. Поэтому
+  // после отрисовки поднимаем его ровно настолько, чтобы низ поместился.
+  const [menuHeight, setMenuHeight] = useState(0);
+  useLayoutEffect(() => {
+    setMenuHeight(ref.current?.offsetHeight ?? 0);
+  }, [confirm, naming, deletingTag, copied]);
   const style: CSSProperties = {
     position: "fixed",
-    top: Math.max(8, Math.min(props.y, window.innerHeight - 240)),
+    top: Math.max(8, Math.min(props.y, window.innerHeight - menuHeight - 8)),
     left: Math.max(8, Math.min(props.x, window.innerWidth - 236)),
   };
 
