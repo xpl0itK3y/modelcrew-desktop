@@ -1396,6 +1396,38 @@ pub fn delete_branch(
     Ok(())
 }
 
+fn git_internal_path_exists(root: &Path, name: &str) -> CommandResult<bool> {
+    let raw = run_git(root, &["rev-parse", "--git-path", name])?;
+    let path = PathBuf::from(String::from_utf8_lossy(&raw).trim().to_owned());
+    Ok(if path.is_absolute() {
+        path.exists()
+    } else {
+        root.join(path).exists()
+    })
+}
+
+fn repository_operation_in_progress(root: &Path) -> CommandResult<bool> {
+    Ok(git_internal_path_exists(root, "MERGE_HEAD")?
+        || git_internal_path_exists(root, "CHERRY_PICK_HEAD")?
+        || git_internal_path_exists(root, "REVERT_HEAD")?
+        || git_internal_path_exists(root, "REBASE_HEAD")?
+        || git_internal_path_exists(root, "rebase-merge")?
+        || git_internal_path_exists(root, "rebase-apply")?
+        || git_internal_path_exists(root, "sequencer")?)
+}
+
+fn run_history_action(root: &Path, args: &[&str]) -> CommandResult<()> {
+    // Не вмешиваемся в операцию, начатую терминалом или другим Git-клиентом.
+    if repository_operation_in_progress(root)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    // При конфликте сохраняем стандартное состояние Git. Автоматический
+    // abort без owner-token небезопасен: параллельный клиент мог начать свою
+    // операцию между проверкой выше и вызовом команды.
+    run_git(root, args).map(|_| ())
+}
+
 // Действие над конкретным коммитом истории. Все варианты — стандартные
 // операции git, которые пользователь осознанно запускает из меню; ошибки
 // (грязное дерево, конфликт cherry-pick/revert) поднимаются наверх. Конфликт
@@ -1444,8 +1476,8 @@ pub fn commit_action(
             ensure_no_pending_branch_cleanup(&toplevel, name)?;
             run_git(&toplevel, &["switch", "-c", name, &resolved_commit]).map(|_| ())
         }
-        "cherryPick" => run_git(&toplevel, &["cherry-pick", hash]).map(|_| ()),
-        "revert" => run_git(&toplevel, &["revert", "--no-edit", hash]).map(|_| ()),
+        "cherryPick" => run_history_action(&toplevel, &["cherry-pick", &resolved_commit]),
+        "revert" => run_history_action(&toplevel, &["revert", "--no-edit", &resolved_commit]),
         other => Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("action", other)),
     }
 }
@@ -1983,6 +2015,10 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    if repository_operation_in_progress(&toplevel)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
 
     // Текущая ветка (обновляем её ссылку). Detached HEAD не поддерживаем.
     let branch = run_git(&toplevel, &["symbolic-ref", "--quiet", "--short", "HEAD"])
