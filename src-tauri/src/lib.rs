@@ -665,6 +665,7 @@ fn disable_dmabuf_renderer_by_default() {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 enum DmabufChoice {
     Disable,
     Restore,
@@ -674,6 +675,7 @@ enum DmabufChoice {
 // WebKit смотрит на само наличие переменной, а не на её значение: оставленный
 // `=0` отключил бы DMABUF ровно так же, как `=1`. Поэтому «верни как было»
 // можно выразить только удалением переменной.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn dmabuf_choice(current: Option<&str>) -> DmabufChoice {
     match current {
         None => DmabufChoice::Disable,

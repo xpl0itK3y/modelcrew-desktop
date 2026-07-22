@@ -6232,6 +6232,417 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         .is_err());
     }
 
+    // Запускает git в конкретной папке с фиксированной подписью автора.
+    // Возвращает stdout: тесты ниже сверяют по нему реальное состояние Git,
+    // а не только результат наших функций.
+    fn git_at(root: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "Me")
+            .env("GIT_AUTHOR_EMAIL", "me@t")
+            .env("GIT_COMMITTER_NAME", "Me")
+            .env("GIT_COMMITTER_EMAIL", "me@t")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    fn configure(root: &Path) {
+        git_at(root, &["config", "user.name", "Me"]);
+        git_at(root, &["config", "user.email", "me@t"]);
+    }
+
+    fn commit_file(root: &Path, name: &str, body: &str, message: &str) -> String {
+        std::fs::write(root.join(name), body).unwrap();
+        git_at(root, &["add", "--", name]);
+        git_at(root, &["commit", "--quiet", "-m", message]);
+        git_at(root, &["rev-parse", "HEAD"])
+    }
+
+    // «Сервер» — обычный bare-репозиторий: для git это полноценный remote, а
+    // тесту не нужны ни сеть, ни учётные данные. Рабочую копию именно создаём,
+    // а не клонируем: клон пустого репозитория уже прописал бы upstream в
+    // конфиг, и случай «ветка ещё не опубликована» перестал бы существовать.
+    fn server_and_workdir(dir: &Path) -> (PathBuf, PathBuf) {
+        let bare = dir.join("server.git");
+        git_at(
+            dir,
+            &[
+                "init",
+                "--quiet",
+                "--bare",
+                "--initial-branch=main",
+                bare.to_str().unwrap(),
+            ],
+        );
+        let work = dir.join("work");
+        std::fs::create_dir(&work).unwrap();
+        git_at(&work, &["init", "--quiet", "--initial-branch=main"]);
+        configure(&work);
+        git_at(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        (bare, work)
+    }
+
+    // Полный цикл работы с сервером: публикация ветки, отправка, приём,
+    // расхождение, rebase и выравнивание. Всё через те же функции, которые
+    // вызывает панель, и с проверкой обеих сторон — локальной и серверной.
+    #[test]
+    fn full_remote_workflow_against_a_real_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bare, work) = server_and_workdir(dir.path());
+        let root = work.as_path();
+
+        // 1. Первый коммит: ветки на сервере ещё нет, сравнивать не с чем.
+        let first = commit_file(root, "a.txt", "one\n", "first");
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(summary.branch.as_deref(), Some("main"));
+        assert!(summary.upstream_ref.is_none(), "ветка ещё не опубликована");
+
+        // 2. Публикация: ветка уезжает на сервер и получает upstream.
+        publish_branch(root, "main", &first, None).unwrap();
+        assert_eq!(git_at(&bare, &["rev-parse", "refs/heads/main"]), first);
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(summary.upstream_ref.as_deref(), Some("origin/main"));
+        assert_eq!((summary.ahead, summary.behind), (Some(0), Some(0)));
+
+        // 3. Отдельная ветка от HEAD, коммит в ней и её публикация.
+        create_branch(root, "feature/panel").unwrap();
+        let feature = commit_file(root, "b.txt", "feature\n", "feature work");
+        publish_branch(root, "feature/panel", &feature, None).unwrap();
+        assert_eq!(
+            git_at(&bare, &["rev-parse", "refs/heads/feature/panel"]),
+            feature
+        );
+
+        // 4. Возврат на main и слияние ветки в неё.
+        switch_branch(root, "main", "local").unwrap();
+        assert_eq!(collect_summary(root).unwrap().branch.as_deref(), Some("main"));
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        merge_ref(root, "refs/heads/feature/panel", "main", &head, false).unwrap();
+        assert!(root.join("b.txt").exists(), "слияние принесло файл ветки");
+
+        // 5. Отправка результата: сервер догоняет локальную вершину.
+        let merged = git_at(root, &["rev-parse", "HEAD"]);
+        push_upstream(root, "main", &merged).unwrap();
+        assert_eq!(git_at(&bare, &["rev-parse", "refs/heads/main"]), merged);
+        assert_eq!(collect_summary(root).unwrap().ahead, Some(0));
+
+        // 6. Чужой коммит на сервере: делаем его из второй рабочей копии.
+        let other = dir.path().join("other");
+        git_at(
+            dir.path(),
+            &["clone", "--quiet", bare.to_str().unwrap(), other.to_str().unwrap()],
+        );
+        configure(&other);
+        let theirs = commit_file(&other, "c.txt", "from colleague\n", "colleague work");
+        git_at(&other, &["push", "--quiet", "origin", "main"]);
+
+        // Панель узнаёт о сервере через fetch — до него счётчики не меняются.
+        fetch_upstream(root).unwrap();
+        assert_eq!(collect_summary(root).unwrap().behind, Some(1));
+        pull_upstream(root, "main", &merged).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), theirs);
+        assert!(root.join("c.txt").exists());
+
+        // 7. Расхождение: коммит у нас и коммит на сервере одновременно.
+        let ours = commit_file(root, "d.txt", "mine\n", "my work");
+        let theirs_second = commit_file(&other, "e.txt", "theirs\n", "their second");
+        git_at(&other, &["push", "--quiet", "origin", "main"]);
+        fetch_upstream(root).unwrap();
+        let summary = collect_summary(root).unwrap();
+        assert_eq!((summary.ahead, summary.behind), (Some(1), Some(1)), "ветки разошлись");
+
+        // Простая перемотка тут невозможна — именно поэтому есть rebase.
+        assert!(pull_upstream(root, "main", &ours).is_err());
+        pull_rebase(root, "main", &ours).unwrap();
+        let after_rebase = git_at(root, &["rev-parse", "HEAD"]);
+        assert_ne!(after_rebase, ours, "коммит переложен, значит хеш новый");
+        assert_eq!(
+            git_at(root, &["rev-parse", "HEAD~1"]),
+            theirs_second,
+            "наш коммит лёг поверх серверного"
+        );
+        assert_eq!(collect_summary(root).unwrap().behind, Some(0));
+
+        // 8. Выравнивание по серверу: коммит уходит из истории, файл остаётся.
+        push_upstream(root, "main", &after_rebase).unwrap();
+        let extra = commit_file(root, "f.txt", "local only\n", "local only");
+        reset_to_upstream(root, "main", &extra).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), after_rebase);
+        assert!(
+            root.join("f.txt").exists(),
+            "выравнивание не должно стирать файлы"
+        );
+
+        // 9. Устаревшее подтверждение отклоняется: вершина уже другая.
+        assert_eq!(
+            push_upstream(root, "main", &extra)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("head-moved")
+        );
+    }
+
+    // Правка локальной истории рядом с уже опубликованной: панель обязана
+    // разрешать первое и отказывать во втором, а не полагаться на аккуратность
+    // пользователя.
+    #[test]
+    fn full_local_history_workflow_next_to_published_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_bare, work) = server_and_workdir(dir.path());
+        let root = work.as_path();
+
+        let published = commit_file(root, "a.txt", "one\n", "published");
+        publish_branch(root, "main", &published, None).unwrap();
+        let second = commit_file(root, "b.txt", "two\n", "second");
+        commit_file(root, "c.txt", "three\n", "third");
+
+        // Опубликованный коммит переписывать нельзя, локальные — можно.
+        let log = list_log(root, 10, false, &GitLogFilter::default()).unwrap();
+        let editable: std::collections::HashMap<&str, bool> = log
+            .iter()
+            .map(|commit| (commit.subject.as_str(), commit.editable))
+            .collect();
+        assert_eq!(editable["third"], true);
+        assert_eq!(editable["second"], true);
+        assert_eq!(editable["published"], false, "коммит уже на сервере");
+        assert_eq!(
+            reword_commit(root, &published, "rewritten")
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("pushed")
+        );
+
+        // 1. Переименование сообщения: потомок сохраняется, дерево не меняется.
+        let tree_before = git_at(root, &["rev-parse", "HEAD^{tree}"]);
+        reword_commit(root, &second, "second, reworded").unwrap();
+        let subjects: Vec<String> = list_log(root, 10, false, &GitLogFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|commit| commit.subject)
+            .collect();
+        assert_eq!(subjects, ["third", "second, reworded", "published"]);
+        assert_eq!(git_at(root, &["rev-parse", "HEAD^{tree}"]), tree_before);
+
+        // 2. Дополнение последнего коммита подготовленными правками.
+        std::fs::write(root.join("d.txt"), "added later\n").unwrap();
+        git_at(root, &["add", "d.txt"]);
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        amend_commit(root, &head, None).unwrap();
+        let files = list_commit_files(root, &git_at(root, &["rev-parse", "HEAD"])).unwrap();
+        let mut names: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["c.txt", "d.txt"]);
+
+        // 3. Склейка двух локальных коммитов: содержимое вершины не меняется.
+        let tree_before = git_at(root, &["rev-parse", "HEAD^{tree}"]);
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        squash_commit(root, &head, "fixup", &head).unwrap();
+        let subjects: Vec<String> = list_log(root, 10, false, &GitLogFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|commit| commit.subject)
+            .collect();
+        assert_eq!(subjects, ["second, reworded", "published"]);
+        assert_eq!(git_at(root, &["rev-parse", "HEAD^{tree}"]), tree_before);
+
+        // 4. Удаление коммита из середины: потомки переносятся, файл исчезает.
+        let unwanted = commit_file(root, "unwanted.txt", "remove\n", "unwanted");
+        commit_file(root, "keep.txt", "keep\n", "keep me");
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        drop_commit(root, &unwanted, &head).unwrap();
+        assert!(!root.join("unwanted.txt").exists());
+        assert!(root.join("keep.txt").exists());
+        assert!(collect_summary(root).unwrap().files.is_empty());
+
+        // 5. Отмена последнего коммита: изменения остаются подготовленными.
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        commit_action(root, "uncommit", &head, None).unwrap();
+        assert!(root.join("keep.txt").exists());
+        assert!(!collect_summary(root).unwrap().files.is_empty());
+        git_at(root, &["commit", "--quiet", "-m", "keep me again"]);
+
+        // 6. Сброс ветки на выбранный коммит в трёх режимах.
+        let target = git_at(root, &["rev-parse", "HEAD~1"]);
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        reset_to_commit(root, &target, "soft", &head).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), target);
+        assert!(root.join("keep.txt").exists(), "soft не трогает файлы");
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        reset_to_commit(root, &published, "hard", &head).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), published);
+        assert!(!root.join("keep.txt").exists(), "hard вернул рабочую папку");
+        assert!(!root.join("b.txt").exists());
+    }
+
+    // Жизненный цикл веток и тегов целиком: создание, переименование, удаление
+    // влитой и невлитой, защита от устаревшего подтверждения, действия над
+    // коммитом и сравнение состояний.
+    #[test]
+    fn full_branch_lifecycle_workflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bare, work) = server_and_workdir(dir.path());
+        let root = work.as_path();
+
+        let first = commit_file(root, "a.txt", "one\n", "first");
+        publish_branch(root, "main", &first, None).unwrap();
+        let second = commit_file(root, "a.txt", "one\ntwo\n", "second");
+
+        // 1. Создание, переименование и список веток.
+        create_branch(root, "wip").unwrap();
+        rename_branch(root, "wip", "feature/rename-me").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        let branches = list_branches(root).unwrap();
+        let names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
+        assert!(names.contains(&"feature/rename-me"));
+        assert!(!names.contains(&"wip"), "старое имя исчезло");
+        let feature = branches
+            .iter()
+            .find(|b| b.name == "feature/rename-me")
+            .unwrap();
+        assert_eq!(feature.ref_name, "refs/heads/feature/rename-me");
+        assert!(feature.is_merged, "ветка создана от текущей вершины");
+
+        // 2. Влитая ветка удаляется, невлитая — только принудительно.
+        delete_branch(root, "feature/rename-me", false, &feature.tip_hash).unwrap();
+        create_branch(root, "unmerged").unwrap();
+        let stray = commit_file(root, "stray.txt", "stray\n", "stray work");
+        switch_branch(root, "main", "local").unwrap();
+        assert_eq!(
+            delete_branch(root, "unmerged", false, &stray)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("branch-unmerged")
+        );
+        // Подтверждение относится к увиденной вершине: чужой коммит не теряется.
+        assert_eq!(
+            delete_branch(root, "unmerged", true, &second)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("branch-moved")
+        );
+        delete_branch(root, "unmerged", true, &stray).unwrap();
+        assert!(!list_branches(root)
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "unmerged"));
+        // Текущую ветку удалить нельзя ни при каких подтверждениях.
+        assert_eq!(
+            delete_branch(root, "main", true, &second)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("branch-current")
+        );
+
+        // 3. Действия над коммитом: ветка от него, отделённый HEAD и возврат.
+        commit_action(root, "branch", &first, Some("from-first")).unwrap();
+        assert_eq!(git_at(root, &["rev-parse", "HEAD"]), first);
+        switch_branch(root, "main", "local").unwrap();
+        commit_action(root, "checkout", &first, None).unwrap();
+        let summary = collect_summary(root).unwrap();
+        assert!(summary.branch.is_none(), "HEAD отделён");
+        assert_eq!(
+            summary.previous_branch.as_deref(),
+            Some("main"),
+            "панель знает, куда вернуться"
+        );
+        switch_branch(root, "main", "local").unwrap();
+
+        // 4. Перенос чужого коммита и его отмена новым коммитом.
+        let side = git_at(root, &["rev-parse", "refs/heads/from-first"]);
+        assert_eq!(side, first);
+        let donor = commit_file(root, "donor.txt", "donor\n", "donor work");
+        reset_to_commit(root, &second, "hard", &donor).unwrap();
+        commit_action(root, "cherryPick", &donor, None).unwrap();
+        assert!(root.join("donor.txt").exists(), "коммит применён поверх");
+        let picked = git_at(root, &["rev-parse", "HEAD"]);
+        commit_action(root, "revert", &picked, None).unwrap();
+        assert!(!root.join("donor.txt").exists(), "отмена убрала файл");
+
+        // 5. Теги: лёгкий и аннотированный, переход на тег и удаление.
+        create_tag(root, "v1.0", &first, None).unwrap();
+        create_tag(root, "v1.0-note", &first, Some("first release")).unwrap();
+        assert_eq!(git_at(root, &["cat-file", "-t", "v1.0-note"]), "tag");
+        switch_branch(root, "v1.0", "tag").unwrap();
+        assert!(collect_summary(root).unwrap().branch.is_none());
+        switch_branch(root, "main", "local").unwrap();
+        delete_tag(root, "v1.0").unwrap();
+        assert!(!git_at(root, &["tag", "--list"]).contains("v1.0\n"));
+
+        // 6. Сравнение двух состояний и с рабочей папкой.
+        let head = git_at(root, &["rev-parse", "HEAD"]);
+        let changed = compare_files(root, &first, Some(&head)).unwrap();
+        assert!(changed.iter().any(|file| file.path == "a.txt"));
+        assert!(compare_file_diff(root, &first, Some(&head), "a.txt")
+            .unwrap()
+            .diff
+            .contains("+two"));
+        std::fs::write(root.join("a.txt"), "one\ntwo\nworking\n").unwrap();
+        assert!(compare_file_diff(root, &head, None, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+working"));
+        git_at(root, &["checkout", "--", "a.txt"]);
+
+        // 7. Серверная ветка видна как удалённая и переключается по полному ref.
+        git_at(&bare, &["branch", "release", "refs/heads/main"]);
+        fetch_upstream(root).unwrap();
+        let remote = list_branches(root)
+            .unwrap()
+            .into_iter()
+            .find(|b| b.name == "origin/release")
+            .expect("серверная ветка попала в список");
+        assert!(remote.is_remote);
+        switch_branch(root, &remote.ref_name, "remote").unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("release"),
+            "создана локальная копия со слежением"
+        );
+
+        // 8. Фильтры журнала работают на реальной истории.
+        let by_text = list_log(
+            root,
+            50,
+            true,
+            &GitLogFilter {
+                text: Some("donor".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!by_text.is_empty());
+        assert!(by_text
+            .iter()
+            .all(|commit| commit.subject.to_lowercase().contains("donor")));
+        let by_path = list_log(
+            root,
+            50,
+            true,
+            &GitLogFilter {
+                path: Some("stray.txt".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            by_path.is_empty(),
+            "коммит удалённой ветки больше не в истории"
+        );
+    }
+
     #[test]
     fn merges_and_rebases_by_exact_ref() {
         let dir = tempfile::tempdir().unwrap();
