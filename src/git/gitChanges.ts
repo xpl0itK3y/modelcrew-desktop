@@ -387,24 +387,49 @@ export function rewordCommit(
 // Забрать с сервера (ff-only) и отправить локальные коммиты. Обе — сетевые,
 // без интерактивного запроса пароля: при необходимости авторизации падают с
 // ошибкой, а не виснут.
-export function gitPull(workspaceId: string): Promise<void> {
-  return invoke("git_pull", { workspaceId });
+export function gitPull(
+  workspaceId: string,
+  expectedBranch: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_pull", { workspaceId, expectedBranch, expectedHead });
 }
 
-export function gitPush(workspaceId: string): Promise<void> {
-  return invoke("git_push", { workspaceId });
+export function gitPush(
+  workspaceId: string,
+  expectedBranch: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_push", { workspaceId, expectedBranch, expectedHead });
 }
 
 // Забрать с rebase (для разошедшейся ветки): локальные коммиты кладутся поверх
-// серверных. При конфликте бэкенд откатывает rebase и возвращает ошибку.
-export function gitPullRebase(workspaceId: string): Promise<void> {
-  return invoke("git_pull_rebase", { workspaceId });
+// серверных. При конфликте Git оставляет стандартное незавершённое состояние,
+// чтобы пользователь явно сделал continue/abort в терминале.
+export function gitPullRebase(
+  workspaceId: string,
+  expectedBranch: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_pull_rebase", {
+    workspaceId,
+    expectedBranch,
+    expectedHead,
+  });
 }
 
-// Принудительно встать на серверную ветку: локальные коммиты и несохранённые
-// правки отбрасываются (коммиты восстановимы через reflog).
-export function gitResetToUpstream(workspaceId: string): Promise<void> {
-  return invoke("git_reset_to_upstream", { workspaceId });
+// Атомарно выровнять локальную ветку по серверной вершине. Локальные коммиты
+// исчезают из истории, но их изменения, индекс и текущие правки сохраняются.
+export function gitResetToUpstream(
+  workspaceId: string,
+  expectedBranch: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_reset_to_upstream", {
+    workspaceId,
+    expectedBranch,
+    expectedHead,
+  });
 }
 
 export type GitCommitFile = {

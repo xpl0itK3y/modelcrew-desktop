@@ -264,6 +264,27 @@ describe("Git action errors", () => {
   });
 });
 
+describe("sync confirmation", () => {
+  it("passes the confirmed branch and HEAD to push", async () => {
+    const head = "cccccccccccccccccccccccccccccccccccccccc";
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      headHash: head,
+      ahead: 1,
+      behind: 0,
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    const push = screen.getByTitle("Отправить локальные коммиты на сервер");
+    fireEvent.click(push);
+    fireEvent.click(screen.getByRole("button", { name: "Запушить?" }));
+
+    await waitFor(() =>
+      expect(mocks.gitPush).toHaveBeenCalledWith("project-a", "main", head),
+    );
+  });
+});
+
 describe("BranchSwitcher local management", () => {
   it("ignores a branch-list response from a previous menu opening", async () => {
     let resolveOld!: (branches: GitBranchInfo[]) => void;

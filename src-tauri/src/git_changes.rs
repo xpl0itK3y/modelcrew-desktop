@@ -1053,40 +1053,197 @@ pub fn fetch_upstream(root: &Path) -> CommandResult<()> {
     run_git_network(&toplevel, &["fetch", "--quiet"])
 }
 
-// Забрать изменения с сервера. --ff-only: только перемотка, без авто-merge —
-// если ветки разошлись, честно падаем с ошибкой, ничего не ломая.
-pub fn pull_upstream(root: &Path) -> CommandResult<()> {
+// Забрать изменения с сервера. Fetch отделён от локальной мутации: после
+// долгой сети повторно сверяем ветку и HEAD, которые видел пользователь.
+// --ff-only только перематывает историю, без неявного merge-коммита.
+pub fn pull_upstream(root: &Path, expected_branch: &str, expected_head: &str) -> CommandResult<()> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    run_git_network(&toplevel, &["pull", "--ff-only", "--quiet"])
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    let target = upstream_target_for_branch(&toplevel, expected_branch)?;
+    run_git_network(&toplevel, &["fetch", "--quiet", &target.remote])?;
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    if upstream_target_for_branch(&toplevel, expected_branch)? != target {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+    let upstream_tip = resolve_upstream_tip(&toplevel, &target.tracking_ref)?;
+    run_git(
+        &toplevel,
+        &[
+            "merge",
+            "--ff-only",
+            "--quiet",
+            &format!("{upstream_tip}^{{commit}}"),
+        ],
+    )
+    .map(|_| ())
 }
 
-// Отправить локальные коммиты текущей ветки на её upstream.
-pub fn push_upstream(root: &Path) -> CommandResult<()> {
+// Отправить ровно подтверждённый commit в upstream подтверждённой ветки.
+// Даже если другой Git-клиент успеет переключить/продвинуть текущую ветку,
+// push не подхватит её новый HEAD по неявному push.default.
+pub fn push_upstream(root: &Path, expected_branch: &str, expected_head: &str) -> CommandResult<()> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    run_git_network(&toplevel, &["push", "--quiet"])
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    let target = upstream_target_for_branch(&toplevel, expected_branch)?;
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    let refspec = format!("{expected_head}^{{commit}}:{}", target.remote_branch_ref);
+    run_git_network(&toplevel, &["push", "--quiet", &target.remote, &refspec])
 }
 
 // Забрать с сервера с rebase: локальные коммиты переносятся поверх серверных —
-// подходит для разошедшейся ветки. При конфликте откатываем rebase, чтобы не
-// оставить репозиторий в разобранном состоянии, и честно сообщаем об ошибке.
-pub fn pull_rebase(root: &Path) -> CommandResult<()> {
+// подходит для разошедшейся ветки. Конфликт оставляет стандартное состояние
+// rebase для явного continue/abort: автоматически abort-ить нельзя, потому что
+// параллельная операция могла быть начата пользователем в терминале.
+pub fn pull_rebase(root: &Path, expected_branch: &str, expected_head: &str) -> CommandResult<()> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    let result = run_git_network(&toplevel, &["pull", "--rebase", "--quiet"]);
-    if result.is_err() {
-        let _ = run_git(&toplevel, &["rebase", "--abort"]);
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    let target = upstream_target_for_branch(&toplevel, expected_branch)?;
+    run_git_network(&toplevel, &["fetch", "--quiet", &target.remote])?;
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    if upstream_target_for_branch(&toplevel, expected_branch)? != target {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
     }
-    result
+    let upstream_tip = resolve_upstream_tip(&toplevel, &target.tracking_ref)?;
+    run_git(
+        &toplevel,
+        &["rebase", "--quiet", &format!("{upstream_tip}^{{commit}}")],
+    )
+    .map(|_| ())
 }
 
-// Принудительно встать точно на серверную ветку: локальные коммиты и
-// несохранённые правки отбрасываются (коммиты восстановимы через reflog).
-pub fn reset_to_upstream(root: &Path) -> CommandResult<()> {
+// Атомарно переставить подтверждённую локальную ветку на серверную вершину.
+// Индекс и рабочее дерево намеренно не трогаем: локальные коммиты исчезают из
+// истории, но все их изменения и несохранённые правки остаются staged/working.
+fn attached_branch_and_head(root: &Path) -> CommandResult<(String, String)> {
+    let branch = run_git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    let head = run_git(root, &["rev-parse", "--verify", "HEAD^{commit}"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if branch.is_empty() || !is_safe_hash(&head) {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+    Ok((branch, head))
+}
+
+fn ensure_expected_branch_head(
+    root: &Path,
+    expected_branch: &str,
+    expected_head: &str,
+) -> CommandResult<()> {
+    let (branch, head) = attached_branch_and_head(root)?;
+    if branch != expected_branch || head != expected_head {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UpstreamTarget {
+    remote: String,
+    remote_branch_ref: String,
+    tracking_ref: String,
+}
+
+fn ensure_sync_snapshot(
+    root: &Path,
+    expected_branch: &str,
+    expected_head: &str,
+) -> CommandResult<()> {
+    validate_branch_name(root, expected_branch)?;
+    if !is_safe_hash(expected_head) {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+    if repository_operation_in_progress(root)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    ensure_expected_branch_head(root, expected_branch, expected_head)
+}
+
+fn upstream_target_for_branch(root: &Path, branch: &str) -> CommandResult<UpstreamTarget> {
+    let remote_key = format!("branch.{branch}.remote");
+    let merge_key = format!("branch.{branch}.merge");
+    let remote = run_git(root, &["config", "--get", &remote_key])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if remote.is_empty()
+        || remote.starts_with('-')
+        || remote == "."
+        || !remote_names(root)?.iter().any(|name| name == &remote)
+    {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "upstream-invalid"));
+    }
+    let remote_branch_ref = run_git(root, &["config", "--get", &merge_key])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !remote_branch_ref.starts_with("refs/heads/")
+        || run_git(root, &["check-ref-format", &remote_branch_ref]).is_err()
+    {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "upstream-invalid"));
+    }
+
+    let local_ref = format!("refs/heads/{branch}");
+    let tracking_ref = run_git(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(upstream)",
+            "--count=1",
+            &local_ref,
+        ],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !tracking_ref.starts_with("refs/remotes/")
+        || run_git(root, &["check-ref-format", &tracking_ref]).is_err()
+    {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "upstream-invalid"));
+    }
+    Ok(UpstreamTarget {
+        remote,
+        remote_branch_ref,
+        tracking_ref,
+    })
+}
+
+fn resolve_upstream_tip(root: &Path, tracking_ref: &str) -> CommandResult<String> {
+    let tip = run_git(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("{tracking_ref}^{{commit}}"),
+        ],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !is_safe_hash(&tip) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "upstream-invalid"));
+    }
+    Ok(tip)
+}
+
+pub fn reset_to_upstream(
+    root: &Path,
+    expected_branch: &str,
+    expected_head: &str,
+) -> CommandResult<()> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
@@ -1113,12 +1270,16 @@ pub async fn git_pull(
     window: tauri::WebviewWindow,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
+    expected_branch: String,
+    expected_head: String,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || pull_upstream(&root))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        pull_upstream(&root, &expected_branch, &expected_head)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1126,12 +1287,16 @@ pub async fn git_push(
     window: tauri::WebviewWindow,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
+    expected_branch: String,
+    expected_head: String,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || push_upstream(&root))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        push_upstream(&root, &expected_branch, &expected_head)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1139,12 +1304,16 @@ pub async fn git_pull_rebase(
     window: tauri::WebviewWindow,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
+    expected_branch: String,
+    expected_head: String,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || pull_rebase(&root))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        pull_rebase(&root, &expected_branch, &expected_head)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1152,12 +1321,16 @@ pub async fn git_reset_to_upstream(
     window: tauri::WebviewWindow,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
+    expected_branch: String,
+    expected_head: String,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || reset_to_upstream(&root))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        reset_to_upstream(&root, &expected_branch, &expected_head)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3933,6 +4106,80 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     #[test]
+    fn sync_actions_reject_a_stale_branch_head_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+            output.stdout
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
+        let stale_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+
+        let remote = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--bare", "--quiet", "--initial-branch=main"])
+            .current_dir(remote.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        git(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(&["push", "--quiet", "-u", "origin", "main"]);
+
+        git(&["commit", "--quiet", "--allow-empty", "-m", "new local head"]);
+        let current_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+
+        for error in [
+            pull_upstream(root, "main", &stale_head).unwrap_err(),
+            push_upstream(root, "main", &stale_head).unwrap_err(),
+            pull_rebase(root, "main", &stale_head).unwrap_err(),
+        ] {
+            assert_eq!(
+                error.context.get("reason").map(String::as_str),
+                Some("head-moved")
+            );
+        }
+        let remote_head = || {
+            let output = Command::new("git")
+                .args([
+                    "--git-dir",
+                    remote.path().to_str().unwrap(),
+                    "rev-parse",
+                    "refs/heads/main",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "remote rev-parse failed: {output:?}"
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        };
+        assert_eq!(remote_head(), stale_head, "stale push ничего не отправил");
+
+        push_upstream(root, "main", &current_head).unwrap();
+        assert_eq!(
+            remote_head(),
+            current_head,
+            "push отправляет ровно подтверждённый commit"
+        );
+    }
+
+    #[test]
     fn uncommit_moves_local_head_and_preserves_worktree() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -4044,4 +4291,84 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(list_log(root, 1, false).unwrap()[0].is_head);
     }
 
+    #[test]
+    fn preserves_conflicting_cherry_pick_and_revert_for_explicit_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed");
+            output.stdout
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("a.txt"), "base\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "base"]);
+
+        git(&["checkout", "--quiet", "-b", "feature"]);
+        std::fs::write(root.join("a.txt"), "feature\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "feature"]);
+        let feature = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+
+        git(&["checkout", "--quiet", "main"]);
+        std::fs::write(root.join("a.txt"), "main\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "main"]);
+        let main_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+
+        // Чужую незавершённую операцию не abort-им: новый action только
+        // отказывает, оставляя владельцу возможность continue/abort.
+        let preexisting = Command::new("git")
+            .args(["cherry-pick", &feature])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(!preexisting.status.success());
+        assert!(root.join(".git/CHERRY_PICK_HEAD").exists());
+        assert!(commit_action(root, "revert", &feature, None).is_err());
+        assert!(commit_action(root, "uncommit", &main_head, None).is_err());
+        assert!(reword_commit(root, &main_head, "renamed main").is_err());
+        assert!(pull_rebase(root, "main", &main_head).is_err());
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+            main_head
+        );
+        assert!(root.join(".git/CHERRY_PICK_HEAD").exists());
+        git(&["cherry-pick", "--abort"]);
+
+        assert!(commit_action(root, "cherryPick", &feature, None).is_err());
+        assert!(root.join(".git/CHERRY_PICK_HEAD").exists());
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+            main_head
+        );
+        git(&["cherry-pick", "--abort"]);
+        assert!(collect_summary(root).unwrap().files.is_empty());
+
+        assert!(commit_action(root, "revert", &feature, None).is_err());
+        assert!(root.join(".git/REVERT_HEAD").exists());
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+            main_head
+        );
+        git(&["revert", "--abort"]);
+        assert!(collect_summary(root).unwrap().files.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "main\n"
+        );
+    }
 }

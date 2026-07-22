@@ -15,6 +15,9 @@ import {
   createBranch,
   deleteBranch,
   formatRelativeTime,
+  gitPull,
+  gitPullRebase,
+  gitPush,
   parseUnifiedDiff,
   renameBranch,
   resolveAvatarUrl,
@@ -67,6 +70,28 @@ describe("git mutation IPC", () => {
     });
   });
 
+  it("binds every sync command to the confirmed branch and HEAD", async () => {
+    const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    await gitPull("ws-5", "main", head);
+    await gitPush("ws-5", "main", head);
+    await gitPullRebase("ws-5", "main", head);
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "git_pull", {
+      workspaceId: "ws-5",
+      expectedBranch: "main",
+      expectedHead: head,
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "git_push", {
+      workspaceId: "ws-5",
+      expectedBranch: "main",
+      expectedHead: head,
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, "git_pull_rebase", {
+      workspaceId: "ws-5",
+      expectedBranch: "main",
+      expectedHead: head,
+    });
+  });
 });
 
 describe("resolveAvatarUrl", () => {

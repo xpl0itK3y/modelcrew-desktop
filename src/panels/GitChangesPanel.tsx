@@ -1231,6 +1231,8 @@ function CommitActionsMenu(props: {
 // чем сравнивать) не показывается; при совпадении — тихая галочка.
 function SyncStatus(props: {
   workspaceId: string;
+  branch?: string;
+  headHash?: string;
   ahead?: number;
   behind?: number;
   onError: (message: string) => void;
@@ -1238,11 +1240,32 @@ function SyncStatus(props: {
   const { t } = useI18n();
   const { ahead, behind } = props;
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState<null | "pull" | "push">(null);
+  type SyncSnapshot = {
+    action: "pull" | "push";
+    branch: string;
+    headHash: string;
+  };
+  const [confirm, setConfirm] = useState<SyncSnapshot | null>(null);
   // Разошедшаяся ветка: ↓ открывает меню (rebase / сброс к серверу).
   const [pullMenu, setPullMenu] = useState(false);
-  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState<{
+    branch: string;
+    headHash: string;
+  } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const snapshot = (action: SyncSnapshot["action"]): SyncSnapshot | null =>
+    props.branch && props.headHash
+      ? { action, branch: props.branch, headHash: props.headHash }
+      : null;
+
+  // Подтверждение относится к конкретному состоянию истории. Как только
+  // watcher сообщает другую ветку/вершину или другие счётчики, старый клик
+  // больше нельзя применить к новому состоянию.
+  useEffect(() => {
+    setConfirm(null);
+    setPullMenu(false);
+    setResetConfirm(null);
+  }, [props.branch, props.headHash, ahead, behind]);
 
   // Незакреплённое подтверждение гаснет само.
   useEffect(() => {
@@ -1260,7 +1283,7 @@ function SyncStatus(props: {
     }
     const close = () => {
       setPullMenu(false);
-      setResetConfirm(false);
+      setResetConfirm(null);
     };
     const onDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
@@ -1287,20 +1310,42 @@ function SyncStatus(props: {
   // Ветка разошлась: есть и свои коммиты, и серверные — простой ff невозможен.
   const diverged = (ahead ?? 0) > 0 && (behind ?? 0) > 0;
 
-  const run = async (action: "pull" | "push" | "rebase" | "reset") => {
+  const run = async (
+    action: "pull" | "push" | "rebase" | "reset",
+    confirmed: { branch: string; headHash: string } | null,
+  ) => {
+    if (!confirmed) {
+      return;
+    }
     setBusy(true);
     setConfirm(null);
     setPullMenu(false);
-    setResetConfirm(false);
+    setResetConfirm(null);
     try {
       if (action === "pull") {
-        await gitPull(props.workspaceId);
+        await gitPull(
+          props.workspaceId,
+          confirmed.branch,
+          confirmed.headHash,
+        );
       } else if (action === "push") {
-        await gitPush(props.workspaceId);
+        await gitPush(
+          props.workspaceId,
+          confirmed.branch,
+          confirmed.headHash,
+        );
       } else if (action === "rebase") {
-        await gitPullRebase(props.workspaceId);
+        await gitPullRebase(
+          props.workspaceId,
+          confirmed.branch,
+          confirmed.headHash,
+        );
       } else {
-        await gitResetToUpstream(props.workspaceId);
+        await gitResetToUpstream(
+          props.workspaceId,
+          confirmed.branch,
+          confirmed.headHash,
+        );
       }
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
@@ -1324,35 +1369,41 @@ function SyncStatus(props: {
         <button
           type="button"
           className={`git-sync-btn ${
-            confirm === "pull" || pullMenu ? "is-confirm" : ""
+            confirm?.action === "pull" || pullMenu ? "is-confirm" : ""
           }`}
           disabled={busy}
           title={diverged ? t("git.pullDivergedTitle") : t("git.pullTitle")}
           onClick={() => {
             if (diverged) {
               setPullMenu((value) => !value);
-              setResetConfirm(false);
-            } else if (confirm === "pull") {
-              void run("pull");
+              setResetConfirm(null);
+            } else if (confirm?.action === "pull") {
+              void run("pull", confirm);
             } else {
-              setConfirm("pull");
+              setConfirm(snapshot("pull"));
             }
           }}
         >
-          {!diverged && confirm === "pull" ? t("git.pullConfirm") : `↓${behind}`}
+          {!diverged && confirm?.action === "pull"
+            ? t("git.pullConfirm")
+            : `↓${behind}`}
         </button>
       )}
       {(ahead ?? 0) > 0 && (
         <button
           type="button"
-          className={`git-sync-btn ${confirm === "push" ? "is-confirm" : ""}`}
+          className={`git-sync-btn ${
+            confirm?.action === "push" ? "is-confirm" : ""
+          }`}
           disabled={busy}
           title={t("git.pushTitle")}
           onClick={() =>
-            confirm === "push" ? void run("push") : setConfirm("push")
+            confirm?.action === "push"
+              ? void run("push", confirm)
+              : setConfirm(snapshot("push"))
           }
         >
-          {confirm === "push" ? t("git.pushConfirm") : `↑${ahead}`}
+          {confirm?.action === "push" ? t("git.pushConfirm") : `↑${ahead}`}
         </button>
       )}
       {pullMenu && (
@@ -1364,7 +1415,14 @@ function SyncStatus(props: {
             className="git-sync-menu-item"
             disabled={busy}
             title={t("git.pullRebaseHint")}
-            onClick={() => void run("rebase")}
+            onClick={() =>
+              void run(
+                "rebase",
+                props.branch && props.headHash
+                  ? { branch: props.branch, headHash: props.headHash }
+                  : null,
+              )
+            }
           >
             {t("git.pullRebase")}
           </button>
@@ -1375,7 +1433,14 @@ function SyncStatus(props: {
             disabled={busy}
             title={t("git.resetToServerHint")}
             onClick={() =>
-              resetConfirm ? void run("reset") : setResetConfirm(true)
+              resetConfirm
+                ? void run("reset", resetConfirm)
+                : props.branch && props.headHash
+                  ? setResetConfirm({
+                      branch: props.branch,
+                      headHash: props.headHash,
+                    })
+                  : undefined
             }
           >
             {resetConfirm ? t("git.resetConfirm") : t("git.resetToServer")}
@@ -2261,6 +2326,8 @@ export function GitChangesView(props: { workspaceId: string }) {
             <div className="git-toolbar-right">
               <SyncStatus
                 workspaceId={workspaceId}
+                branch={summary.branch}
+                headHash={summary.headHash}
                 ahead={summary.ahead}
                 behind={summary.behind}
                 onError={setBranchError}
