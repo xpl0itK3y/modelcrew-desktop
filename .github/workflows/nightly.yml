@@ -133,12 +133,96 @@ jobs:
           # Public OAuth App Client ID for GitHub sign-in (empty → not
           # configured); kept in a secret so it stays out of the repo.
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
-          # Bundle GStreamer into the Linux AppImage so audio works without the
-          # user installing system plugins (ignored on Windows).
-          APPIMAGE_BUNDLE_GSTREAMER: "1"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+
+      # AppImage несёт свой WebKitGTK, а тот проигрывает звук только через
+      # GStreamer. Библиотеки GStreamer попадают в образ сами — они прописаны в
+      # зависимостях libwebkit2gtk и копируются вместе с ним. А вот плагины
+      # (парсер WAV, преобразование, вывод в ALSA/Pulse) лежат отдельным
+      # каталогом, и без них пайплайн не собирается: звука нет вообще.
+      # Кладём их сами и подсказываем GStreamer путь через apprun-хук —
+      # собранное на Ubuntu ядро иначе ищет плагины в
+      # /usr/lib/x86_64-linux-gnu/gstreamer-1.0, которого на других
+      # дистрибутивах не существует.
+      - name: Bundle GStreamer plugins into the AppImage
+        if: contains(matrix.bundles, 'appimage')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
+          appimage="$(find "$bundle" -name '*.AppImage' -print -quit)"
+          test -n "$appimage" || { echo "No AppImage in $bundle" >&2; exit 1; }
+          appimage="$(realpath "$appimage")"
+
+          multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+          plugins="/usr/lib/$multiarch/gstreamer-1.0"
+          test -d "$plugins" || { echo "No GStreamer plugins at $plugins" >&2; exit 1; }
+          scanner="$(find /usr/lib/"$multiarch" -name gst-plugin-scanner -print -quit)"
+          test -n "$scanner" || { echo "gst-plugin-scanner not found" >&2; exit 1; }
+          # Инструмент упаковки уже скачал сам tauri во время сборки.
+          tool="$(find "$HOME/.cache/tauri" -name 'appimagetool*' -print -quit)"
+          test -n "$tool" || { echo "appimagetool not found in tauri cache" >&2; exit 1; }
+          chmod +x "$tool"
+
+          work="$(mktemp -d)"
+          (cd "$work" && "$appimage" --appimage-extract >/dev/null)
+          root="$work/squashfs-root"
+          install -d "$root/usr/lib/gstreamer-1.0"
+          cp -a "$plugins"/*.so "$root/usr/lib/gstreamer-1.0/"
+          cp -a "$scanner" "$root/usr/lib/gstreamer-1.0/"
+          # AppRun выполняет каждый файл из apprun-hooks перед запуском.
+          cat > "$root/apprun-hooks/gstreamer.sh" <<'HOOK'
+          export GST_PLUGIN_SYSTEM_PATH_1_0="$APPDIR/usr/lib/gstreamer-1.0"
+          export GST_PLUGIN_SCANNER="$APPDIR/usr/lib/gstreamer-1.0/gst-plugin-scanner"
+          # Свой файл реестра: общий с системным GStreamer описывал бы совсем
+          # другой набор плагинов, и наши считались бы неизвестными.
+          mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/modelcrew"
+          export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-$HOME/.cache}/modelcrew/gstreamer-registry.bin"
+          HOOK
+          ARCH="$(uname -m)" "$tool" --no-appstream "$root" "$appimage"
+          chmod +x "$appimage"
+
+          # Патч меняет байты образа, поэтому прежняя подпись к нему уже не
+          # относится: пересоздаём её тем же ключом.
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            npm run --silent tauri -- signer sign \
+              --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+              --password "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
+              "$appimage" > /dev/null
+          fi
+
+      # Ловим регресс здесь, а не в отзывах пользователей.
+      - name: Check the AppImage audio stack
+        if: contains(matrix.bundles, 'appimage')
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
+          appimage="$(find "$bundle" -name '*.AppImage' -print -quit)"
+          test -n "$appimage" || { echo "No AppImage in $bundle" >&2; exit 1; }
+          work="$(mktemp -d)"
+          cp "$appimage" "$work/app.AppImage"
+          chmod +x "$work/app.AppImage"
+          # --appimage-extract разворачивает образ без FUSE.
+          (cd "$work" && ./app.AppImage --appimage-extract >/dev/null)
+          root="$work/squashfs-root"
+          core="$(find "$root" -name 'libgstreamer-1.0.so*' -print -quit || true)"
+          plugins="$(find "$root" -type d -name 'gstreamer-1.0' -print -quit || true)"
+          if [ -n "$core" ] && [ -z "$plugins" ]; then
+            echo "AppImage ships GStreamer libraries without any plugins:" >&2
+            echo "  core:    $core" >&2
+            echo "  plugins: (none)" >&2
+            echo "Notification sounds would be silent on every machine." >&2
+            exit 1
+          fi
+          if [ -n "$plugins" ]; then
+            echo "GStreamer plugins bundled: $(find "$plugins" -name '*.so' | wc -l)"
+          else
+            echo "No bundled GStreamer: the system one will be used."
+          fi
 
       - name: Create build metadata
         id: metadata
