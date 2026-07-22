@@ -597,8 +597,8 @@ pub struct GitCommitInfo {
     pub epoch_ms: i64,
     // Коммит есть только локально: upstream его ещё не видел.
     pub unpushed: bool,
-    // Можно безопасно переписать сообщение: не запушен, не merge и авторства
-    // локального пользователя (git config user.email).
+    // Можно безопасно переписать сообщение: коммит входит в непрерывный
+    // локальный first-parent суффикс без merge/чужих авторов до текущего HEAD.
     pub editable: bool,
     // Коммит недостижим ни из одной remote-tracking ветки. В отличие от
     // editable не зависит от GitHub-входа, автора и типа коммита.
@@ -1860,7 +1860,7 @@ fn parse_log_records(
     raw: &[u8],
     upstream_unpushed: &std::collections::HashSet<String>,
     local_only: &std::collections::HashSet<String>,
-    local_email: &str,
+    rewordable: &std::collections::HashSet<String>,
 ) -> CommandResult<Vec<GitCommitInfo>> {
     const FIELD_COUNT: usize = 10;
     let mut fields = raw.split(|byte| *byte == 0).collect::<Vec<_>>();
@@ -1908,13 +1908,9 @@ fn parse_log_records(
             .map(str::to_owned)
             .collect::<Vec<_>>();
         let (body, co_authors) = split_body_and_co_authors(&text(record[8]));
-        let editable = local_only.contains(&hash)
-            && parents.len() <= 1
-            && !local_email.is_empty()
-            && author_email.to_lowercase() == local_email;
-
         let full_message = text(record[9]).trim_end_matches('\n').to_owned();
         let is_local_only = local_only.contains(&hash);
+        let editable = rewordable.contains(&hash);
         commits.push(GitCommitInfo {
             // Без upstream множество upstream_unpushed пусто, но local_only
             // всё равно честно показывает, что коммита нет ни на одном remote.
@@ -1940,11 +1936,83 @@ fn parse_log_records(
     Ok(commits)
 }
 
+// Объединяет ограниченный основной поток истории с редкими decoration-tip
+// записями. Простое append нарушило бы граф, если добавленный tip ссылается на
+// уже видимого родителя. Стабильная топологическая сортировка сохраняет
+// исходный порядок настолько, насколько позволяют связи child -> parent.
+fn merge_topological_commits(
+    mut primary: Vec<GitCommitInfo>,
+    supplemental: Vec<GitCommitInfo>,
+) -> Vec<GitCommitInfo> {
+    let mut seen = primary
+        .iter()
+        .map(|commit| commit.hash.clone())
+        .collect::<std::collections::HashSet<_>>();
+    for commit in supplemental {
+        if seen.insert(commit.hash.clone()) {
+            primary.push(commit);
+        }
+    }
+    if primary.len() < 2 {
+        return primary;
+    }
+
+    let positions = primary
+        .iter()
+        .enumerate()
+        .map(|(index, commit)| (commit.hash.clone(), index))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut incoming_children = vec![0usize; primary.len()];
+    let mut visible_parents = vec![Vec::new(); primary.len()];
+    for (child_index, commit) in primary.iter().enumerate() {
+        for parent in &commit.parents {
+            let Some(&parent_index) = positions.get(parent) else {
+                continue;
+            };
+            if parent_index == child_index || visible_parents[child_index].contains(&parent_index) {
+                continue;
+            }
+            visible_parents[child_index].push(parent_index);
+            incoming_children[parent_index] += 1;
+        }
+    }
+
+    let mut available = std::collections::BinaryHeap::new();
+    for (index, incoming) in incoming_children.iter().enumerate() {
+        if *incoming == 0 {
+            available.push(std::cmp::Reverse(index));
+        }
+    }
+    let mut commits = primary.into_iter().map(Some).collect::<Vec<_>>();
+    let mut ordered = Vec::with_capacity(commits.len());
+    while let Some(std::cmp::Reverse(index)) = available.pop() {
+        let Some(commit) = commits[index].take() else {
+            continue;
+        };
+        ordered.push(commit);
+        for parent_index in &visible_parents[index] {
+            incoming_children[*parent_index] -= 1;
+            if incoming_children[*parent_index] == 0 {
+                available.push(std::cmp::Reverse(*parent_index));
+            }
+        }
+    }
+
+    // Commit-граф ацикличен. Если повреждённый объект всё же дал цикл,
+    // не теряем записи: возвращаем их в стабильном исходном порядке.
+    if ordered.len() != commits.len() {
+        ordered.extend(commits.into_iter().flatten());
+    }
+    ordered
+}
+
 pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Vec<GitCommitInfo>> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
     let head_exists = run_git(&toplevel, &["rev-parse", "--verify", "HEAD"]).is_ok();
+    let detached_head =
+        head_exists && run_git(&toplevel, &["symbolic-ref", "--quiet", "HEAD"]).is_err();
     if !all_branches && !head_exists {
         // Unborn HEAD: это корректный пустой репозиторий. Прочие ошибки `log`
         // ниже не маскируем под пустую историю.
@@ -1975,14 +2043,35 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
         // ни одна локальная ветка может на него не указывать.
         args.push("--branches");
         args.push("--remotes");
-        if head_exists && run_git(&toplevel, &["symbolic-ref", "--quiet", "HEAD"]).is_err() {
+        if detached_head {
             args.push("HEAD");
         }
     }
     let raw = run_git(&toplevel, &args)?;
+    // Глобальный -n применяется ко всему topo-потоку. Длинная main может
+    // полностью вытеснить короткую side-ветку, поэтому вторым упрощённым
+    // проходом забираем tips всех branch/remote refs и topology connectors.
+    let supplemental_raw = all_branches
+        .then(|| {
+            run_git(
+                &toplevel,
+                &[
+                    "log",
+                    "--topo-order",
+                    "--simplify-by-decoration",
+                    "-z",
+                    "--decorate=full",
+                    "--decorate-refs-exclude=refs/remotes/*/HEAD",
+                    LOG_FORMAT,
+                    "--branches",
+                    "--remotes",
+                ],
+            )
+        })
+        .transpose()?;
     // Коммиты, которых ещё нет на upstream текущей ветки. Без upstream
     // сравнивать не с чем — тогда пометок нет.
-    let unpushed: std::collections::HashSet<String> =
+    let upstream_unpushed: std::collections::HashSet<String> =
         run_git(&toplevel, &["rev-list", "-n", "600", "@{upstream}..HEAD"])
             .map(|raw| {
                 String::from_utf8_lossy(&raw)
@@ -2000,20 +2089,71 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
 
     // Коммиты, которых нет ни на одной remote-ветке — их безопасно переписывать.
     // В отличие от @{upstream} работает и без upstream (тогда всё локально).
-    let local_only: std::collections::HashSet<String> = run_git(
-        &toplevel,
-        &["rev-list", "-n", "2000", "HEAD", "--not", "--remotes"],
-    )
-    .map(|raw| {
-        String::from_utf8_lossy(&raw)
-            .lines()
-            .map(|line| line.trim().to_owned())
-            .filter(|line| !line.is_empty())
-            .collect()
-    })
-    .unwrap_or_default();
+    let mut local_only_args = vec!["rev-list", "-n", "2000"];
+    if all_branches {
+        local_only_args.push("--branches");
+        if detached_head {
+            local_only_args.push("HEAD");
+        }
+    } else {
+        local_only_args.push("HEAD");
+    }
+    local_only_args.push("--not");
+    local_only_args.push("--remotes");
+    let local_only: std::collections::HashSet<String> = run_git(&toplevel, &local_only_args)
+        .map(|raw| {
+            String::from_utf8_lossy(&raw)
+                .lines()
+                .map(|line| line.trim().to_owned())
+                .filter(|line| !line.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
 
-    parse_log_records(&raw, &unpushed, &local_only, &local_email)
+    // Reword пересобирает цепочку от HEAD до выбранного коммита. Поэтому
+    // действие доступно только для непрерывного безопасного суффикса
+    // first-parent: первый merge, опубликованный или чужой коммит блокирует и
+    // все более старые цели, даже если сами они локальные и линейные.
+    let mut rewordable = std::collections::HashSet::new();
+    if !detached_head && !local_email.is_empty() {
+        if let Ok(raw) = run_git(
+            &toplevel,
+            &[
+                "log",
+                "--first-parent",
+                "-n2000",
+                "--format=%H%x1f%P%x1f%ae",
+                "HEAD",
+            ],
+        ) {
+            for line in String::from_utf8_lossy(&raw).lines() {
+                let mut fields = line.split('\u{1f}');
+                let hash = fields.next().unwrap_or_default().trim();
+                let parents = fields.next().unwrap_or_default();
+                let email = fields.next().unwrap_or_default().trim().to_lowercase();
+                let safe = is_safe_hash(hash)
+                    && local_only.contains(hash)
+                    && parents.split_whitespace().count() <= 1
+                    && email == local_email;
+                if !safe {
+                    break;
+                }
+                rewordable.insert(hash.to_owned());
+            }
+        }
+    }
+
+    let primary = parse_log_records(&raw, &upstream_unpushed, &local_only, &rewordable)?;
+    let Some(supplemental_raw) = supplemental_raw else {
+        return Ok(primary);
+    };
+    let supplemental = parse_log_records(
+        &supplemental_raw,
+        &upstream_unpushed,
+        &local_only,
+        &rewordable,
+    )?;
+    Ok(merge_topological_commits(primary, supplemental))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -3440,6 +3580,97 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     #[test]
+    fn all_branches_limit_never_hides_a_branch_tip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git_at = |args: &[&str], date: &str| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "Limit Test")
+                .env("GIT_AUTHOR_EMAIL", "limit@test")
+                .env("GIT_COMMITTER_NAME", "Limit Test")
+                .env("GIT_COMMITTER_EMAIL", "limit@test")
+                .env("GIT_AUTHOR_DATE", date)
+                .env("GIT_COMMITTER_DATE", date)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+            output.stdout
+        };
+        git_at(
+            &["init", "--quiet", "--initial-branch=main"],
+            "2026-01-01T00:00:00Z",
+        );
+        git_at(
+            &["commit", "--quiet", "--allow-empty", "-m", "base"],
+            "2026-01-01T00:00:00Z",
+        );
+        git_at(&["branch", "side"], "2026-01-01T00:00:00Z");
+        git_at(&["checkout", "--quiet", "side"], "2026-01-01T00:00:00Z");
+        git_at(
+            &["commit", "--quiet", "--allow-empty", "-m", "short side tip"],
+            "2026-01-02T00:00:00Z",
+        );
+        let side_tip =
+            String::from_utf8_lossy(&git_at(&["rev-parse", "HEAD"], "2026-01-02T00:00:00Z"))
+                .trim()
+                .to_owned();
+        git_at(&["checkout", "--quiet", "main"], "2027-01-01T00:00:00Z");
+        for index in 0..510 {
+            git_at(
+                &[
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    &format!("main-{index}"),
+                ],
+                "2027-01-01T00:00:00Z",
+            );
+        }
+
+        let limited_without_supplement = run_git(
+            root,
+            &["log", "-n500", "--topo-order", "--format=%H", "--branches"],
+        )
+        .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&limited_without_supplement)
+                .lines()
+                .any(|hash| hash == side_tip),
+            "fixture должен воспроизводить вытеснение короткой ветки глобальным limit"
+        );
+
+        let log = list_log(root, 500, true).unwrap();
+        let positions = log
+            .iter()
+            .enumerate()
+            .map(|(index, commit)| (commit.hash.as_str(), index))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert!(positions.contains_key(side_tip.as_str()));
+        assert!(log.iter().any(|commit| {
+            commit.hash == side_tip
+                && commit
+                    .ref_details
+                    .iter()
+                    .any(|reference| reference.kind == "local" && reference.name == "side")
+        }));
+        for (child_index, commit) in log.iter().enumerate() {
+            for parent in &commit.parents {
+                if let Some(parent_index) = positions.get(parent.as_str()) {
+                    assert!(
+                        child_index < *parent_index,
+                        "{} must precede parent {}",
+                        commit.hash,
+                        parent
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn all_branches_excludes_non_branch_refs_and_includes_detached_head() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -3491,6 +3722,15 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(branch_hashes.contains(side_hash.as_str()));
         assert!(!branch_hashes.contains(tag_only_hash.as_str()));
         assert!(!branch_hashes.contains(stash_hash.as_str()));
+        let side_commit = branch_log
+            .iter()
+            .find(|commit| commit.hash == side_hash)
+            .unwrap();
+        assert!(side_commit.local_only);
+        assert!(
+            side_commit.unpushed,
+            "без upstream local-only всё равно не запушен"
+        );
 
         // Detached HEAD не входит в refs/heads, поэтому добавляется отдельной
         // starting revision и живёт рядом с обычными ветками.
@@ -3505,6 +3745,12 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(detached_hashes.contains(detached_hash.as_str()));
         assert!(detached_hashes.contains(main_hash.as_str()));
         assert!(detached_hashes.contains(side_hash.as_str()));
+        let detached_commit = detached_log
+            .iter()
+            .find(|commit| commit.hash == detached_hash)
+            .unwrap();
+        assert!(detached_commit.local_only);
+        assert!(detached_commit.unpushed);
     }
 
     #[test]

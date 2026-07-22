@@ -284,9 +284,9 @@ export type GitCommitInfo = {
   epochMs: number;
   // Коммит есть только на этом компьютере.
   unpushed: boolean;
-  // Можно безопасно переписать сообщение (не запушен, не merge, свой).
   // Коммит не достижим ни из одной remote-tracking ветки.
   localOnly: boolean;
+  // Можно безопасно переписать сообщение в текущей first-parent цепочке.
   editable: boolean;
   // На этот коммит указывает HEAD (текущий checkout).
   isHead: boolean;
