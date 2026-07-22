@@ -257,12 +257,22 @@ export function writeRepoFile(
 
 export type GitBranchInfo = {
   name: string;
+  refName: string;
+  // Ref tip observed when the branch list was loaded. Destructive actions
+  // send it back so the backend can reject a stale confirmation.
+  tipHash: string;
   isCurrent: boolean;
   // Есть только на сервере: переключение создаст локальную со слежением.
   isRemote: boolean;
   // Уже влита в текущую ветку — кандидат на удаление.
   isMerged: boolean;
   lastCommitAt?: number;
+};
+
+export type GitCommitRefInfo = {
+  name: string;
+  fullName: string;
+  kind: GitRefKind;
 };
 
 export type GitCommitInfo = {
@@ -275,12 +285,18 @@ export type GitCommitInfo = {
   // Коммит есть только на этом компьютере.
   unpushed: boolean;
   // Можно безопасно переписать сообщение (не запушен, не merge, свой).
+  // Коммит не достижим ни из одной remote-tracking ветки.
+  localOnly: boolean;
   editable: boolean;
   // На этот коммит указывает HEAD (текущий checkout).
   isHead: boolean;
   // Полные хеши родителей (для графа веток).
   parents: string[];
   refs: string[];
+  refDetails: GitCommitRefInfo[];
+  remoteRefs: string[];
+  // Исходное полное сообщение, включая mixed trailer block.
+  fullMessage: string;
   body?: string;
   coAuthors?: string[];
 };
@@ -289,12 +305,40 @@ export function fetchBranches(workspaceId: string): Promise<GitBranchInfo[]> {
   return invoke<GitBranchInfo[]>("git_branches", { workspaceId });
 }
 
+export type GitRefKind = "local" | "remote" | "tag";
+
 export function switchBranch(
   workspaceId: string,
-  branch: string,
-  remote = false,
+  refName: string,
+  kind: GitRefKind = "local",
 ): Promise<void> {
-  return invoke("git_switch_branch", { workspaceId, branch, remote });
+  return invoke("git_switch_branch", { workspaceId, branch: refName, kind });
+}
+
+export function createBranch(workspaceId: string, name: string): Promise<void> {
+  return invoke("git_create_branch", { workspaceId, name });
+}
+
+export function renameBranch(
+  workspaceId: string,
+  branch: string,
+  newName: string,
+): Promise<void> {
+  return invoke("git_rename_branch", { workspaceId, branch, newName });
+}
+
+export function deleteBranch(
+  workspaceId: string,
+  branch: string,
+  force: boolean,
+  expectedTip: string,
+): Promise<void> {
+  return invoke("git_delete_branch", {
+    workspaceId,
+    branch,
+    force,
+    expectedTip,
+  });
 }
 
 export function fetchLog(

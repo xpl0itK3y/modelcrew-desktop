@@ -559,6 +559,13 @@ pub async fn git_write_file(
 #[serde(rename_all = "camelCase")]
 pub struct GitBranch {
     pub name: String,
+    // Полное имя ref. Для remote оно принципиально: короткие имена могут
+    // совпадать с локальной веткой или не начинаться с имени remote при
+    // пользовательском fetch refspec.
+    pub ref_name: String,
+    // Вершина ref в момент построения списка. Destructive-команды получают
+    // её обратно и отказываются, если ветка успела сдвинуться до подтверждения.
+    pub tip_hash: String,
     pub is_current: bool,
     // Ветка существует только на сервере: переключение создаст локальную
     // копию со слежением.
@@ -568,6 +575,15 @@ pub struct GitBranch {
     // Unix-время последнего коммита в миллисекундах (для сортировки/подписи).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_commit_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitRef {
+    pub name: String,
+    pub full_name: String,
+    // "local" | "remote" | "tag"
+    pub kind: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -590,6 +606,12 @@ pub struct GitCommitInfo {
     pub parents: Vec<String>,
     // Декорации коммита: ветки/теги, указывающие на него.
     pub refs: Vec<String>,
+    // Те же декорации с точным типом. `refs` оставлен для алгоритма графа и
+    // обратной совместимости, но UI переключается только по этим данным.
+    pub ref_details: Vec<GitCommitRef>,
+    // Только реальные refs/remotes, указывающие на этот коммит. Нужны UI,
+    // чтобы не определять remote по ненадёжному префиксу `origin/`.
+    pub remote_refs: Vec<String>,
     // Тело коммита без трейлеров Co-authored-by (они в co_authors).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub body: String,
@@ -619,31 +641,281 @@ pub fn split_body_and_co_authors(raw_body: &str) -> (String, Vec<String>) {
     (body_lines.join("\n").trim().to_owned(), co_authors)
 }
 
-// Имя ветки, безопасное для передачи git-у аргументом.
-pub fn is_safe_ref_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 256
-        && !name.starts_with('-')
-        && !name.starts_with('.')
-        && !name.contains("..")
-        && !name.contains("@{")
-        && !name.ends_with(".lock")
-        && name
-            .chars()
-            .all(|ch| ch.is_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/'))
+// Проверку имени ветки поручаем самому Git: его правила сложнее
+// самодельного regexp (компоненты, оканчивающиеся точкой, `//`, `HEAD` и т.д.).
+// Ведущий дефис отсекаем до вызова, чтобы имя не могло стать опцией команды.
+fn validate_branch_name(root: &Path, name: &str) -> CommandResult<()> {
+    if name.is_empty() || name.starts_with('-') || name == "HEAD" {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-invalid")
+            .with_context("branch", name));
+    }
+    let reference = format!("refs/heads/{name}");
+    run_git(root, &["check-ref-format", &reference])
+        .map(|_| ())
+        .map_err(|_| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "branch-invalid")
+                .with_context("branch", name)
+        })
+}
+
+fn validate_namespaced_ref(
+    root: &Path,
+    namespace: &str,
+    name: &str,
+    reason: &str,
+) -> CommandResult<String> {
+    if name.is_empty() {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", reason)
+            .with_context("branch", name));
+    }
+    let reference = format!("refs/{namespace}/{name}");
+    run_git(root, &["check-ref-format", &reference])
+        .map(|_| reference)
+        .map_err(|_| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", reason)
+                .with_context("branch", name)
+        })
+}
+
+fn local_branch_exists(root: &Path, name: &str) -> bool {
+    local_branch_tip(root, name).is_some()
+}
+
+fn local_branch_tip(root: &Path, name: &str) -> Option<String> {
+    run_git(
+        root,
+        &[
+            "show-ref",
+            "--verify",
+            "--hash",
+            &format!("refs/heads/{name}"),
+        ],
+    )
+    .ok()
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+    .filter(|hash| is_safe_hash(hash))
+}
+
+fn remote_names(root: &Path) -> CommandResult<Vec<String>> {
+    let raw = run_git(root, &["remote"])?;
+    let mut names = String::from_utf8_lossy(&raw)
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    // Имена remote могут содержать `/`; самый длинный prefix однозначно
+    // отделяет remote от имени ветки (a/b/topic -> remote a/b, branch topic).
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    Ok(names)
+}
+
+fn map_fetch_refspec(refspec: &str, remote_ref: &str) -> Option<String> {
+    let refspec = refspec.strip_prefix('+').unwrap_or(refspec);
+    if refspec.starts_with('^') {
+        return None;
+    }
+    let (source, destination) = refspec.split_once(':')?;
+    let source_branch = source.strip_prefix("refs/heads/")?;
+    if let Some((destination_prefix, destination_suffix)) = destination.split_once('*') {
+        let matched = remote_ref
+            .strip_prefix(destination_prefix)?
+            .strip_suffix(destination_suffix)?;
+        let (source_prefix, source_suffix) = source_branch.split_once('*')?;
+        return Some(format!("{source_prefix}{matched}{source_suffix}"));
+    }
+    (destination == remote_ref).then(|| source_branch.to_owned())
+}
+
+fn local_name_for_remote_ref(root: &Path, remote_ref: &str) -> CommandResult<Option<String>> {
+    for remote in remote_names(root)? {
+        let key = format!("remote.{remote}.fetch");
+        let Ok(raw) = run_git(root, &["config", "--get-all", &key]) else {
+            continue;
+        };
+        for refspec in String::from_utf8_lossy(&raw).lines() {
+            if let Some(local_name) = map_fetch_refspec(refspec.trim(), remote_ref) {
+                return Ok(Some(local_name));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn branch_checked_out_in_worktree(root: &Path, name: &str) -> CommandResult<bool> {
+    let raw = run_git(root, &["worktree", "list", "--porcelain", "-z"])?;
+    let expected = format!("branch refs/heads/{name}");
+    Ok(raw
+        .split(|byte| *byte == 0)
+        .any(|field| field == expected.as_bytes()))
+}
+
+fn branch_config_entries(root: &Path, name: &str) -> CommandResult<Vec<(String, String)>> {
+    let raw = run_git(root, &["config", "--local", "--null", "--list"])?;
+    Ok(raw
+        .split(|byte| *byte == 0)
+        .filter_map(|record| {
+            let separator = record.iter().position(|byte| *byte == b'\n')?;
+            let key = String::from_utf8_lossy(&record[..separator]).into_owned();
+            // `branch.foo.bar.*` belongs to branch `foo.bar`, not `foo`.
+            // The final dot separates the subsection (branch name) from the
+            // variable, while dots before it are part of the branch name.
+            let branch_and_variable = key.strip_prefix("branch.")?;
+            let (subsection, _) = branch_and_variable.rsplit_once('.')?;
+            if subsection != name {
+                return None;
+            }
+            let value = String::from_utf8_lossy(&record[separator + 1..]).into_owned();
+            Some((key, value))
+        })
+        .collect())
+}
+
+fn cleanup_branch_config(root: &Path, name: &str) -> CommandResult<()> {
+    for attempt in 0..4 {
+        if branch_config_entries(root, name)?.is_empty() {
+            return Ok(());
+        }
+        let section = format!("branch.{name}");
+        let _ = run_git(root, &["config", "--local", "--remove-section", &section]);
+        if attempt < 3 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    Err(CommandError::new(ErrorCode::GitCommandFailed)
+        .with_context("reason", "branch-config-stale")
+        .with_context("branch", name))
+}
+
+static BRANCH_CLEANUP_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static BRANCH_BACKUP_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn create_branch_delete_backup(root: &Path, branch: &str, tip: &str) -> CommandResult<String> {
+    let zero = "0".repeat(tip.len());
+    for _ in 0..32 {
+        let sequence = BRANCH_BACKUP_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let reference = format!(
+            "refs/modelcrew/branch-delete/{}-{sequence}",
+            std::process::id()
+        );
+        if run_git(
+            root,
+            &[
+                "update-ref",
+                "-m",
+                "modelcrew: protect branch during deletion",
+                &reference,
+                tip,
+                &zero,
+            ],
+        )
+        .is_ok()
+        {
+            return Ok(reference);
+        }
+    }
+    Err(CommandError::new(ErrorCode::GitCommandFailed)
+        .with_context("reason", "branch-backup-failed")
+        .with_context("branch", branch))
+}
+
+fn remove_branch_delete_backup(root: &Path, reference: &str, tip: &str) {
+    let _ = run_git(root, &["update-ref", "-d", reference, tip]);
+}
+
+fn pending_branch_cleanup_dir(root: &Path) -> CommandResult<PathBuf> {
+    // branch.* живёт в общем config репозитория, поэтому очередь тоже должна
+    // быть общей для main и всех linked worktree. `--git-path` здесь ошибочно
+    // дал бы worktree-private каталог.
+    let raw = run_git(root, &["rev-parse", "--git-common-dir"])?;
+    let path = PathBuf::from(String::from_utf8_lossy(&raw).trim().to_owned());
+    let common_dir = if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    };
+    Ok(common_dir.join("modelcrew-branch-cleanup"))
+}
+
+fn pending_branch_cleanups(root: &Path) -> CommandResult<Vec<(PathBuf, String)>> {
+    let directory = pending_branch_cleanup_dir(root)?;
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let entries = std::fs::read_dir(&directory)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    let mut pending = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(name) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let name = name.trim().to_owned();
+        if !name.is_empty() {
+            pending.push((path, name));
+        }
+    }
+    Ok(pending)
+}
+
+fn queue_branch_config_cleanup(root: &Path, name: &str) -> CommandResult<()> {
+    let directory = pending_branch_cleanup_dir(root)?;
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    let sequence = BRANCH_CLEANUP_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let marker = directory.join(format!("{}-{nanos}-{sequence}.pending", std::process::id()));
+    std::fs::write(marker, name)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))
+}
+
+fn drain_branch_config_cleanups(root: &Path) -> CommandResult<()> {
+    for (marker, name) in pending_branch_cleanups(root)? {
+        // Если ветку успели воссоздать вне приложения, её config уже снова
+        // легитимен: не трогаем настройки живого ref и снимаем старый marker.
+        if local_branch_exists(root, &name) {
+            let _ = std::fs::remove_file(marker);
+            continue;
+        }
+        if cleanup_branch_config(root, &name).is_ok() {
+            let _ = std::fs::remove_file(marker);
+        }
+    }
+    Ok(())
+}
+
+fn ensure_no_pending_branch_cleanup(root: &Path, name: &str) -> CommandResult<()> {
+    let _ = drain_branch_config_cleanups(root);
+    if pending_branch_cleanups(root)?
+        .iter()
+        .any(|(_, pending)| pending == name)
+    {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-config-stale")
+            .with_context("branch", name));
+    }
+    Ok(())
 }
 
 pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    let _ = drain_branch_config_cleanups(&toplevel);
     let raw = run_git(
         &toplevel,
         &[
             "for-each-ref",
             "refs/heads",
             "--sort=-committerdate",
-            "--format=%(HEAD)%1f%(refname:short)%1f%(committerdate:unix)",
+            "--format=%(HEAD)%1f%(refname:short)%1f%(committerdate:unix)%1f%(objectname)",
         ],
     )?;
     // Локальные ветки, уже влитые в текущую: их коммиты — предки HEAD.
@@ -671,10 +943,16 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             let date = parts
                 .next()
                 .and_then(|value| value.trim().parse::<i64>().ok());
+            let tip_hash = parts.next()?.trim();
+            if !is_safe_hash(tip_hash) {
+                return None;
+            }
             let is_current = head == "*";
             Some(GitBranch {
                 is_merged: !is_current && merged.contains(name),
                 name: name.to_owned(),
+                ref_name: format!("refs/heads/{name}"),
+                tip_hash: tip_hash.to_owned(),
                 is_current,
                 is_remote: false,
                 last_commit_at: date.map(|seconds| seconds * 1000),
@@ -692,27 +970,38 @@ pub fn list_branches(root: &Path) -> CommandResult<Vec<GitBranch>> {
             "for-each-ref",
             "refs/remotes",
             "--sort=-committerdate",
-            "--format=%(refname:short)%1f%(committerdate:unix)",
+            "--format=%(refname)%1f%(committerdate:unix)%1f%(objectname)%1f%(symref)",
         ],
     ) {
         let text = String::from_utf8_lossy(&raw);
         for line in text.lines() {
             let mut parts = line.split('\u{1f}');
-            let Some(full_name) = parts.next() else {
+            let Some(full_ref) = parts.next() else {
                 continue;
             };
-            // origin/HEAD — указатель, не ветка.
-            let Some((_, short_name)) = full_name.split_once('/') else {
+            let Some(display_name) = full_ref.strip_prefix("refs/remotes/") else {
                 continue;
             };
-            if short_name == "HEAD" || local_names.contains(short_name) {
-                continue;
-            }
             let date = parts
                 .next()
                 .and_then(|value| value.trim().parse::<i64>().ok());
+            let Some(tip_hash) = parts.next().filter(|hash| is_safe_hash(hash.trim())) else {
+                continue;
+            };
+            let symbolic_target = parts.next().unwrap_or_default();
+            if !symbolic_target.is_empty() || display_name.ends_with("/HEAD") {
+                continue;
+            }
+            let Ok(Some(local_name)) = local_name_for_remote_ref(&toplevel, full_ref) else {
+                continue;
+            };
+            if local_names.contains(&local_name) {
+                continue;
+            }
             branches.push(GitBranch {
-                name: full_name.to_owned(),
+                name: display_name.to_owned(),
+                ref_name: full_ref.to_owned(),
+                tip_hash: tip_hash.trim().to_owned(),
                 is_current: false,
                 is_remote: true,
                 is_merged: false,
@@ -886,30 +1175,236 @@ pub async fn git_commit_action(
     .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
-pub fn switch_branch(root: &Path, name: &str, remote: bool) -> CommandResult<()> {
-    if !is_safe_ref_name(name) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("branch", name));
-    }
+pub fn switch_branch(root: &Path, name: &str, kind: &str) -> CommandResult<()> {
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    if remote {
-        // Создаёт локальную ветку со слежением за серверной и переключается.
-        run_git(&toplevel, &["checkout", "--track", name])?;
-    } else {
-        run_git(&toplevel, &["checkout", name])?;
+    match kind {
+        "local" => {
+            validate_branch_name(&toplevel, name)?;
+            if !local_branch_exists(&toplevel, name) {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "branch-missing")
+                    .with_context("branch", name));
+            }
+            run_git(&toplevel, &["switch", "--no-guess", name])?;
+        }
+        "remote" => {
+            let remote_ref = name;
+            if !remote_ref.starts_with("refs/remotes/")
+                || run_git(&toplevel, &["check-ref-format", remote_ref]).is_err()
+            {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "branch-invalid")
+                    .with_context("branch", name));
+            }
+            let Some(local_name) = local_name_for_remote_ref(&toplevel, remote_ref)? else {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "branch-invalid")
+                    .with_context("branch", name));
+            };
+            validate_branch_name(&toplevel, &local_name)?;
+            if local_branch_exists(&toplevel, &local_name) {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "branch-exists")
+                    .with_context("branch", &local_name));
+            }
+            ensure_no_pending_branch_cleanup(&toplevel, &local_name)?;
+            run_git(&toplevel, &["show-ref", "--verify", "--hash", remote_ref])?;
+            // Явное имя получено из реального fetch refspec, а полный source
+            // ref исключает перехват одноимённой локальной веткой или тегом.
+            run_git(
+                &toplevel,
+                &["switch", "--track", "-c", &local_name, remote_ref],
+            )?;
+        }
+        "tag" => {
+            let tag_ref = validate_namespaced_ref(&toplevel, "tags", name, "tag-invalid")?;
+            // Сначала разрешаем точный refs/tags/... в commit hash. Поэтому
+            // одноимённая локальная ветка не может перехватить checkout.
+            let peeled = format!("{tag_ref}^{{commit}}");
+            let raw = run_git(&toplevel, &["rev-parse", "--verify", &peeled])?;
+            let commit = String::from_utf8_lossy(&raw).trim().to_owned();
+            if !is_safe_hash(&commit) {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "tag-invalid")
+                    .with_context("branch", name));
+            }
+            run_git(&toplevel, &["switch", "--detach", &commit])?;
+        }
+        _ => {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "ref-kind-invalid"));
+        }
+    }
+    Ok(())
+}
+
+pub fn create_branch(root: &Path, name: &str) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    validate_branch_name(&toplevel, name)?;
+    if local_branch_exists(&toplevel, name) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-exists")
+            .with_context("branch", name));
+    }
+    ensure_no_pending_branch_cleanup(&toplevel, name)?;
+    // Без явного `HEAD` команда работает и в обычном репозитории, и с unborn
+    // HEAD (новый репозиторий без первого коммита). Одна команда также не
+    // оставляет созданную, но не выбранную ветку при ошибке checkout.
+    run_git(&toplevel, &["checkout", "-b", name])?;
+    Ok(())
+}
+
+pub fn rename_branch(root: &Path, branch: &str, new_name: &str) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    validate_branch_name(&toplevel, branch)?;
+    validate_branch_name(&toplevel, new_name)?;
+    let Some(original_tip) = local_branch_tip(&toplevel, branch) else {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-missing")
+            .with_context("branch", branch));
+    };
+    if local_branch_exists(&toplevel, new_name) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-exists")
+            .with_context("branch", new_name));
+    }
+    ensure_no_pending_branch_cleanup(&toplevel, new_name)?;
+    // -m (не -M) принципиально не перезаписывает существующую ветку.
+    if let Err(error) = run_git(&toplevel, &["branch", "-m", "--", branch, new_name]) {
+        // Git переименовывает ref раньше config. При занятом config.lock он
+        // возвращает ошибку уже после мутации; разворачиваем тот же нативный
+        // rename назад (он также обновляет HEAD всех linked worktree).
+        if !local_branch_exists(&toplevel, branch)
+            && local_branch_tip(&toplevel, new_name).as_deref() == Some(original_tip.as_str())
+        {
+            let _ = run_git(&toplevel, &["branch", "-m", "--", new_name, branch]);
+            if local_branch_tip(&toplevel, branch).as_deref() == Some(original_tip.as_str())
+                && !local_branch_exists(&toplevel, new_name)
+            {
+                return Err(error);
+            }
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "branch-restore-failed")
+                .with_context("branch", branch)
+                .with_debug(format!("{error:?}")));
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+pub fn delete_branch(
+    root: &Path,
+    branch: &str,
+    force: bool,
+    expected_tip: &str,
+) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let _ = drain_branch_config_cleanups(&toplevel);
+    validate_branch_name(&toplevel, branch)?;
+    if !is_safe_hash(expected_tip) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-moved")
+            .with_context("branch", branch));
+    }
+    let Some(actual_tip) = local_branch_tip(&toplevel, branch) else {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-missing")
+            .with_context("branch", branch));
+    };
+    let current = run_git(&toplevel, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .ok()
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned());
+    if current.as_deref() == Some(branch) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-current")
+            .with_context("branch", branch));
+    }
+    if branch_checked_out_in_worktree(&toplevel, branch)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-worktree")
+            .with_context("branch", branch));
+    }
+    // Confirmation applies to the exact ref the user saw. If a terminal,
+    // hook or another Git client advanced it meanwhile, force-delete must not
+    // silently remove the new commits.
+    if actual_tip != expected_tip {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-moved")
+            .with_context("branch", branch));
+    }
+    let backup_ref = create_branch_delete_backup(&toplevel, branch, expected_tip)?;
+    if !force
+        && run_git(
+            &toplevel,
+            &["merge-base", "--is-ancestor", expected_tip, "HEAD"],
+        )
+        .is_err()
+    {
+        remove_branch_delete_backup(&toplevel, &backup_ref, expected_tip);
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-unmerged")
+            .with_context("branch", branch));
+    }
+
+    // CAS-delete: Git удалит ref только если он всё ещё указывает ровно на
+    // подтверждённую вершину. Новый concurrent commit никогда не удаляется.
+    let reference = format!("refs/heads/{branch}");
+    if let Err(error) = run_git(
+        &toplevel,
+        &[
+            "update-ref",
+            "-m",
+            "modelcrew: delete local branch",
+            "-d",
+            &reference,
+            expected_tip,
+        ],
+    ) {
+        remove_branch_delete_backup(&toplevel, &backup_ref, expected_tip);
+        if local_branch_tip(&toplevel, branch).as_deref() != Some(expected_tip) {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "branch-moved")
+                .with_context("branch", branch));
+        } else {
+            return Err(error);
+        }
+    }
+
+    remove_branch_delete_backup(&toplevel, &backup_ref, expected_tip);
+
+    // Git считает cleanup config best-effort и в редкой гонке с `git config`
+    // может вернуть success после удаления ref, оставив branch.<name>.*.
+    // Удаление уже состоялось, поэтому не показываем ложную ошибку: ставим
+    // marker и автоматически дочищаем секцию при следующем чтении/действии.
+    if cleanup_branch_config(&toplevel, branch).is_err() {
+        queue_branch_config_cleanup(&toplevel, branch).map_err(|error| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "branch-config-stale")
+                .with_context("branch", branch)
+                .with_debug(format!("{error:?}"))
+        })?;
     }
     Ok(())
 }
 
 // Действие над конкретным коммитом истории. Все варианты — стандартные
 // операции git, которые пользователь осознанно запускает из меню; ошибки
-// (грязное дерево, конфликт cherry-pick/revert) поднимаются наверх и
-// показываются в панели, ничего не проглатывая.
+// (грязное дерево, конфликт cherry-pick/revert) поднимаются наверх. Конфликт
+// сохраняется как штатная незавершённая операция Git для явного continue/abort.
 //   checkout   — перейти на коммит (HEAD отделяется);
 //   branch     — создать ветку `name` от коммита и переключиться на неё;
 //   cherryPick — применить коммит поверх текущей ветки;
-//   revert     — создать коммит, отменяющий данный.
+//   revert     — создать коммит, отменяющий данный;
+//   uncommit   — убрать локальный HEAD-коммит, сохранив изменения в дереве.
 pub fn commit_action(
     root: &Path,
     action: &str,
@@ -922,19 +1417,78 @@ pub fn commit_action(
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    let resolved = run_git(
+        &toplevel,
+        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !is_safe_hash(&resolved) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    // Не передаём голый 40-hex последующим porcelain-командам: Git допускает
+    // ref с таким именем и некоторые команды выберут ref вместо object id.
+    let resolved_commit = format!("{resolved}^{{commit}}");
     match action {
-        "checkout" => run_git(&toplevel, &["checkout", hash]).map(|_| ()),
+        "checkout" => run_git(&toplevel, &["switch", "--detach", &resolved_commit]).map(|_| ()),
         "branch" => {
-            let Some(name) = name.filter(|candidate| is_safe_ref_name(candidate)) else {
+            let Some(name) = name else {
                 return Err(CommandError::new(ErrorCode::GitCommandFailed)
                     .with_context("branch", name.unwrap_or_default()));
             };
-            run_git(&toplevel, &["checkout", "-b", name, hash]).map(|_| ())
+            validate_branch_name(&toplevel, name)?;
+            if local_branch_exists(&toplevel, name) {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "branch-exists")
+                    .with_context("branch", name));
+            }
+            ensure_no_pending_branch_cleanup(&toplevel, name)?;
+            run_git(&toplevel, &["switch", "-c", name, &resolved_commit]).map(|_| ())
         }
         "cherryPick" => run_git(&toplevel, &["cherry-pick", hash]).map(|_| ()),
         "revert" => run_git(&toplevel, &["revert", "--no-edit", hash]).map(|_| ()),
         other => Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("action", other)),
     }
+}
+
+fn parse_commit_refs(decorations: &str) -> (bool, Vec<GitCommitRef>) {
+    let mut is_head = false;
+    let mut refs = Vec::new();
+    for raw_entry in decorations.split(", ") {
+        let mut entry = raw_entry.trim();
+        if entry == "HEAD" {
+            is_head = true;
+            continue;
+        }
+        if let Some(target) = entry.strip_prefix("HEAD -> ") {
+            is_head = true;
+            entry = target;
+        }
+        let detail = if let Some(name) = entry.strip_prefix("refs/heads/") {
+            Some(GitCommitRef {
+                name: name.to_owned(),
+                full_name: entry.to_owned(),
+                kind: "local".to_owned(),
+            })
+        } else if let Some(name) = entry.strip_prefix("refs/remotes/") {
+            (!name.ends_with("/HEAD")).then(|| GitCommitRef {
+                name: name.to_owned(),
+                full_name: entry.to_owned(),
+                kind: "remote".to_owned(),
+            })
+        } else {
+            entry
+                .strip_prefix("tag: refs/tags/")
+                .map(|name| GitCommitRef {
+                    name: name.to_owned(),
+                    full_name: format!("refs/tags/{name}"),
+                    kind: "tag".to_owned(),
+                })
+        };
+        if let Some(detail) = detail {
+            refs.push(detail);
+        }
+    }
+    (is_head, refs)
 }
 
 fn parse_log_records(
@@ -971,18 +1525,19 @@ fn parse_log_records(
                 .with_debug(error)
         })?;
         let subject = text(record[5]);
-        // Декорации %D: «HEAD -> main», «HEAD, tag: v1» (detached) и т.п.
-        // Признак HEAD снимаем до чистки, иначе он теряется.
+        // С `--decorate=full` локальная ветка, remote ref и тег не становятся
+        // неразличимыми даже при одинаковом отображаемом имени.
         let decorations = text(record[6]);
-        let is_head = decorations
-            .split(", ")
-            .any(|entry| entry.trim() == "HEAD" || entry.trim().starts_with("HEAD -> "));
-        let refs = decorations
-            .split(", ")
-            .map(|entry| entry.trim().trim_start_matches("HEAD -> "))
-            .filter(|entry| !entry.is_empty() && *entry != "HEAD")
-            .map(str::to_owned)
-            .collect();
+        let (is_head, ref_details) = parse_commit_refs(&decorations);
+        let refs = ref_details
+            .iter()
+            .map(|detail| detail.name.clone())
+            .collect::<Vec<_>>();
+        let commit_remote_refs = ref_details
+            .iter()
+            .filter(|detail| detail.kind == "remote")
+            .map(|detail| detail.name.clone())
+            .collect::<Vec<_>>();
         let parents = text(record[7])
             .split_whitespace()
             .map(str::to_owned)
@@ -1005,6 +1560,8 @@ fn parse_log_records(
             epoch_ms: epoch.saturating_mul(1000),
             parents,
             refs,
+            ref_details,
+            remote_refs: commit_remote_refs,
             body,
             co_authors,
         });
@@ -1035,6 +1592,7 @@ pub fn list_log(root: &Path, limit: u32, all_branches: bool) -> CommandResult<Ve
         count.as_str(),
         "--topo-order",
         "-z",
+        "--decorate=full",
         "--decorate-refs-exclude=refs/remotes/*/HEAD",
         "--format=%H%x00%h%x00%an%x00%ae%x00%at%x00%s%x00%D%x00%P%x00%b",
     ];
@@ -1163,12 +1721,59 @@ pub async fn git_switch_branch(
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     branch: String,
-    remote: Option<bool>,
+    kind: Option<String>,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        switch_branch(&root, &branch, remote.unwrap_or(false))
+        switch_branch(&root, &branch, kind.as_deref().unwrap_or("local"))
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_create_branch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    name: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || create_branch(&root, &name))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_rename_branch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    branch: String,
+    new_name: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || rename_branch(&root, &branch, &new_name))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_delete_branch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    branch: String,
+    force: bool,
+    expected_tip: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_branch(&root, &branch, force, &expected_tip)
     })
     .await
     .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
@@ -1384,11 +1989,12 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
         .ok()
         .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
         .filter(|name| !name.is_empty());
-    let Some(branch) = branch.filter(|name| is_safe_ref_name(name)) else {
+    let Some(branch) = branch else {
         return Err(
             CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "detached")
         );
     };
+    validate_branch_name(&toplevel, &branch)?;
 
     // Коммит должен быть на текущей ветке (предок HEAD).
     run_git(&toplevel, &["merge-base", "--is-ancestor", hash, "HEAD"]).map_err(|_| {
@@ -1864,19 +2470,93 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let (empty_body, none) = split_body_and_co_authors("");
         assert_eq!(empty_body, "");
         assert!(none.is_empty());
+
+    }
+
+    #[test]
+    fn keeps_same_named_local_remote_and_tag_refs_distinct() {
+        let (is_head, refs) = parse_commit_refs(
+            "HEAD -> refs/heads/origin/topic, refs/remotes/origin/topic, tag: refs/tags/origin/topic",
+        );
+        assert!(is_head);
+        assert_eq!(
+            refs,
+            vec![
+                GitCommitRef {
+                    name: "origin/topic".to_owned(),
+                    full_name: "refs/heads/origin/topic".to_owned(),
+                    kind: "local".to_owned(),
+                },
+                GitCommitRef {
+                    name: "origin/topic".to_owned(),
+                    full_name: "refs/remotes/origin/topic".to_owned(),
+                    kind: "remote".to_owned(),
+                },
+                GitCommitRef {
+                    name: "origin/topic".to_owned(),
+                    full_name: "refs/tags/origin/topic".to_owned(),
+                    kind: "tag".to_owned(),
+                },
+            ]
+        );
     }
 
     #[test]
     fn validates_branch_names() {
-        assert!(is_safe_ref_name("main"));
-        assert!(is_safe_ref_name("feature/agent-resume"));
-        assert!(is_safe_ref_name("v1.2.3"));
-        assert!(!is_safe_ref_name(""));
-        assert!(!is_safe_ref_name("-rf"));
-        assert!(!is_safe_ref_name("a..b"));
-        assert!(!is_safe_ref_name("bad name"));
-        assert!(!is_safe_ref_name("head@{1}"));
-        assert!(!is_safe_ref_name("x.lock"));
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for valid in ["main", "feature/agent-resume", "v1.2.3", "@", "задача"] {
+            assert!(validate_branch_name(root, valid).is_ok(), "{valid}");
+        }
+        for invalid in [
+            "",
+            "-rf",
+            "HEAD",
+            "a//b",
+            "a/",
+            "a/.hidden",
+            "a..b",
+            "bad name",
+            "head@{1}",
+            "@{-1}",
+            "x.lock",
+        ] {
+            assert!(validate_branch_name(root, invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn branch_config_entries_match_dotted_branch_names_exactly() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "branch.foo.remote", "origin"]);
+        git(&["config", "branch.foo.bar.remote", "upstream"]);
+
+        assert_eq!(
+            branch_config_entries(root, "foo").unwrap(),
+            vec![("branch.foo.remote".to_owned(), "origin".to_owned())]
+        );
+        assert_eq!(
+            branch_config_entries(root, "foo.bar").unwrap(),
+            vec![("branch.foo.bar.remote".to_owned(), "upstream".to_owned())]
+        );
+
+        cleanup_branch_config(root, "foo").unwrap();
+        assert!(branch_config_entries(root, "foo").unwrap().is_empty());
+        assert_eq!(
+            branch_config_entries(root, "foo.bar").unwrap(),
+            vec![("branch.foo.bar.remote".to_owned(), "upstream".to_owned())],
+            "cleanup ветки foo не должен удалять config ветки foo.bar"
+        );
     }
 
     #[test]
@@ -1944,7 +2624,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(files[0].additions, Some(1));
         assert!(list_commit_files(root, "not-a-hash").is_err());
 
-        switch_branch(root, "main", false).unwrap();
+        switch_branch(root, "main", "local").unwrap();
         let branches = list_branches(root).unwrap();
         assert_eq!(
             branches
@@ -1954,7 +2634,43 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
                 .name,
             "main"
         );
-        assert!(switch_branch(root, "no-such-branch", false).is_err());
+        assert!(switch_branch(root, "no-such-branch", "local").is_err());
+
+        // Ветка и тег с одинаковым именем разрешаются строго по типу ref.
+        let first_hash = log[1].hash.clone();
+        let second_hash = log[0].hash.clone();
+        git(&["branch", "collision", &first_hash]);
+        git(&["tag", "collision", &second_hash]);
+        switch_branch(root, "collision", "tag").unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap()).trim(),
+            second_hash
+        );
+        assert!(run_git(root, &["symbolic-ref", "--quiet", "HEAD"]).is_err());
+        switch_branch(root, "collision", "local").unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("collision")
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap()).trim(),
+            first_hash
+        );
+        switch_branch(root, "main", "local").unwrap();
+        git(&["branch", "-D", "collision"]);
+        let before_missing_local =
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap())
+                .trim()
+                .to_owned();
+        assert!(switch_branch(root, "collision", "local").is_err());
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap()).trim(),
+            before_missing_local
+        );
 
         // Ветка только на «сервере» (bare-репозиторий): попадает в список с
         // пометкой is_remote, переключение создаёт локальную со слежением.
@@ -1972,7 +2688,16 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             remote_dir.path().to_str().unwrap(),
         ]);
         git(&["push", "--quiet", "origin", "main", "feature/x"]);
+        git(&["remote", "set-head", "origin", "main"]);
         git(&["branch", "-D", "feature/x"]);
+
+        let decorated = list_log(root, 10, false).unwrap();
+        assert!(decorated
+            .iter()
+            .all(|commit| !commit.refs.iter().any(|name| name == "origin/HEAD")));
+        assert!(decorated
+            .iter()
+            .all(|commit| !commit.remote_refs.iter().any(|name| name == "origin/HEAD")));
 
         let branches = list_branches(root).unwrap();
         let remote_only = branches
@@ -1983,7 +2708,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // main существует локально — origin/main дублем не показывается.
         assert!(!branches.iter().any(|branch| branch.name == "origin/main"));
 
-        switch_branch(root, "origin/feature/x", true).unwrap();
+        switch_branch(root, "refs/remotes/origin/feature/x", "remote").unwrap();
         let branches = list_branches(root).unwrap();
         assert_eq!(
             branches
@@ -1996,7 +2721,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
         // Кто-то запушил в main с другой машины: fetch обновляет refs/remotes,
         // и статус показывает отставание (стрелка ↓ в панели).
-        switch_branch(root, "main", false).unwrap();
+        switch_branch(root, "main", "local").unwrap();
         let run_at = |dir: &Path, args: &[&str]| {
             let output = Command::new("git")
                 .args(args)
@@ -2067,6 +2792,184 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .unwrap();
         assert!(init.status.success());
         assert!(list_log(fresh.path(), 10, false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn tracks_remote_refs_through_custom_fetch_refspecs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
+
+        let remote = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .current_dir(remote.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        git(&[
+            "remote",
+            "add",
+            "team/platform",
+            remote.path().to_str().unwrap(),
+        ]);
+        git(&["push", "--quiet", "team/platform", "main:topic"]);
+        git(&["config", "--unset-all", "remote.team/platform.fetch"]);
+        git(&[
+            "config",
+            "--add",
+            "remote.team/platform.fetch",
+            "+refs/heads/*:refs/remotes/cache/*",
+        ]);
+        git(&["fetch", "--quiet", "team/platform"]);
+
+        let branches = list_branches(root).unwrap();
+        let remote_only = branches
+            .iter()
+            .find(|branch| branch.ref_name == "refs/remotes/cache/topic")
+            .expect("custom remote ref is listed");
+        assert_eq!(remote_only.name, "cache/topic");
+        assert!(remote_only.is_remote);
+
+        switch_branch(root, &remote_only.ref_name, "remote").unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("topic")
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["config", "branch.topic.remote"]).unwrap())
+                .trim(),
+            "team/platform"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["config", "branch.topic.merge"]).unwrap())
+                .trim(),
+            "refs/heads/topic"
+        );
+    }
+
+    #[test]
+    fn pending_config_cleanup_blocks_every_app_branch_creation_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
+        let head = String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap())
+            .trim()
+            .to_owned();
+
+        let remote = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .current_dir(remote.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        git(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(&["push", "--quiet", "origin", "main:pending"]);
+        git(&["fetch", "--quiet", "origin"]);
+        git(&["config", "branch.pending.remote", "stale"]);
+        queue_branch_config_cleanup(root, "pending").unwrap();
+        let config_lock = root.join(".git/config.lock");
+        std::fs::write(&config_lock, "held\n").unwrap();
+
+        assert!(commit_action(root, "branch", &head, Some("pending")).is_err());
+        assert!(!local_branch_exists(root, "pending"));
+        assert!(switch_branch(root, "refs/remotes/origin/pending", "remote").is_err());
+        assert!(!local_branch_exists(root, "pending"));
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap()).trim(),
+            head
+        );
+
+        std::fs::remove_file(config_lock).unwrap();
+        switch_branch(root, "refs/remotes/origin/pending", "remote").unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("pending")
+        );
+        assert!(pending_branch_cleanups(root).unwrap().is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&run_git(root, &["config", "branch.pending.remote"]).unwrap())
+                .trim(),
+            "origin"
+        );
+    }
+
+    #[test]
+    fn config_cleanup_markers_are_shared_between_linked_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
+        git(&["branch", "doomed"]);
+        git(&["config", "branch.doomed.remote", "origin"]);
+        let doomed_tip = local_branch_tip(root, "doomed").unwrap();
+        let linked_dir = tempfile::tempdir().unwrap();
+        let linked = linked_dir.path().join("linked");
+        git(&[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "linked",
+            linked.to_str().unwrap(),
+        ]);
+
+        let config_lock = root.join(".git/config.lock");
+        std::fs::write(&config_lock, "held\n").unwrap();
+        delete_branch(&linked, "doomed", true, &doomed_tip).unwrap();
+        assert!(pending_branch_cleanups(&linked)
+            .unwrap()
+            .iter()
+            .any(|(_, name)| name == "doomed"));
+        assert!(pending_branch_cleanups(root)
+            .unwrap()
+            .iter()
+            .any(|(_, name)| name == "doomed"));
+
+        std::fs::remove_file(config_lock).unwrap();
+        list_branches(root).unwrap();
+        assert!(branch_config_entries(root, "doomed").unwrap().is_empty());
+        assert!(pending_branch_cleanups(&linked).unwrap().is_empty());
+        assert!(pending_branch_cleanups(root).unwrap().is_empty());
     }
 
     #[test]
@@ -2529,6 +3432,60 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     #[test]
+    fn commit_actions_do_not_dwim_a_full_hash_as_a_branch_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+            output.stdout
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "first"]);
+        let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+        assert_eq!(first.len(), 40, "регрессия проверяет полный SHA-1 hash");
+        git(&["commit", "--quiet", "--allow-empty", "-m", "second"]);
+        let second = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+            .trim()
+            .to_owned();
+
+        // Такое имя ref допустимо, но оно указывает на другой коммит. Git
+        // switch без предварительного resolve мог бы выбрать эту ветку.
+        git(&["branch", &first, &second]);
+        assert_eq!(
+            local_branch_tip(root, &first).as_deref(),
+            Some(second.as_str())
+        );
+
+        commit_action(root, "checkout", &first, None).unwrap();
+        assert_eq!(collect_summary(root).unwrap().branch, None);
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+            first
+        );
+
+        commit_action(root, "branch", &first, Some("from-exact-hash")).unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("from-exact-hash")
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+            first
+        );
+    }
+
+    #[test]
     fn rewords_a_local_commit_and_preserves_descendants() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -2665,4 +3622,215 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "запушенный коммит переписывать нельзя"
         );
     }
+
+    #[test]
+    fn creates_renames_and_deletes_local_branches_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(root.join("base.txt"), "base\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "base"]);
+
+        assert!(create_branch(root, "a//b").is_err());
+        create_branch(root, "feature/local").unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("feature/local")
+        );
+        assert!(create_branch(root, "feature/local").is_err());
+
+        rename_branch(root, "feature/local", "topic").unwrap();
+        assert_eq!(
+            collect_summary(root).unwrap().branch.as_deref(),
+            Some("topic")
+        );
+        assert!(rename_branch(root, "topic", "main").is_err());
+
+        std::fs::write(root.join("topic.txt"), "topic\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "topic work"]);
+        let topic_tip = local_branch_tip(root, "topic").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        let unmerged_error = delete_branch(root, "topic", false, &topic_tip).unwrap_err();
+        assert_eq!(
+            unmerged_error.context.get("reason").map(String::as_str),
+            Some("branch-unmerged"),
+            "невлитая ветка не удаляется без force"
+        );
+        assert!(local_branch_exists(root, "topic"));
+        delete_branch(root, "topic", true, &topic_tip).unwrap();
+        assert!(!local_branch_exists(root, "topic"));
+
+        create_branch(root, "merged").unwrap();
+        std::fs::write(root.join("merged.txt"), "merged\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "merged work"]);
+        let merged_tip = local_branch_tip(root, "merged").unwrap();
+        git(&["config", "branch.merged.remote", "origin"]);
+        git(&["config", "branch.merged.merge", "refs/heads/merged"]);
+        switch_branch(root, "main", "local").unwrap();
+        git(&["merge", "--quiet", "--no-edit", "merged"]);
+        delete_branch(root, "merged", false, &merged_tip).unwrap();
+        assert!(!local_branch_exists(root, "merged"));
+        assert!(run_git(
+            root,
+            &["config", "--local", "--get-regexp", "^branch\\.merged\\."]
+        )
+        .is_err());
+
+        create_branch(root, "moving").unwrap();
+        let stale_tip = local_branch_tip(root, "moving").unwrap();
+        std::fs::write(root.join("moving.txt"), "moving\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "move branch"]);
+        let moving_tip = local_branch_tip(root, "moving").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        let moved_error = delete_branch(root, "moving", true, &stale_tip).unwrap_err();
+        assert_eq!(
+            moved_error.context.get("reason").map(String::as_str),
+            Some("branch-moved")
+        );
+        assert_eq!(
+            local_branch_tip(root, "moving").as_deref(),
+            Some(moving_tip.as_str())
+        );
+        delete_branch(root, "moving", true, &moving_tip).unwrap();
+
+        create_branch(root, "linked").unwrap();
+        let linked_tip = local_branch_tip(root, "linked").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        let worktrees = tempfile::tempdir().unwrap();
+        let linked_path = worktrees.path().join("linked");
+        git(&[
+            "worktree",
+            "add",
+            "--quiet",
+            linked_path.to_str().unwrap(),
+            "linked",
+        ]);
+        assert!(delete_branch(root, "linked", true, &linked_tip).is_err());
+        assert!(local_branch_exists(root, "linked"));
+        assert_eq!(
+            String::from_utf8_lossy(
+                &run_git(&linked_path, &["symbolic-ref", "--short", "HEAD"]).unwrap()
+            )
+            .trim(),
+            "linked"
+        );
+        assert!(list_branches(root)
+            .unwrap()
+            .iter()
+            .all(|branch| !branch.name.starts_with("modelcrew-delete/")));
+        git(&[
+            "worktree",
+            "remove",
+            "--force",
+            linked_path.to_str().unwrap(),
+        ]);
+        delete_branch(root, "linked", true, &linked_tip).unwrap();
+
+        create_branch(root, "locked-config").unwrap();
+        let locked_tip = local_branch_tip(root, "locked-config").unwrap();
+        git(&["config", "branch.locked-config.remote", "origin"]);
+        switch_branch(root, "main", "local").unwrap();
+        let config_lock = root.join(".git/config.lock");
+        std::fs::write(&config_lock, "held by another git process\n").unwrap();
+        delete_branch(root, "locked-config", true, &locked_tip).unwrap();
+        assert!(!local_branch_exists(root, "locked-config"));
+        assert!(!branch_config_entries(root, "locked-config")
+            .unwrap()
+            .is_empty());
+        assert!(pending_branch_cleanups(root)
+            .unwrap()
+            .iter()
+            .any(|(_, name)| name == "locked-config"));
+        std::fs::remove_file(config_lock).unwrap();
+        list_branches(root).unwrap();
+        assert!(branch_config_entries(root, "locked-config")
+            .unwrap()
+            .is_empty());
+        assert!(pending_branch_cleanups(root).unwrap().is_empty());
+
+        git(&[
+            "config",
+            "branch.preconfigured.description",
+            "keep this setting",
+        ]);
+        create_branch(root, "preconfigured").unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(
+                &run_git(root, &["config", "branch.preconfigured.description"]).unwrap()
+            )
+            .trim(),
+            "keep this setting"
+        );
+        let preconfigured_tip = local_branch_tip(root, "preconfigured").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        delete_branch(root, "preconfigured", false, &preconfigured_tip).unwrap();
+
+        create_branch(root, "rename-lock").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        git(&["config", "branch.rename-lock.remote", "origin"]);
+        let config_lock = root.join(".git/config.lock");
+        std::fs::write(&config_lock, "held by another git process\n").unwrap();
+        assert!(rename_branch(root, "rename-lock", "renamed-lock").is_err());
+        assert!(local_branch_exists(root, "rename-lock"));
+        assert!(!local_branch_exists(root, "renamed-lock"));
+        std::fs::remove_file(config_lock).unwrap();
+
+        create_branch(root, "current").unwrap();
+        let current_tip = local_branch_tip(root, "current").unwrap();
+        assert!(delete_branch(root, "current", false, &current_tip).is_err());
+        assert!(delete_branch(root, "current", true, &current_tip).is_err());
+        assert!(local_branch_exists(root, "current"));
+        assert!(String::from_utf8_lossy(
+            &run_git(
+                root,
+                &[
+                    "for-each-ref",
+                    "refs/modelcrew/branch-delete",
+                    "--format=%(refname)",
+                ],
+            )
+            .unwrap()
+        )
+        .trim()
+        .is_empty());
+    }
+
+    #[test]
+    fn creates_branch_in_repository_without_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let output = Command::new("git")
+            .args(["init", "--quiet", "--initial-branch=main"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        create_branch(root, "feature/empty").unwrap();
+        let head = run_git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+            .unwrap();
+        assert_eq!(head, "feature/empty");
+    }
+
 }

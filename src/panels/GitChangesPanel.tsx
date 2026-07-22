@@ -39,6 +39,7 @@ import {
   type GitCommitFile,
   type GitCommitInfo,
   type GitFileDiff,
+  type GitRefKind,
 } from "../git/gitChanges";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { computeCommitGraph } from "../git/commitGraph";
@@ -540,7 +541,11 @@ function BranchSwitcher(props: {
     }
     setBusy(true);
     try {
-      await switchBranch(props.workspaceId, branch.name, branch.isRemote);
+      await switchBranch(
+        props.workspaceId,
+        branch.isRemote ? branch.refName : branch.name,
+        branch.isRemote ? "remote" : "local",
+      );
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       // Типично: незакоммиченные изменения конфликтуют с целевой веткой.
@@ -1098,17 +1103,20 @@ function SyncStatus(props: {
 }
 
 // Бейдж ветки/тега: клик переключает на неё, не всплывая до выбора коммита.
-// Серверная (origin/…) создаёт локальную со слежением, тег — переход с
-// отделением HEAD. Текущая ветка — некликабельная отметка.
+// Серверная ссылка определяется бэкендом по refs/remotes (remote может
+// называться не только origin) и создаёт локальную tracking-ветку. Тег —
+// переход с отделением HEAD. Текущая ветка — некликабельная отметка.
 function RefBadge(props: {
   refName: string;
+  fullRefName: string;
+  kind: GitRefKind;
   currentBranch?: string;
-  onSwitch: (name: string, remote: boolean) => void;
+  onSwitch: (name: string, kind: GitRefKind) => void;
 }) {
   const { t } = useI18n();
-  const isTag = props.refName.startsWith("tag: ");
-  const label = isTag ? props.refName.slice(5) : props.refName;
-  const isRemote = !isTag && props.refName.startsWith("origin/");
+  const isTag = props.kind === "tag";
+  const label = props.refName;
+  const isRemote = props.kind === "remote";
   const isCurrent = !isTag && !isRemote && label === props.currentBranch;
   const kind = isTag ? "is-tag" : isRemote ? "is-remote" : "";
   const title = isCurrent
@@ -1124,10 +1132,14 @@ function RefBadge(props: {
       className={`git-commit-ref ${kind} ${isCurrent ? "is-current" : ""}`}
       title={title}
       aria-current={isCurrent || undefined}
+      disabled={isCurrent}
       onClick={(event) => {
         event.stopPropagation();
         if (!isCurrent) {
-          props.onSwitch(label, isRemote);
+          props.onSwitch(
+            isRemote ? props.fullRefName : label,
+            isTag ? "tag" : isRemote ? "remote" : "local",
+          );
         }
       }}
     >
@@ -1138,7 +1150,7 @@ function RefBadge(props: {
 
 // Модальный редактор сообщения коммита: первая строка — заголовок, дальше —
 // описание. Сохранение переписывает локальный коммит (бэкенд проверяет
-// безопасность). Доступен только для редактируемых коммитов вошедшего.
+// безопасность). Доступен только для собственных локальных коммитов.
 function RewordEditor(props: {
   workspaceId: string;
   commit: GitCommitInfo;
@@ -1228,7 +1240,7 @@ function CommitGraph(props: {
   onSelect: (commit: GitCommitInfo) => void;
   detailsPresence: { item: string; closing: boolean } | null;
   onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
-  onSwitchBranch: (name: string, remote: boolean) => void;
+  onSwitchBranch: (name: string, kind: GitRefKind) => void;
   currentBranch?: string;
   workingTreeCount: number;
   onOpenChanges: () => void;
@@ -1419,10 +1431,12 @@ function CommitGraph(props: {
               <span className="git-graph-subject" title={commit.subject}>
                 {commit.subject}
               </span>
-              {commit.refs.map((ref) => (
+              {commit.refDetails.map((ref) => (
                 <RefBadge
-                  key={ref}
-                  refName={ref}
+                  key={`${ref.kind}:${ref.name}`}
+                  refName={ref.name}
+                  fullRefName={ref.fullName}
+                  kind={ref.kind}
                   currentBranch={props.currentBranch}
                   onSwitch={props.onSwitchBranch}
                 />
@@ -1616,9 +1630,9 @@ function HistoryView(props: {
 
   // Переключение на ветку/тег по клику на бейдж; ошибка (грязное дерево и т.п.)
   // показывается баннером.
-  const switchTo = async (name: string, remote: boolean) => {
+  const switchTo = async (name: string, kind: GitRefKind) => {
     try {
-      await switchBranch(props.workspaceId, name, remote);
+      await switchBranch(props.workspaceId, name, kind);
       void refreshGitChanges(props.workspaceId);
       setReloadNonce((value) => value + 1);
     } catch (error) {
@@ -1684,7 +1698,7 @@ function HistoryView(props: {
           }
           detailsPresence={detailsPresence}
           onMenu={openMenu}
-          onSwitchBranch={(name, remote) => void switchTo(name, remote)}
+          onSwitchBranch={(name, kind) => void switchTo(name, kind)}
           currentBranch={props.currentBranch}
           workingTreeCount={workingTreeCount}
           onOpenChanges={props.onOpenChanges}
@@ -1769,12 +1783,14 @@ function HistoryView(props: {
                   {t("git.unpushed")}
                 </span>
               )}
-              {commit.refs.map((ref) => (
+              {commit.refDetails.map((ref) => (
                 <RefBadge
-                  key={ref}
-                  refName={ref}
+                  key={`${ref.kind}:${ref.name}`}
+                  refName={ref.name}
+                  fullRefName={ref.fullName}
+                  kind={ref.kind}
                   currentBranch={props.currentBranch}
-                  onSwitch={(name, remote) => void switchTo(name, remote)}
+                  onSwitch={(name, kind) => void switchTo(name, kind)}
                 />
               ))}
             </div>
