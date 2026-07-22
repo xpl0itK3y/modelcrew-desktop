@@ -150,13 +150,42 @@ const backendErrorKeys: Record<string, MessageKey> = {
   terminal_kill_failed: "error.terminalKillFailed",
 };
 
+const gitReasonKeys: Record<string, MessageKey> = {
+  "branch-exists": "error.gitBranchExists",
+  "branch-invalid": "error.gitBranchInvalid",
+  "branch-missing": "error.gitBranchMissing",
+  "branch-current": "error.gitBranchCurrent",
+  "branch-unmerged": "error.gitBranchUnmerged",
+  "branch-moved": "error.gitBranchMoved",
+  "branch-worktree": "error.gitBranchWorktree",
+  "branch-restore-failed": "error.gitBranchRestoreFailed",
+  "branch-config-stale": "error.gitBranchConfigStale",
+  "branch-delete-unverified": "error.gitBranchDeleteUnverified",
+  "branch-backup-failed": "error.gitBranchBackupFailed",
+  detached: "error.gitDetachedHead",
+  "not-head": "error.gitCommitNotHead",
+  "parent-count": "error.gitCommitCannotUncommit",
+  pushed: "error.gitCommitPushed",
+  "head-moved": "error.gitHistoryMoved",
+  "upstream-invalid": "error.gitUpstreamInvalid",
+  "operation-in-progress": "error.gitOperationInProgress",
+  "not-on-branch": "error.gitCommitNotOnBranch",
+  merge: "error.gitCommitMerge",
+  "not-yours": "error.gitCommitNotYours",
+  message: "error.gitCommitMessage",
+};
+
 export function localizeBackendError(error: unknown): string {
   const parsed = parseBackendError(error);
   if (!parsed) {
     console.error("Unstructured backend error", error);
     return translate("error.unknown");
   }
-  const key = backendErrorKeys[parsed.code] ?? "error.unknown";
+  const reason = parsed.context?.reason;
+  const key =
+    parsed.code === "git_command_failed" && typeof reason === "string"
+      ? (gitReasonKeys[reason] ?? "error.gitCommandFailed")
+      : (backendErrorKeys[parsed.code] ?? "error.unknown");
   if (parsed.debug) {
     console.error("Backend error", parsed);
   }

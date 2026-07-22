@@ -415,6 +415,41 @@ export const ru = {
   "error.gitUnavailable": "git не найден — установите его, чтобы видеть изменения",
   "error.gitNotARepository": "Папка не является git-репозиторием",
   "error.gitCommandFailed": "Команда git завершилась с ошибкой",
+  "error.gitBranchExists": "Ветка «{branch}» уже существует",
+  "error.gitBranchInvalid": "«{branch}» — недопустимое имя Git-ветки",
+  "error.gitBranchMissing": "Локальная ветка «{branch}» не найдена",
+  "error.gitBranchCurrent": "Нельзя удалить текущую ветку «{branch}»",
+  "error.gitBranchUnmerged":
+    "Ветка «{branch}» не влита в текущую ветку. Для удаления нужно отдельное принудительное подтверждение",
+  "error.gitBranchMoved":
+    "Ветка «{branch}» изменилась после подтверждения. Обновите список и повторите действие",
+  "error.gitBranchWorktree":
+    "Ветка «{branch}» открыта в другом Git worktree, поэтому удалить её нельзя",
+  "error.gitBranchRestoreFailed":
+    "Не удалось восстановить ветку «{branch}» после параллельного изменения Git. Проверьте список веток перед продолжением",
+  "error.gitBranchConfigStale":
+    "Git не смог очистить сохранённые настройки ветки «{branch}». Дождитесь завершения другой Git-операции и повторите попытку",
+  "error.gitBranchDeleteUnverified":
+    "Git удалил ветку, но результат не удалось проверить. Обновите список веток перед продолжением",
+  "error.gitBranchBackupFailed":
+    "Не удалось создать точку восстановления для ветки «{branch}», поэтому она не была удалена",
+  "error.gitDetachedHead": "Действие недоступно при отделённом HEAD",
+  "error.gitCommitNotHead": "Этот коммит уже не является вершиной ветки",
+  "error.gitCommitCannotUncommit":
+    "Корневой или merge-коммит нельзя отменить этим действием",
+  "error.gitCommitPushed":
+    "Коммит уже есть на сервере — его локальную историю нельзя переписать",
+  "error.gitHistoryMoved":
+    "История ветки успела измениться. Обновите список и повторите действие",
+  "error.gitUpstreamInvalid":
+    "Не удалось определить корректную серверную ветку для синхронизации",
+  "error.gitOperationInProgress":
+    "В репозитории уже выполняется другая git-операция",
+  "error.gitCommitNotOnBranch": "Коммит не находится в текущей ветке",
+  "error.gitCommitMerge": "Merge-коммит нельзя переписать этим действием",
+  "error.gitCommitNotYours":
+    "Можно менять только коммиты автора из локального git config",
+  "error.gitCommitMessage": "Введите корректное сообщение до 4000 символов",
 } as const;
 
 export type MessageKey = keyof typeof ru;

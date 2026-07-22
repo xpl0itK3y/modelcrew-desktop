@@ -420,4 +420,39 @@ export const en: Record<MessageKey, string> = {
   "error.gitUnavailable": "git was not found — install it to see changes",
   "error.gitNotARepository": "The folder is not a git repository",
   "error.gitCommandFailed": "A git command failed",
+  "error.gitBranchExists": "Branch “{branch}” already exists",
+  "error.gitBranchInvalid": "“{branch}” is not a valid Git branch name",
+  "error.gitBranchMissing": "Local branch “{branch}” was not found",
+  "error.gitBranchCurrent": "The current branch “{branch}” cannot be deleted",
+  "error.gitBranchUnmerged":
+    "Branch “{branch}” is not merged into the current branch. Deleting it requires a separate force confirmation",
+  "error.gitBranchMoved":
+    "Branch “{branch}” changed after confirmation. Refresh the list and try again",
+  "error.gitBranchWorktree":
+    "Branch “{branch}” is open in another Git worktree and cannot be deleted",
+  "error.gitBranchRestoreFailed":
+    "Could not restore branch “{branch}” after a concurrent Git change. Check the branch list before continuing",
+  "error.gitBranchConfigStale":
+    "Git could not clean the saved settings for branch “{branch}”. Wait for the other Git operation to finish and try again",
+  "error.gitBranchDeleteUnverified":
+    "Git deleted the branch but its result could not be verified. Refresh the branch list before continuing",
+  "error.gitBranchBackupFailed":
+    "Could not create a recovery point for branch “{branch}”, so it was not deleted",
+  "error.gitDetachedHead": "This action is unavailable while HEAD is detached",
+  "error.gitCommitNotHead": "This commit is no longer the branch tip",
+  "error.gitCommitCannotUncommit":
+    "A root or merge commit cannot be undone with this action",
+  "error.gitCommitPushed":
+    "This commit is already on the server, so its local history cannot be rewritten",
+  "error.gitHistoryMoved":
+    "The branch history changed. Refresh the list and try again",
+  "error.gitUpstreamInvalid":
+    "Could not determine a valid upstream branch for synchronization",
+  "error.gitOperationInProgress":
+    "Another Git operation is already in progress in this repository",
+  "error.gitCommitNotOnBranch": "This commit is not on the current branch",
+  "error.gitCommitMerge": "A merge commit cannot be rewritten with this action",
+  "error.gitCommitNotYours":
+    "Only commits matching the local Git author can be edited",
+  "error.gitCommitMessage": "Enter a valid commit message up to 4000 characters",
 };
