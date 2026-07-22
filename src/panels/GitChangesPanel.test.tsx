@@ -23,6 +23,10 @@ const mocks = vi.hoisted(() => ({
   gitPullRebase: vi.fn(async () => {}),
   gitResetToUpstream: vi.fn(async () => {}),
   rewordCommit: vi.fn(async () => {}),
+  amendCommit: vi.fn(async () => {}),
+  squashCommit: vi.fn(async () => {}),
+  dropCommit: vi.fn(async () => {}),
+  resetToCommit: vi.fn(async () => {}),
   writeClipboard: vi.fn(async () => {}),
   fetchBranches: vi.fn<() => Promise<GitBranchInfo[]>>(async () => []),
   fetchLog: vi.fn<() => Promise<GitCommitInfo[]>>(async () => []),
@@ -56,6 +60,10 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     gitPullRebase: mocks.gitPullRebase,
     gitResetToUpstream: mocks.gitResetToUpstream,
     rewordCommit: mocks.rewordCommit,
+    amendCommit: mocks.amendCommit,
+    squashCommit: mocks.squashCommit,
+    dropCommit: mocks.dropCommit,
+    resetToCommit: mocks.resetToCommit,
     fetchBranches: mocks.fetchBranches,
     fetchLog: mocks.fetchLog,
     refreshGitChanges: mocks.refreshGitChanges,
@@ -339,6 +347,87 @@ describe("GitChangesView workspace lifecycle", () => {
         name: "Отменить последний локальный коммит",
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it("rewrites history only against the head the panel showed", async () => {
+    const head = "7777777777777777777777777777777777777777";
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      headHash: head,
+    });
+    mocks.fetchLog.mockResolvedValue([
+      {
+        hash: head,
+        shortHash: "7777777",
+        subject: "local tip",
+        author: "Denis",
+        authorEmail: "denis@example.com",
+        epochMs: Date.now(),
+        unpushed: true,
+        localOnly: true,
+        editable: true,
+        isHead: true,
+        parents: ["5555555555555555555555555555555555555555"],
+        refs: [],
+        refDetails: [],
+        remoteRefs: [],
+        fullMessage: "local tip",
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Дополнить последний коммит" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    await waitFor(() =>
+      expect(mocks.amendCommit).toHaveBeenCalledWith("project-a", head),
+    );
+  });
+
+  it("offers no history rewriting for a commit that is already pushed", async () => {
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      headHash: "8888888888888888888888888888888888888888",
+    });
+    mocks.fetchLog.mockResolvedValue([
+      {
+        hash: "8888888888888888888888888888888888888888",
+        shortHash: "8888888",
+        subject: "pushed tip",
+        author: "Denis",
+        authorEmail: "denis@example.com",
+        epochMs: Date.now(),
+        unpushed: false,
+        localOnly: false,
+        editable: false,
+        isHead: true,
+        parents: ["5555555555555555555555555555555555555555"],
+        refs: [],
+        refDetails: [],
+        remoteRefs: [],
+        fullMessage: "pushed tip",
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+
+    for (const name of [
+      "Дополнить последний коммит",
+      "Объединить с предыдущим",
+      "Удалить коммит из истории",
+    ]) {
+      expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
+    }
+    // Откатить чужой или уже отправленный коммит новым — по-прежнему можно.
+    expect(
+      screen.getByRole("menuitem", { name: "Откатить этот коммит" }),
+    ).toBeInTheDocument();
   });
 
   it("copies the exact full message without reordering mixed trailers", async () => {

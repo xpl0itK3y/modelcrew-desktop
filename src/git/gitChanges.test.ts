@@ -10,17 +10,21 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 import {
   aggregateCounts,
+  amendCommit,
   authorAvatar,
   commitAction,
   createBranch,
   deleteBranch,
+  dropCommit,
   formatRelativeTime,
   gitPull,
   gitPullRebase,
   gitPush,
   parseUnifiedDiff,
   renameBranch,
+  resetToCommit,
   resolveAvatarUrl,
+  squashCommit,
   type GitChangesSummary,
 } from "./gitChanges";
 
@@ -273,5 +277,54 @@ describe("subscribeGitChanges", () => {
       ),
     ).toHaveLength(0);
     vi.useRealTimers();
+  });
+});
+
+describe("history rewriting IPC", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.invoke.mockResolvedValue(undefined);
+  });
+
+  it("amends the last commit against the confirmed head", async () => {
+    await amendCommit("ws-1", "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_amend_commit", {
+      workspaceId: "ws-1",
+      expectedHead: "a".repeat(40),
+      message: undefined,
+    });
+  });
+
+  it("passes the reset mode and the confirmed head", async () => {
+    await resetToCommit("ws-1", "b".repeat(40), "hard", "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_reset_to_commit", {
+      workspaceId: "ws-1",
+      hash: "b".repeat(40),
+      mode: "hard",
+      expectedHead: "a".repeat(40),
+    });
+  });
+
+  it("separates squash from fixup", async () => {
+    await squashCommit("ws-1", "b".repeat(40), "fixup", "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_squash_commit", {
+      workspaceId: "ws-1",
+      hash: "b".repeat(40),
+      mode: "fixup",
+      expectedHead: "a".repeat(40),
+    });
+  });
+
+  it("drops a commit against the confirmed head", async () => {
+    await dropCommit("ws-1", "b".repeat(40), "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_drop_commit", {
+      workspaceId: "ws-1",
+      hash: "b".repeat(40),
+      expectedHead: "a".repeat(40),
+    });
   });
 });

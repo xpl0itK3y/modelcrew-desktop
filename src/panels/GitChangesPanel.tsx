@@ -10,11 +10,13 @@ import {
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
+  amendCommit,
   authorAvatar,
   commitAction,
   commitAll,
   createBranch,
   deleteBranch,
+  dropCommit,
   fetchBranches,
   fetchCommitFiles,
   fetchFileDiff,
@@ -29,9 +31,11 @@ import {
   readRepoFile,
   refreshGitChanges,
   renameBranch,
+  resetToCommit,
   resolveAvatarUrl,
   revertFile,
   rewordCommit,
+  squashCommit,
   subscribeGitChanges,
   switchBranch,
   writeRepoFile,
@@ -43,6 +47,7 @@ import {
   type GitCommitInfo,
   type GitFileDiff,
   type GitRefKind,
+  type GitResetMode,
 } from "../git/gitChanges";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
@@ -987,10 +992,44 @@ function CommitDetails(props: {
 // cherry-pick, revert и безопасная отмена последнего локального коммита.
 // Открывается по ⋯ или правому клику; опасные действия требуют подтверждения
 // прямо в меню, ветка — ввода имени.
+// Действия меню: часть уходит в общий commit_action, часть — в отдельные
+// команды правки истории, которым нужна подтверждённая вершина ветки.
+type CommitMenuAction =
+  | Exclude<CommitAction, "branch">
+  | "amend"
+  | "squash"
+  | "fixup"
+  | "drop"
+  | "resetSoft"
+  | "resetMixed"
+  | "resetHard";
+
+const RESET_MODES: Record<string, GitResetMode> = {
+  resetSoft: "soft",
+  resetMixed: "mixed",
+  resetHard: "hard",
+};
+
+const CONFIRM_TEXT = {
+  checkout: "git.actionCheckoutConfirm",
+  cherryPick: "git.actionCherryConfirm",
+  revert: "git.actionRevertConfirm",
+  uncommit: "git.actionUncommitConfirm",
+  amend: "git.actionAmendConfirm",
+  squash: "git.actionSquashConfirm",
+  fixup: "git.actionFixupConfirm",
+  drop: "git.actionDropConfirm",
+  resetSoft: "git.actionResetSoftConfirm",
+  resetMixed: "git.actionResetMixedConfirm",
+  resetHard: "git.actionResetHardConfirm",
+} as const;
+
 function CommitActionsMenu(props: {
   workspaceId: string;
   commit: GitCommitInfo;
   currentBranch?: string;
+  // Вершина ветки на момент отрисовки: уходит в бэкенд как подтверждение.
+  headHash?: string;
   x: number;
   y: number;
   onClose: () => void;
@@ -1004,15 +1043,19 @@ function CommitActionsMenu(props: {
   // GitHub-авторизация здесь не нужна: бэкенд сверяет автора с локальным
   // `git config user.email` и разрешает переписывать только локальную историю.
   const canReword = props.commit.editable;
+  const onBranch = Boolean(props.currentBranch) && Boolean(props.headHash);
   const canUncommit =
-    Boolean(props.currentBranch) &&
+    onBranch &&
     props.commit.isHead &&
     props.commit.localOnly === true &&
     props.commit.parents.length === 1;
+  // Переписывать историю можно только там, где это уже разрешил бэкенд:
+  // непрерывный локальный first-parent суффикс собственных коммитов.
+  const canAmend = onBranch && props.commit.isHead && canReword;
+  const canRewrite = onBranch && canReword && props.commit.parents.length === 1;
+  const canReset = onBranch && !props.commit.isHead;
   const isMerge = props.commit.parents.length > 1;
-  const [confirm, setConfirm] = useState<
-    null | "checkout" | "cherryPick" | "revert" | "uncommit"
-  >(null);
+  const [confirm, setConfirm] = useState<null | CommitMenuAction>(null);
   const [branching, setBranching] = useState(false);
   const [branchName, setBranchName] = useState("");
   const [copied, setCopied] = useState<null | "hash" | "message">(null);
@@ -1037,10 +1080,22 @@ function CommitActionsMenu(props: {
     };
   }, [props]);
 
-  const run = async (action: CommitAction, name?: string) => {
+  const run = async (action: CommitMenuAction | "branch", name?: string) => {
     setBusy(true);
+    const hash = props.commit.hash;
+    const head = props.headHash ?? "";
     try {
-      await commitAction(props.workspaceId, action, props.commit.hash, name);
+      if (action === "amend") {
+        await amendCommit(props.workspaceId, head);
+      } else if (action === "squash" || action === "fixup") {
+        await squashCommit(props.workspaceId, hash, action, head);
+      } else if (action === "drop") {
+        await dropCommit(props.workspaceId, hash, head);
+      } else if (action in RESET_MODES) {
+        await resetToCommit(props.workspaceId, hash, RESET_MODES[action], head);
+      } else {
+        await commitAction(props.workspaceId, action as CommitAction, hash, name);
+      }
       await refreshGitChanges(props.workspaceId);
       props.onDone();
       props.onClose();
@@ -1106,13 +1161,7 @@ function CommitActionsMenu(props: {
       ) : confirm ? (
         <div className="git-actions-confirm">
           <span className="git-actions-confirm-text">
-            {confirm === "checkout"
-              ? t("git.actionCheckoutConfirm")
-              : confirm === "cherryPick"
-                ? t("git.actionCherryConfirm")
-                : confirm === "revert"
-                  ? t("git.actionRevertConfirm")
-                  : t("git.actionUncommitConfirm")}
+            {t(CONFIRM_TEXT[confirm])}
           </span>
           <div className="git-actions-confirm-row">
             <button
@@ -1166,6 +1215,39 @@ function CommitActionsMenu(props: {
               {t("git.actionReword")}
             </button>
           )}
+          {canAmend && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item"
+              disabled={busy}
+              onClick={() => setConfirm("amend")}
+            >
+              {t("git.actionAmend")}
+            </button>
+          )}
+          {canRewrite && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className="git-actions-item"
+                disabled={busy}
+                onClick={() => setConfirm("squash")}
+              >
+                {t("git.actionSquash")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="git-actions-item"
+                disabled={busy}
+                onClick={() => setConfirm("fixup")}
+              >
+                {t("git.actionFixup")}
+              </button>
+            </>
+          )}
           <div className="git-actions-sep" aria-hidden="true" />
           <button
             type="button"
@@ -1217,6 +1299,50 @@ function CommitActionsMenu(props: {
             >
               {t("git.actionUncommit")}
             </button>
+          )}
+          {canRewrite && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item is-danger"
+              disabled={busy}
+              onClick={() => setConfirm("drop")}
+            >
+              {t("git.actionDrop")}
+            </button>
+          )}
+          {canReset && (
+            <>
+              <div className="git-actions-sep" aria-hidden="true" />
+              <div className="git-actions-label">{t("git.actionResetHere")}</div>
+              <button
+                type="button"
+                role="menuitem"
+                className="git-actions-item"
+                disabled={busy}
+                onClick={() => setConfirm("resetSoft")}
+              >
+                {t("git.actionResetSoft")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="git-actions-item"
+                disabled={busy}
+                onClick={() => setConfirm("resetMixed")}
+              >
+                {t("git.actionResetMixed")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="git-actions-item is-danger"
+                disabled={busy}
+                onClick={() => setConfirm("resetHard")}
+              >
+                {t("git.actionResetHard")}
+              </button>
+            </>
           )}
         </>
       )}
@@ -1892,6 +2018,8 @@ function HistoryView(props: {
   onOpenChanges: () => void;
   // Текущая ветка — для выделения её бейджа и клика по чужим.
   currentBranch?: string;
+  // Вершина текущей ветки: правка истории подтверждается именно ею.
+  headHash?: string;
   upstreamBranch?: string;
 }) {
   const { locale, t } = useI18n();
@@ -2216,6 +2344,7 @@ function HistoryView(props: {
           workspaceId={props.workspaceId}
           commit={menu.commit}
           currentBranch={props.currentBranch}
+          headHash={props.headHash}
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
@@ -2430,6 +2559,7 @@ function GitChangesWorkspaceView(props: {
               fileCount={summary.files.length}
               onOpenChanges={() => props.onSelectView("changes")}
               currentBranch={summary.branch}
+              headHash={summary.headHash}
               upstreamBranch={summary.upstreamRef}
             />
           ) : summary.files.length === 0 ? (

@@ -384,6 +384,59 @@ export function rewordCommit(
   return invoke("git_reword_commit", { workspaceId, hash, message });
 }
 
+// Правка локальной истории. Каждая команда получает вершину ветки, которую
+// пользователь видел в панели: если её успели сдвинуть, бэкенд откажет вместо
+// того, чтобы переписать чужой коммит.
+export function amendCommit(
+  workspaceId: string,
+  expectedHead: string,
+  message?: string,
+): Promise<void> {
+  return invoke("git_amend_commit", { workspaceId, expectedHead, message });
+}
+
+// soft — двигает только ветку, mixed — ещё и индекс, hard — и файлы на диске.
+export type GitResetMode = "soft" | "mixed" | "hard";
+
+export function resetToCommit(
+  workspaceId: string,
+  hash: string,
+  mode: GitResetMode,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_reset_to_commit", {
+    workspaceId,
+    hash,
+    mode,
+    expectedHead,
+  });
+}
+
+// squash объединяет оба сообщения, fixup оставляет сообщение родителя.
+export type GitSquashMode = "squash" | "fixup";
+
+export function squashCommit(
+  workspaceId: string,
+  hash: string,
+  mode: GitSquashMode,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_squash_commit", {
+    workspaceId,
+    hash,
+    mode,
+    expectedHead,
+  });
+}
+
+export function dropCommit(
+  workspaceId: string,
+  hash: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_drop_commit", { workspaceId, hash, expectedHead });
+}
+
 // Забрать с сервера (ff-only) и отправить локальные коммиты. Обе — сетевые,
 // без интерактивного запроса пароля: при необходимости авторизации падают с
 // ошибкой, а не виснут.

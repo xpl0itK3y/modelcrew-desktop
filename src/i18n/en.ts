@@ -58,6 +58,28 @@ export const en: Record<MessageKey, string> = {
   "git.actionUncommit": "Undo last local commit",
   "git.actionUncommitConfirm":
     "Remove the last local commit from history? Its changes will remain staged and ready to commit again.",
+  "git.actionAmend": "Add changes to the last commit",
+  "git.actionAmendConfirm":
+    "Add the staged changes to the last commit? Unstaged changes stay untouched.",
+  "git.actionSquash": "Combine with the previous commit",
+  "git.actionSquashConfirm":
+    "Combine this commit with the previous one? Both messages are kept and the content stays the same.",
+  "git.actionFixup": "Merge into the previous commit",
+  "git.actionFixupConfirm":
+    "Combine this commit with the previous one, keeping only the previous message?",
+  "git.actionDrop": "Remove commit from history",
+  "git.actionDropConfirm":
+    "Remove this commit from history? Newer commits are replayed on top and the working folder must be clean.",
+  "git.actionResetHere": "Move the branch here",
+  "git.actionResetSoft": "Keep changes staged",
+  "git.actionResetSoftConfirm":
+    "Move the branch to this commit? Everything from the newer commits stays staged.",
+  "git.actionResetMixed": "Keep changes in the files",
+  "git.actionResetMixedConfirm":
+    "Move the branch to this commit? The changes stay in your files but are no longer staged.",
+  "git.actionResetHard": "Discard every change",
+  "git.actionResetHardConfirm":
+    "Move the branch to this commit and delete every newer change together with unsaved work? The commits stay in the reflog.",
   "git.actionConfirm": "Continue",
   "git.actionReword": "Edit message",
   "git.rewordHint": "First line is the subject, the rest is the description. ⌘/Ctrl+Enter to save, Esc to cancel.",
@@ -459,6 +481,12 @@ export const en: Record<MessageKey, string> = {
     "Git deleted the branch but its result could not be verified. Refresh the branch list before continuing",
   "error.gitBranchBackupFailed":
     "Could not create a recovery point for branch “{branch}”, so it was not deleted",
+  "error.gitDirtyTree":
+    "Commit or discard your current changes first — this action needs a clean working folder",
+  "error.gitReplayConflict":
+    "The newer commits cannot be replayed automatically: their changes conflict. Redo this in the terminal",
+  "error.gitTooOld":
+    "The installed Git is too old for this action — update Git to 2.38 or newer",
   "error.gitDetachedHead": "This action is unavailable while HEAD is detached",
   "error.gitCommitNotHead": "This commit is no longer the branch tip",
   "error.gitCommitCannotUncommit":
