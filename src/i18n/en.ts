@@ -80,6 +80,17 @@ export const en: Record<MessageKey, string> = {
   "git.actionResetHard": "Discard every change",
   "git.actionResetHardConfirm":
     "Move the branch to this commit and delete every newer change together with unsaved work? The commits stay in the reflog.",
+  "git.actionCopyPatch": "Copy patch",
+  "git.actionSavePatch": "Save patch to a file…",
+  "git.actionOpenGithub": "Open on GitHub",
+  "git.actionOpenGithubMissing":
+    "Cannot build the link: this repository has no GitHub remote",
+  "git.tagCreate": "Create tag…",
+  "git.tagCreateGo": "Create",
+  "git.tagName": "tag name",
+  "git.tagDelete": "Delete tag ‘{name}’",
+  "git.tagDeleteConfirm":
+    "Delete the local tag ‘{name}’? The tag on the server stays.",
   "git.actionConfirm": "Continue",
   "git.actionReword": "Edit message",
   "git.rewordHint": "First line is the subject, the rest is the description. ⌘/Ctrl+Enter to save, Esc to cancel.",
@@ -487,6 +498,9 @@ export const en: Record<MessageKey, string> = {
     "The newer commits cannot be replayed automatically: their changes conflict. Redo this in the terminal",
   "error.gitTooOld":
     "The installed Git is too old for this action — update Git to 2.38 or newer",
+  "error.gitTagInvalid": "‘{tag}’ is not a valid tag name",
+  "error.gitTagExists": "Tag ‘{tag}’ already exists",
+  "error.gitTagMissing": "Tag ‘{tag}’ was not found",
   "error.gitDetachedHead": "This action is unavailable while HEAD is detached",
   "error.gitCommitNotHead": "This commit is no longer the branch tip",
   "error.gitCommitCannotUncommit":

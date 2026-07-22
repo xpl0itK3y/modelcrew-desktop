@@ -14,8 +14,11 @@ import {
   authorAvatar,
   commitAction,
   commitAll,
+  commitPatch,
   createBranch,
+  createTag,
   deleteBranch,
+  deleteTag,
   dropCommit,
   fetchBranches,
   fetchCommitFiles,
@@ -23,6 +26,7 @@ import {
   fetchLog,
   formatRelativeTime,
   getGitSummary,
+  githubCommitUrl,
   gitPull,
   gitPullRebase,
   gitPush,
@@ -35,6 +39,7 @@ import {
   resolveAvatarUrl,
   revertFile,
   rewordCommit,
+  saveCommitPatch,
   squashCommit,
   subscribeGitChanges,
   switchBranch,
@@ -49,6 +54,7 @@ import {
   type GitRefKind,
   type GitResetMode,
 } from "../git/gitChanges";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { computeCommitGraph } from "../git/commitGraph";
@@ -1056,9 +1062,14 @@ function CommitActionsMenu(props: {
   const canReset = onBranch && !props.commit.isHead;
   const isMerge = props.commit.parents.length > 1;
   const [confirm, setConfirm] = useState<null | CommitMenuAction>(null);
-  const [branching, setBranching] = useState(false);
-  const [branchName, setBranchName] = useState("");
-  const [copied, setCopied] = useState<null | "hash" | "message">(null);
+  // Ветка и тег вводят имя в одном и том же поле меню.
+  const [naming, setNaming] = useState<null | "branch" | "tag">(null);
+  const [nameValue, setNameValue] = useState("");
+  const [deletingTag, setDeletingTag] = useState<string | null>(null);
+  const [copied, setCopied] = useState<null | "hash" | "message" | "patch">(
+    null,
+  );
+  const tags = props.commit.refDetails.filter((ref) => ref.kind === "tag");
 
   // Закрытие по клику вне и по Esc.
   useEffect(() => {
@@ -1080,7 +1091,10 @@ function CommitActionsMenu(props: {
     };
   }, [props]);
 
-  const run = async (action: CommitMenuAction | "branch", name?: string) => {
+  const run = async (
+    action: CommitMenuAction | "branch" | "tag" | "deleteTag",
+    name?: string,
+  ) => {
     setBusy(true);
     const hash = props.commit.hash;
     const head = props.headHash ?? "";
@@ -1093,6 +1107,10 @@ function CommitActionsMenu(props: {
         await dropCommit(props.workspaceId, hash, head);
       } else if (action in RESET_MODES) {
         await resetToCommit(props.workspaceId, hash, RESET_MODES[action], head);
+      } else if (action === "tag") {
+        await createTag(props.workspaceId, name ?? "", hash);
+      } else if (action === "deleteTag") {
+        await deleteTag(props.workspaceId, name ?? "");
       } else {
         await commitAction(props.workspaceId, action as CommitAction, hash, name);
       }
@@ -1107,14 +1125,52 @@ function CommitActionsMenu(props: {
     }
   };
 
-  const copy = async (kind: "hash" | "message") => {
-    const text =
-      kind === "hash" ? props.commit.hash : fullCommitMessage(props.commit);
+  const copy = async (kind: "hash" | "message" | "patch") => {
     try {
+      const text =
+        kind === "hash"
+          ? props.commit.hash
+          : kind === "message"
+            ? fullCommitMessage(props.commit)
+            : await commitPatch(props.workspaceId, props.commit.hash);
       await navigator.clipboard.writeText(text);
       setCopied(kind);
       window.setTimeout(() => props.onClose(), 650);
-    } catch {
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+      props.onClose();
+    }
+  };
+
+  const savePatch = async () => {
+    setBusy(true);
+    try {
+      await saveCommitPatch(
+        props.workspaceId,
+        props.commit.hash,
+        `${props.commit.shortHash}.patch`,
+      );
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
+      props.onClose();
+    }
+  };
+
+  const openOnGithub = async () => {
+    setBusy(true);
+    try {
+      const url = await githubCommitUrl(props.workspaceId, props.commit.hash);
+      if (url) {
+        await openUrl(url);
+      } else {
+        props.onError(t("git.actionOpenGithubMissing"));
+      }
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
       props.onClose();
     }
   };
@@ -1128,35 +1184,66 @@ function CommitActionsMenu(props: {
 
   return (
     <div ref={ref} className="git-actions-menu" role="menu" style={style}>
-      {branching ? (
+      {naming ? (
         <div className="git-actions-branch">
           <input
             autoFocus
             className="git-actions-input"
-            placeholder={t("git.actionBranchName")}
-            value={branchName}
+            aria-label={
+              naming === "branch" ? t("git.actionBranchName") : t("git.tagName")
+            }
+            placeholder={
+              naming === "branch" ? t("git.actionBranchName") : t("git.tagName")
+            }
+            value={nameValue}
             spellCheck={false}
             disabled={busy}
-            onChange={(event) => setBranchName(event.target.value)}
+            onChange={(event) => setNameValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) {
                 return;
               }
-              if (event.key === "Enter" && branchName.trim()) {
-                void run("branch", branchName.trim());
+              if (event.key === "Enter" && nameValue.trim()) {
+                void run(naming, nameValue.trim());
               } else if (event.key === "Escape") {
-                setBranching(false);
+                setNaming(null);
               }
             }}
           />
           <button
             type="button"
             className="git-actions-go"
-            disabled={busy || !branchName.trim()}
-            onClick={() => void run("branch", branchName.trim())}
+            disabled={busy || !nameValue.trim()}
+            onClick={() => void run(naming, nameValue.trim())}
           >
-            {t("git.actionBranchCreate")}
+            {naming === "branch"
+              ? t("git.actionBranchCreate")
+              : t("git.tagCreateGo")}
           </button>
+        </div>
+      ) : deletingTag ? (
+        <div className="git-actions-confirm">
+          <span className="git-actions-confirm-text">
+            {t("git.tagDeleteConfirm", { name: deletingTag })}
+          </span>
+          <div className="git-actions-confirm-row">
+            <button
+              type="button"
+              className="git-actions-cancel"
+              disabled={busy}
+              onClick={() => setDeletingTag(null)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className="git-actions-danger"
+              disabled={busy}
+              onClick={() => void run("deleteTag", deletingTag)}
+            >
+              {t("git.actionConfirm")}
+            </button>
+          </div>
         </div>
       ) : confirm ? (
         <div className="git-actions-confirm">
@@ -1201,6 +1288,33 @@ function CommitActionsMenu(props: {
             {copied === "message"
               ? t("git.copied")
               : t("git.actionCopyMessage")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => void copy("patch")}
+          >
+            {copied === "patch" ? t("git.copied") : t("git.actionCopyPatch")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => void savePatch()}
+          >
+            {t("git.actionSavePatch")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => void openOnGithub()}
+          >
+            {t("git.actionOpenGithub")}
           </button>
           {canReword && (
             <button
@@ -1254,10 +1368,37 @@ function CommitActionsMenu(props: {
             role="menuitem"
             className="git-actions-item"
             disabled={busy}
-            onClick={() => setBranching(true)}
+            onClick={() => {
+              setNaming("branch");
+              setNameValue("");
+            }}
           >
             {t("git.actionBranch")}
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            disabled={busy}
+            onClick={() => {
+              setNaming("tag");
+              setNameValue("");
+            }}
+          >
+            {t("git.tagCreate")}
+          </button>
+          {tags.map((tag) => (
+            <button
+              key={tag.fullName}
+              type="button"
+              role="menuitem"
+              className="git-actions-item is-danger"
+              disabled={busy}
+              onClick={() => setDeletingTag(tag.name)}
+            >
+              {t("git.tagDelete", { name: tag.name })}
+            </button>
+          ))}
           <button
             type="button"
             role="menuitem"

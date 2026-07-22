@@ -79,6 +79,17 @@ export const ru = {
   "git.actionResetHard": "Стереть все правки",
   "git.actionResetHardConfirm":
     "Перенести ветку на этот коммит и удалить все более новые изменения вместе с несохранённой работой? Коммиты останутся в reflog.",
+  "git.actionCopyPatch": "Скопировать патч",
+  "git.actionSavePatch": "Сохранить патч в файл…",
+  "git.actionOpenGithub": "Открыть на GitHub",
+  "git.actionOpenGithubMissing":
+    "Не удалось составить ссылку: у репозитория нет remote на GitHub",
+  "git.tagCreate": "Создать тег…",
+  "git.tagCreateGo": "Создать",
+  "git.tagName": "имя тега",
+  "git.tagDelete": "Удалить тег «{name}»",
+  "git.tagDeleteConfirm":
+    "Удалить локальный тег «{name}»? Тег на сервере останется.",
   "git.actionConfirm": "Продолжить",
   "git.actionReword": "Изменить сообщение",
   "git.rewordHint": "Первая строка — заголовок, дальше — описание. ⌘/Ctrl+Enter — сохранить, Esc — отмена.",
@@ -482,6 +493,9 @@ export const ru = {
     "Более новые коммиты не переносятся автоматически: изменения конфликтуют. Выполните перенос вручную в терминале",
   "error.gitTooOld":
     "Установленная версия Git слишком старая для этой операции — обновите Git до 2.38 или новее",
+  "error.gitTagInvalid": "«{tag}» — недопустимое имя тега",
+  "error.gitTagExists": "Тег «{tag}» уже существует",
+  "error.gitTagMissing": "Тег «{tag}» не найден",
   "error.gitDetachedHead": "Действие недоступно при отделённом HEAD",
   "error.gitCommitNotHead": "Этот коммит уже не является вершиной ветки",
   "error.gitCommitCannotUncommit":

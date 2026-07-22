@@ -27,6 +27,12 @@ const mocks = vi.hoisted(() => ({
   squashCommit: vi.fn(async () => {}),
   dropCommit: vi.fn(async () => {}),
   resetToCommit: vi.fn(async () => {}),
+  createTag: vi.fn(async () => {}),
+  deleteTag: vi.fn(async () => {}),
+  commitPatch: vi.fn(async () => "PATCH BODY"),
+  saveCommitPatch: vi.fn(async () => true),
+  githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
+  openUrl: vi.fn(async () => {}),
   writeClipboard: vi.fn(async () => {}),
   fetchBranches: vi.fn<() => Promise<GitBranchInfo[]>>(async () => []),
   fetchLog: vi.fn<() => Promise<GitCommitInfo[]>>(async () => []),
@@ -64,11 +70,18 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     squashCommit: mocks.squashCommit,
     dropCommit: mocks.dropCommit,
     resetToCommit: mocks.resetToCommit,
+    createTag: mocks.createTag,
+    deleteTag: mocks.deleteTag,
+    commitPatch: mocks.commitPatch,
+    saveCommitPatch: mocks.saveCommitPatch,
+    githubCommitUrl: mocks.githubCommitUrl,
     fetchBranches: mocks.fetchBranches,
     fetchLog: mocks.fetchLog,
     refreshGitChanges: mocks.refreshGitChanges,
   };
 });
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
 
 vi.mock("../git/githubAvatars", () => ({
   githubAvatarForEmail: () => null,
@@ -116,6 +129,26 @@ beforeEach(() => {
 });
 
 afterEach(() => setLocale("ru"));
+
+function taggableCommit(): GitCommitInfo {
+  return {
+    hash: "9999999999999999999999999999999999999999",
+    shortHash: "9999999",
+    subject: "tag me",
+    author: "Denis",
+    authorEmail: "denis@example.com",
+    epochMs: Date.now(),
+    unpushed: false,
+    localOnly: false,
+    editable: false,
+    isHead: false,
+    parents: ["5555555555555555555555555555555555555555"],
+    refs: [],
+    refDetails: [],
+    remoteRefs: [],
+    fullMessage: "tag me",
+  };
+}
 
 describe("GitChangesView workspace lifecycle", () => {
   it("keeps a separate draft per project while preserving the selected tab", () => {
@@ -428,6 +461,58 @@ describe("GitChangesView workspace lifecycle", () => {
     expect(
       screen.getByRole("menuitem", { name: "Откатить этот коммит" }),
     ).toBeInTheDocument();
+  });
+
+  it("tags the commit the menu was opened on", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Создать тег…" }));
+    fireEvent.change(screen.getByLabelText("имя тега"), {
+      target: { value: "v2.0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() =>
+      expect(mocks.createTag).toHaveBeenCalledWith(
+        "project-a",
+        "v2.0",
+        "9999999999999999999999999999999999999999",
+      ),
+    );
+  });
+
+  it("explains that a commit link needs a GitHub remote", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    mocks.githubCommitUrl.mockResolvedValue(null);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Открыть на GitHub" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "нет remote на GitHub",
+    );
+    expect(mocks.openUrl).not.toHaveBeenCalled();
+  });
+
+  it("opens the commit page when the repository lives on GitHub", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    mocks.githubCommitUrl.mockResolvedValue("https://github.com/o/r/commit/9");
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Открыть на GitHub" }));
+
+    await waitFor(() =>
+      expect(mocks.openUrl).toHaveBeenCalledWith(
+        "https://github.com/o/r/commit/9",
+      ),
+    );
   });
 
   it("copies the exact full message without reordering mixed trailers", async () => {

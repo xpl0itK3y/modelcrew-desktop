@@ -437,6 +437,50 @@ export function dropCommit(
   return invoke("git_drop_commit", { workspaceId, hash, expectedHead });
 }
 
+// Локальные теги. Тег на сервере не трогаем: это уже общий репозиторий.
+export function createTag(
+  workspaceId: string,
+  name: string,
+  hash: string,
+  message?: string,
+): Promise<void> {
+  return invoke("git_create_tag", { workspaceId, name, hash, message });
+}
+
+export function deleteTag(workspaceId: string, name: string): Promise<void> {
+  return invoke("git_delete_tag", { workspaceId, name });
+}
+
+// Патч коммита в формате `git format-patch` — его принимает `git am`.
+export function commitPatch(
+  workspaceId: string,
+  hash: string,
+): Promise<string> {
+  return invoke<string>("git_commit_patch", { workspaceId, hash });
+}
+
+// false означает, что диалог сохранения закрыли без выбора файла.
+export function saveCommitPatch(
+  workspaceId: string,
+  hash: string,
+  fileName: string,
+): Promise<boolean> {
+  return invoke<boolean>("git_save_commit_patch", {
+    workspaceId,
+    hash,
+    fileName,
+  });
+}
+
+// Ссылка на коммит на GitHub; null — репозиторий не связан с GitHub. Команда
+// живёт в модуле авторизации, но нужна именно панели истории.
+export function githubCommitUrl(
+  workspaceId: string,
+  hash: string,
+): Promise<string | null> {
+  return invoke<string | null>("github_commit_url", { workspaceId, hash });
+}
+
 // Забрать с сервера (ff-only) и отправить локальные коммиты. Обе — сетевые,
 // без интерактивного запроса пароля: при необходимости авторизации падают с
 // ошибкой, а не виснут.
