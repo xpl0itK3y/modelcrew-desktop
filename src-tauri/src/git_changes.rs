@@ -38,6 +38,10 @@ pub struct GitChangesSummary {
     pub head_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream_ref: Option<String>,
+    // Куда вернуться с отделённого HEAD: ветка, на которой мы были до этого.
+    // Заполняется только при detached HEAD и только если ветка ещё жива.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ahead: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,6 +56,7 @@ impl GitChangesSummary {
             branch: None,
             head_hash: None,
             upstream_ref: None,
+            previous_branch: None,
             ahead: None,
             behind: None,
             files: Vec::new(),
@@ -367,11 +372,26 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
         .collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
 
+    // На отделённом HEAD подсказываем, куда вернуться: `@{-1}` — предыдущий
+    // checkout. Если это была не ветка или её уже удалили, подсказки нет.
+    let previous_branch = status.branch.is_none().then(|| {
+        run_git(&toplevel, &["rev-parse", "--symbolic-full-name", "@{-1}"])
+            .ok()
+            .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+            .and_then(|reference| {
+                reference
+                    .strip_prefix("refs/heads/")
+                    .map(str::to_owned)
+                    .filter(|name| local_branch_exists(&toplevel, name))
+            })
+    });
+
     Ok(GitChangesSummary {
         is_repo: true,
         branch: status.branch,
         head_hash: status.head_hash,
         upstream_ref: status.upstream_ref,
+        previous_branch: previous_branch.flatten(),
         ahead: status.ahead,
         behind: status.behind,
         files,
@@ -2978,6 +2998,222 @@ pub fn drop_commit(root: &Path, hash: &str, expected_head: &str) -> CommandResul
     // выполнением появились правки, которые пришлось бы затереть.
     ensure_history_snapshot(&toplevel, expected_head)?;
     run_git(&toplevel, &["reset", "--keep", &format!("{tip}^{{commit}}")]).map(|_| ())
+}
+
+// ---------- Слияние, перенос и публикация ветки ----------
+
+// Сообщение слияния строим сами: git, получив полное имя ref, вписал бы в него
+// «refs/heads/topic» вместо привычного «topic». Заодно это отсекает ссылки,
+// которые сливать из панели нельзя.
+fn merge_message(reference: &str) -> Option<String> {
+    if let Some(name) = reference.strip_prefix("refs/heads/") {
+        return Some(format!("Merge branch '{name}'"));
+    }
+    if let Some(name) = reference.strip_prefix("refs/remotes/") {
+        return Some(format!("Merge remote-tracking branch '{name}'"));
+    }
+    reference
+        .strip_prefix("refs/tags/")
+        .map(|name| format!("Merge tag '{name}'"))
+}
+
+// Полное имя ref, существующее в этом репозитории. Только полные имена: по
+// короткому «origin/main» git мог бы выбрать одноимённую локальную ветку.
+fn existing_ref(root: &Path, reference: &str) -> CommandResult<()> {
+    if !reference.starts_with("refs/") || run_git(root, &["check-ref-format", reference]).is_err() {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "branch-invalid")
+            .with_context("branch", reference));
+    }
+    run_git(root, &["show-ref", "--verify", "--quiet", reference])
+        .map(|_| ())
+        .map_err(|_| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "branch-missing")
+                .with_context("branch", reference)
+        })
+}
+
+// Незавершённая операция после нашей команды означает конфликт: Git оставил
+// стандартное состояние, которое пользователь разрешит сам. Ничего не
+// откатываем — параллельный клиент мог начать свою операцию.
+fn conflict_or(root: &Path, result: CommandResult<Vec<u8>>, reason: &str) -> CommandResult<()> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if repository_operation_in_progress(root)? {
+                return Err(
+                    CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", reason)
+                );
+            }
+            Err(error)
+        }
+    }
+}
+
+// Вливает ветку, серверную ссылку или тег в текущую ветку.
+pub fn merge_ref(
+    root: &Path,
+    reference: &str,
+    expected_branch: &str,
+    expected_head: &str,
+    no_ff: bool,
+) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    let Some(message) = merge_message(reference) else {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "ref-kind-invalid")
+        );
+    };
+    existing_ref(&toplevel, reference)?;
+    let mut args = vec!["merge", "--no-edit", "-m", message.as_str()];
+    if no_ff {
+        args.push("--no-ff");
+    }
+    args.push(reference);
+    conflict_or(&toplevel, run_git(&toplevel, &args), "merge-conflict")
+}
+
+// Переносит коммиты текущей ветки поверх выбранной. Грязное дерево git
+// отвергнет сам, конфликт оставит штатное состояние rebase.
+pub fn rebase_onto(
+    root: &Path,
+    reference: &str,
+    expected_branch: &str,
+    expected_head: &str,
+) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    if merge_message(reference).is_none() {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "ref-kind-invalid")
+        );
+    }
+    existing_ref(&toplevel, reference)?;
+    conflict_or(
+        &toplevel,
+        run_git(&toplevel, &["rebase", reference]),
+        "rebase-conflict",
+    )
+}
+
+// Отправляет ещё не опубликованную ветку на сервер и привязывает её к
+// созданной серверной ветке, чтобы дальше работали обычные ↑/↓.
+pub fn publish_branch(
+    root: &Path,
+    expected_branch: &str,
+    expected_head: &str,
+    remote: Option<&str>,
+) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
+    if upstream_target_for_branch(&toplevel, expected_branch).is_ok() {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "upstream-exists")
+        );
+    }
+    let remotes = remote_names(&toplevel)?;
+    let remote = match remote.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) if remotes.iter().any(|known| known == name) => name.to_owned(),
+        Some(name) => {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "remote-missing")
+                .with_context("remote", name));
+        }
+        // Без явного выбора берём origin, а при единственном remote — его.
+        None if remotes.iter().any(|name| name == "origin") => "origin".to_owned(),
+        None if remotes.len() == 1 => remotes[0].clone(),
+        None => {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "remote-ambiguous"));
+        }
+    };
+
+    // Отправляем ровно подтверждённый коммит: параллельный коммит из терминала
+    // не уедет на сервер незаметно для пользователя.
+    let refspec = format!("{expected_head}^{{commit}}:refs/heads/{expected_branch}");
+    run_git_network(&toplevel, &["push", "--quiet", &remote, &refspec])?;
+    let tracking = format!("refs/remotes/{remote}/{expected_branch}");
+    run_git(
+        &toplevel,
+        &["branch", "--set-upstream-to", &tracking, expected_branch],
+    )
+    .map(|_| ())
+    .map_err(|error| {
+        // Push уже прошёл, поэтому это не «не удалось опубликовать», а «не
+        // удалось связать»: сообщение должно отличаться.
+        CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "published-untracked")
+            .with_debug(format!("{error:?}"))
+    })
+}
+
+#[tauri::command]
+pub async fn git_merge_ref(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    reference: String,
+    expected_branch: String,
+    expected_head: String,
+    no_ff: Option<bool>,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        merge_ref(
+            &root,
+            &reference,
+            &expected_branch,
+            &expected_head,
+            no_ff.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_rebase_onto(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    reference: String,
+    expected_branch: String,
+    expected_head: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        rebase_onto(&root, &reference, &expected_branch, &expected_head)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_publish_branch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    expected_branch: String,
+    expected_head: String,
+    remote: Option<String>,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        publish_branch(&root, &expected_branch, &expected_head, remote.as_deref())
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Сравнение двух состояний ----------
@@ -5994,6 +6230,169 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             },
         )
         .is_err());
+    }
+
+    #[test]
+    fn merges_and_rebases_by_exact_ref() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        git(&["checkout", "--quiet", "-b", "topic"]);
+        std::fs::write(root.join("b.txt"), "topic\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "topic work"]);
+        git(&["checkout", "--quiet", "main"]);
+        std::fs::write(root.join("c.txt"), "main\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "main work"]);
+        let head = head_of(&git);
+
+        merge_ref(root, "refs/heads/topic", "main", &head, false).unwrap();
+        // Сообщение должно быть привычным, без «refs/heads/» внутри.
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["log", "-1", "--format=%s"])).trim(),
+            "Merge branch 'topic'"
+        );
+        assert!(root.join("b.txt").exists());
+
+        // Подтверждение относится к конкретной вершине.
+        assert_eq!(
+            merge_ref(root, "refs/heads/topic", "main", &head, false)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("head-moved")
+        );
+        // Короткое имя не принимаем: оно неоднозначно.
+        assert_eq!(
+            merge_ref(root, "topic", "main", &head_of(&git), false)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("ref-kind-invalid")
+        );
+        assert_eq!(
+            merge_ref(root, "refs/heads/gone", "main", &head_of(&git), false)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("branch-missing")
+        );
+
+        // Rebase переносит коммиты ветки поверх выбранной.
+        git(&["checkout", "--quiet", "-b", "feature", "refs/heads/topic"]);
+        std::fs::write(root.join("d.txt"), "feature\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "feature work"]);
+        let feature_head = head_of(&git);
+        rebase_onto(root, "refs/heads/main", "feature", &feature_head).unwrap();
+        let subjects = String::from_utf8_lossy(&git(&["log", "--format=%s"])).into_owned();
+        assert!(subjects.starts_with("feature work\n"));
+        assert!(subjects.contains("Merge branch 'topic'"));
+    }
+
+    #[test]
+    fn keeps_a_conflicted_merge_for_the_user_to_resolve() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "base\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "base"]);
+        git(&["checkout", "--quiet", "-b", "other"]);
+        std::fs::write(root.join("a.txt"), "theirs\n").unwrap();
+        git(&["commit", "--quiet", "-am", "theirs"]);
+        git(&["checkout", "--quiet", "main"]);
+        std::fs::write(root.join("a.txt"), "ours\n").unwrap();
+        git(&["commit", "--quiet", "-am", "ours"]);
+        let head = head_of(&git);
+
+        let error = merge_ref(root, "refs/heads/other", "main", &head, false).unwrap_err();
+        assert_eq!(
+            error.context.get("reason").map(String::as_str),
+            Some("merge-conflict")
+        );
+        // Незавершённое слияние остаётся на месте: решает пользователь.
+        assert!(root.join(".git/MERGE_HEAD").exists());
+        // Пока конфликт не разрешён, другие операции не вмешиваются.
+        assert_eq!(
+            merge_ref(root, "refs/heads/other", "main", &head, false)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("operation-in-progress")
+        );
+    }
+
+    #[test]
+    fn publishes_a_branch_that_has_no_upstream_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("server.git");
+        let init = Command::new("git")
+            .args(["init", "--quiet", "--bare", bare.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+
+        let work = dir.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let root = work.as_path();
+        let git = history_repo(root);
+        git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        let head = head_of(&git);
+
+        // До публикации upstream нет, поэтому сравнивать с сервером нечего.
+        assert!(collect_summary(root).unwrap().upstream_ref.is_none());
+        publish_branch(root, "main", &head, None).unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(summary.upstream_ref.as_deref(), Some("origin/main"));
+        assert_eq!(summary.ahead, Some(0));
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "refs/remotes/origin/main"])).trim(),
+            head
+        );
+        // Повторная публикация уже связанной ветки — не то, что нужно делать.
+        assert_eq!(
+            publish_branch(root, "main", &head, None)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("upstream-exists")
+        );
+    }
+
+    #[test]
+    fn points_back_to_the_branch_left_behind_by_a_detached_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&["commit", "--quiet", "-am", "second"]);
+        assert!(collect_summary(root).unwrap().previous_branch.is_none());
+
+        let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD~1"]))
+            .trim()
+            .to_owned();
+        commit_action(root, "checkout", &first, None).unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        assert!(summary.branch.is_none());
+        assert_eq!(summary.previous_branch.as_deref(), Some("main"));
     }
 
     #[test]
