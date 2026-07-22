@@ -32,6 +32,15 @@ const mocks = vi.hoisted(() => ({
   commitPatch: vi.fn(async () => "PATCH BODY"),
   saveCommitPatch: vi.fn(async () => true),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
+  compareFiles: vi.fn(async () => [
+    { path: "src/a.ts", additions: 3, deletions: 1 },
+  ]),
+  compareFileDiff: vi.fn(async () => ({
+    path: "src/a.ts",
+    isBinary: false,
+    truncated: false,
+    diff: "@@ -1 +1,2 @@\n one\n+two\n",
+  })),
   openUrl: vi.fn(async () => {}),
   writeClipboard: vi.fn(async () => {}),
   fetchBranches: vi.fn<() => Promise<GitBranchInfo[]>>(async () => []),
@@ -75,6 +84,8 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     commitPatch: mocks.commitPatch,
     saveCommitPatch: mocks.saveCommitPatch,
     githubCommitUrl: mocks.githubCommitUrl,
+    compareFiles: mocks.compareFiles,
+    compareFileDiff: mocks.compareFileDiff,
     fetchBranches: mocks.fetchBranches,
     fetchLog: mocks.fetchLog,
     refreshGitChanges: mocks.refreshGitChanges,
@@ -495,6 +506,48 @@ describe("GitChangesView workspace lifecycle", () => {
       ),
     );
     expect(screen.getByRole("button", { name: "Граф" })).toBeEnabled();
+  });
+
+  it("compares two marked commits and shows the file diff", async () => {
+    const older = taggableCommit();
+    const newer = {
+      ...taggableCommit(),
+      hash: "1111111111111111111111111111111111111111",
+      shortHash: "1111111",
+      subject: "newer",
+      fullMessage: "newer",
+    };
+    mocks.fetchLog.mockResolvedValue([newer, older]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    const menus = await screen.findAllByTitle("Действия над коммитом");
+    fireEvent.click(menus[1]);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Отметить для сравнения" }),
+    );
+    fireEvent.click(screen.getAllByTitle("Действия над коммитом")[0]);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Сравнить с 9999999" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.compareFiles).toHaveBeenCalledWith(
+        "project-a",
+        older.hash,
+        newer.hash,
+      ),
+    );
+    fireEvent.click(await screen.findByText("src/a.ts"));
+    await waitFor(() =>
+      expect(mocks.compareFileDiff).toHaveBeenCalledWith(
+        "project-a",
+        older.hash,
+        "src/a.ts",
+        newer.hash,
+      ),
+    );
+    expect(await screen.findByText("+two".slice(1))).toBeInTheDocument();
   });
 
   it("tags the commit the menu was opened on", async () => {

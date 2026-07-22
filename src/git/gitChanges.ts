@@ -451,6 +451,33 @@ export function dropCommit(
   return invoke("git_drop_commit", { workspaceId, hash, expectedHead });
 }
 
+// Сравнение двух состояний. `to` не задан — сравниваем с рабочей папкой.
+export function compareFiles(
+  workspaceId: string,
+  from: string,
+  to?: string,
+): Promise<GitCommitFile[]> {
+  return invoke<GitCommitFile[]>("git_compare_files", {
+    workspaceId,
+    from,
+    to,
+  });
+}
+
+export function compareFileDiff(
+  workspaceId: string,
+  from: string,
+  path: string,
+  to?: string,
+): Promise<GitFileDiff> {
+  return invoke<GitFileDiff>("git_compare_file_diff", {
+    workspaceId,
+    from,
+    to,
+    path,
+  });
+}
+
 // Локальные теги. Тег на сервере не трогаем: это уже общий репозиторий.
 export function createTag(
   workspaceId: string,

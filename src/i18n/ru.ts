@@ -90,6 +90,13 @@ export const ru = {
   "git.tagDelete": "Удалить тег «{name}»",
   "git.tagDeleteConfirm":
     "Удалить локальный тег «{name}»? Тег на сервере останется.",
+  "git.compareTitle": "Сравнение",
+  "git.compareWorkingTree": "рабочая папка",
+  "git.compareIdentical": "Различий нет",
+  "git.compareWithWorkingTree": "Сравнить с рабочей папкой",
+  "git.compareMark": "Отметить для сравнения",
+  "git.compareUnmark": "Снять отметку сравнения",
+  "git.compareWithMarked": "Сравнить с {name}",
   "git.actionConfirm": "Продолжить",
   "git.actionReword": "Изменить сообщение",
   "git.rewordHint": "Первая строка — заголовок, дальше — описание. ⌘/Ctrl+Enter — сохранить, Esc — отмена.",

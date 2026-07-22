@@ -91,6 +91,13 @@ export const en: Record<MessageKey, string> = {
   "git.tagDelete": "Delete tag ‘{name}’",
   "git.tagDeleteConfirm":
     "Delete the local tag ‘{name}’? The tag on the server stays.",
+  "git.compareTitle": "Comparison",
+  "git.compareWorkingTree": "working folder",
+  "git.compareIdentical": "No differences",
+  "git.compareWithWorkingTree": "Compare with the working folder",
+  "git.compareMark": "Mark for comparison",
+  "git.compareUnmark": "Clear the comparison mark",
+  "git.compareWithMarked": "Compare with {name}",
   "git.actionConfirm": "Continue",
   "git.actionReword": "Edit message",
   "git.rewordHint": "First line is the subject, the rest is the description. ⌘/Ctrl+Enter to save, Esc to cancel.",

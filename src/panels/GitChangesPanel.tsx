@@ -15,6 +15,8 @@ import {
   commitAction,
   commitAll,
   commitPatch,
+  compareFileDiff,
+  compareFiles,
   createBranch,
   createTag,
   deleteBranch,
@@ -998,6 +1000,181 @@ function CommitDetails(props: {
 // cherry-pick, revert и безопасная отмена последнего локального коммита.
 // Открывается по ⋯ или правому клику; опасные действия требуют подтверждения
 // прямо в меню, ветка — ввода имени.
+
+// Сравнение двух состояний: коммит с коммитом или коммит с рабочей папкой.
+// Только чтение: править файлы историческим diff-ом было бы неоднозначно.
+function CompareView(props: {
+  workspaceId: string;
+  from: GitCommitInfo;
+  // null — текущая рабочая папка.
+  to: GitCommitInfo | null;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [files, setFiles] = useState<GitCommitFile[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [openPath, setOpenPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    compareFiles(props.workspaceId, props.from.hash, props.to?.hash)
+      .then((next) => {
+        if (!cancelled) {
+          setFiles(next);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.workspaceId, props.from.hash, props.to?.hash]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [props]);
+
+  const target = props.to?.shortHash ?? t("git.compareWorkingTree");
+  return (
+    <div className="git-reword-backdrop" onPointerDown={props.onClose}>
+      <div
+        className="git-compare"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("git.compareTitle")}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="git-reword-title">
+          {t("git.compareTitle")}
+          <span className="git-reword-hash">
+            {props.from.shortHash} → {target}
+          </span>
+        </div>
+        {failed ? (
+          <div className="git-diff-note">{t("git.diffUnavailable")}</div>
+        ) : !files ? (
+          <div className="git-diff-note">{t("git.diffLoading")}</div>
+        ) : files.length === 0 ? (
+          <div className="git-diff-note">{t("git.compareIdentical")}</div>
+        ) : (
+          <div className="git-compare-files">
+            {files.map((file) => (
+              <div key={file.path} className="git-compare-file">
+                <button
+                  type="button"
+                  className="git-compare-row"
+                  aria-expanded={openPath === file.path}
+                  onClick={() =>
+                    setOpenPath(openPath === file.path ? null : file.path)
+                  }
+                >
+                  <span className="git-compare-path">{file.path}</span>
+                  <span className="git-file-counts">
+                    <span className="git-count-add">+{file.additions ?? 0}</span>
+                    <span className="git-count-del">−{file.deletions ?? 0}</span>
+                  </span>
+                </button>
+                {openPath === file.path && (
+                  <CompareFileDiff
+                    workspaceId={props.workspaceId}
+                    from={props.from.hash}
+                    to={props.to?.hash}
+                    path={file.path}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="git-reword-row">
+          <button
+            type="button"
+            className="git-actions-cancel"
+            onClick={props.onClose}
+          >
+            {t("common.close")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompareFileDiff(props: {
+  workspaceId: string;
+  from: string;
+  to?: string;
+  path: string;
+}) {
+  const { t } = useI18n();
+  const [diff, setDiff] = useState<GitFileDiff | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    compareFileDiff(props.workspaceId, props.from, props.path, props.to)
+      .then((next) => {
+        if (!cancelled) {
+          setDiff(next);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.workspaceId, props.from, props.to, props.path]);
+
+  const lines = useMemo(
+    () => (diff ? parseUnifiedDiff(diff.diff) : []),
+    [diff],
+  );
+  if (failed) {
+    return <div className="git-diff-note">{t("git.diffUnavailable")}</div>;
+  }
+  if (!diff) {
+    return <div className="git-diff-note">{t("git.diffLoading")}</div>;
+  }
+  if (diff.isBinary) {
+    return <div className="git-diff-note">{t("git.binaryFile")}</div>;
+  }
+  return (
+    <div className="git-diff" role="table">
+      <div className="git-diff-body">
+        {lines.map((line, index) =>
+          line.kind === "hunk" ? (
+            index === 0 ? null : (
+              <div key={index} className="git-diff-gap" aria-hidden="true" />
+            )
+          ) : (
+            <div key={index} className={`git-diff-line is-${line.kind}`}>
+              <span className="git-diff-sign" aria-hidden="true">
+                {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
+              </span>
+              <span className="git-diff-text">{line.text}</span>
+            </div>
+          ),
+        )}
+      </div>
+      {diff.truncated && (
+        <div className="git-diff-note">{t("git.diffTruncated")}</div>
+      )}
+    </div>
+  );
+}
+
 // Действия меню: часть уходит в общий commit_action, часть — в отдельные
 // команды правки истории, которым нужна подтверждённая вершина ветки.
 type CommitMenuAction =
@@ -1042,6 +1219,11 @@ function CommitActionsMenu(props: {
   onError: (message: string) => void;
   onDone: () => void;
   onReword: (commit: GitCommitInfo) => void;
+  // Отмеченный для сравнения коммит живёт в истории, а не в меню: меню
+  // закрывается после каждого действия.
+  marked: GitCommitInfo | null;
+  onMark: (commit: GitCommitInfo | null) => void;
+  onCompare: (from: GitCommitInfo, to: GitCommitInfo | null) => void;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -1316,6 +1498,46 @@ function CommitActionsMenu(props: {
           >
             {t("git.actionOpenGithub")}
           </button>
+          <div className="git-actions-sep" aria-hidden="true" />
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            onClick={() => {
+              props.onCompare(props.commit, null);
+              props.onClose();
+            }}
+          >
+            {t("git.compareWithWorkingTree")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="git-actions-item"
+            onClick={() => {
+              props.onMark(
+                props.marked?.hash === props.commit.hash ? null : props.commit,
+              );
+              props.onClose();
+            }}
+          >
+            {props.marked?.hash === props.commit.hash
+              ? t("git.compareUnmark")
+              : t("git.compareMark")}
+          </button>
+          {props.marked && props.marked.hash !== props.commit.hash && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item"
+              onClick={() => {
+                props.onCompare(props.marked!, props.commit);
+                props.onClose();
+              }}
+            >
+              {t("git.compareWithMarked", { name: props.marked.shortHash })}
+            </button>
+          )}
           {canReword && (
             <button
               type="button"
@@ -2173,6 +2395,11 @@ function HistoryView(props: {
   const [searchField, setSearchField] = useState<"text" | "author" | "path">(
     "text",
   );
+  const [marked, setMarked] = useState<GitCommitInfo | null>(null);
+  const [comparing, setComparing] = useState<{
+    from: GitCommitInfo;
+    to: GitCommitInfo | null;
+  } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => {
@@ -2555,6 +2782,17 @@ function HistoryView(props: {
           onError={setActionError}
           onDone={() => setReloadNonce((value) => value + 1)}
           onReword={setRewording}
+          marked={marked}
+          onMark={setMarked}
+          onCompare={(from, to) => setComparing({ from, to })}
+        />
+      )}
+      {comparing && (
+        <CompareView
+          workspaceId={props.workspaceId}
+          from={comparing.from}
+          to={comparing.to}
+          onClose={() => setComparing(null)}
         />
       )}
       {rewording && (
