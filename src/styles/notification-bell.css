@@ -70,6 +70,37 @@
   }
 }
 
+/* Обновление скачано и ждёт установки. В отличие от бейджа непрочитанного,
+   индикатор не гаснет после открытия центра: он показывает состояние, а не
+   новость, и исчезает только когда обновление поставили. */
+.notification-button.is-update-waiting {
+  color: var(--mc-accent);
+}
+
+.notification-waiting-dot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--mc-bg);
+  border-radius: 999px;
+  background: var(--mc-accent);
+  box-shadow: 0 0 7px var(--mc-accent-glow);
+  pointer-events: none;
+  animation: notification-waiting-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes notification-waiting-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .notification-download {
   position: absolute;
   right: 3px;
@@ -96,7 +127,8 @@
   animation: update-progress-indeterminate 1.15s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .notification-badge {
+  .notification-badge,
+  .notification-waiting-dot {
     animation: none;
   }
 

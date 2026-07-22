@@ -94,6 +94,44 @@ describe("Titlebar notification center", () => {
     expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
   });
 
+  it("keeps showing a downloaded update after its badge was read", async () => {
+    const updater = controller({ sync: "settled", items: [readyUpdate] });
+    const first = render(titlebar(updater));
+    const bell = screen.getByRole("button", {
+      name: "Обновление 0.0.2 готово",
+    });
+
+    fireEvent.click(bell);
+    await waitFor(() =>
+      expect(
+        document.querySelector(".notification-badge"),
+      ).not.toBeInTheDocument(),
+    );
+    // Счётчик непрочитанного погас, но обновление всё ещё ждёт установки —
+    // об этом должно остаться видимое напоминание.
+    expect(
+      document.querySelector(".notification-waiting-dot"),
+    ).toBeInTheDocument();
+    expect(bell).toHaveClass("is-update-waiting");
+
+    first.unmount();
+    render(titlebar(updater));
+    expect(
+      document.querySelector(".notification-waiting-dot"),
+    ).toBeInTheDocument();
+  });
+
+  it("drops the waiting indicator once no update is pending", () => {
+    render(titlebar(controller({ sync: "settled", items: [] })));
+
+    expect(
+      document.querySelector(".notification-waiting-dot"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Уведомления" }),
+    ).not.toHaveClass("is-update-waiting");
+  });
+
   it("marks an update read when it appears while the center is open", async () => {
     const updater = controller({ sync: "settled", items: [] });
     const view = render(titlebar(updater));

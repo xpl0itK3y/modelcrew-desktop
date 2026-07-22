@@ -73,6 +73,10 @@ export function Titlebar(props: TitlebarProps) {
       (item.phase === "ready" || item.phase === "manual"),
   );
   const latestAttentionItem = attentionItems[attentionItems.length - 1];
+  // Скачанное обновление — это не «новость», а состояние: оно ждёт установки,
+  // пока его не поставят. Поэтому индикатор живёт независимо от «прочитано» —
+  // иначе один раз открытый центр уведомлений прятал бы обновление навсегда.
+  const updateWaiting = attentionItems.length > 0;
   // Count unread attention-worthy notifications (announcements plus ready/manual
   // updates) for the badge on the bell; opening the center marks them read.
   const unreadCount = props.updater.center.items.filter(
@@ -282,8 +286,8 @@ export function Titlebar(props: TitlebarProps) {
             type="button"
             className={`icon-button notification-button ${
               notificationsOpen ? "is-active" : ""
-            }`}
-            title={t("titlebar.notifications")}
+            } ${updateWaiting ? "is-update-waiting" : ""}`}
+            title={notificationLabel}
             aria-label={notificationLabel}
             aria-haspopup="dialog"
             aria-controls="notification-center"
@@ -301,6 +305,11 @@ export function Titlebar(props: TitlebarProps) {
               >
                 {unreadCount > 9 ? "9+" : unreadCount}
               </span>
+            )}
+            {updateWaiting && unreadCount === 0 && (
+              // Счётчик уже прочитан, но обновление всё ещё ждёт: показываем
+              // точку вместо числа, чтобы кнопка не выглядела пустой.
+              <span className="notification-waiting-dot" aria-hidden="true" />
             )}
             {downloadingItem && (
               <span
