@@ -655,10 +655,30 @@ fn setup_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 #[cfg(target_os = "linux")]
 fn disable_dmabuf_renderer_by_default() {
     const KEY: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
-    if std::env::var_os(KEY).is_none() {
-        // Вызывается первой строкой run(), до старта любых потоков, поэтому
-        // гонки за окружение здесь нет.
-        std::env::set_var(KEY, "1");
+    // Вызывается первой строкой run(), до старта любых потоков, поэтому гонки
+    // за окружение здесь нет.
+    match dmabuf_choice(std::env::var(KEY).ok().as_deref()) {
+        DmabufChoice::Disable => std::env::set_var(KEY, "1"),
+        DmabufChoice::Restore => std::env::remove_var(KEY),
+        DmabufChoice::Keep => {}
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DmabufChoice {
+    Disable,
+    Restore,
+    Keep,
+}
+
+// WebKit смотрит на само наличие переменной, а не на её значение: оставленный
+// `=0` отключил бы DMABUF ровно так же, как `=1`. Поэтому «верни как было»
+// можно выразить только удалением переменной.
+fn dmabuf_choice(current: Option<&str>) -> DmabufChoice {
+    match current {
+        None => DmabufChoice::Disable,
+        Some(value) if matches!(value.trim(), "" | "0" | "false") => DmabufChoice::Restore,
+        Some(_) => DmabufChoice::Keep,
     }
 }
 
@@ -849,5 +869,22 @@ mod tests {
         assert_eq!(AppLocale::Ru.window_menu_title(), "Окно");
         assert_eq!(AppLocale::En.edit_menu_title(), "Edit");
         assert_eq!(AppLocale::En.window_menu_title(), "Window");
+    }
+}
+
+#[cfg(test)]
+mod dmabuf_tests {
+    use super::{dmabuf_choice, DmabufChoice};
+
+    #[test]
+    fn dmabuf_workaround_can_be_turned_off_by_the_user() {
+        assert_eq!(dmabuf_choice(None), DmabufChoice::Disable);
+        // Явный отказ от обхода: переменную надо убрать, а не оставить «0».
+        for value in ["0", "false", "", "  "] {
+            assert_eq!(dmabuf_choice(Some(value)), DmabufChoice::Restore, "{value:?}");
+        }
+        for value in ["1", "true", "yes"] {
+            assert_eq!(dmabuf_choice(Some(value)), DmabufChoice::Keep, "{value:?}");
+        }
     }
 }

@@ -93,9 +93,10 @@ notification sounds work out of the box.
 > a notification daemon such as `mako` or `dunst` running.
 
 > **Black window on Linux:** WebKitGTK's DMABUF renderer leaves a blank
-> window on some drivers, so ModelCrew sets
-> `WEBKIT_DISABLE_DMABUF_RENDERER=1` unless you set that variable yourself.
-> If a window still stays black, turn accelerated compositing off as well:
+> window on some drivers, so ModelCrew disables it by default. Set
+> `WEBKIT_DISABLE_DMABUF_RENDERER=0` to get the faster path back, or `=1` to
+> keep it off explicitly. If a window still stays black, turn accelerated
+> compositing off as well:
 > ```bash
 > WEBKIT_DISABLE_COMPOSITING_MODE=1 modelcrew-desktop
 > ```
