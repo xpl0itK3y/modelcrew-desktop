@@ -3,6 +3,8 @@ name: Build stable Linux bundles
 on:
   workflow_call:
     secrets:
+      GH_OAUTH_CLIENT_ID:
+        required: false
       TAURI_SIGNING_PRIVATE_KEY:
         required: true
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:

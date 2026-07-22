@@ -22,7 +22,10 @@ const templatePath = path.resolve(
     ? args.template
     : "packaging/aur/PKGBUILD.template",
 );
-const x86Name = `ModelCrew_${version}_linux_x86_64.deb`;
+// x86_64 берём из нативно собранного на Arch пакета: бинарь из ubuntu-овского
+// .deb запускается против более новых библиотек Arch и даёт чёрное окно.
+// Для aarch64 нативной сборки не существует, поэтому там остаётся .deb.
+const x86Name = `ModelCrew_${version}_linux_x86_64.pkg.tar.zst`;
 const armName = `ModelCrew_${version}_linux_aarch64.deb`;
 const x86Path = path.join(dist, x86Name);
 const armPath = path.join(dist, armName);
@@ -59,6 +62,7 @@ const srcinfo = `pkgbase = modelcrew-bin
 \tdepends = desktop-file-utils
 \tdepends = gdk-pixbuf2
 \tdepends = glib2
+\tdepends = gst-plugins-base
 \tdepends = gst-plugins-good
 \tdepends = gtk3
 \tdepends = hicolor-icon-theme
@@ -71,7 +75,7 @@ const srcinfo = `pkgbase = modelcrew-bin
 \tprovides = modelcrew
 \tconflicts = modelcrew
 \toptions = !strip
-\tsource_x86_64 = modelcrew-bin-${version}-x86_64.deb::${x86Url}
+\tsource_x86_64 = modelcrew-bin-${version}-x86_64.pkg.tar.zst::${x86Url}
 \tsha256sums_x86_64 = ${x86Sha}
 \tsource_aarch64 = modelcrew-bin-${version}-aarch64.deb::${armUrl}
 \tsha256sums_aarch64 = ${armSha}

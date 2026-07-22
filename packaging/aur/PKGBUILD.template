@@ -11,6 +11,7 @@ depends=(
   'desktop-file-utils'
   'gdk-pixbuf2'
   'glib2'
+  'gst-plugins-base'
   'gst-plugins-good'
   'gtk3'
   'hicolor-icon-theme'
@@ -25,12 +26,24 @@ provides=('modelcrew')
 conflicts=('modelcrew')
 options=('!strip')
 
-source_x86_64=("${pkgname}-${pkgver}-x86_64.deb::@X86_URL@")
+# makepkg сам разворачивает всё, что похоже на архив: pacman-пакет нам нужен
+# целиком, поэтому распаковываем его вручную в package().
+noextract=("${pkgname}-${pkgver}-x86_64.pkg.tar.zst")
+
+source_x86_64=("${pkgname}-${pkgver}-x86_64.pkg.tar.zst::@X86_URL@")
 sha256sums_x86_64=('@X86_SHA256@')
 source_aarch64=("${pkgname}-${pkgver}-aarch64.deb::@ARM64_URL@")
 sha256sums_aarch64=('@ARM64_SHA256@')
 
 package() {
+  if [ "${CARCH}" = 'x86_64' ]; then
+    # Готовый pacman-пакет, собранный на Arch: забираем из него только дерево
+    # файлов, служебные .PKGINFO/.MTREE создаёт уже makepkg.
+    bsdtar -xf "${srcdir}/${pkgname}-${pkgver}-x86_64.pkg.tar.zst" \
+      -C "${pkgdir}" usr
+    return
+  fi
+
   local deb="${srcdir}/${pkgname}-${pkgver}-${CARCH}.deb"
   local unpack="${srcdir}/deb-${CARCH}"
 

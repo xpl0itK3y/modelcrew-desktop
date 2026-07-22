@@ -113,9 +113,10 @@ fn classify_linux_install(evidence: LinuxInstallEvidence) -> DetectedLinuxInstal
         return DetectedLinuxInstall::SelfUpdate;
     }
 
-    // The Arch package is deliberately repacked from the .deb artifact, so its
-    // embedded Tauri bundle marker remains `Deb`. Package ownership is the
-    // authoritative override in that case.
+    // A pacman package can carry any bundle marker: the aarch64 one is still
+    // repacked from the .deb (so it says `Deb`), while the natively built
+    // x86_64 one carries none at all. Package ownership is the authoritative
+    // answer in both cases.
     if evidence.pacman_owns_executable {
         return DetectedLinuxInstall::Native(LinuxPackageKind::Pacman);
     }
