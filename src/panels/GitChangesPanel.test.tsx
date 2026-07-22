@@ -110,6 +110,53 @@ beforeEach(() => {
 afterEach(() => setLocale("ru"));
 
 describe("GitChangesView workspace lifecycle", () => {
+  it("keeps a separate draft per project while preserving the selected tab", () => {
+    const view = render(<GitChangesView workspaceId="project-a" />);
+
+    expect(screen.getByText("from-a.txt")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
+      target: { value: "draft for A" },
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+
+    view.rerender(<GitChangesView workspaceId="project-b" />);
+    expect(screen.queryByText("from-a.txt")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "История" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Изменения" }));
+    expect(screen.getByText("from-b.txt")).toBeInTheDocument();
+    expect(screen.getByLabelText("Заголовок коммита")).toHaveValue("");
+
+    view.rerender(<GitChangesView workspaceId="project-a" />);
+    expect(screen.queryByText("from-b.txt")).not.toBeInTheDocument();
+    expect(screen.getByText("from-a.txt")).toBeInTheDocument();
+    expect(screen.getByLabelText("Заголовок коммита")).toHaveValue(
+      "draft for A",
+    );
+  });
+
+  it("commits a subject and optional description as one Git message", async () => {
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
+      target: { value: "feat: history controls" },
+    });
+    fireEvent.change(screen.getByLabelText("Описание (необязательно)"), {
+      target: { value: "Adds local branch management." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
+
+    await waitFor(() =>
+      expect(mocks.commitAll).toHaveBeenCalledWith(
+        "project-a",
+        "feat: history controls\n\nAdds local branch management.",
+      ),
+    );
+  });
+
   it("keeps Co-authored-by trailers visible when editing a message", async () => {
     const fullMessage =
       "feat: shared work\n\nDetailed body.  \n\nCo-authored-by: Alex <alex@example.com>\n\n";

@@ -693,6 +693,14 @@
   padding: 8px 8px 0;
 }
 
+.git-commit-fields {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .git-commit-input {
   flex: 1;
   min-width: 0;
@@ -711,6 +719,13 @@
 
 .git-commit-input::placeholder {
   color: var(--mc-text-faint);
+}
+
+.git-commit-description {
+  box-sizing: border-box;
+  min-height: 48px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .git-commit-button {

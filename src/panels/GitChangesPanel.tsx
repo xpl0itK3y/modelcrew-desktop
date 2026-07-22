@@ -2230,10 +2230,46 @@ function HistoryView(props: {
   );
 }
 
-// Содержимое панели изменений; живёт в оверлее-drawer поверх терминалов.
+type GitPanelView = "changes" | "history";
+type CommitDraft = { subject: string; description: string };
+
+function joinCommitMessage(subject: string, description: string): string {
+  const title = subject.trim();
+  const body = description.trim();
+  return title && body ? `${title}\n\n${body}` : title;
+}
+
+// Вкладку и черновики сохраняем при переходе между проектами, а остальное
+// workspace-зависимое состояние перемонтируем по key. Так старые файлы, меню
+// и выбранные коммиты не попадают в новый проект даже на один кадр.
 export function GitChangesView(props: { workspaceId: string }) {
+  const [view, setView] = useState<GitPanelView>("changes");
+  const [drafts, setDrafts] = useState<Record<string, CommitDraft>>({});
+  const draft = drafts[props.workspaceId] ?? { subject: "", description: "" };
+  return (
+    <GitChangesWorkspaceView
+      key={props.workspaceId}
+      workspaceId={props.workspaceId}
+      view={view}
+      onSelectView={setView}
+      draft={draft}
+      onDraftChange={(next) =>
+        setDrafts((current) => ({ ...current, [props.workspaceId]: next }))
+      }
+    />
+  );
+}
+
+// Содержимое одного проекта; живёт в оверлее-drawer поверх терминалов.
+function GitChangesWorkspaceView(props: {
+  workspaceId: string;
+  view: GitPanelView;
+  onSelectView: (view: GitPanelView) => void;
+  draft: CommitDraft;
+  onDraftChange: (draft: CommitDraft) => void;
+}) {
   const { t } = useI18n();
-  const { workspaceId } = props;
+  const { workspaceId, view } = props;
   const [summary, setSummary] = useState<GitChangesSummary | null>(() =>
     getGitSummary(workspaceId),
   );
@@ -2253,7 +2289,6 @@ export function GitChangesView(props: { workspaceId: string }) {
     }
   }, [workspaceId]);
 
-  const [view, setView] = useState<"changes" | "history">("changes");
   const [branchError, setBranchError] = useState<string | null>(null);
 
   // Файлы, появившиеся в списке уже при открытой панели, въезжают с
@@ -2283,19 +2318,35 @@ export function GitChangesView(props: { workspaceId: string }) {
   }, [branchError]);
 
   // Коммит всех изменений прямо из панели, как в Warp.
-  const [message, setMessage] = useState("");
+  const commitSubject = props.draft.subject;
+  const commitDescription = props.draft.description;
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
+  const commitMessage = joinCommitMessage(commitSubject, commitDescription);
+  const commitMessageLength = Array.from(commitMessage).length;
+  const updateCommitText = (
+    nextSubject: string,
+    nextDescription: string,
+  ) => {
+    if (
+      Array.from(joinCommitMessage(nextSubject, nextDescription)).length <=
+      4000
+    ) {
+      props.onDraftChange({
+        subject: nextSubject,
+        description: nextDescription,
+      });
+    }
+  };
   const commit = async () => {
-    const trimmed = message.trim();
-    if (!trimmed || committing) {
+    if (!commitMessage || commitMessageLength > 4000 || committing) {
       return;
     }
     setCommitting(true);
     setCommitError(null);
     try {
-      await commitAll(workspaceId, trimmed);
-      setMessage("");
+      await commitAll(workspaceId, commitMessage);
+      props.onDraftChange({ subject: "", description: "" });
       void refreshGitChanges(workspaceId);
     } catch (error) {
       setCommitError(localizeBackendError(error));
@@ -2332,7 +2383,7 @@ export function GitChangesView(props: { workspaceId: string }) {
                     // Метки «свежих» карточек сбрасываются, чтобы въезд
                     // не переигрывался при каждом переключении вкладок.
                     arrivedPathsRef.current.clear();
-                    setView(tab);
+                    props.onSelectView(tab);
                   }}
                 >
                   {t(tab === "changes" ? "git.tabChanges" : "git.tabHistory")}
@@ -2367,7 +2418,7 @@ export function GitChangesView(props: { workspaceId: string }) {
             <HistoryView
               workspaceId={workspaceId}
               fileCount={summary.files.length}
-              onOpenChanges={() => setView("changes")}
+              onOpenChanges={() => props.onSelectView("changes")}
               currentBranch={summary.branch}
             />
           ) : summary.files.length === 0 ? (
@@ -2375,24 +2426,57 @@ export function GitChangesView(props: { workspaceId: string }) {
           ) : (
             <>
               <div className="git-commit-row">
-                <input
-                  type="text"
-                  className="git-commit-input"
-                  placeholder={t("git.commitPlaceholder")}
-                  value={message}
-                  maxLength={4000}
-                  disabled={committing}
-                  onChange={(event) => setMessage(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      void commit();
+                <div className="git-commit-fields">
+                  <input
+                    type="text"
+                    className="git-commit-input"
+                    aria-label={t("git.commitPlaceholder")}
+                    placeholder={t("git.commitPlaceholder")}
+                    value={commitSubject}
+                    maxLength={4000}
+                    disabled={committing}
+                    onChange={(event) =>
+                      updateCommitText(event.target.value, commitDescription)
                     }
-                  }}
-                />
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) {
+                        return;
+                      }
+                      if (event.key === "Enter") {
+                        void commit();
+                      }
+                    }}
+                  />
+                  <textarea
+                    className="git-commit-input git-commit-description"
+                    aria-label={t("git.commitDescription")}
+                    placeholder={t("git.commitDescription")}
+                    value={commitDescription}
+                    maxLength={4000}
+                    rows={2}
+                    disabled={committing}
+                    onChange={(event) =>
+                      updateCommitText(commitSubject, event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) {
+                        return;
+                      }
+                      if (
+                        event.key === "Enter" &&
+                        (event.metaKey || event.ctrlKey)
+                      ) {
+                        event.preventDefault();
+                        void commit();
+                      }
+                    }}
+                  />
+                </div>
                 <button
                   type="button"
                   className="git-commit-button"
-                  disabled={committing || message.trim().length === 0}
+                  title={t("git.commitShortcut")}
+                  disabled={committing || commitMessage.length === 0}
                   onClick={() => void commit()}
                 >
                   {t("git.commitButton")}

@@ -4005,9 +4005,12 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Коммит из панели забирает всё, включая новые файлы.
         std::fs::write(root.join("a.txt"), "committed\n").unwrap();
         std::fs::write(root.join("new.txt"), "brand new\n").unwrap();
-        commit_all(root, "panel commit").unwrap();
+        commit_all(root, "panel commit\n\nDetailed description").unwrap();
         let summary = collect_summary(root).unwrap();
         assert!(summary.files.is_empty());
+        let commit = list_log(root, 1, false).unwrap().remove(0);
+        assert_eq!(commit.subject, "panel commit");
+        assert_eq!(commit.body, "Detailed description");
         assert!(commit_all(root, "   ").is_err());
     }
 
