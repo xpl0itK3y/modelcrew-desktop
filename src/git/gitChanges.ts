@@ -25,6 +25,10 @@ export type GitChangedFile = {
 export type GitChangesSummary = {
   isRepo: boolean;
   branch?: string;
+  headHash?: string;
+  // Точный short ref из `branch.upstream` (например fork/dev или
+  // cache/review при пользовательском fetch refspec).
+  upstreamRef?: string;
   ahead?: number;
   behind?: number;
   files: GitChangedFile[];

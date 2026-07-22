@@ -35,6 +35,10 @@ pub struct GitChangesSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ahead: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<i64>,
@@ -46,6 +50,8 @@ impl GitChangesSummary {
         Self {
             is_repo: false,
             branch: None,
+            head_hash: None,
+            upstream_ref: None,
             ahead: None,
             behind: None,
             files: Vec::new(),
@@ -73,6 +79,9 @@ fn git_command() -> Command {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    // Машиночитаемые парсеры ниже не должны зависеть от языка ОС. Это также
+    // стабилизирует диагностику Git на Windows/macOS/Linux.
+    command.env("LC_ALL", "C").env("LANG", "C");
     command
 }
 
@@ -107,6 +116,8 @@ fn run_git(root: &Path, args: &[&str]) -> CommandResult<Vec<u8>> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ParsedStatus {
     pub branch: Option<String>,
+    pub head_hash: Option<String>,
+    pub upstream_ref: Option<String>,
     pub ahead: Option<i64>,
     pub behind: Option<i64>,
     // (path, status, orig_path)
@@ -137,9 +148,17 @@ pub fn parse_porcelain_status(raw: &[u8]) -> ParsedStatus {
         }
         let line = String::from_utf8_lossy(field).into_owned();
         if let Some(header) = line.strip_prefix("# ") {
-            if let Some(head) = header.strip_prefix("branch.head ") {
+            if let Some(oid) = header.strip_prefix("branch.oid ") {
+                if is_safe_hash(oid) {
+                    parsed.head_hash = Some(oid.to_owned());
+                }
+            } else if let Some(head) = header.strip_prefix("branch.head ") {
                 if head != "(detached)" {
                     parsed.branch = Some(head.to_owned());
+                }
+            } else if let Some(upstream) = header.strip_prefix("branch.upstream ") {
+                if !upstream.is_empty() {
+                    parsed.upstream_ref = Some(upstream.to_owned());
                 }
             } else if let Some(ab) = header.strip_prefix("branch.ab ") {
                 for part in ab.split_whitespace() {
@@ -351,6 +370,8 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
     Ok(GitChangesSummary {
         is_repo: true,
         branch: status.branch,
+        head_hash: status.head_hash,
+        upstream_ref: status.upstream_ref,
         ahead: status.ahead,
         behind: status.behind,
         files,
@@ -1647,12 +1668,17 @@ mod tests {
 
     #[test]
     fn parses_branch_and_counts_from_porcelain() {
-        let raw = b"# branch.oid abc\0# branch.head main\0# branch.ab +2 -1\0\
+        let raw = b"# branch.oid 1111111111111111111111111111111111111111\0# branch.head main\0# branch.upstream fork/cache/dev\0# branch.ab +2 -1\0\
 1 .M N... 100644 100644 100644 abc def src/app.ts\0\
 1 A. N... 000000 100644 100644 000 def new file.txt\0\
 ? untracked.md\0";
         let parsed = parse_porcelain_status(raw);
         assert_eq!(parsed.branch.as_deref(), Some("main"));
+        assert_eq!(
+            parsed.head_hash.as_deref(),
+            Some("1111111111111111111111111111111111111111")
+        );
+        assert_eq!(parsed.upstream_ref.as_deref(), Some("fork/cache/dev"));
         assert_eq!(parsed.ahead, Some(2));
         assert_eq!(parsed.behind, Some(1));
         assert_eq!(
