@@ -29,6 +29,8 @@ export type GitChangesSummary = {
   // Точный short ref из `branch.upstream` (например fork/dev или
   // cache/review при пользовательском fetch refspec).
   upstreamRef?: string;
+  // Куда вернуться с отделённого HEAD; есть только когда branch отсутствует.
+  previousBranch?: string;
   ahead?: number;
   behind?: number;
   files: GitChangedFile[];
@@ -449,6 +451,53 @@ export function dropCommit(
   expectedHead: string,
 ): Promise<void> {
   return invoke("git_drop_commit", { workspaceId, hash, expectedHead });
+}
+
+// Слияние и перенос принимают полное имя ref: по короткому git мог бы выбрать
+// одноимённую локальную ветку вместо серверной.
+export function mergeRef(
+  workspaceId: string,
+  reference: string,
+  expectedBranch: string,
+  expectedHead: string,
+  noFf = false,
+): Promise<void> {
+  return invoke("git_merge_ref", {
+    workspaceId,
+    reference,
+    expectedBranch,
+    expectedHead,
+    noFf,
+  });
+}
+
+export function rebaseOnto(
+  workspaceId: string,
+  reference: string,
+  expectedBranch: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_rebase_onto", {
+    workspaceId,
+    reference,
+    expectedBranch,
+    expectedHead,
+  });
+}
+
+// Первая отправка ветки на сервер: создаёт серверную и связывает с ней локальную.
+export function publishBranch(
+  workspaceId: string,
+  expectedBranch: string,
+  expectedHead: string,
+  remote?: string,
+): Promise<void> {
+  return invoke("git_publish_branch", {
+    workspaceId,
+    expectedBranch,
+    expectedHead,
+    remote,
+  });
 }
 
 // Сравнение двух состояний. `to` не задан — сравниваем с рабочей папкой.

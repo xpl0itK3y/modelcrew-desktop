@@ -30,6 +30,22 @@ export const en: Record<MessageKey, string> = {
     "Branch “{name}” is not merged into the current branch. Force-delete its local copy? Unique commits will remain only in the reflog; the server branch will not be deleted.",
   "git.branchesLoadFailed": "Could not load branches",
   "git.branchesEmpty": "No local branches yet",
+  "git.branchMerge": "Merge into current",
+  "git.branchMergeNamed": "Merge branch ‘{name}’ into the current one",
+  "git.branchMergeConfirm":
+    "Merge ‘{name}’ into the current branch ‘{current}’? On a conflict Git leaves the merge unfinished so you can resolve it yourself.",
+  "git.branchRebase": "Move current branch here",
+  "git.branchRebaseNamed": "Move the current branch onto ‘{name}’",
+  "git.branchRebaseConfirm":
+    "Replay the commits of ‘{current}’ on top of ‘{name}’? Commit hashes change; on a conflict Git leaves the rebase unfinished.",
+  "git.branchPublish": "Publish",
+  "git.branchPublishHint":
+    "This branch is not on the server yet: push it and link it to the local one",
+  "git.branchPublishConfirm": "Push to the server?",
+  "git.detachedTitle": "Detached HEAD",
+  "git.detachedNote":
+    "You are looking at commit {hash}, not at a branch. New commits would not belong to any branch.",
+  "git.detachedReturn": "Back to ‘{name}’",
   "git.remoteBranches": "On the server",
   "git.remoteBranchHint":
     "This branch only exists on the server: switching creates a tracking local copy",
@@ -515,6 +531,17 @@ export const en: Record<MessageKey, string> = {
   "error.gitTagInvalid": "‘{tag}’ is not a valid tag name",
   "error.gitTagExists": "Tag ‘{tag}’ already exists",
   "error.gitTagMissing": "Tag ‘{tag}’ was not found",
+  "error.gitMergeConflict":
+    "The merge stopped on a conflict. Resolve it and finish (git merge --continue) or cancel it (git merge --abort)",
+  "error.gitRebaseConflict":
+    "The rebase stopped on a conflict. Resolve it and continue (git rebase --continue) or cancel it (git rebase --abort)",
+  "error.gitUpstreamExists": "This branch already has a copy on the server",
+  "error.gitRemoteMissing": "Remote ‘{remote}’ was not found",
+  "error.gitRemoteAmbiguous":
+    "Several remotes and no origin — pick where to publish from the terminal",
+  "error.gitPublishedUntracked":
+    "The branch reached the server, but linking it to the server branch failed. Check the remote configuration",
+  "error.gitRefKindInvalid": "This reference cannot be used for this action",
   "error.gitDetachedHead": "This action is unavailable while HEAD is detached",
   "error.gitCommitNotHead": "This commit is no longer the branch tip",
   "error.gitCommitCannotUncommit":

@@ -11,6 +11,9 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 import {
   aggregateCounts,
   amendCommit,
+  mergeRef,
+  publishBranch,
+  rebaseOnto,
   authorAvatar,
   commitAction,
   createBranch,
@@ -325,6 +328,47 @@ describe("history rewriting IPC", () => {
       workspaceId: "ws-1",
       hash: "b".repeat(40),
       expectedHead: "a".repeat(40),
+    });
+  });
+});
+
+describe("branch integration IPC", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.invoke.mockResolvedValue(undefined);
+  });
+
+  it("merges a full ref against the confirmed branch and head", async () => {
+    await mergeRef("ws-1", "refs/remotes/origin/dev", "main", "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_merge_ref", {
+      workspaceId: "ws-1",
+      reference: "refs/remotes/origin/dev",
+      expectedBranch: "main",
+      expectedHead: "a".repeat(40),
+      noFf: false,
+    });
+  });
+
+  it("rebases onto a full ref", async () => {
+    await rebaseOnto("ws-1", "refs/heads/main", "topic", "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_rebase_onto", {
+      workspaceId: "ws-1",
+      reference: "refs/heads/main",
+      expectedBranch: "topic",
+      expectedHead: "a".repeat(40),
+    });
+  });
+
+  it("publishes without forcing a remote choice", async () => {
+    await publishBranch("ws-1", "feature/x", "a".repeat(40));
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_publish_branch", {
+      workspaceId: "ws-1",
+      expectedBranch: "feature/x",
+      expectedHead: "a".repeat(40),
+      remote: undefined,
     });
   });
 });

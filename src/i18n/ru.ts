@@ -29,6 +29,22 @@ export const ru = {
     "Ветка «{name}» не влита в текущую. Принудительно удалить её локальную копию? Уникальные коммиты останутся только в reflog; ветка на сервере не удалится.",
   "git.branchesLoadFailed": "Не удалось загрузить ветки",
   "git.branchesEmpty": "Локальных веток пока нет",
+  "git.branchMerge": "Влить в текущую",
+  "git.branchMergeNamed": "Влить ветку «{name}» в текущую",
+  "git.branchMergeConfirm":
+    "Влить «{name}» в текущую ветку «{current}»? При конфликте Git оставит слияние незавершённым, чтобы вы разрешили его сами.",
+  "git.branchRebase": "Перенести текущую сюда",
+  "git.branchRebaseNamed": "Перенести текущую ветку на «{name}»",
+  "git.branchRebaseConfirm":
+    "Переложить коммиты ветки «{current}» поверх «{name}»? Хеши коммитов изменятся; при конфликте Git оставит rebase незавершённым.",
+  "git.branchPublish": "Опубликовать",
+  "git.branchPublishHint":
+    "Ветки ещё нет на сервере: отправить её и связать с локальной",
+  "git.branchPublishConfirm": "Отправить на сервер?",
+  "git.detachedTitle": "Отделённый HEAD",
+  "git.detachedNote":
+    "Вы смотрите коммит {hash}, а не ветку. Новые коммиты не попадут ни в одну ветку.",
+  "git.detachedReturn": "Вернуться на «{name}»",
   "git.remoteBranches": "На сервере",
   "git.remoteBranchHint":
     "Ветка есть только на сервере: переключение создаст локальную копию со слежением",
@@ -510,6 +526,17 @@ export const ru = {
   "error.gitTagInvalid": "«{tag}» — недопустимое имя тега",
   "error.gitTagExists": "Тег «{tag}» уже существует",
   "error.gitTagMissing": "Тег «{tag}» не найден",
+  "error.gitMergeConflict":
+    "Слияние остановлено на конфликте. Разрешите его и завершите (git merge --continue) или отмените (git merge --abort)",
+  "error.gitRebaseConflict":
+    "Перенос остановлен на конфликте. Разрешите его и продолжите (git rebase --continue) или отмените (git rebase --abort)",
+  "error.gitUpstreamExists": "У ветки уже есть серверная копия",
+  "error.gitRemoteMissing": "Remote «{remote}» не найден",
+  "error.gitRemoteAmbiguous":
+    "Несколько remote и ни одного origin — выберите, куда публиковать, в терминале",
+  "error.gitPublishedUntracked":
+    "Ветка отправлена на сервер, но связать её с серверной не удалось. Проверьте настройки remote",
+  "error.gitRefKindInvalid": "Эту ссылку нельзя использовать для этой операции",
   "error.gitDetachedHead": "Действие недоступно при отделённом HEAD",
   "error.gitCommitNotHead": "Этот коммит уже не является вершиной ветки",
   "error.gitCommitCannotUncommit":

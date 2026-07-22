@@ -33,8 +33,11 @@ import {
   gitPullRebase,
   gitPush,
   gitResetToUpstream,
+  mergeRef,
   parseUnifiedDiff,
+  publishBranch,
   readRepoFile,
+  rebaseOnto,
   refreshGitChanges,
   renameBranch,
   resetToCommit,
@@ -530,6 +533,7 @@ function FileCard(props: {
 function BranchSwitcher(props: {
   workspaceId: string;
   currentBranch?: string;
+  headHash?: string;
   onError: (message: string) => void;
 }) {
   const { locale, t } = useI18n();
@@ -545,6 +549,12 @@ function BranchSwitcher(props: {
   >(null);
   const [branchName, setBranchName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<GitBranchInfo | null>(null);
+  // Слияние и перенос подтверждаются отдельно: обе операции меняют историю
+  // текущей ветки и при конфликте оставляют репозиторий незавершённым.
+  const [integrate, setIntegrate] = useState<{
+    kind: "merge" | "rebase";
+    branch: GitBranchInfo;
+  } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const branchesRequestRef = useRef(0);
 
@@ -673,6 +683,30 @@ function BranchSwitcher(props: {
     }
   };
 
+  const confirmIntegrate = async () => {
+    if (!integrate || !props.currentBranch || !props.headHash || busy) {
+      return;
+    }
+    const { kind, branch } = integrate;
+    setBusy(true);
+    try {
+      const run = kind === "merge" ? mergeRef : rebaseOnto;
+      await run(
+        props.workspaceId,
+        branch.refName,
+        props.currentBranch,
+        props.headHash,
+      );
+      setIntegrate(null);
+      void refreshGitChanges(props.workspaceId);
+    } catch (error) {
+      setIntegrate(null);
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deleteTarget || busy) {
       return;
@@ -727,6 +761,38 @@ function BranchSwitcher(props: {
           </span>
         )}
       </button>
+      <span className="git-branch-actions">
+        {!branch.isCurrent && props.currentBranch && props.headHash && (
+          <>
+            <button
+              type="button"
+              className="git-branch-action"
+              title={t("git.branchMerge")}
+              aria-label={t("git.branchMergeNamed", { name: branch.name })}
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                setIntegrate({ kind: "merge", branch });
+              }}
+            >
+              ⤵
+            </button>
+            <button
+              type="button"
+              className="git-branch-action"
+              title={t("git.branchRebase")}
+              aria-label={t("git.branchRebaseNamed", { name: branch.name })}
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                setIntegrate({ kind: "rebase", branch });
+              }}
+            >
+              ⤴
+            </button>
+          </>
+        )}
+      </span>
       {!branch.isRemote && (
         <span className="git-branch-actions">
           <button
@@ -863,6 +929,22 @@ function BranchSwitcher(props: {
           </div>
         )}
       </div>
+      {integrate && props.currentBranch && (
+        <ConfirmDialog
+          text={t(
+            integrate.kind === "merge"
+              ? "git.branchMergeConfirm"
+              : "git.branchRebaseConfirm",
+            { name: integrate.branch.name, current: props.currentBranch },
+          )}
+          confirmLabel={t(
+            integrate.kind === "merge" ? "git.branchMerge" : "git.branchRebase",
+          )}
+          busy={busy}
+          onConfirm={() => void confirmIntegrate()}
+          onCancel={() => setIntegrate(null)}
+        />
+      )}
       {deleteTarget && (
         <ConfirmDialog
           text={t(
@@ -1717,6 +1799,100 @@ function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;
 }
 
+
+
+// Предупреждение об отделённом HEAD. Из списка веток вернуться можно и так, но
+// без явной подсказки состояние легко не заметить и потерять коммиты.
+function DetachedHeadBanner(props: {
+  workspaceId: string;
+  headHash: string;
+  previousBranch?: string;
+  onError: (message: string) => void;
+}) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const back = async (branch: string) => {
+    setBusy(true);
+    try {
+      await switchBranch(props.workspaceId, branch, "local");
+      void refreshGitChanges(props.workspaceId);
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="git-detached" role="status">
+      <div className="git-detached-text">
+        <strong className="git-detached-title">{t("git.detachedTitle")}</strong>
+        <span>
+          {t("git.detachedNote", { hash: props.headHash.slice(0, 7) })}
+        </span>
+      </div>
+      {props.previousBranch && (
+        <button
+          type="button"
+          className="git-detached-back"
+          disabled={busy}
+          onClick={() => void back(props.previousBranch!)}
+        >
+          {t("git.detachedReturn", { name: props.previousBranch })}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Первая отправка ветки на сервер. Показывается вместо ↑/↓, когда сравнивать
+// ещё не с чем; после публикации ветка получает upstream и обычные счётчики.
+function PublishBranch(props: {
+  workspaceId: string;
+  branch: string;
+  headHash: string;
+  onError: (message: string) => void;
+}) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  // Подтверждение относится к увиденной вершине: сдвинулась — спрашиваем снова.
+  useEffect(() => setConfirmed(null), [props.branch, props.headHash]);
+
+  const publish = async () => {
+    setBusy(true);
+    setConfirmed(null);
+    try {
+      await publishBranch(props.workspaceId, props.branch, props.headHash);
+      void refreshGitChanges(props.workspaceId);
+    } catch (error) {
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="git-sync">
+      <button
+        type="button"
+        className={`git-sync-btn ${confirmed ? "is-confirm" : ""}`}
+        title={t("git.branchPublishHint")}
+        disabled={busy}
+        onClick={() =>
+          confirmed === props.headHash
+            ? void publish()
+            : setConfirmed(props.headHash)
+        }
+      >
+        {confirmed === props.headHash
+          ? t("git.branchPublishConfirm")
+          : `↑ ${t("git.branchPublish")}`}
+      </button>
+    </span>
+  );
+}
+
 // Индикатор расхождения с сервером в шапке: ↓ забрать (ff-only), ↑ отправить.
 // Клик разворачивает подтверждение, повторный — выполняет. Без upstream (не с
 // чем сравнивать) не показывается; при совпадении — тихая галочка.
@@ -1726,6 +1902,8 @@ function SyncStatus(props: {
   headHash?: string;
   ahead?: number;
   behind?: number;
+  // Ветки ещё нет на сервере — можно предложить первую отправку.
+  canPublish?: boolean;
   onError: (message: string) => void;
 }) {
   const { t } = useI18n();
@@ -1795,7 +1973,15 @@ function SyncStatus(props: {
   }, [pullMenu]);
 
   if (ahead === undefined && behind === undefined) {
-    return null; // нет upstream — сравнивать не с чем
+    // Upstream ещё нет: сравнивать не с чем, но ветку можно опубликовать.
+    return props.canPublish && props.branch && props.headHash ? (
+      <PublishBranch
+        workspaceId={props.workspaceId}
+        branch={props.branch}
+        headHash={props.headHash}
+        onError={props.onError}
+      />
+    ) : null;
   }
 
   // Ветка разошлась: есть и свои коммиты, и серверные — простой ff невозможен.
@@ -2978,11 +3164,13 @@ function GitChangesWorkspaceView(props: {
                 headHash={summary.headHash}
                 ahead={summary.ahead}
                 behind={summary.behind}
+                canPublish={summary.upstreamRef === undefined}
                 onError={setBranchError}
               />
               <BranchSwitcher
                 workspaceId={workspaceId}
                 currentBranch={summary.branch}
+                headHash={summary.headHash}
                 onError={setBranchError}
               />
             </div>
@@ -2991,6 +3179,14 @@ function GitChangesWorkspaceView(props: {
             <div className="git-commit-error" role="alert">
               {branchError}
             </div>
+          )}
+          {summary.branch === undefined && summary.headHash && (
+            <DetachedHeadBanner
+              workspaceId={workspaceId}
+              headHash={summary.headHash}
+              previousBranch={summary.previousBranch}
+              onError={setBranchError}
+            />
           )}
           {/* key по вкладке перемонтирует контент — короткий въезд при
               переключении «Изменения ⇄ История». */}

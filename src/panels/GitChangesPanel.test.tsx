@@ -32,6 +32,9 @@ const mocks = vi.hoisted(() => ({
   commitPatch: vi.fn(async () => "PATCH BODY"),
   saveCommitPatch: vi.fn(async () => true),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
+  mergeRef: vi.fn(async () => {}),
+  rebaseOnto: vi.fn(async () => {}),
+  publishBranch: vi.fn(async () => {}),
   compareFiles: vi.fn(async () => [
     { path: "src/a.ts", additions: 3, deletions: 1 },
   ]),
@@ -84,6 +87,9 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     commitPatch: mocks.commitPatch,
     saveCommitPatch: mocks.saveCommitPatch,
     githubCommitUrl: mocks.githubCommitUrl,
+    mergeRef: mocks.mergeRef,
+    rebaseOnto: mocks.rebaseOnto,
+    publishBranch: mocks.publishBranch,
     compareFiles: mocks.compareFiles,
     compareFileDiff: mocks.compareFileDiff,
     fetchBranches: mocks.fetchBranches,
@@ -727,6 +733,97 @@ describe("GitChangesView workspace lifecycle", () => {
         "project-a",
         "refs/remotes/origin/topic",
         "remote",
+      ),
+    );
+  });
+});
+
+describe("branch integration", () => {
+  it("merges a branch by its exact ref against the confirmed head", async () => {
+    const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      headHash: head,
+    });
+    mocks.fetchBranches.mockResolvedValue([
+      {
+        name: "main",
+        refName: "refs/heads/main",
+        tipHash: head,
+        isCurrent: true,
+        isRemote: false,
+        isMerged: true,
+      },
+      {
+        name: "topic",
+        refName: "refs/heads/topic",
+        tipHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        isCurrent: false,
+        isRemote: false,
+        isMerged: false,
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByTitle("Переключить ветку"));
+    fireEvent.click(
+      await screen.findByLabelText("Влить ветку «topic» в текущую"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Влить в текущую" }));
+
+    await waitFor(() =>
+      expect(mocks.mergeRef).toHaveBeenCalledWith(
+        "project-a",
+        "refs/heads/topic",
+        "main",
+        head,
+      ),
+    );
+  });
+
+  it("publishes a branch that has no upstream and hides the arrows", async () => {
+    const head = "cccccccccccccccccccccccccccccccccccccccc";
+    mocks.summaries.set("project-a", {
+      ...summary("feature/new", "from-a.txt"),
+      headHash: head,
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    expect(screen.queryByTitle("Забрать с сервера")).not.toBeInTheDocument();
+    const publish = await screen.findByTitle(
+      "Ветки ещё нет на сервере: отправить её и связать с локальной",
+    );
+    fireEvent.click(publish);
+    // Первый клик только подтверждает намерение.
+    expect(mocks.publishBranch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Отправить на сервер?" }));
+
+    await waitFor(() =>
+      expect(mocks.publishBranch).toHaveBeenCalledWith(
+        "project-a",
+        "feature/new",
+        head,
+      ),
+    );
+  });
+
+  it("offers a way back from a detached HEAD", async () => {
+    mocks.summaries.set("project-a", {
+      ...summary("main", "from-a.txt"),
+      branch: undefined,
+      headHash: "dddddddddddddddddddddddddddddddddddddddd",
+      previousBranch: "main",
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("ddddddd");
+    fireEvent.click(screen.getByRole("button", { name: "Вернуться на «main»" }));
+
+    await waitFor(() =>
+      expect(mocks.switchBranch).toHaveBeenCalledWith(
+        "project-a",
+        "main",
+        "local",
       ),
     );
   });
