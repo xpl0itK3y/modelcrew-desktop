@@ -2169,6 +2169,18 @@ function HistoryView(props: {
   // «Все ветки»: включает локальные и серверные ветки (без stash/tag-only
   // служебных историй), граф становится насыщенным, как в редакторах.
   const [allBranches, setAllBranches] = useState(false);
+  // Поиск по истории: поле ввода и то, что именно ищем.
+  const [searchField, setSearchField] = useState<"text" | "author" | "path">(
+    "text",
+  );
+  const [searchDraft, setSearchDraft] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    // Печатать быстрее, чем git успевает отвечать, — обычное дело.
+    const timer = window.setTimeout(() => setSearch(searchDraft.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
+  const filtering = search.length > 0;
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
   // Сколько коммитов запрашивать; «Показать ещё» наращивает порциями.
@@ -2220,7 +2232,12 @@ function HistoryView(props: {
     let cancelled = false;
     const load = () => {
       const request = ++logRequestRef.current;
-      fetchLog(props.workspaceId, limit, allBranches)
+      fetchLog(
+        props.workspaceId,
+        limit,
+        allBranches,
+        filtering ? { [searchField]: search } : undefined,
+      )
         .then((log) => {
           if (!cancelled && logRequestRef.current === request) {
             setCommits(log);
@@ -2242,11 +2259,20 @@ function HistoryView(props: {
       logRequestRef.current += 1;
       unsubscribe();
     };
-  }, [props.workspaceId, limit, allBranches, reloadNonce]);
+  }, [
+    props.workspaceId,
+    limit,
+    allBranches,
+    reloadNonce,
+    filtering,
+    searchField,
+    search,
+  ]);
 
   // Незакоммиченные изменения показываем узлом только в обычном виде: в режиме
   // «все ветки» верхний коммит — не обязательно HEAD, поводок был бы обманчив.
-  const workingTreeCount = allBranches ? 0 : props.fileCount;
+  const workingTreeCount = allBranches || filtering ? 0 : props.fileCount;
+  const showGraph = graphMode && !filtering;
 
   // Ошибка действия гаснет сама.
   useEffect(() => {
@@ -2287,7 +2313,9 @@ function HistoryView(props: {
   if (commits === null) {
     return <div className="git-empty">{t("git.loading")}</div>;
   }
-  if (commits.length === 0) {
+  // При активном фильтре пустой результат не должен прятать саму строку
+  // поиска — иначе запрос стало бы нечем очистить.
+  if (commits.length === 0 && !filtering) {
     return <div className="git-empty">{t("git.historyEmpty")}</div>;
   }
   return (
@@ -2296,16 +2324,18 @@ function HistoryView(props: {
         <div className="git-history-modes" role="group">
           <button
             type="button"
-            className={`git-mode ${graphMode ? "is-active" : ""}`}
-            aria-pressed={graphMode}
+            className={`git-mode ${showGraph ? "is-active" : ""}`}
+            aria-pressed={showGraph}
+            disabled={filtering}
+            title={filtering ? t("git.graphNeedsNoFilter") : undefined}
             onClick={() => setGraphMode(true)}
           >
             {t("git.viewGraph")}
           </button>
           <button
             type="button"
-            className={`git-mode ${!graphMode ? "is-active" : ""}`}
-            aria-pressed={!graphMode}
+            className={`git-mode ${!showGraph ? "is-active" : ""}`}
+            aria-pressed={!showGraph}
             onClick={() => setGraphMode(false)}
           >
             {t("git.viewList")}
@@ -2324,6 +2354,37 @@ function HistoryView(props: {
           ⎇ {t("git.allBranches")}
         </button>
       </div>
+      <div className="git-history-search">
+        <select
+          className="git-search-field"
+          aria-label={t("git.searchField")}
+          value={searchField}
+          onChange={(event) =>
+            setSearchField(event.target.value as typeof searchField)
+          }
+        >
+          <option value="text">{t("git.searchByText")}</option>
+          <option value="author">{t("git.searchByAuthor")}</option>
+          <option value="path">{t("git.searchByPath")}</option>
+        </select>
+        <input
+          type="search"
+          className="git-search-input"
+          aria-label={t("git.searchPlaceholder")}
+          placeholder={t("git.searchPlaceholder")}
+          value={searchDraft}
+          spellCheck={false}
+          onChange={(event) => {
+            setLimit(100);
+            setSearchDraft(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setSearchDraft("");
+            }
+          }}
+        />
+      </div>
       {actionError && (
         <div className="git-commit-error" role="alert">
           {actionError}
@@ -2331,8 +2392,10 @@ function HistoryView(props: {
       )}
       {/* key по режиму перемонтирует контент — короткая анимация появления
           при переключении «Граф ⇄ Список» в обе стороны. */}
-      <div key={graphMode ? "graph" : "list"} className="git-history-swap">
-      {graphMode ? (
+      <div key={showGraph ? "graph" : "list"} className="git-history-swap">
+      {commits.length === 0 ? (
+        <div className="git-empty">{t("git.searchEmpty")}</div>
+      ) : showGraph ? (
         <CommitGraph
           commits={commits}
           workspaceId={props.workspaceId}

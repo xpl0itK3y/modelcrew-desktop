@@ -341,12 +341,26 @@ export function deleteBranch(
   });
 }
 
+// Фильтр применяет git, а не панель: иначе пришлось бы вычитывать всю историю,
+// чтобы отобрать пару коммитов.
+export type GitLogFilter = {
+  text?: string;
+  author?: string;
+  path?: string;
+};
+
 export function fetchLog(
   workspaceId: string,
   limit = 100,
   all = false,
+  filter?: GitLogFilter,
 ): Promise<GitCommitInfo[]> {
-  return invoke<GitCommitInfo[]>("git_log", { workspaceId, limit, all });
+  return invoke<GitCommitInfo[]>("git_log", {
+    workspaceId,
+    limit,
+    all,
+    filter,
+  });
 }
 
 // Действия над коммитом истории: checkout (отделить HEAD), branch (создать

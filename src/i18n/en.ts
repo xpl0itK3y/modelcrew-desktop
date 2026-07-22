@@ -136,6 +136,13 @@ export const en: Record<MessageKey, string> = {
   "github.notConfigured": "GitHub sign-in is not configured",
   "github.notConfiguredHint":
     "Register an OAuth App at github.com/settings/developers (enable Device Flow) and set its Client ID at build time.",
+  "git.searchField": "Search in",
+  "git.searchByText": "Message",
+  "git.searchByAuthor": "Author",
+  "git.searchByPath": "File",
+  "git.searchPlaceholder": "Search history",
+  "git.searchEmpty": "Nothing found",
+  "git.graphNeedsNoFilter": "The graph needs an unfiltered history: filtered commits hide the links between them",
   "git.allBranches": "All branches",
   "git.allBranchesHint":
     "Show history across all branches, including server ones (origin/…). Refreshed by the background fetch.",

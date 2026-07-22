@@ -463,6 +463,40 @@ describe("GitChangesView workspace lifecycle", () => {
     ).toBeInTheDocument();
   });
 
+  it("lets git filter the history and drops the graph while filtering", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.change(await screen.findByLabelText("Что искать"), {
+      target: { value: "author" },
+    });
+    fireEvent.change(screen.getByLabelText("Поиск по истории"), {
+      target: { value: "denis" },
+    });
+
+    await waitFor(() =>
+      expect(mocks.fetchLog).toHaveBeenLastCalledWith("project-a", 100, false, {
+        author: "denis",
+      }),
+    );
+    // Отфильтрованная история — уже не связный граф, поэтому режим недоступен.
+    expect(screen.getByRole("button", { name: "Граф" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Поиск по истории"), {
+      target: { value: "" },
+    });
+    await waitFor(() =>
+      expect(mocks.fetchLog).toHaveBeenLastCalledWith(
+        "project-a",
+        100,
+        false,
+        undefined,
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Граф" })).toBeEnabled();
+  });
+
   it("tags the commit the menu was opened on", async () => {
     mocks.fetchLog.mockResolvedValue([taggableCommit()]);
     render(<GitChangesView workspaceId="project-a" />);

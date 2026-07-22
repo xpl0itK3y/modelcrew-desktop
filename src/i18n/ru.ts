@@ -135,6 +135,13 @@ export const ru = {
   "github.notConfigured": "Вход через GitHub не настроен",
   "github.notConfiguredHint":
     "Нужно зарегистрировать OAuth App на github.com/settings/developers (включить Device Flow) и указать его Client ID при сборке.",
+  "git.searchField": "Что искать",
+  "git.searchByText": "Сообщение",
+  "git.searchByAuthor": "Автор",
+  "git.searchByPath": "Файл",
+  "git.searchPlaceholder": "Поиск по истории",
+  "git.searchEmpty": "Ничего не найдено",
+  "git.graphNeedsNoFilter": "Граф доступен без фильтра: в отфильтрованной истории связи между коммитами не видны",
   "git.allBranches": "Все ветки",
   "git.allBranchesHint":
     "Показать историю всех веток, включая серверные (origin/…). Обновляется фоновым fetch.",
