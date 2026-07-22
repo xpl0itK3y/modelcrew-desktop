@@ -13,6 +13,8 @@ import {
   authorAvatar,
   commitAction,
   commitAll,
+  createBranch,
+  deleteBranch,
   fetchBranches,
   fetchCommitFiles,
   fetchFileDiff,
@@ -26,6 +28,7 @@ import {
   parseUnifiedDiff,
   readRepoFile,
   refreshGitChanges,
+  renameBranch,
   resolveAvatarUrl,
   revertFile,
   rewordCommit,
@@ -42,6 +45,7 @@ import {
   type GitRefKind,
 } from "../git/gitChanges";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { computeCommitGraph } from "../git/commitGraph";
 import {
   GRAPH_COLORS,
@@ -331,6 +335,9 @@ function FileDiff(props: {
                       size={Math.max(editValue.length + 2, 12)}
                       onChange={(event) => setEditValue(event.target.value)}
                       onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) {
+                          return;
+                        }
                         if (event.key === "Enter") {
                           event.preventDefault();
                           void saveLine(line.newLine!, editValue);
@@ -515,27 +522,85 @@ function BranchSwitcher(props: {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editor, setEditor] = useState<
+    | { kind: "create" }
+    | { kind: "rename"; branch: GitBranchInfo }
+    | null
+  >(null);
+  const [branchName, setBranchName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<GitBranchInfo | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const branchesRequestRef = useRef(0);
 
   useEffect(() => {
     if (!open) {
       return;
     }
+    const request = ++branchesRequestRef.current;
+    setLoading(true);
+    setLoadFailed(false);
+    setBranches([]);
     fetchBranches(props.workspaceId)
-      .then(setBranches)
-      .catch(() => setBranches([]));
+      .then((next) => {
+        if (branchesRequestRef.current === request) {
+          setBranches(next);
+        }
+      })
+      .catch(() => {
+        if (branchesRequestRef.current === request) {
+          setBranches([]);
+          setLoadFailed(true);
+        }
+      })
+      .finally(() => {
+        if (branchesRequestRef.current === request) {
+          setLoading(false);
+        }
+      });
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false);
+        setEditor(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        setEditor(null);
       }
     };
     window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      if (branchesRequestRef.current === request) {
+        branchesRequestRef.current += 1;
+      }
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [open, props.workspaceId]);
+
+  const reloadBranches = async () => {
+    const request = ++branchesRequestRef.current;
+    try {
+      const next = await fetchBranches(props.workspaceId);
+      if (branchesRequestRef.current === request) {
+        setBranches(next);
+        setLoadFailed(false);
+      }
+    } catch {
+      if (branchesRequestRef.current === request) {
+        setLoadFailed(true);
+      }
+    }
+  };
 
   const pick = async (branch: GitBranchInfo) => {
     setOpen(false);
+    setEditor(null);
     if (branch.isCurrent || busy) {
       return;
     }
@@ -555,65 +620,255 @@ function BranchSwitcher(props: {
     }
   };
 
+  const beginCreate = () => {
+    setEditor({ kind: "create" });
+    setBranchName("");
+  };
+
+  const beginRename = (branch: GitBranchInfo) => {
+    setEditor({ kind: "rename", branch });
+    setBranchName(branch.name);
+  };
+
+  const saveEditor = async () => {
+    const name = branchName.trim();
+    if (
+      !editor ||
+      !name ||
+      busy ||
+      (editor.kind === "rename" && name === editor.branch.name)
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      if (editor.kind === "create") {
+        await createBranch(props.workspaceId, name);
+      } else {
+        await renameBranch(props.workspaceId, editor.branch.name, name);
+      }
+      setEditor(null);
+      setOpen(false);
+      await reloadBranches();
+      void refreshGitChanges(props.workspaceId);
+    } catch (error) {
+      await reloadBranches();
+      void refreshGitChanges(props.workspaceId);
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      // Невлитую ветку удаляем только после усиленного подтверждения. Backend
+      // делает compare-and-swap по показанной вершине: если параллельный Git
+      // успел сдвинуть ref, новая вершина останется нетронутой.
+      await deleteBranch(
+        props.workspaceId,
+        deleteTarget.name,
+        !deleteTarget.isMerged,
+        deleteTarget.tipHash,
+      );
+      setDeleteTarget(null);
+      await reloadBranches();
+      void refreshGitChanges(props.workspaceId);
+    } catch (error) {
+      setDeleteTarget(null);
+      props.onError(localizeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const localBranches = branches.filter((branch) => !branch.isRemote);
   const remoteBranches = branches.filter((branch) => branch.isRemote);
   const branchRow = (branch: GitBranchInfo) => (
-    <button
-      key={branch.name}
-      type="button"
-      role="option"
-      aria-selected={branch.isCurrent}
-      className={`git-branch-item ${branch.isCurrent ? "is-current" : ""} ${
-        branch.isRemote ? "is-remote" : ""
-      }`}
-      title={branch.isRemote ? t("git.remoteBranchHint") : undefined}
-      onClick={() => void pick(branch)}
+    <div
+      key={`${branch.isRemote ? "remote" : "local"}:${branch.name}`}
+      className="git-branch-row"
     >
-      <span className="git-branch-name">{branch.name}</span>
-      {branch.isMerged && (
-        <span className="git-branch-merged" title={t("git.mergedHint")}>
-          {t("git.mergedBadge")}
+      <button
+        type="button"
+        aria-current={branch.isCurrent || undefined}
+        className={`git-branch-item ${branch.isCurrent ? "is-current" : ""} ${
+          branch.isRemote ? "is-remote" : ""
+        }`}
+        title={branch.isRemote ? t("git.remoteBranchHint") : undefined}
+        onClick={() => void pick(branch)}
+      >
+        <span className="git-branch-name">{branch.name}</span>
+        {branch.isMerged && (
+          <span className="git-branch-merged" title={t("git.mergedHint")}>
+            {t("git.mergedBadge")}
+          </span>
+        )}
+        {branch.lastCommitAt !== undefined && (
+          <span className="git-branch-date">
+            {formatRelativeTime(branch.lastCommitAt, locale)}
+          </span>
+        )}
+      </button>
+      {!branch.isRemote && (
+        <span className="git-branch-actions">
+          <button
+            type="button"
+            className="git-branch-action"
+            title={t("git.branchRename")}
+            aria-label={t("git.branchRenameNamed", { name: branch.name })}
+            disabled={busy}
+            onClick={() => beginRename(branch)}
+          >
+            ✎
+          </button>
+          {!branch.isCurrent && (
+            <button
+              type="button"
+              className="git-branch-action is-danger"
+              title={t("git.branchDelete")}
+              aria-label={t("git.branchDeleteNamed", { name: branch.name })}
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                setEditor(null);
+                setDeleteTarget(branch);
+              }}
+            >
+              ×
+            </button>
+          )}
         </span>
       )}
-      {branch.lastCommitAt !== undefined && (
-        <span className="git-branch-date">
-          {formatRelativeTime(branch.lastCommitAt, locale)}
-        </span>
-      )}
-    </button>
+    </div>
   );
 
   return (
-    <div className="git-branch-switcher" ref={rootRef}>
-      <button
-        type="button"
-        className="git-branch-button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        title={t("git.switchBranch")}
-        disabled={busy}
-        onClick={() => setOpen((value) => !value)}
-      >
-        ⎇ {props.currentBranch ?? t("git.detachedHead")}
-        <span className="git-branch-caret" aria-hidden="true">
-          ▾
-        </span>
-      </button>
-      {open && (
-        <div className="git-branch-menu" role="listbox">
-          {localBranches.map(branchRow)}
-          {remoteBranches.length > 0 && (
-            <div className="git-branch-section">
-              {t("git.remoteBranches")}
-            </div>
+    <>
+      <div className="git-branch-switcher" ref={rootRef}>
+        <button
+          type="button"
+          className="git-branch-button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={t("git.switchBranch")}
+          disabled={busy}
+          onClick={() => {
+            setEditor(null);
+            setOpen((value) => !value);
+          }}
+        >
+          ⎇ {props.currentBranch ?? t("git.detachedHead")}
+          <span className="git-branch-caret" aria-hidden="true">
+            ▾
+          </span>
+        </button>
+        {open && (
+          <div
+            className="git-branch-menu"
+            role="dialog"
+            aria-label={t("git.switchBranch")}
+          >
+            {editor ? (
+              <div className="git-branch-editor">
+                <input
+                  autoFocus
+                  className="git-actions-input"
+                  aria-label={
+                    editor.kind === "create"
+                      ? t("git.actionBranchName")
+                      : t("git.branchNewName")
+                  }
+                  placeholder={
+                    editor.kind === "create"
+                      ? t("git.actionBranchName")
+                      : t("git.branchNewName")
+                  }
+                  value={branchName}
+                  spellCheck={false}
+                  disabled={busy}
+                  onChange={(event) => setBranchName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) {
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      void saveEditor();
+                    } else if (event.key === "Escape") {
+                      event.stopPropagation();
+                      setEditor(null);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="git-actions-go"
+                  disabled={
+                    busy ||
+                    !branchName.trim() ||
+                    (editor.kind === "rename" &&
+                      branchName.trim() === editor.branch.name)
+                  }
+                  onClick={() => void saveEditor()}
+                >
+                  {editor.kind === "create"
+                    ? t("git.actionBranchCreate")
+                    : t("git.branchRenameSave")}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="git-branch-create"
+                onClick={beginCreate}
+              >
+                <span aria-hidden="true">＋</span> {t("git.branchCreate")}
+              </button>
+            )}
+            {localBranches.map(branchRow)}
+            {remoteBranches.length > 0 && (
+              <div className="git-branch-section">
+                {t("git.remoteBranches")}
+              </div>
+            )}
+            {remoteBranches.map(branchRow)}
+            {loading && (
+              <div className="git-branch-empty">{t("git.loading")}</div>
+            )}
+            {!loading && loadFailed && (
+              <div className="git-branch-empty is-error">
+                {t("git.branchesLoadFailed")}
+              </div>
+            )}
+            {!loading && !loadFailed && branches.length === 0 && (
+              <div className="git-branch-empty">{t("git.branchesEmpty")}</div>
+            )}
+          </div>
+        )}
+      </div>
+      {deleteTarget && (
+        <ConfirmDialog
+          text={t(
+            deleteTarget.isMerged
+              ? "git.branchDeleteConfirm"
+              : "git.branchForceDeleteConfirm",
+            { name: deleteTarget.name },
           )}
-          {remoteBranches.map(branchRow)}
-          {branches.length === 0 && (
-            <div className="git-branch-empty">{t("git.loading")}</div>
-          )}
-        </div>
+          confirmLabel={
+            deleteTarget.isMerged
+              ? t("git.branchDelete")
+              : t("git.branchForceDelete")
+          }
+          busy={busy}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -822,6 +1077,9 @@ function CommitActionsMenu(props: {
             disabled={busy}
             onChange={(event) => setBranchName(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) {
+                return;
+              }
               if (event.key === "Enter" && branchName.trim()) {
                 void run("branch", branchName.trim());
               } else if (event.key === "Escape") {

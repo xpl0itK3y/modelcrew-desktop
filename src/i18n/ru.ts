@@ -15,6 +15,20 @@ export const ru = {
   "git.tabChanges": "Изменения",
   "git.tabHistory": "История",
   "git.switchBranch": "Переключить ветку",
+  "git.branchCreate": "Новая ветка от HEAD",
+  "git.branchRename": "Переименовать ветку",
+  "git.branchRenameNamed": "Переименовать ветку «{name}»",
+  "git.branchNewName": "новое имя ветки",
+  "git.branchRenameSave": "Сохранить",
+  "git.branchDelete": "Удалить",
+  "git.branchDeleteNamed": "Удалить ветку «{name}»",
+  "git.branchForceDelete": "Удалить принудительно",
+  "git.branchDeleteConfirm":
+    "Удалить локальную ветку «{name}»? Ветка на сервере останется.",
+  "git.branchForceDeleteConfirm":
+    "Ветка «{name}» не влита в текущую. Принудительно удалить её локальную копию? Уникальные коммиты останутся только в reflog; ветка на сервере не удалится.",
+  "git.branchesLoadFailed": "Не удалось загрузить ветки",
+  "git.branchesEmpty": "Локальных веток пока нет",
   "git.remoteBranches": "На сервере",
   "git.remoteBranchHint":
     "Ветка есть только на сервере: переключение создаст локальную копию со слежением",

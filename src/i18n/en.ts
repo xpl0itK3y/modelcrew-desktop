@@ -16,6 +16,20 @@ export const en: Record<MessageKey, string> = {
   "git.tabChanges": "Changes",
   "git.tabHistory": "History",
   "git.switchBranch": "Switch branch",
+  "git.branchCreate": "New branch from HEAD",
+  "git.branchRename": "Rename branch",
+  "git.branchRenameNamed": "Rename branch “{name}”",
+  "git.branchNewName": "new branch name",
+  "git.branchRenameSave": "Save",
+  "git.branchDelete": "Delete",
+  "git.branchDeleteNamed": "Delete branch “{name}”",
+  "git.branchForceDelete": "Force delete",
+  "git.branchDeleteConfirm":
+    "Delete local branch “{name}”? Its server branch will remain.",
+  "git.branchForceDeleteConfirm":
+    "Branch “{name}” is not merged into the current branch. Force-delete its local copy? Unique commits will remain only in the reflog; the server branch will not be deleted.",
+  "git.branchesLoadFailed": "Could not load branches",
+  "git.branchesEmpty": "No local branches yet",
   "git.remoteBranches": "On the server",
   "git.remoteBranchHint":
     "This branch only exists on the server: switching creates a tracking local copy",

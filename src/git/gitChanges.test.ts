@@ -11,11 +11,52 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 import {
   aggregateCounts,
   authorAvatar,
+  createBranch,
+  deleteBranch,
   formatRelativeTime,
   parseUnifiedDiff,
+  renameBranch,
   resolveAvatarUrl,
   type GitChangesSummary,
 } from "./gitChanges";
+
+describe("git mutation IPC", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.invoke.mockResolvedValue(undefined);
+  });
+
+  it("creates a branch with the expected command arguments", async () => {
+    await createBranch("ws-1", "feature/history");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_create_branch", {
+      workspaceId: "ws-1",
+      name: "feature/history",
+    });
+  });
+
+  it("renames a branch with the expected command arguments", async () => {
+    await renameBranch("ws-2", "old-name", "new-name");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_rename_branch", {
+      workspaceId: "ws-2",
+      branch: "old-name",
+      newName: "new-name",
+    });
+  });
+
+  it("deletes a branch with the expected command arguments", async () => {
+    await deleteBranch("ws-3", "obsolete", true, "abc123def456");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("git_delete_branch", {
+      workspaceId: "ws-3",
+      branch: "obsolete",
+      force: true,
+      expectedTip: "abc123def456",
+    });
+  });
+
+});
 
 describe("resolveAvatarUrl", () => {
   it("derives GitHub avatars from noreply emails", async () => {

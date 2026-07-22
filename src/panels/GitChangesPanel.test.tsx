@@ -228,3 +228,103 @@ describe("Git action errors", () => {
   });
 });
 
+describe("BranchSwitcher local management", () => {
+  it("ignores a branch-list response from a previous menu opening", async () => {
+    let resolveOld!: (branches: GitBranchInfo[]) => void;
+    let resolveNew!: (branches: GitBranchInfo[]) => void;
+    mocks.fetchBranches
+      .mockImplementationOnce(
+        () =>
+          new Promise<GitBranchInfo[]>((resolve) => {
+            resolveOld = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<GitBranchInfo[]>((resolve) => {
+            resolveNew = resolve;
+          }),
+      );
+    const branch = (name: string): GitBranchInfo => ({
+      name,
+      refName: `refs/heads/${name}`,
+      tipHash: name === "old" ? "a".repeat(40) : "b".repeat(40),
+      isCurrent: false,
+      isRemote: false,
+      isMerged: true,
+    });
+
+    render(<GitChangesView workspaceId="project-a" />);
+    const switcher = screen.getByTitle("Переключить ветку");
+    fireEvent.click(switcher);
+    await waitFor(() => expect(mocks.fetchBranches).toHaveBeenCalledTimes(1));
+    fireEvent.click(switcher);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Переключить ветку" }))
+        .not.toBeInTheDocument(),
+    );
+    fireEvent.click(switcher);
+    await waitFor(() => expect(mocks.fetchBranches).toHaveBeenCalledTimes(2));
+
+    resolveNew([branch("new")]);
+    expect(await screen.findByText("new")).toBeInTheDocument();
+    resolveOld([branch("old")]);
+    await waitFor(() =>
+      expect(screen.queryByText("old")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("new")).toBeInTheDocument();
+  });
+
+  it("creates a branch from HEAD and confirms deletion of a merged branch", async () => {
+    mocks.fetchBranches.mockResolvedValue([
+      {
+        name: "main",
+        refName: "refs/heads/main",
+        tipHash: "1111111111111111111111111111111111111111",
+        isCurrent: true,
+        isRemote: false,
+        isMerged: false,
+      },
+      {
+        name: "old-feature",
+        refName: "refs/heads/old-feature",
+        tipHash: "2222222222222222222222222222222222222222",
+        isCurrent: false,
+        isRemote: false,
+        isMerged: true,
+      },
+    ]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByTitle("Переключить ветку"));
+    await screen.findByText("Новая ветка от HEAD");
+    fireEvent.click(screen.getByText("Новая ветка от HEAD"));
+    fireEvent.change(screen.getByLabelText("имя ветки"), {
+      target: { value: "feature/history" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() =>
+      expect(mocks.createBranch).toHaveBeenCalledWith(
+        "project-a",
+        "feature/history",
+      ),
+    );
+
+    fireEvent.click(screen.getByTitle("Переключить ветку"));
+    await screen.findByLabelText("Удалить ветку «old-feature»");
+    fireEvent.click(screen.getByLabelText("Удалить ветку «old-feature»"));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "Ветка на сервере останется",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+
+    await waitFor(() =>
+      expect(mocks.deleteBranch).toHaveBeenCalledWith(
+        "project-a",
+        "old-feature",
+        false,
+        "2222222222222222222222222222222222222222",
+      ),
+    );
+  });
+});

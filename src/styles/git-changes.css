@@ -140,6 +140,8 @@
 
 .git-branch-item {
   display: flex;
+  min-width: 0;
+  flex: 1;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -154,8 +156,20 @@
   cursor: pointer;
 }
 
-.git-branch-item:hover {
+.git-branch-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  border-radius: 5px;
+}
+
+.git-branch-row:hover,
+.git-branch-row:focus-within {
   background: var(--mc-hover);
+}
+
+.git-branch-item:hover {
+  background: transparent;
 }
 
 .git-branch-item.is-current .git-branch-name {
@@ -180,6 +194,80 @@
   padding: 8px;
   color: var(--mc-text-faint);
   font-size: 11.5px;
+}
+
+.git-branch-empty.is-error {
+  color: #e0714c;
+}
+
+.git-branch-create {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mc-accent);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-branch-create:hover {
+  background: var(--mc-hover);
+}
+
+.git-branch-editor {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+
+.git-branch-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  padding-right: 3px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.git-branch-row:hover .git-branch-actions,
+.git-branch-row:focus-within .git-branch-actions {
+  opacity: 1;
+}
+
+.git-branch-action {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.git-branch-action:hover:not(:disabled) {
+  background: var(--mc-surface-active);
+  color: var(--mc-text-bright);
+}
+
+.git-branch-action.is-danger {
+  color: #e0714c;
+}
+
+.git-branch-action:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* Секция серверных веток: заголовок и синий оттенок имён. */
