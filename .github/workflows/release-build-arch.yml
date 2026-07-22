@@ -5,6 +5,9 @@ on:
     secrets:
       GH_OAUTH_CLIENT_ID:
         required: false
+  # Нативная сборка иначе проверялась бы только выпуском релиза, а её поломка
+  # ломала бы сам релиз. Ручной запуск даёт прогнать её отдельно и заранее.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -149,6 +152,8 @@ jobs:
   # версии библиотек, что и раньше.
   repack:
     name: Arch Linux aarch64
+    # Берёт .deb из сборки Linux, которой при ручном запуске просто нет.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-22.04
     container: archlinux:latest
     timeout-minutes: 30
