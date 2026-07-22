@@ -308,6 +308,43 @@ fn origin_url(root: &Path) -> Option<String> {
     git_capture(root, &["remote", "get-url", "origin"]).filter(|url| !url.is_empty())
 }
 
+// Первый remote, ведущий на GitHub: origin приоритетнее, но проект может
+// работать и через fork/upstream с другим именем.
+fn github_slug(root: &Path) -> Option<(String, String)> {
+    if let Some(slug) = origin_url(root).as_deref().and_then(parse_github_slug) {
+        return Some(slug);
+    }
+    let remotes = git_capture(root, &["remote"])?;
+    remotes.lines().find_map(|remote| {
+        let remote = remote.trim();
+        if remote.is_empty() || remote == "origin" {
+            return None;
+        }
+        git_capture(root, &["remote", "get-url", remote])
+            .as_deref()
+            .and_then(parse_github_slug)
+    })
+}
+
+// Ссылка на коммит на GitHub. None — если репозиторий не связан с GitHub;
+// открывать ссылку решает фронтенд, здесь мы её только собираем.
+#[tauri::command]
+pub async fn github_commit_url(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    hash: String,
+) -> CommandResult<Option<String>> {
+    super::ensure_main_window(&window)?;
+    if hash.len() < 7 || !hash.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Ok(None);
+    }
+    let root = roots.resolve(&workspace_id)?;
+    Ok(github_slug(&root).map(|(owner, repo)| {
+        format!("https://github.com/{owner}/{repo}/commit/{hash}")
+    }))
+}
+
 // Почта, которой подписаны локальные коммиты этого репо (git config user.email).
 fn local_git_email(root: &Path) -> Option<String> {
     git_capture(root, &["config", "user.email"])

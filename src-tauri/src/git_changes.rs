@@ -2904,6 +2904,200 @@ pub fn drop_commit(root: &Path, hash: &str, expected_head: &str) -> CommandResul
     run_git(&toplevel, &["reset", "--keep", &format!("{tip}^{{commit}}")]).map(|_| ())
 }
 
+// ---------- Теги и патчи ----------
+
+// Имя тега уходит в `git tag` позиционным аргументом, поэтому ведущий дефис
+// отсекаем до вызова: иначе имя стало бы опцией команды.
+fn validated_tag_ref(root: &Path, name: &str) -> CommandResult<String> {
+    if name.starts_with('-') {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "tag-invalid")
+            .with_context("tag", name));
+    }
+    validate_namespaced_ref(root, "tags", name, "tag-invalid")
+}
+
+// Создаёт локальный тег на коммите. С сообщением тег будет аннотированным
+// (собственный объект с автором и датой), без него — лёгким указателем.
+pub fn create_tag(
+    root: &Path,
+    name: &str,
+    hash: &str,
+    message: Option<&str>,
+) -> CommandResult<()> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let reference = validated_tag_ref(&toplevel, name)?;
+    if run_git(&toplevel, &["show-ref", "--verify", "--quiet", &reference]).is_ok() {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "tag-exists")
+            .with_context("tag", name));
+    }
+    let commit = run_git(
+        &toplevel,
+        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !is_safe_hash(&commit) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    match message.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(text) => {
+            validated_message(text)?;
+            run_git(&toplevel, &["tag", "-a", "-m", text, name, &commit])
+        }
+        None => run_git(&toplevel, &["tag", name, &commit]),
+    }
+    .map(|_| ())
+}
+
+// Удаляет локальный тег. Тег на сервере не трогаем: это уже изменение общего
+// репозитория, а не локальной копии.
+pub fn delete_tag(root: &Path, name: &str) -> CommandResult<()> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let reference = validated_tag_ref(&toplevel, name)?;
+    let current = run_git(&toplevel, &["show-ref", "--verify", "--hash", &reference])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+        .map_err(|_| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "tag-missing")
+                .with_context("tag", name)
+        })?;
+    // Удаляем ровно то значение, которое только что прочитали: если тег успели
+    // пересоздать на другом коммите, ref останется нетронутым.
+    run_git(
+        &toplevel,
+        &[
+            "update-ref",
+            "-m",
+            "modelcrew: delete tag",
+            "-d",
+            &reference,
+            &current,
+        ],
+    )
+    .map(|_| ())
+}
+
+// Патч коммита в формате `git format-patch` — его можно применить через
+// `git am`. У merge-коммита правок относительно одного родителя нет, поэтому
+// для него отдаём обычный `git show`.
+pub fn commit_patch(root: &Path, hash: &str) -> CommandResult<String> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let commit = run_git(
+        &toplevel,
+        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    let revision = format!("{commit}^{{commit}}");
+    // format-patch по умолчанию пропускает merge-коммиты и молча выдаёт патч
+    // предыдущего обычного коммита, поэтому merge отправляем сразу в `show`.
+    // `--root` нужен, иначе у самого первого коммита патча бы не оказалось.
+    let raw = if read_commit_meta(&toplevel, &commit)?.parents.len() > 1 {
+        run_git(&toplevel, &["show", "--patch", "--format=fuller", &revision])?
+    } else {
+        run_git(
+            &toplevel,
+            &["format-patch", "-1", "--root", "--stdout", &revision],
+        )?
+    };
+    Ok(String::from_utf8_lossy(&raw).into_owned())
+}
+
+#[tauri::command]
+pub async fn git_create_tag(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    name: String,
+    hash: String,
+    message: Option<String>,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        create_tag(&root, &name, &hash, message.as_deref())
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_delete_tag(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    name: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || delete_tag(&root, &name))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_commit_patch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    hash: String,
+) -> CommandResult<String> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || commit_patch(&root, &hash))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+// Сохраняет патч в выбранный пользователем файл. Возвращает false, если диалог
+// закрыли без выбора — это не ошибка и показывать её не нужно.
+#[tauri::command]
+pub async fn git_save_commit_patch(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    hash: String,
+    file_name: String,
+) -> CommandResult<bool> {
+    use tauri_plugin_dialog::DialogExt;
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    let patch = {
+        let root = root.clone();
+        let hash = hash.clone();
+        tauri::async_runtime::spawn_blocking(move || commit_patch(&root, &hash))
+            .await
+            .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))??
+    };
+    let Some(target) = window
+        .dialog()
+        .file()
+        .set_file_name(file_name)
+        .add_filter("patch", &["patch"])
+        .blocking_save_file()
+    else {
+        return Ok(false);
+    };
+    let path = target
+        .into_path()
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    std::fs::write(path, patch)
+        .map(|_| true)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))
+}
+
 #[tauri::command]
 pub async fn git_amend_commit(
     window: tauri::WebviewWindow,
@@ -5546,6 +5740,95 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "one\nediting\n"
         );
+    }
+
+    #[test]
+    fn creates_and_deletes_local_tags() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        let head = head_of(&git);
+
+        create_tag(root, "v1.0", &head, None).unwrap();
+        create_tag(root, "v1.0-annotated", &head, Some("first release")).unwrap();
+        let tags = String::from_utf8_lossy(&git(&["tag", "--list"])).into_owned();
+        assert!(tags.contains("v1.0"));
+        assert!(tags.contains("v1.0-annotated"));
+        // Аннотированный тег — отдельный объект, лёгкий указывает прямо на коммит.
+        let annotated = String::from_utf8_lossy(&git(&["cat-file", "-t", "v1.0-annotated"]))
+            .trim()
+            .to_owned();
+        assert_eq!(annotated, "tag");
+
+        assert_eq!(
+            create_tag(root, "v1.0", &head, None)
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("tag-exists")
+        );
+        for invalid in ["-rf", "bad name", ""] {
+            assert_eq!(
+                create_tag(root, invalid, &head, None)
+                    .unwrap_err()
+                    .context
+                    .get("reason")
+                    .map(String::as_str),
+                Some("tag-invalid"),
+                "{invalid}"
+            );
+        }
+
+        delete_tag(root, "v1.0").unwrap();
+        assert!(!String::from_utf8_lossy(&git(&["tag", "--list"])).contains("v1.0\n"));
+        assert_eq!(
+            delete_tag(root, "v1.0")
+                .unwrap_err()
+                .context
+                .get("reason")
+                .map(String::as_str),
+            Some("tag-missing")
+        );
+    }
+
+    #[test]
+    fn exports_a_commit_as_an_appliable_patch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "first"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&["commit", "--quiet", "-am", "second"]);
+        let head = head_of(&git);
+
+        let patch = commit_patch(root, &head).unwrap();
+        assert!(patch.contains("Subject: [PATCH] second"));
+        assert!(patch.contains("+two"));
+        assert!(patch.contains("diff --git a/a.txt b/a.txt"));
+
+        // Merge-коммит не имеет патча против одного родителя — отдаём diff.
+        git(&["checkout", "--quiet", "-b", "side", "HEAD~1"]);
+        std::fs::write(root.join("b.txt"), "side\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "side"]);
+        git(&["checkout", "--quiet", "main"]);
+        git(&["merge", "--quiet", "--no-ff", "--no-edit", "side"]);
+        let merge = head_of(&git);
+        let merge_patch = commit_patch(root, &merge).unwrap();
+        assert!(merge_patch.contains("Merge:"), "{merge_patch}");
+        assert!(merge_patch.contains("Merge branch 'side'"));
+
+        // Самый первый коммит тоже должен экспортироваться, а не выдавать пустоту.
+        let first = String::from_utf8_lossy(&git(&["rev-list", "--max-parents=0", "HEAD"]))
+            .trim()
+            .to_owned();
+        assert!(commit_patch(root, &first).unwrap().contains("+one"));
     }
 
     #[test]

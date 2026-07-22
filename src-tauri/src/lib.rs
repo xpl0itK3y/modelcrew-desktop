@@ -16,13 +16,14 @@ use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_amend_commit, git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch,
     git_commit, git_commit_action, git_commit_files, git_create_branch, git_delete_branch,
-    git_drop_commit, git_fetch_upstream,
+    git_commit_patch, git_create_tag, git_delete_tag, git_drop_commit, git_fetch_upstream,
     git_file_diff, git_log, git_pull, git_pull_rebase, git_push, git_read_file, git_rename_branch,
     git_reset_to_commit, git_reset_to_upstream, git_revert_file, git_reword_commit,
-    git_squash_commit, git_switch_branch, git_write_file, GitWatchState,
+    git_save_commit_patch, git_squash_commit, git_switch_branch, git_write_file, GitWatchState,
 };
 use github_auth::{
-    github_auth_available, github_commit_avatars, github_current_user, github_device_poll,
+    github_auth_available, github_commit_avatars, github_commit_url, github_current_user,
+    github_device_poll,
     github_device_start, github_logout,
 };
 use linux_updater::{
@@ -709,6 +710,11 @@ pub fn run() {
             git_reset_to_commit,
             git_squash_commit,
             git_drop_commit,
+            git_create_tag,
+            git_delete_tag,
+            git_commit_patch,
+            git_save_commit_patch,
+            github_commit_url,
             git_reword_commit,
             workspace_reconcile_roots,
             workspace_register_root,
