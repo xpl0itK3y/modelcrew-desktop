@@ -107,7 +107,7 @@ jobs:
           arch=('x86_64')
           url='https://github.com/xpl0itK3y/modelcrew-desktop'
           license=('MIT')
-          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1')
+          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1' 'xdg-utils')
           provides=('modelcrew')
           conflicts=('modelcrew')
           options=('!strip')
@@ -191,7 +191,7 @@ jobs:
           arch=('aarch64')
           url='https://github.com/xpl0itK3y/modelcrew-desktop'
           license=('MIT')
-          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1')
+          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1' 'xdg-utils')
           provides=('modelcrew')
           conflicts=('modelcrew')
           options=('!strip')

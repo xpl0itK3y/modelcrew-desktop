@@ -41,16 +41,28 @@
       "deb": {
         "depends": [
           "git",
+          "gstreamer1.0-plugins-base",
           "gstreamer1.0-plugins-good",
           "gstreamer1.0-pulseaudio",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "pkexec | policykit-1",
+          "xdg-utils"
+        ],
+        "recommends": [
+          "openssh-client"
         ]
       },
       "rpm": {
         "depends": [
           "git",
+          "gstreamer1-plugins-base",
           "gstreamer1-plugins-good",
-          "libayatana-appindicator-gtk3"
+          "libayatana-appindicator-gtk3",
+          "polkit",
+          "xdg-utils"
+        ],
+        "recommends": [
+          "openssh-clients"
         ]
       }
     },

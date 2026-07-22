@@ -388,24 +388,56 @@ test("prepare-assets rejects an unsigned MSI", () => {
   }
 });
 
-// Панель изменений вызывает системный git. Если пакет перестанет объявлять его
-// зависимостью, на чистой машине Git-раздел молча исчезнет.
-test("every Linux package declares git as a runtime dependency", () => {
+// Приложение вызывает внешние программы: git (вся панель изменений), pkexec
+// (установка обновления системным пакетным менеджером) и xdg-open (открытие
+// ссылок), а звук уведомлений WebKitGTK проигрывает через плагины GStreamer.
+// Стоит убрать любую из этих зависимостей — на чистой машине соответствующая
+// часть приложения молча перестанет работать.
+test("every Linux package declares what the app runs at runtime", () => {
   const config = JSON.parse(
     fs.readFileSync(path.join(rootDirectory, "src-tauri/tauri.conf.json"), "utf8"),
   );
-  for (const kind of ["deb", "rpm"]) {
-    assert.ok(
-      config.bundle.linux[kind].depends.includes("git"),
-      `${kind} package must depend on git`,
-    );
+  const expected = {
+    deb: [
+      "git",
+      "gstreamer1.0-plugins-base",
+      "gstreamer1.0-plugins-good",
+      "pkexec | policykit-1",
+      "xdg-utils",
+    ],
+    rpm: [
+      "git",
+      "gstreamer1-plugins-base",
+      "gstreamer1-plugins-good",
+      "polkit",
+      "xdg-utils",
+    ],
+  };
+  for (const [kind, packages] of Object.entries(expected)) {
+    const depends = config.bundle.linux[kind].depends;
+    for (const name of packages) {
+      assert.ok(depends.includes(name), `${kind} must depend on ${name}`);
+    }
   }
 
+  // Пакеты для pacman описаны отдельно: в сборке Arch и в шаблоне для AUR.
   for (const file of [
     "packaging/aur/PKGBUILD.template",
     ".github/workflows/release-build-arch.yml",
   ]) {
     const text = fs.readFileSync(path.join(rootDirectory, file), "utf8");
-    assert.match(text, /'git'/u, `${file} must list git among the dependencies`);
+    for (const name of [
+      "git",
+      "gst-plugins-base",
+      "gst-plugins-good",
+      "polkit",
+      "xdg-utils",
+    ]) {
+      assert.match(
+        text,
+        new RegExp(`'${name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}'`, "u"),
+        `${file} must list ${name}`,
+      );
+    }
   }
 });

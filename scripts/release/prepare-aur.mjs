@@ -73,6 +73,7 @@ const srcinfo = `pkgbase = modelcrew-bin
 \tdepends = pango
 \tdepends = polkit
 \tdepends = webkit2gtk-4.1
+\tdepends = xdg-utils
 \tprovides = modelcrew
 \tconflicts = modelcrew
 \toptions = !strip

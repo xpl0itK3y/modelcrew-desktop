@@ -82,10 +82,11 @@ On Arch Linux, prefer the native package:
 sudo pacman -U ModelCrew_x.y.z_linux_x86_64.pkg.tar.zst
 ```
 
-…or build `modelcrew-bin` from the attached `PKGBUILD`. Runtime
-dependencies — WebKitGTK, GStreamer audio plugins, tray support — are
-declared in every package, and the AppImage bundles GStreamer so
-notification sounds work out of the box.
+…or build `modelcrew-bin` from the attached `PKGBUILD`. Every package
+declares what ModelCrew runs at runtime — `git` for the change panel,
+`pkexec` for installing updates, `xdg-open` for links, plus WebKitGTK,
+GStreamer audio plugins and tray support. The AppImage carries GStreamer
+itself so notification sounds work out of the box.
 
 > **Linux notifications:** system banners use the standard
 > `org.freedesktop.Notifications` D-Bus service. Desktop environments
