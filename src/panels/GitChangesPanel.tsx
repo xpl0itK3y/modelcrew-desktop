@@ -1608,6 +1608,7 @@ function CommitGraph(props: {
   onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
   onSwitchBranch: (name: string, kind: GitRefKind) => void;
   currentBranch?: string;
+  upstreamBranch?: string;
   workingTreeCount: number;
   onOpenChanges: () => void;
 }) {
@@ -1619,11 +1620,15 @@ function CommitGraph(props: {
           hash: commit.hash,
           parents: commit.parents,
           refs: commit.refs,
+          refDetails: commit.refDetails,
           isHead: commit.isHead,
         })),
-        { currentBranch: props.currentBranch },
+        {
+          currentBranch: props.currentBranch,
+          upstreamBranch: props.upstreamBranch ?? null,
+        },
       ),
-    [props.commits, props.currentBranch],
+    [props.commits, props.currentBranch, props.upstreamBranch],
   );
   const head = rows[0];
   const headWidth = ((head?.width ?? 1) + 1) * GRAPH_LANE_WIDTH;
@@ -1887,6 +1892,7 @@ function HistoryView(props: {
   onOpenChanges: () => void;
   // Текущая ветка — для выделения её бейджа и клика по чужим.
   currentBranch?: string;
+  upstreamBranch?: string;
 }) {
   const { locale, t } = useI18n();
   const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
@@ -2069,6 +2075,7 @@ function HistoryView(props: {
           onMenu={openMenu}
           onSwitchBranch={(name, kind) => void switchTo(name, kind)}
           currentBranch={props.currentBranch}
+          upstreamBranch={props.upstreamBranch}
           workingTreeCount={workingTreeCount}
           onOpenChanges={props.onOpenChanges}
         />
@@ -2423,6 +2430,7 @@ function GitChangesWorkspaceView(props: {
               fileCount={summary.files.length}
               onOpenChanges={() => props.onSelectView("changes")}
               currentBranch={summary.branch}
+              upstreamBranch={summary.upstreamRef}
             />
           ) : summary.files.length === 0 ? (
             <div className="git-empty">{t("git.clean")}</div>

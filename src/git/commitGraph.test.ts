@@ -160,6 +160,112 @@ describe("computeCommitGraph", () => {
     expect(below(rows, 2)).toEqual([`d@${GRAPH_REMOTE_REF_COLOR}`]);
   });
 
+  it("does not confuse a same-named remote ref with the current local branch", () => {
+    const remoteOnly = checked(
+      [
+        {
+          hash: "a",
+          parents: ["b"],
+          refs: ["origin/topic"],
+          refDetails: [
+            {
+              name: "origin/topic",
+              fullName: "refs/remotes/origin/topic",
+              kind: "remote" as const,
+            },
+          ],
+        },
+        { hash: "b", parents: [] },
+      ],
+      { currentBranch: "origin/topic", upstreamBranch: "not-this-ref" },
+    );
+    const local = checked(
+      [
+        {
+          hash: "a",
+          parents: ["b"],
+          refs: ["origin/topic"],
+          refDetails: [
+            {
+              name: "origin/topic",
+              fullName: "refs/heads/origin/topic",
+              kind: "local" as const,
+            },
+          ],
+        },
+        { hash: "b", parents: [] },
+      ],
+      { currentBranch: "origin/topic", upstreamBranch: "not-this-ref" },
+    );
+
+    expect(remoteOnly[0].color).not.toBe(GRAPH_LOCAL_REF_COLOR);
+    expect(local[0].color).toBe(GRAPH_LOCAL_REF_COLOR);
+  });
+
+  it("colors the exact configured upstream instead of guessing origin/current", () => {
+    const rows = checked(
+      [
+        {
+          hash: "local",
+          parents: ["origin"],
+          refDetails: [
+            {
+              name: "dev",
+              fullName: "refs/heads/dev",
+              kind: "local" as const,
+            },
+          ],
+          isHead: true,
+        },
+        {
+          hash: "origin",
+          parents: ["fork"],
+          refDetails: [
+            {
+              name: "origin/dev",
+              fullName: "refs/remotes/origin/dev",
+              kind: "remote" as const,
+            },
+          ],
+        },
+        {
+          hash: "fork",
+          parents: ["root"],
+          refDetails: [
+            {
+              name: "cache/review",
+              fullName: "refs/remotes/cache/review",
+              kind: "remote" as const,
+            },
+          ],
+        },
+        { hash: "root", parents: [] },
+      ],
+      { currentBranch: "dev", upstreamBranch: "cache/review" },
+    );
+
+    expect(rows[1].color).not.toBe(GRAPH_REMOTE_REF_COLOR);
+    expect(rows[2].color).toBe(GRAPH_REMOTE_REF_COLOR);
+    expect(rows[3].color).toBe(GRAPH_REMOTE_REF_COLOR);
+  });
+
+  it("does not invent an upstream when Git reports none", () => {
+    const rows = checked(
+      [
+        {
+          hash: "local",
+          parents: ["origin"],
+          refs: ["dev"],
+          isHead: true,
+        },
+        { hash: "origin", parents: [], refs: ["origin/dev"] },
+      ],
+      { currentBranch: "dev", upstreamBranch: null },
+    );
+
+    expect(rows[1].color).not.toBe(GRAPH_REMOTE_REF_COLOR);
+  });
+
   it("preserves another disconnected history after reaching a root", () => {
     const rows = checked([
       { hash: "a", parents: ["root-a"] },

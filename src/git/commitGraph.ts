@@ -50,12 +50,19 @@ export type GraphInput = {
   hash: string;
   parents: string[];
   refs?: string[];
+  refDetails?: Array<{
+    name: string;
+    fullName?: string;
+    kind: "local" | "remote" | "tag";
+  }>;
   isHead?: boolean;
 };
 
 export type CommitGraphOptions = {
   currentBranch?: string;
-  upstreamBranch?: string;
+  // null означает, что upstream точно отсутствует; undefined оставляет
+  // эвристику только для старых/изолированных вызовов без Git summary.
+  upstreamBranch?: string | null;
 };
 
 type Lane = {
@@ -73,7 +80,15 @@ function inferUpstreamBranch(
     return undefined;
   }
 
-  const refs = new Set(commits.flatMap((commit) => commit.refs ?? []));
+  const refs = new Set(
+    commits.flatMap((commit) =>
+      commit.refDetails
+        ? commit.refDetails
+            .filter((ref) => ref.kind === "remote")
+            .map((ref) => ref.name)
+        : (commit.refs ?? []),
+    ),
+  );
   const originRef = `origin/${currentBranch}`;
   if (refs.has(originRef)) {
     return originRef;
@@ -100,22 +115,32 @@ export function computeCommitGraph(
   };
 
   const upstreamBranch =
-    options.upstreamBranch ??
-    inferUpstreamBranch(commits, options.currentBranch);
+    options.upstreamBranch === undefined
+      ? inferUpstreamBranch(commits, options.currentBranch)
+      : (options.upstreamBranch ?? undefined);
   const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
   const labelColor = (commit: GraphInput | undefined): number | undefined => {
     if (!commit) {
       return undefined;
     }
-    const refs = commit.refs ?? [];
+    const localRefs = commit.refDetails
+      ? commit.refDetails
+          .filter((ref) => ref.kind === "local")
+          .map((ref) => ref.name)
+      : (commit.refs ?? []);
+    const remoteRefs = commit.refDetails
+      ? commit.refDetails
+          .filter((ref) => ref.kind === "remote")
+          .map((ref) => ref.name)
+      : (commit.refs ?? []);
     if (
       commit.isHead ||
       (options.currentBranch !== undefined &&
-        refs.includes(options.currentBranch))
+        localRefs.includes(options.currentBranch))
     ) {
       return GRAPH_LOCAL_REF_COLOR;
     }
-    if (upstreamBranch !== undefined && refs.includes(upstreamBranch)) {
+    if (upstreamBranch !== undefined && remoteRefs.includes(upstreamBranch)) {
       return GRAPH_REMOTE_REF_COLOR;
     }
     return undefined;
