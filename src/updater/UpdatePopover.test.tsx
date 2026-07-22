@@ -132,6 +132,38 @@ describe("UpdatePopover", () => {
     expect(callbacks.onInstall).not.toHaveBeenCalled();
   });
 
+  it("shows the real install command instead of an invented path", () => {
+    renderPopover({
+      sync: "settled",
+      items: [
+        notification("installFailed", {
+          installKind: "nativePackage",
+          manualCommand:
+            "sudo pacman -U /home/user/.cache/modelcrew/ModelCrew-0.0.2.pkg.tar.zst",
+        }),
+      ],
+    });
+
+    expect(
+      screen.getByText(
+        "sudo pacman -U /home/user/.cache/modelcrew/ModelCrew-0.0.2.pkg.tar.zst",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the command when the backend did not report a package path", () => {
+    renderPopover({
+      sync: "settled",
+      items: [notification("installFailed", { installKind: "nativePackage" })],
+    });
+
+    expect(
+      document.querySelector(".update-manual-command"),
+    ).not.toBeInTheDocument();
+    // Совет про polkit-агент остаётся полезным и без команды.
+    expect(screen.getByText(/polkit/)).toBeInTheDocument();
+  });
+
   it.each([
     ["authorizationCancelled", "Повторить установку"],
     ["installFailed", "Повторить установку"],

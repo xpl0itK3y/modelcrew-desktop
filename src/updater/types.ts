@@ -49,6 +49,9 @@ export type UpdateNotification = UpdateDetails & {
   phase: UpdateNotificationPhase;
   downloaded?: number;
   total?: number;
+  // Готовая команда ручной установки: показывается, когда системная установка
+  // не прошла и пакет уже лежит на диске.
+  manualCommand?: string;
 };
 
 export type AnnouncementNotification = {

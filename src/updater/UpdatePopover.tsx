@@ -65,6 +65,21 @@ function canConfirmInstall(item: UpdateNotification): boolean {
   );
 }
 
+
+// Подсказка о ручной установке. Команду показываем только когда бэкенд назвал
+// реальный путь к скачанному пакету: выдуманный путь бесполезен.
+function ManualInstallHint(props: { command?: string }) {
+  const { t } = useI18n();
+  return (
+    <>
+      <p>{t("update.manualInstallHint")}</p>
+      {props.command && (
+        <code className="update-manual-command">{props.command}</code>
+      )}
+    </>
+  );
+}
+
 export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
   function UpdatePopover(props, ref) {
     const { locale, t } = useI18n();
@@ -479,7 +494,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                         <strong>{t("update.authorizationCancelledTitle")}</strong>
                         <p>{t("update.authorizationCancelledDescription")}</p>
                         {item.installKind === "nativePackage" && (
-                          <p>{t("update.manualInstallHint")}</p>
+                          <ManualInstallHint command={item.manualCommand} />
                         )}
                       </div>
                     )}
@@ -517,7 +532,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                         <strong>{t("update.installFailedTitle")}</strong>
                         <p>{t("update.installFailedDescription")}</p>
                         {item.installKind === "nativePackage" && (
-                          <p>{t("update.manualInstallHint")}</p>
+                          <ManualInstallHint command={item.manualCommand} />
                         )}
                       </div>
                     )}

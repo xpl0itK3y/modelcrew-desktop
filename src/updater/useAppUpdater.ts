@@ -34,6 +34,7 @@ import {
   installKindFrom,
   isAuthorizationCancelled,
   isInstallTarget,
+  manualInstallCommand,
   isUpdateDownloadProgress,
   isPlainObject,
   isRecoverableUpdateCacheError,
@@ -606,11 +607,12 @@ export function useAppUpdater({
       if (phase !== "restartFailed") {
         onInstallAbortedRef.current?.();
       }
+      const manualCommand = manualInstallCommand(error);
       setCenter((current) => ({
         ...current,
         items: current.items.map((item) =>
           item.kind === "update" && item.id === notification.id
-            ? { ...item, phase }
+            ? { ...item, phase, manualCommand }
             : item,
         ),
       }));

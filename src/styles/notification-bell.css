@@ -143,3 +143,20 @@
     transform: none;
   }
 }
+
+/* Команда ручной установки в карточке ошибки: её копируют, поэтому текст
+   моноширинный, выделяемый и переносится по длинному пути. */
+.update-manual-command {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-surface);
+  color: var(--mc-text-bright);
+  font-family: var(--mc-font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

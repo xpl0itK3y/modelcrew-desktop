@@ -47,6 +47,17 @@ impl LinuxPackageKind {
             Self::Pacman => "pacman",
         }
     }
+
+    // Расширение, по которому пакет узнают и менеджер пакетов, и человек.
+    // В кеше файл лежит под служебным именем, и передавать его установщику
+    // как есть нельзя: ручная команда из подсказки тогда неисполнима.
+    fn file_extension(self) -> &'static str {
+        match self {
+            Self::Deb => "deb",
+            Self::Rpm => "rpm",
+            Self::Pacman => "pkg.tar.zst",
+        }
+    }
 }
 
 impl std::fmt::Display for LinuxPackageKind {
@@ -545,7 +556,12 @@ async fn install_linux_package(
         let bytes = std::fs::read(&install_snapshot.path)
             .map_err(|error| CommandError::new(ErrorCode::UpdaterCacheInvalid).with_debug(error))?;
         verify_cached_update_signature(&signature_cache_dir, &bytes, &signature, &public_key)?;
-        run_package_installer(install_snapshot.package_kind, &install_snapshot.path)
+        let installable = installable_package_path(
+            install_snapshot.package_kind,
+            &install_snapshot.path,
+            &install_snapshot.version,
+        )?;
+        run_package_installer(install_snapshot.package_kind, &installable)
     })
     .await
     .map_err(|error| CommandError::new(ErrorCode::UpdaterInstallFailed).with_debug(error))?;
@@ -809,6 +825,29 @@ fn classify_installer_exit(code: Option<i32>, success: bool) -> InstallerExit {
     }
 }
 
+// Кладёт рядом с кешированным артефактом копию с привычным именем пакета.
+// Жёсткая ссылка не тратит место; если файловая система её не поддерживает,
+// падаем на обычное копирование.
+#[cfg(target_os = "linux")]
+fn installable_package_path(
+    kind: LinuxPackageKind,
+    artifact: &Path,
+    version: &str,
+) -> CommandResult<std::path::PathBuf> {
+    let name = format!("ModelCrew-{version}.{}", kind.file_extension());
+    let target = artifact.with_file_name(name);
+    if target == artifact {
+        return Ok(target);
+    }
+    let _ = std::fs::remove_file(&target);
+    if std::fs::hard_link(artifact, &target).is_err() {
+        std::fs::copy(artifact, &target).map_err(|error| {
+            CommandError::new(ErrorCode::UpdaterCacheWriteFailed).with_debug(error)
+        })?;
+    }
+    Ok(target)
+}
+
 #[cfg(target_os = "linux")]
 fn run_package_installer(kind: LinuxPackageKind, package: &Path) -> CommandResult<()> {
     if !Path::new(PKEXEC_PATH).is_file() {
@@ -838,7 +877,9 @@ fn run_package_installer(kind: LinuxPackageKind, package: &Path) -> CommandResul
     match classify_installer_exit(output.status.code(), output.status.success()) {
         InstallerExit::Success => Ok(()),
         InstallerExit::AuthorizationCancelled => {
-            Err(CommandError::new(ErrorCode::UpdaterAuthorizationCancelled))
+            Err(CommandError::new(ErrorCode::UpdaterAuthorizationCancelled)
+                .with_context("packageKind", kind)
+                .with_context("packagePath", package.display()))
         }
         InstallerExit::Failed => {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -846,6 +887,7 @@ fn run_package_installer(kind: LinuxPackageKind, package: &Path) -> CommandResul
             let diagnostics = format!("stdout: {stdout}\nstderr: {stderr}");
             Err(CommandError::new(ErrorCode::UpdaterInstallFailed)
                 .with_context("packageKind", kind)
+                .with_context("packagePath", package.display())
                 .with_context(
                     "exitCode",
                     output
@@ -959,6 +1001,33 @@ mod tests {
             serde_json::to_value(LinuxUpdateProgress::Verifying).unwrap(),
             serde_json::json!({ "phase": "verifying" })
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_package_gets_a_name_its_installer_understands() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("artifact.bin");
+        std::fs::write(&artifact, b"package bytes").unwrap();
+
+        for (kind, expected) in [
+            (LinuxPackageKind::Deb, "ModelCrew-1.2.3.deb"),
+            (LinuxPackageKind::Rpm, "ModelCrew-1.2.3.rpm"),
+            (LinuxPackageKind::Pacman, "ModelCrew-1.2.3.pkg.tar.zst"),
+        ] {
+            let installable = installable_package_path(kind, &artifact, "1.2.3").unwrap();
+            assert_eq!(
+                installable.file_name().and_then(|name| name.to_str()),
+                Some(expected)
+            );
+            // Содержимое то же самое, а не копия «на всякий случай»: пакет уже
+            // проверен по подписи, повторно скачивать или менять его нельзя.
+            assert_eq!(std::fs::read(&installable).unwrap(), b"package bytes");
+            assert_eq!(installable.parent(), artifact.parent());
+        }
+
+        // Повторная установка не должна падать из-за оставшегося файла.
+        assert!(installable_package_path(LinuxPackageKind::Pacman, &artifact, "1.2.3").is_ok());
     }
 
     #[test]

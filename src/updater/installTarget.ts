@@ -101,3 +101,24 @@ export function isRecoverableUpdateCacheError(error: unknown): boolean {
     error.code === "updater_install_target_changed"
   );
 }
+
+// Чем пользователь поставит уже скачанный пакет сам, если системная установка
+// не прошла. Путь и тип пакета приходят из ошибки бэкенда — придумывать их на
+// фронтенде нельзя: подсказка с несуществующим путём хуже, чем её отсутствие.
+const MANUAL_INSTALL_COMMANDS: Record<string, string> = {
+  deb: "sudo dpkg -i",
+  rpm: "sudo rpm -U",
+  pacman: "sudo pacman -U",
+};
+
+export function manualInstallCommand(error: unknown): string | undefined {
+  if (!isPlainObject(error) || !isPlainObject(error.context)) {
+    return undefined;
+  }
+  const { packageKind, packagePath } = error.context;
+  if (typeof packageKind !== "string" || typeof packagePath !== "string") {
+    return undefined;
+  }
+  const command = MANUAL_INSTALL_COMMANDS[packageKind];
+  return command && packagePath ? `${command} ${packagePath}` : undefined;
+}
