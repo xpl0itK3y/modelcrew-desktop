@@ -1910,6 +1910,7 @@ function HistoryView(props: {
   const [rewording, setRewording] = useState<GitCommitInfo | null>(null);
   // Немедленная перезагрузка лога после действия (не дожидаясь вотчера).
   const [reloadNonce, setReloadNonce] = useState(0);
+  const logRequestRef = useRef(0);
   // Детали остаются смонтированными на время exit-анимации при сворачивании.
   const detailsPresence = useAnimatedPresence(expandedHash, 240);
   const openMenu = (commit: GitCommitInfo, x: number, y: number) =>
@@ -1943,15 +1944,16 @@ function HistoryView(props: {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
+      const request = ++logRequestRef.current;
       fetchLog(props.workspaceId, limit, allBranches)
         .then((log) => {
-          if (!cancelled) {
+          if (!cancelled && logRequestRef.current === request) {
             setCommits(log);
             setLoadingMore(false);
           }
         })
         .catch(() => {
-          if (!cancelled) {
+          if (!cancelled && logRequestRef.current === request) {
             setCommits([]);
             setLoadingMore(false);
           }
@@ -1962,6 +1964,7 @@ function HistoryView(props: {
     const unsubscribe = subscribeGitChanges(props.workspaceId, load);
     return () => {
       cancelled = true;
+      logRequestRef.current += 1;
       unsubscribe();
     };
   }, [props.workspaceId, limit, allBranches, reloadNonce]);

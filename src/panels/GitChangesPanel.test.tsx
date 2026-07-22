@@ -157,6 +157,58 @@ describe("GitChangesView workspace lifecycle", () => {
     );
   });
 
+  it("ignores an older history response that finishes after a refresh", async () => {
+    let resolveOld!: (commits: GitCommitInfo[]) => void;
+    let resolveNew!: (commits: GitCommitInfo[]) => void;
+    mocks.fetchLog
+      .mockImplementationOnce(
+        () =>
+          new Promise<GitCommitInfo[]>((resolve) => {
+            resolveOld = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<GitCommitInfo[]>((resolve) => {
+            resolveNew = resolve;
+          }),
+      );
+    const makeCommit = (hash: string, subject: string): GitCommitInfo => ({
+      hash: hash.repeat(40),
+      shortHash: hash.repeat(7),
+      subject,
+      author: "Denis",
+      authorEmail: "denis@example.com",
+      epochMs: Date.now(),
+      unpushed: true,
+      localOnly: true,
+      editable: true,
+      isHead: true,
+      parents: [],
+      refs: ["main"],
+      refDetails: [
+        { name: "main", fullName: "refs/heads/main", kind: "local" },
+      ],
+      remoteRefs: [],
+      fullMessage: subject,
+    });
+
+    render(<GitChangesView workspaceId="project-a" />);
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    await waitFor(() => expect(mocks.fetchLog).toHaveBeenCalledTimes(1));
+
+    emitSummary("project-a", summary("main", "from-a.txt"));
+    await waitFor(() => expect(mocks.fetchLog).toHaveBeenCalledTimes(2));
+    resolveNew([makeCommit("b", "new history")]);
+    expect(await screen.findByText("new history")).toBeInTheDocument();
+
+    resolveOld([makeCommit("a", "stale history")]);
+    await waitFor(() =>
+      expect(screen.queryByText("stale history")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("new history")).toBeInTheDocument();
+  });
+
   it("keeps Co-authored-by trailers visible when editing a message", async () => {
     const fullMessage =
       "feat: shared work\n\nDetailed body.  \n\nCo-authored-by: Alex <alex@example.com>\n\n";
