@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.0.6
+
+### Русский
+
+Git-панель выросла до полной истории с графом веток, действиями над коммитами, правкой файлов прямо в diff и входом через GitHub.
+
+- Изучайте историю графом веток: HEAD, метки веток, поиск по сообщению, автору и файлу
+- Управляйте коммитами: amend, squash, drop, теги, патчи и сравнение любых двух коммитов
+- Сливайте, перебазируйте и публикуйте ветки, а из отделённого HEAD возвращайтесь одним действием
+- Правьте изменённые файлы прямо в diff, не покидая панель
+- Входите через GitHub и видьте настоящие аватары авторов рядом с коммитами
+- В Linux исправлено чёрное окно, вернулись звуки уведомлений в AppImage, а пакет для Arch x86_64 собирается нативно
+
+### English
+
+The Git panel grew into a full history with a branch graph, commit actions, inline file editing in the diff, and GitHub sign-in.
+
+- Explore history as a branch graph with HEAD, branch chips, and search by message, author, or file
+- Manage commits: amend, squash, drop, tags, patches, and a diff between any two commits
+- Merge, rebase, and publish branches, and return from a detached HEAD in one action
+- Edit changed files inline in the diff without leaving the panel
+- Sign in with GitHub to see real author avatars next to commits
+- On Linux the black window is fixed, AppImage notification sounds work again, and the Arch x86_64 package is built natively
+
 ## 0.0.5
 
 ### Русский
