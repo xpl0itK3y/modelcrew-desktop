@@ -584,9 +584,12 @@ mod tests {
         fn dump_file(path: &std::path::Path) -> Vec<Vec<u8>> {
             let path = path.display().to_string();
             if cfg!(windows) {
+                // Собираем маркер из двух половин: cmd отражает набранное, и
+                // `set MARK=STRESS_1337` отдал бы готовый маркер прямо в эхе
+                // ввода — цикл вышел бы, не дождавшись ни байта файла.
                 vec![
-                    Self::line("set MARK=STRESS_1337"),
-                    Self::line(&format!("type \"{path}\" & echo %MARK%")),
+                    Self::line("set PART=1337"),
+                    Self::line(&format!("type \"{path}\" & echo STRESS_%PART%")),
                 ]
             } else {
                 vec![Self::line(&format!(
