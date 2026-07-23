@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  loadNotificationSound,
   playNotificationSound,
+  prepareNotificationSound,
   selectUnseenNotificationSoundIds,
 } from "../sound";
 import { sendSystemNotification } from "../notifications";
@@ -27,6 +29,12 @@ async function notifyInBackground(item: NotificationItem): Promise<void> {
 // still announce itself the next time the app discovers it.
 export function useNotificationSounds(items: readonly NotificationItem[]) {
   const [handledIds] = useState(() => new Set(loadReadNotificationIds()));
+
+  // Уведомление приходит внезапно, а звук ещё надо забрать — тянем его
+  // заранее, чтобы первое же событие прозвучало вовремя.
+  useEffect(() => {
+    prepareNotificationSound(loadNotificationSound());
+  }, []);
 
   useEffect(() => {
     // The notification center can mark items read without changing updater

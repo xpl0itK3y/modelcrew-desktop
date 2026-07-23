@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let audioInstances: FakeAudio[] = [];
 let playResult: Promise<void>;
+let fetchSound: (file: string) => Promise<Response>;
 
 class FakeAudio {
   src = "";
@@ -25,6 +26,15 @@ function storedHealth(): { status: string; version: string } {
 // Waits out the next-tick watchdog that confirms a playback attempt survived.
 function settleWatchdog(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 1));
+}
+
+// Звук сначала забирается через fetch, поэтому первое проигрывание файла
+// доезжает через несколько микрозадач. Таймеры при этом не трогаем: порядок
+// сторожевого тика проверяется отдельно.
+async function settleSource(): Promise<void> {
+  for (let turn = 0; turn < 20; turn += 1) {
+    await Promise.resolve();
+  }
 }
 
 function update(
@@ -59,6 +69,14 @@ describe("notification sounds", () => {
     audioInstances = [];
     playResult = Promise.resolve();
     vi.stubGlobal("Audio", FakeAudio);
+    fetchSound = async () =>
+      ({ ok: true, blob: async () => new Blob() }) as Response;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((file: string) => fetchSound(file)),
+    );
+    let issued = 0;
+    URL.createObjectURL = vi.fn(() => `blob:sound-${(issued += 1)}`);
     // Защита от зависания аудио — только на Linux; тесты на неё гоняем под
     // Linux-UA. Отдельный тест ниже проверяет поведение вне Linux.
     Object.defineProperty(navigator, "userAgent", {
@@ -95,10 +113,49 @@ describe("notification sounds", () => {
     const { previewNotificationSound } = await import("./sound");
 
     previewNotificationSound("reveal");
+    await settleSource();
 
     expect(audioInstances).toHaveLength(1);
-    expect(audioInstances[0].src).toBe("/sounds/reveal.wav");
     expect(audioInstances[0].currentTime).toBe(0);
+    expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
+  });
+
+  // Схему приложения (tauri://localhost) GStreamer внутри WebKitGTK обслужить
+  // не умеет: конвейер разваливается до разбора файла, и на Linux не звучит
+  // ничего. Поэтому байты забираем сами, а элементу достаётся blob:.
+  it("plays through a blob URL instead of the app scheme", async () => {
+    const { previewNotificationSound } = await import("./sound");
+
+    previewNotificationSound("reveal");
+    await settleSource();
+
+    expect(fetch).toHaveBeenCalledWith("/sounds/reveal.wav");
+    expect(audioInstances[0].src).toBe("blob:sound-1");
+  });
+
+  it("fetches a sound once and reuses it for later plays", async () => {
+    const { previewNotificationSound } = await import("./sound");
+
+    previewNotificationSound("pop");
+    await settleSource();
+    previewNotificationSound("pop");
+
+    // Второе проигрывание попадает в готовый источник — без круга через
+    // промисы, чтобы уведомление звучало ровно тогда, когда пришло.
+    expect(audioInstances[0].play).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the plain path when the sound cannot be fetched", async () => {
+    fetchSound = async () => {
+      throw new Error("offline");
+    };
+    const { previewNotificationSound } = await import("./sound");
+
+    previewNotificationSound("click");
+    await settleSource();
+
+    expect(audioInstances[0].src).toBe("/sounds/click.wav");
     expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
   });
 
@@ -107,7 +164,7 @@ describe("notification sounds", () => {
     const { playNotificationSound } = await import("./sound");
 
     expect(() => playNotificationSound()).not.toThrow();
-    await Promise.resolve();
+    await settleSource();
 
     expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
   });
@@ -127,6 +184,7 @@ describe("notification sounds", () => {
     );
     expect(isNotificationSoundSuppressed()).toBe(false);
     previewNotificationSound("chime");
+    await settleSource();
     expect(audioInstances).toHaveLength(1);
     // Метки здоровья вне Linux не ведём — «broken» осталась нетронутой.
     expect(storedHealth().status).toBe("broken");
@@ -136,6 +194,7 @@ describe("notification sounds", () => {
     const { previewNotificationSound } = await import("./sound");
 
     previewNotificationSound("pop");
+    await settleSource();
     expect(storedHealth().status).toBe("pending");
 
     await settleWatchdog();
@@ -148,6 +207,7 @@ describe("notification sounds", () => {
 
     // A healthy attempt records the running app version for us.
     previewNotificationSound("chime");
+    await settleSource();
     await settleWatchdog();
     const { version } = storedHealth();
     audioInstances = [];
@@ -172,6 +232,7 @@ describe("notification sounds", () => {
     } = await import("./sound");
 
     previewNotificationSound("chime");
+    await settleSource();
     await settleWatchdog();
     const { version } = storedHealth();
     localStorage.setItem(
@@ -201,6 +262,7 @@ describe("notification sounds", () => {
 
     expect(isNotificationSoundSuppressed()).toBe(false);
     previewNotificationSound("click");
+    await settleSource();
     expect(audioInstances).toHaveLength(1);
   });
 
@@ -213,6 +275,7 @@ describe("notification sounds", () => {
     vi.spyOn(performance, "now").mockImplementation(() => mockedNow);
 
     previewNotificationSound("chime");
+    await settleSource();
     expect(audioInstances).toHaveLength(1);
     mockedNow = 10_000; // the watchdog wakes only after a 10s stall
     await settleWatchdog();
