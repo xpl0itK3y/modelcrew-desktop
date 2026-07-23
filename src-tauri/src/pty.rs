@@ -456,6 +456,35 @@ pub struct ShellInfo {
     pub command: String,
 }
 
+/// Bash из установки Git for Windows. Искать его только в PATH бесполезно:
+/// установщик по умолчанию добавляет туда каталог с `git.exe`, а `bash.exe`
+/// лежит рядом, в `bin`. Поэтому у большинства пользователей bash установлен,
+/// но обычным поиском не находится.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn bash_in_git_install(roots: &[PathBuf]) -> Option<PathBuf> {
+    roots
+        .iter()
+        .map(|root| root.join("Git").join("bin").join("bash.exe"))
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(windows)]
+fn windows_git_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    // ProgramW6432 указывает на 64-битный Program Files даже из 32-битного
+    // процесса; остальные покрывают обычную и 32-битную установки.
+    for variable in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Some(value) = std::env::var_os(variable) {
+            roots.push(PathBuf::from(value));
+        }
+    }
+    // Установка «только для меня» кладёт Git в профиль пользователя.
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(PathBuf::from(local).join("Programs"));
+    }
+    roots
+}
+
 /// Оболочки, реально доступные на этой ОС — фронт покажет только их, чтобы
 /// пользователь не выбрал отсутствующую. Кроссплатформенно: unix и windows
 /// перебирают разные наборы.
@@ -465,7 +494,6 @@ pub fn available_shells() -> Vec<ShellInfo> {
         ("powershell", "PowerShell", "powershell.exe"),
         ("pwsh", "PowerShell 7", "pwsh.exe"),
         ("cmd", "Command Prompt", "cmd.exe"),
-        ("bash", "Bash", "bash.exe"),
     ];
     #[cfg(not(windows))]
     let candidates: &[(&str, &str, &str)] = &[
@@ -474,7 +502,8 @@ pub fn available_shells() -> Vec<ShellInfo> {
         ("sh", "Sh", "sh"),
         ("fish", "Fish", "fish"),
     ];
-    candidates
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut shells: Vec<ShellInfo> = candidates
         .iter()
         .filter(|(_, _, command)| shell_exists(command))
         .map(|(id, label, command)| ShellInfo {
@@ -482,7 +511,25 @@ pub fn available_shells() -> Vec<ShellInfo> {
             label: (*label).to_string(),
             command: (*command).to_string(),
         })
-        .collect()
+        .collect();
+
+    #[cfg(windows)]
+    {
+        // Полный путь, а не имя: PATH до него всё равно не доведёт. Если Git
+        // не установлен, остаётся обычный поиск — он найдёт bash из WSL или
+        // поставленный вручную.
+        let (label, command) = match bash_in_git_install(&windows_git_roots()) {
+            Some(path) => ("Git Bash", path.display().to_string()),
+            None if shell_exists("bash.exe") => ("Bash", "bash.exe".to_string()),
+            None => return shells,
+        };
+        shells.push(ShellInfo {
+            id: "bash".to_string(),
+            label: label.to_string(),
+            command,
+        });
+    }
+    shells
 }
 
 fn shell_exists(shell: &str) -> bool {
@@ -1098,6 +1145,25 @@ mod tests {
             error.context["path"],
             Shell::missing_directory().display().to_string()
         );
+    }
+
+    #[test]
+    fn finds_bash_inside_a_git_installation() {
+        let dir = tempfile::tempdir().unwrap();
+        let without_git = dir.path().join("empty");
+        std::fs::create_dir_all(&without_git).unwrap();
+        let program_files = dir.path().join("Program Files");
+        let bash = program_files.join("Git").join("bin").join("bash.exe");
+        std::fs::create_dir_all(bash.parent().unwrap()).unwrap();
+        std::fs::write(&bash, b"").unwrap();
+
+        // Корень без Git пропускается, а не обрывает поиск: у пользователя
+        // обычно есть и Program Files, и Program Files (x86).
+        assert_eq!(
+            bash_in_git_install(&[without_git.clone(), program_files]),
+            Some(bash)
+        );
+        assert_eq!(bash_in_git_install(&[without_git]), None);
     }
 
     #[test]
