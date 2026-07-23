@@ -3897,6 +3897,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(status.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("tracked.txt"), "one\ntwo\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "init"]);
@@ -4050,6 +4051,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed: {output:?}");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "branch.foo.remote", "origin"]);
         git(&["config", "branch.foo.bar.remote", "upstream"]);
 
@@ -4088,6 +4090,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "first commit"]);
@@ -4327,6 +4330,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed: {output:?}");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
 
         let remote = tempfile::tempdir().unwrap();
@@ -4394,6 +4398,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed: {output:?}");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
         let head = String::from_utf8_lossy(&run_git(root, &["rev-parse", "HEAD"]).unwrap())
             .trim()
@@ -4454,6 +4459,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed: {output:?}");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
         git(&["branch", "doomed"]);
         git(&["config", "branch.doomed.remote", "origin"]);
@@ -4509,6 +4515,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
         git_at(
             &["init", "--quiet", "--initial-branch=main"],
+            "2026-01-01T00:00:00Z",
+        );
+        git_at(
+            &["config", "core.autocrlf", "false"],
             "2026-01-01T00:00:00Z",
         );
         // Общий родитель намеренно новее одного из потомков. Без
@@ -4582,6 +4592,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         };
         git_at(
             &["init", "--quiet", "--initial-branch=main"],
+            "2026-01-01T00:00:00Z",
+        );
+        git_at(
+            &["config", "core.autocrlf", "false"],
             "2026-01-01T00:00:00Z",
         );
         git_at(
@@ -4672,6 +4686,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let hash = |args: &[&str]| String::from_utf8_lossy(&git(args)).trim().to_owned();
 
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("tracked.txt"), "base\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "root"]);
@@ -4754,6 +4769,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         };
 
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "root"]);
         let root_hash = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
             .trim()
@@ -4793,6 +4809,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "Дэн"]);
         git(&["config", "user.email", "d@t"]);
 
@@ -4945,6 +4962,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "t"]);
         git(&["config", "user.email", "t@t"]);
         std::fs::write(root.join("a.txt"), "original\n").unwrap();
@@ -4986,6 +5004,74 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(commit_all(root, "   ").is_err());
     }
 
+    // Остальные тесты выключают core.autocrlf, чтобы сравнивать содержимое
+    // точно. Но у пользователя Git for Windows он включён по умолчанию, и в
+    // рабочей копии лежит CRLF. Проверяем здесь один раз и осознанно, что
+    // панель от этого не слепнет: файл остаётся текстовым, diff собирается,
+    // сообщение коммита разбирается.
+    #[test]
+    fn panel_reads_a_repository_with_autocrlf_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "true"]);
+        git(&["config", "user.name", "t"]);
+        git(&["config", "user.email", "t@t"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "add the file\n\nWhy it matters"]);
+
+        // Коммит содержимое не переписывает, поэтому CRLF в рабочей копии
+        // появляется только на выдаче: удаляем файл и забираем его из HEAD.
+        // Так тест ведёт себя одинаково на всех системах, а не только там,
+        // где autocrlf включён установщиком.
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        git(&["checkout", "--", "a.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\r\ntwo\r\n",
+            "autocrlf обязан выдать рабочую копию с CRLF, иначе тест ничего не проверяет"
+        );
+
+        // Правка тем же переводом строки: git видит изменение, и панель тоже.
+        std::fs::write(root.join("a.txt"), "one\r\ntwo\r\nthree\r\n").unwrap();
+        let summary = collect_summary(root).unwrap();
+        assert!(summary.is_repo);
+        let changed = summary
+            .files
+            .iter()
+            .find(|file| file.path == "a.txt")
+            .expect("панель не увидела правку файла с CRLF");
+        assert_eq!(changed.status, "modified");
+        assert_eq!(changed.additions, Some(1));
+
+        // Файл с CRLF остаётся текстовым, а не «бинарным без diff».
+        let diff = collect_file_diff(root, "a.txt").unwrap();
+        assert!(!diff.is_binary, "файл с CRLF принят за бинарный");
+        assert!(
+            diff.diff.contains("three"),
+            "в diff нет добавленной строки: {}",
+            diff.diff
+        );
+
+        // Разбор сообщения не зависит от переводов строк в содержимом.
+        let commit = list_log_unfiltered(root, 1, false).unwrap().remove(0);
+        assert_eq!(commit.subject, "add the file");
+        assert_eq!(commit.body, "Why it matters");
+    }
+
     #[test]
     fn commit_actions_in_a_real_repository() {
         let dir = tempfile::tempdir().unwrap();
@@ -5003,6 +5089,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "t"]);
         git(&["config", "user.email", "t@t"]);
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -5074,6 +5161,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             output.stdout
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "first"]);
         let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
             .trim()
@@ -5127,6 +5215,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "Me"]);
         git(&["config", "user.email", "me@t"]);
         std::fs::write(root.join("a.txt"), "1\n").unwrap();
@@ -5220,6 +5309,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             output.stdout
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "Me"]);
         git(&["config", "user.email", "me@t"]);
         let message_path = root.join(".git/verbatim-message");
@@ -5275,6 +5365,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed: {output:?}");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "Me"]);
         git(&["config", "user.email", "me@t"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
@@ -5321,6 +5412,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         run(&["init", "--quiet", "--initial-branch=main"], "me@t");
+        run(&["config", "core.autocrlf", "false"], "me@t");
         run(&["config", "user.name", "Me"], "me@t");
         run(&["config", "user.email", "me@t"], "me@t");
         std::fs::write(root.join("a.txt"), "1\n").unwrap();
@@ -5403,6 +5495,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             );
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("base.txt"), "base\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "base"]);
@@ -5609,6 +5702,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed: {output:?}");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("a.txt"), "base\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "base"]);
@@ -5685,6 +5779,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             output.stdout
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["commit", "--quiet", "--allow-empty", "-m", "base"]);
         let stale_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
             .trim()
@@ -5759,6 +5854,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             output.stdout
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "first"]);
@@ -5829,6 +5925,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "first"]);
@@ -5871,6 +5968,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             output.stdout
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(root.join("a.txt"), "base\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "base"]);
@@ -5951,6 +6049,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             output.stdout
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["config", "core.autocrlf", "false"]);
         git(&["config", "user.name", "Me"]);
         git(&["config", "user.email", "me@t"]);
         git
