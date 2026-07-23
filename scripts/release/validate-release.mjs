@@ -48,6 +48,29 @@ if (tauriConfig.version !== "../package.json" && tauriConfig.version !== version
   );
 }
 
+// Политика безопасности содержимого — второй рубеж на случай, если в окно
+// когда-нибудь попадёт чужой скрипт: панель изменений показывает содержимое
+// произвольных репозиториев. Отключить её легко и незаметно, поэтому релиз без
+// неё не собирается. Проверяем только выпускаемую политику: dev-вариант живёт
+// на машине разработчика и наружу не уезжает.
+const csp = tauriConfig.app?.security?.csp;
+if (typeof csp !== "string" || csp.trim() === "") {
+  fail("tauri.conf.json: app.security.csp must be set for a release build");
+}
+for (const [directive, banned] of [
+  ["script-src", "'unsafe-inline'"],
+  ["script-src", "'unsafe-eval'"],
+  ["object-src", "*"],
+]) {
+  const sources = new RegExp(`(?:^|;)\\s*${directive}\\s([^;]*)`, "u").exec(csp)?.[1];
+  if (sources?.includes(banned)) {
+    fail(`tauri.conf.json: csp ${directive} must not allow ${banned}`);
+  }
+}
+if (!/(?:^|;)\s*default-src\s/u.test(csp)) {
+  fail("tauri.conf.json: csp must set default-src so unlisted types stay closed");
+}
+
 const notesPath = path.join(root, "release-notes", `${version}.json`);
 validateReleaseNotes(await readJson(notesPath), version);
 
