@@ -43,7 +43,7 @@ driven by mouse and hotkeys, and title themselves after the running program.
 | **Live git panel** | A slide-over showing uncommitted changes in real time as agents edit files: per-file diffs with live counters, a commit box, one-click revert, a branch switcher, and full commit history. |
 | **Agent alerts** | When an out-of-sight agent finishes or waits for your decision, ModelCrew plays a sound, shows a system banner naming the agent and project, and badges the app icon with the count of waiting panels. |
 | **Per-panel history** | Each terminal keeps its own shell history (zsh, bash, fish), so pressing arrow-up never leaks commands between panels. |
-| **Resilient updates** | Signed auto-updates download in the background into a persistent cache — a restart never re-downloads — with progress and release notes in the notification center. |
+| **Resilient updates** | Signed auto-updates download in the background into a persistent cache — a restart never re-downloads — with progress and release notes in the notification center. A downloaded update keeps its badge on the bell and the app icon until it is installed, so reading the notification never hides it. |
 
 **Also inside:** projects → sessions → terminals (one folder = one project,
 enforced by the backend, friendly codenames like `amber-lynx`) · native PTY

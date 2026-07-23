@@ -9,11 +9,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 import { READ_NOTIFICATIONS_STORAGE_KEY } from "../updater/readNotifications";
 import type {
+  AnnouncementNotification,
   AppUpdaterController,
   NotificationCenterState,
   UpdateNotification,
 } from "../updater/types";
 import { Titlebar } from "./Titlebar";
+
+const announcement: AnnouncementNotification = {
+  id: "announcement:0.0.2",
+  kind: "announcement",
+  title: "Что нового в 0.0.2",
+  summary: "Короткий список изменений.",
+  highlights: ["Тихий центр уведомлений"],
+};
 
 const readyUpdate: UpdateNotification = {
   id: "update:0.0.2",
@@ -73,12 +82,10 @@ describe("Titlebar notification center", () => {
     expect(within(dialog).getByText("Пока нет уведомлений")).toBeInTheDocument();
   });
 
-  it("marks a ready update read and preserves that state after remount", async () => {
-    const updater = controller({ sync: "settled", items: [readyUpdate] });
+  it("marks an announcement read and preserves that state after remount", async () => {
+    const updater = controller({ sync: "settled", items: [announcement] });
     const first = render(titlebar(updater));
-    const bell = screen.getByRole("button", {
-      name: "Обновление 0.0.2 готово",
-    });
+    const bell = screen.getByRole("button", { name: "Уведомления" });
     expect(document.querySelector(".notification-badge")).toBeInTheDocument();
 
     fireEvent.click(bell);
@@ -87,14 +94,14 @@ describe("Titlebar notification center", () => {
     );
     expect(
       JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY) ?? "[]"),
-    ).toContain(readyUpdate.id);
+    ).toContain(announcement.id);
 
     first.unmount();
     render(titlebar(updater));
     expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
   });
 
-  it("keeps showing a downloaded update after its badge was read", async () => {
+  it("keeps the badge on a downloaded update after the center was opened", async () => {
     const updater = controller({ sync: "settled", items: [readyUpdate] });
     const first = render(titlebar(updater));
     const bell = screen.getByRole("button", {
@@ -102,51 +109,72 @@ describe("Titlebar notification center", () => {
     });
 
     fireEvent.click(bell);
+    // Центр прочитан — и всё же обновление ждёт установки, а значит остаётся
+    // на виду: иначе единственное напоминание пропадало бы от одного взгляда.
     await waitFor(() =>
       expect(
-        document.querySelector(".notification-badge"),
-      ).not.toBeInTheDocument(),
+        JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY) ?? "[]"),
+      ).toContain(readyUpdate.id),
     );
-    // Счётчик непрочитанного погас, но обновление всё ещё ждёт установки —
-    // об этом должно остаться видимое напоминание.
-    expect(
-      document.querySelector(".notification-waiting-dot"),
-    ).toBeInTheDocument();
+    expect(document.querySelector(".notification-badge")).toHaveTextContent("1");
     expect(bell).toHaveClass("is-update-waiting");
 
     first.unmount();
     render(titlebar(updater));
+    expect(document.querySelector(".notification-badge")).toHaveTextContent("1");
     expect(
-      document.querySelector(".notification-waiting-dot"),
-    ).toBeInTheDocument();
+      screen.getByRole("button", { name: "Обновление 0.0.2 готово" }),
+    ).toHaveClass("is-update-waiting");
+  });
+
+  it("counts a waiting update once, not twice, next to an unread announcement", () => {
+    render(
+      titlebar(controller({ sync: "settled", items: [announcement, readyUpdate] })),
+    );
+
+    expect(document.querySelector(".notification-badge")).toHaveTextContent("2");
   });
 
   it("drops the waiting indicator once no update is pending", () => {
     render(titlebar(controller({ sync: "settled", items: [] })));
 
-    expect(
-      document.querySelector(".notification-waiting-dot"),
-    ).not.toBeInTheDocument();
+    expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Уведомления" }),
     ).not.toHaveClass("is-update-waiting");
   });
 
-  it("marks an update read when it appears while the center is open", async () => {
+  it("clears the badge when the update leaves the waiting phase", () => {
+    render(
+      titlebar(
+        controller({
+          sync: "settled",
+          items: [{ ...readyUpdate, phase: "installing" }],
+        }),
+      ),
+    );
+
+    expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Уведомления" }),
+    ).not.toHaveClass("is-update-waiting");
+  });
+
+  it("marks an announcement read when it appears while the center is open", async () => {
     const updater = controller({ sync: "settled", items: [] });
     const view = render(titlebar(updater));
     fireEvent.click(screen.getByRole("button", { name: "Уведомления" }));
 
-    const withUpdate: AppUpdaterController = {
+    const withAnnouncement: AppUpdaterController = {
       ...updater,
-      center: { sync: "settled", items: [readyUpdate] },
+      center: { sync: "settled", items: [announcement] },
     };
-    view.rerender(titlebar(withUpdate));
+    view.rerender(titlebar(withAnnouncement));
 
     await waitFor(() =>
       expect(
         JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY) ?? "[]"),
-      ).toContain(readyUpdate.id),
+      ).toContain(announcement.id),
     );
     expect(document.querySelector(".notification-badge")).not.toBeInTheDocument();
   });

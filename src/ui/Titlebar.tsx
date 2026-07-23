@@ -74,22 +74,22 @@ export function Titlebar(props: TitlebarProps) {
   );
   const latestAttentionItem = attentionItems[attentionItems.length - 1];
   // Скачанное обновление — это не «новость», а состояние: оно ждёт установки,
-  // пока его не поставят. Поэтому индикатор живёт независимо от «прочитано» —
-  // иначе один раз открытый центр уведомлений прятал бы обновление навсегда.
+  // пока его не поставят.
   const updateWaiting = attentionItems.length > 0;
-  // Count unread attention-worthy notifications (announcements plus ready/manual
-  // updates) for the badge on the bell; opening the center marks them read.
-  const unreadCount = props.updater.center.items.filter(
-    (item) =>
-      !readNotificationIds.includes(item.id) &&
-      (item.kind === "announcement" ||
-        item.phase === "ready" ||
-        item.phase === "manual"),
-  ).length;
+  // Счётчик на колокольчике. Объявление гаснет, как только его прочитали, а
+  // скачанное обновление остаётся в счёте до самой установки: прочитать его
+  // нельзя — по нему нужно действие, и напоминание не должно исчезать от
+  // одного взгляда в центр уведомлений.
+  const pendingCount =
+    attentionItems.length +
+    props.updater.center.items.filter(
+      (item) =>
+        item.kind === "announcement" && !readNotificationIds.includes(item.id),
+    ).length;
 
-  // Бейдж на иконке приложения: непрочитанные уведомления + агенты, ждущие
-  // ответа. Ноль убирает бейдж.
-  const dockBadge = unreadCount + agentAttention;
+  // Бейдж на иконке приложения: то же, что на колокольчике, плюс агенты,
+  // ждущие ответа. Ноль убирает бейдж.
+  const dockBadge = pendingCount + agentAttention;
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) {
       return;
@@ -295,21 +295,16 @@ export function Titlebar(props: TitlebarProps) {
             onClick={toggleNotifications}
           >
             <BellIcon />
-            {unreadCount > 0 && (
+            {pendingCount > 0 && (
               // key по счётчику пересоздаёт бейдж — pop-анимация играет на
               // каждое новое уведомление, а не только на первое.
               <span
-                key={unreadCount}
+                key={pendingCount}
                 className="notification-badge"
                 aria-hidden="true"
               >
-                {unreadCount > 9 ? "9+" : unreadCount}
+                {pendingCount > 9 ? "9+" : pendingCount}
               </span>
-            )}
-            {updateWaiting && unreadCount === 0 && (
-              // Счётчик уже прочитан, но обновление всё ещё ждёт: показываем
-              // точку вместо числа, чтобы кнопка не выглядела пустой.
-              <span className="notification-waiting-dot" aria-hidden="true" />
             )}
             {downloadingItem && (
               <span
