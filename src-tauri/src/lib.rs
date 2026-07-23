@@ -688,7 +688,18 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer_by_default();
 
-    let builder = tauri::Builder::default()
+    // Окно закрывается в трей, а не завершает приложение. Без защиты от второго
+    // экземпляра каждый повторный запуск поднимал бы ещё один процесс со своей
+    // иконкой в трее — пользователь получал бы их пачку, не понимая откуда.
+    // Плагин должен идти первым: он перехватывает запуск до создания окна.
+    // macOS не даёт запустить вторую копию сам, поэтому там он не нужен.
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        show_main_window(app);
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())

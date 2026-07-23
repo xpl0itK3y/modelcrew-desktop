@@ -49,3 +49,6 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Threading",
 ] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
