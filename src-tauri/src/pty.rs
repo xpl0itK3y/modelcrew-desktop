@@ -594,21 +594,83 @@ mod tests {
                 ))]
             }
         }
+
+        // ConPTY при старте сессии спрашивает позицию курсора (DSR) и ждёт
+        // ответа, прежде чем выполнять что-либо ещё. В приложении отвечает
+        // xterm.js — это работа эмулятора терминала, и в PTY-слое ей не место.
+        // В тестах эмулятора нет, поэтому его роль исполняет харнесс, иначе
+        // шелл замирает на первом же запросе.
+        const CURSOR_QUERY: &'static [u8] = b"\x1b[6n";
+        const CURSOR_REPLY: &'static [u8] = b"\x1b[1;1R";
+    }
+
+    // Отвечает на запросы позиции курсора по ходу потока. Поток не копит: в
+    // стресс-тесте через харнесс проходит 50 МБ. Между чанками переносится
+    // только хвост короче самого запроса — на случай, если запрос разорвало
+    // на границе.
+    struct CursorResponder {
+        carry: Vec<u8>,
+    }
+
+    impl CursorResponder {
+        fn new() -> Self {
+            Self { carry: Vec::new() }
+        }
+
+        // Чистая часть: сколько запросов пришло. Вынесена отдельно, потому
+        // что склейку на границе чанков иначе исполняет только Windows, то
+        // есть ровно та система, где её не проверить локально.
+        fn count(&mut self, chunk: &[u8]) -> usize {
+            let mut window = std::mem::take(&mut self.carry);
+            window.extend_from_slice(chunk);
+            let queries = window
+                .windows(Shell::CURSOR_QUERY.len())
+                .filter(|candidate| *candidate == Shell::CURSOR_QUERY)
+                .count();
+            let keep = window.len().min(Shell::CURSOR_QUERY.len() - 1);
+            self.carry = window.split_off(window.len() - keep);
+            queries
+        }
+
+        fn feed(&mut self, manager: &PtyManager, id: &str, chunk: &[u8]) {
+            for _ in 0..self.count(chunk) {
+                let _ = manager.write(id, Shell::CURSOR_REPLY);
+            }
+        }
+    }
+
+    #[test]
+    fn cursor_responder_counts_queries_split_across_chunks() {
+        let mut responder = CursorResponder::new();
+        assert_eq!(responder.count(b"hello"), 0);
+        // Запрос разорван границей чанка, но он один.
+        assert_eq!(responder.count(b"tail\x1b["), 0);
+        assert_eq!(responder.count(b"6nrest"), 1);
+        // Два запроса в одном чанке — два ответа.
+        assert_eq!(responder.count(b"\x1b[6nmid\x1b[6n"), 2);
+        // Перенесённый хвост не считается второй раз.
+        assert_eq!(responder.count(b"quiet"), 0);
     }
 
     fn test_cwd() -> PathBuf {
         std::env::current_dir().expect("тестам нужна текущая папка")
     }
 
+    // Харнесс здесь не только ждёт текст, но и играет роль фронтенда: на
+    // запрос позиции курсора надо ответить, иначе шелл не дойдёт до команды.
     fn wait_for_output(
+        manager: &PtyManager,
+        id: &str,
         rx: &mpsc::Receiver<Vec<u8>>,
         needle: &str,
         timeout: Duration,
     ) -> Result<String, String> {
         let deadline = Instant::now() + timeout;
         let mut collected = String::new();
+        let mut cursor = CursorResponder::new();
         while Instant::now() < deadline {
             if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(100)) {
+                cursor.feed(manager, id, &chunk);
                 collected.push_str(&String::from_utf8_lossy(&chunk));
                 if collected.contains(needle) {
                     return Ok(collected);
@@ -616,6 +678,28 @@ mod tests {
             }
         }
         Err(format!("не дождались «{needle}», получено: {collected:?}"))
+    }
+
+    // То же самое для ожидания завершения: пока процесс не отчитался, поток
+    // надо продолжать разбирать, иначе запрос курсора остаётся без ответа.
+    fn wait_for_exit(
+        manager: &PtyManager,
+        id: &str,
+        out_rx: &mpsc::Receiver<Vec<u8>>,
+        exit_rx: &mpsc::Receiver<Option<i32>>,
+        timeout: Duration,
+    ) -> Result<Option<i32>, String> {
+        let deadline = Instant::now() + timeout;
+        let mut cursor = CursorResponder::new();
+        while Instant::now() < deadline {
+            if let Ok(code) = exit_rx.recv_timeout(Duration::from_millis(50)) {
+                return Ok(code);
+            }
+            while let Ok(chunk) = out_rx.try_recv() {
+                cursor.feed(manager, id, &chunk);
+            }
+        }
+        Err("процесс не завершился за отведённое время".to_string())
     }
 
     #[test]
@@ -646,15 +730,16 @@ mod tests {
 
         let (command, needle) = Shell::evaluated(0);
         manager.write("t1", &command).expect("запись в PTY");
-        let output =
-            wait_for_output(&out_rx, &needle, Duration::from_secs(20)).expect("эхо из шелла");
+        let output = wait_for_output(&manager, "t1", &out_rx, &needle, Duration::from_secs(20))
+            .expect("эхо из шелла");
         assert!(output.contains(&needle));
 
         manager.resize("t1", 100, 30).expect("ресайз живого PTY");
 
         manager.write("t1", &Shell::exit(7)).expect("запись exit");
-        let code = exit_rx
-            .recv_timeout(Duration::from_secs(10))
+        // Ждём завершения, не переставая отвечать на запросы курсора: иначе
+        // шелл замрёт на очередном запросе и до `exit` просто не дойдёт.
+        let code = wait_for_exit(&manager, "t1", &out_rx, &exit_rx, Duration::from_secs(10))
             .expect("процесс должен завершиться");
         assert_eq!(code, Some(7));
     }
@@ -753,8 +838,14 @@ mod tests {
         manager
             .write("r1", &command)
             .expect("запись в заменённую сессию");
-        wait_for_output(&fresh_out_rx, &needle, Duration::from_secs(20))
-            .expect("ответ от новой сессии");
+        wait_for_output(
+            &manager,
+            "r1",
+            &fresh_out_rx,
+            &needle,
+            Duration::from_secs(20),
+        )
+        .expect("ответ от новой сессии");
 
         // Явный kill новой сессии по-прежнему сообщается во фронт.
         manager.kill("r1").expect("kill заменённой сессии");
@@ -821,8 +912,14 @@ mod tests {
         for line in Shell::env_probe() {
             manager.write("t-env", &line).expect("запись в PTY");
         }
-        let output =
-            wait_for_output(&out_rx, "PROBE_", Duration::from_secs(20)).expect("эхо из шелла");
+        let output = wait_for_output(
+            &manager,
+            "t-env",
+            &out_rx,
+            "PROBE_",
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
         // Главное — значения переменных запускавшего агента не видны терминалу.
         assert!(
             !output.contains("leak-test"),
@@ -879,6 +976,10 @@ mod tests {
         let mut total = 0usize;
         let mut chunks = 0usize;
         let mut tail: Vec<u8> = Vec::new();
+        // Поток читаем своим циклом, а не wait_for_output, поэтому за роль
+        // эмулятора здесь отвечаем сами: без ответа на запрос курсора шелл
+        // не дойдёт даже до начала выдачи файла.
+        let mut cursor = CursorResponder::new();
         loop {
             assert!(
                 Instant::now() < deadline,
@@ -890,6 +991,7 @@ mod tests {
                     String::from_utf8_lossy(&tail)
                 );
             };
+            cursor.feed(&manager, "stress", &chunk);
             total += chunk.len();
             chunks += 1;
             // Проверяем на склейке «хвост + чанк» ДО усечения: иначе маркер,
@@ -951,8 +1053,14 @@ mod tests {
             manager
                 .write(&format!("s{index}"), &command)
                 .expect("запись в сессию");
-            wait_for_output(out_rx, &needle, Duration::from_secs(20))
-                .expect("сессия должна ответить");
+            wait_for_output(
+                &manager,
+                &format!("s{index}"),
+                out_rx,
+                &needle,
+                Duration::from_secs(20),
+            )
+            .expect("сессия должна ответить");
         }
 
         manager
