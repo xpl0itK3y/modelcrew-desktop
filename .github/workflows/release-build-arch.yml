@@ -43,7 +43,22 @@ jobs:
       # синхронизации баз. Правим конфиг, а не команду: pacman вызывается ещё
       # и из build-arch-package.sh, флаг на одной команде дыру бы не закрыл.
       - name: Let pacman work without the Landlock sandbox
-        run: printf '\nDisableSandbox\n' >> /etc/pacman.conf
+        run: |
+          set -euo pipefail
+          pacman --version | grep -i 'pacman v'
+          # Директива действует только в секции [options]. Дописанная в конец
+          # файла, она попадает в последнюю секцию репозитория (в этом образе
+          # это [aur]) и молча игнорируется — pacman сообщает об этом лишь
+          # warning-ом, а падает всё так же на песочнице.
+          sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
+          grep -qx 'DisableSandbox' /etc/pacman.conf
+          # Убеждаемся, что pacman директиву принял: незнакомую он бы
+          # отбросил тем же warning-ом, и мы снова узнали бы об этом только
+          # из упавшей сборки.
+          if pacman --version 2>&1 | grep -qi 'not recognized'; then
+            echo "pacman не понимает DisableSandbox" >&2
+            exit 1
+          fi
 
       - name: Install build dependencies
         run: |
