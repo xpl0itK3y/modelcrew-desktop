@@ -43,6 +43,12 @@ DESKTOP
 useradd -m builder
 work=/home/builder/work
 install -d -o builder -g builder "$work"
+# Расширение пакета задаём сами, а не берём из образа: archlinux:latest даёт
+# .pkg.tar.zst, а образ Arch Linux ARM до сих пор держит старое
+# PKGEXT='.pkg.tar.xz'. Весь конвейер дальше — prepare-assets, verify-release,
+# AUR — знает только про .zst, и разошлась бы ровно одна платформа из двух.
+printf "PKGEXT='.pkg.tar.zst'\n" > /home/builder/.makepkg.conf
+chown builder:builder /home/builder/.makepkg.conf
 tar -C "$stage" -czf "$work/modelcrew-files.tar.gz" .
 cat > "$work/PKGBUILD" <<PKGBUILD
 pkgname=modelcrew-bin
