@@ -511,6 +511,91 @@ mod tests {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
+    // Тесты поднимают настоящий шелл через PTY, а шеллы на разных системах
+    // разные. Различать вывод шелла и эхо набранной команды тоже приходится
+    // по-разному, поэтому платформенные особенности собраны здесь, а сами
+    // тесты остаются про поведение PTY, а не про синтаксис оболочки.
+    struct Shell;
+
+    impl Shell {
+        fn path() -> String {
+            if cfg!(windows) {
+                "cmd.exe".to_string()
+            } else {
+                "/bin/sh".to_string()
+            }
+        }
+
+        // Enter в терминале — это возврат каретки; POSIX-шеллы принимают и
+        // перевод строки, ConPTY ждёт именно \r.
+        fn line(command: &str) -> Vec<u8> {
+            if cfg!(windows) {
+                format!("{command}\r\n").into_bytes()
+            } else {
+                format!("{command}\n").into_bytes()
+            }
+        }
+
+        // Команда, чей вывод невозможно спутать с эхом ввода: шелл обязан
+        // что-то вычислить. На Unix это арифметика, в cmd — подстановка
+        // переменной, которой в набранной строке нет.
+        fn evaluated(index: usize) -> (Vec<u8>, String) {
+            if cfg!(windows) {
+                (Self::line("echo PING_%RANDOM%_DONE"), "_DONE".to_string())
+            } else {
+                (
+                    Self::line(&format!("echo PING_$(({index} + 100))")),
+                    format!("PING_{}", index + 100),
+                )
+            }
+        }
+
+        fn exit(code: i32) -> Vec<u8> {
+            Self::line(&format!("exit {code}"))
+        }
+
+        fn missing_directory() -> PathBuf {
+            if cfg!(windows) {
+                PathBuf::from(r"C:\nonexistent\workspace\folder")
+            } else {
+                PathBuf::from("/nonexistent/workspace/folder")
+            }
+        }
+
+        // Проба окружения. Маркер собирается шеллом, а в наборе команды его
+        // нет: на Unix кавычки рвут его в эхе, в cmd он живёт в переменной,
+        // которая подставляется только во второй строке.
+        fn env_probe() -> Vec<Vec<u8>> {
+            if cfg!(windows) {
+                vec![
+                    Self::line("set MARK=PROBE_%CLAUDECODE%_%CLAUDE_CODE_SESSION_ID%"),
+                    Self::line("echo %MARK%"),
+                ]
+            } else {
+                vec![Self::line(
+                    "echo PRO\"BE\"_${CLAUDECODE:-clean}_${CLAUDE_CODE_SESSION_ID:-clean}",
+                )]
+            }
+        }
+
+        // Выливает файл в терминал и печатает маркер конца. Маркер обязан
+        // собираться шеллом: написанный в команде целиком, он немедленно
+        // нашёлся бы в эхе ввода, и тест закончился бы на первом же чанке.
+        fn dump_file(path: &std::path::Path) -> Vec<Vec<u8>> {
+            let path = path.display().to_string();
+            if cfg!(windows) {
+                vec![
+                    Self::line("set MARK=STRESS_1337"),
+                    Self::line(&format!("type \"{path}\" & echo %MARK%")),
+                ]
+            } else {
+                vec![Self::line(&format!(
+                    "cat '{path}'; echo STRESS_$((1300 + 37))"
+                ))]
+            }
+        }
+    }
+
     fn test_cwd() -> PathBuf {
         std::env::current_dir().expect("тестам нужна текущая папка")
     }
@@ -534,7 +619,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn shell_roundtrip_and_exit() {
         let manager = PtyManager::default();
         let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
@@ -544,7 +628,7 @@ mod tests {
             .spawn(
                 SpawnOptions {
                     id: "t1".into(),
-                    shell: Some("/bin/sh".into()),
+                    shell: Some(Shell::path()),
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
@@ -558,18 +642,17 @@ mod tests {
                 },
             )
             .expect("шелл должен запуститься");
-        assert_eq!(spawned_shell, "/bin/sh");
+        assert_eq!(spawned_shell, Shell::path());
 
-        manager
-            .write("t1", b"echo MARKER_$((40 + 2))\n")
-            .expect("запись в PTY");
+        let (command, needle) = Shell::evaluated(0);
+        manager.write("t1", &command).expect("запись в PTY");
         let output =
-            wait_for_output(&out_rx, "MARKER_42", Duration::from_secs(10)).expect("эхо из шелла");
-        assert!(output.contains("MARKER_42"));
+            wait_for_output(&out_rx, &needle, Duration::from_secs(20)).expect("эхо из шелла");
+        assert!(output.contains(&needle));
 
         manager.resize("t1", 100, 30).expect("ресайз живого PTY");
 
-        manager.write("t1", b"exit 7\n").expect("запись exit");
+        manager.write("t1", &Shell::exit(7)).expect("запись exit");
         let code = exit_rx
             .recv_timeout(Duration::from_secs(10))
             .expect("процесс должен завершиться");
@@ -577,7 +660,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn kill_terminates_process() {
         let manager = PtyManager::default();
         let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
@@ -586,7 +668,7 @@ mod tests {
             .spawn(
                 SpawnOptions {
                     id: "t2".into(),
-                    shell: Some("/bin/sh".into()),
+                    shell: Some(Shell::path()),
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
@@ -614,7 +696,6 @@ mod tests {
     /// с «терминал уже существует», и хендлер вытеснённой сессии не должен
     /// «завершить» уже новый терминал.
     #[test]
-    #[cfg(unix)]
     fn respawn_same_id_replaces_session() {
         let manager = PtyManager::default();
         let (stale_out_tx, _stale_out_rx) = mpsc::channel::<Vec<u8>>();
@@ -624,7 +705,7 @@ mod tests {
             .spawn(
                 SpawnOptions {
                     id: "r1".into(),
-                    shell: Some("/bin/sh".into()),
+                    shell: Some(Shell::path()),
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
@@ -645,7 +726,7 @@ mod tests {
             .spawn(
                 SpawnOptions {
                     id: "r1".into(),
-                    shell: Some("/bin/sh".into()),
+                    shell: Some(Shell::path()),
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
@@ -668,10 +749,11 @@ mod tests {
         );
 
         // Новая сессия — живая и отвечает своим каналом.
+        let (command, needle) = Shell::evaluated(1);
         manager
-            .write("r1", b"echo AGAIN_$((1 + 1))\n")
+            .write("r1", &command)
             .expect("запись в заменённую сессию");
-        wait_for_output(&fresh_out_rx, "AGAIN_2", Duration::from_secs(10))
+        wait_for_output(&fresh_out_rx, &needle, Duration::from_secs(20))
             .expect("ответ от новой сессии");
 
         // Явный kill новой сессии по-прежнему сообщается во фронт.
@@ -711,7 +793,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn agent_launcher_markers_do_not_leak_into_terminals() {
         // Приложение может быть запущено из-под CLI-агента; его маркеры не
         // должны доставаться пользовательским терминалам (см. spawn).
@@ -724,7 +805,7 @@ mod tests {
             .spawn(
                 SpawnOptions {
                     id: "t-env".into(),
-                    shell: Some("/bin/sh".into()),
+                    shell: Some(Shell::path()),
                     cwd: test_cwd(),
                     cols: 80,
                     rows: 24,
@@ -737,27 +818,33 @@ mod tests {
             )
             .expect("шелл должен запуститься");
 
-        // Кавычки разрывают маркер в эхе набранной команды: совпадение
-        // возможно только в строке результата.
-        manager
-            .write(
-                "t-env",
-                b"echo PRO\"BE\"_${CLAUDECODE:-clean}_${CLAUDE_CODE_SESSION_ID:-clean}\n",
-            )
-            .expect("запись в PTY");
+        for line in Shell::env_probe() {
+            manager.write("t-env", &line).expect("запись в PTY");
+        }
         let output =
-            wait_for_output(&out_rx, "PROBE_", Duration::from_secs(10)).expect("эхо из шелла");
+            wait_for_output(&out_rx, "PROBE_", Duration::from_secs(20)).expect("эхо из шелла");
+        // Главное — значения переменных запускавшего агента не видны терминалу.
+        assert!(
+            !output.contains("leak-test"),
+            "маркеры агента протекли в терминал: {output}"
+        );
+        #[cfg(unix)]
         assert!(
             output.contains("PROBE_clean_clean"),
-            "маркеры агента протекли в терминал: {output}"
+            "шелл должен видеть переменные пустыми: {output}"
         );
         let _ = manager.kill("t-env");
     }
 
     #[test]
-    #[cfg(unix)]
-    fn fifty_megabytes_arrive_batched() {
-        const PAYLOAD: usize = 50 * 1024 * 1024;
+    fn bulk_output_arrives_batched() {
+        // ConPTY на Windows заметно медленнее unix-псевдотерминала, поэтому
+        // объём там меньше: проверяется склейка в крупные куски, а не скорость.
+        const PAYLOAD: usize = if cfg!(windows) {
+            8 * 1024 * 1024
+        } else {
+            50 * 1024 * 1024
+        };
 
         let manager = PtyManager::default();
         let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
@@ -766,7 +853,7 @@ mod tests {
             .spawn(
                 SpawnOptions {
                     id: "stress".into(),
-                    shell: Some("/bin/sh".into()),
+                    shell: Some(Shell::path()),
                     cwd: test_cwd(),
                     cols: 120,
                     rows: 40,
@@ -779,24 +866,24 @@ mod tests {
             )
             .expect("шелл должен запуститься");
 
-        // Маркер вычисляется шеллом, иначе он поймается в эхе самой команды.
-        manager
-            .write(
-                "stress",
-                format!(
-                    "dd if=/dev/zero bs=1048576 count={} 2>/dev/null; echo STRESS_$((1300 + 37))\n",
-                    PAYLOAD / 1048576
-                )
-                .as_bytes(),
-            )
-            .expect("запись команды");
+        // Файл готовим сами: так не нужен ни dd, ни его отсутствующий на
+        // Windows аналог, и объём точно одинаков на всех системах.
+        let payload_dir = tempfile::tempdir().expect("временная папка");
+        let payload_path = payload_dir.path().join("payload.bin");
+        std::fs::write(&payload_path, vec![b'.'; PAYLOAD]).expect("подготовка данных");
+        for line in Shell::dump_file(&payload_path) {
+            manager.write("stress", &line).expect("запись команды");
+        }
 
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + Duration::from_secs(120);
         let mut total = 0usize;
         let mut chunks = 0usize;
         let mut tail: Vec<u8> = Vec::new();
         loop {
-            assert!(Instant::now() < deadline, "50 МБ не дошли за 60 секунд");
+            assert!(
+                Instant::now() < deadline,
+                "{PAYLOAD} байт не дошли за отведённое время"
+            );
             let Ok(chunk) = out_rx.recv_timeout(Duration::from_secs(5)) else {
                 panic!(
                     "поток вывода заглох (получено {total} байт), хвост: {:?}",
@@ -828,7 +915,6 @@ mod tests {
 
     /// Дюжина живых сессий одновременно: все отвечают, kill_all всех убирает.
     #[test]
-    #[cfg(unix)]
     fn dozen_concurrent_sessions() {
         const SESSIONS: usize = 12;
 
@@ -843,7 +929,7 @@ mod tests {
                 .spawn(
                     SpawnOptions {
                         id: format!("s{index}"),
-                        shell: Some("/bin/sh".into()),
+                        shell: Some(Shell::path()),
                         cwd: test_cwd(),
                         cols: 80,
                         rows: 24,
@@ -861,18 +947,12 @@ mod tests {
         }
 
         for (index, out_rx) in outputs.iter().enumerate() {
+            let (command, needle) = Shell::evaluated(index);
             manager
-                .write(
-                    &format!("s{index}"),
-                    format!("echo PING_$(({index} + 100))\n").as_bytes(),
-                )
+                .write(&format!("s{index}"), &command)
                 .expect("запись в сессию");
-            wait_for_output(
-                out_rx,
-                &format!("PING_{}", index + 100),
-                Duration::from_secs(10),
-            )
-            .expect("сессия должна ответить");
+            wait_for_output(out_rx, &needle, Duration::from_secs(20))
+                .expect("сессия должна ответить");
         }
 
         manager
@@ -886,14 +966,13 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn spawn_in_missing_cwd_fails() {
         let manager = PtyManager::default();
         let result = manager.spawn(
             SpawnOptions {
                 id: "cwd".into(),
-                shell: Some("/bin/sh".into()),
-                cwd: PathBuf::from("/nonexistent/workspace/folder"),
+                shell: Some(Shell::path()),
+                cwd: Shell::missing_directory(),
                 cols: 80,
                 rows: 24,
                 history_dir: None,
@@ -904,7 +983,10 @@ mod tests {
         let error = result.expect_err("несуществующая папка должна давать ошибку");
         assert_eq!(error.code, ErrorCode::TerminalCwdUnavailable);
         assert_eq!(error.context["terminalId"], "cwd");
-        assert_eq!(error.context["path"], "/nonexistent/workspace/folder");
+        assert_eq!(
+            error.context["path"],
+            Shell::missing_directory().display().to_string()
+        );
     }
 
     #[test]

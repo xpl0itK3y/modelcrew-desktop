@@ -423,7 +423,7 @@ test("every Linux package declares what the app runs at runtime", () => {
   // Пакеты для pacman описаны отдельно: в сборке Arch и в шаблоне для AUR.
   for (const file of [
     "packaging/aur/PKGBUILD.template",
-    ".github/workflows/release-build-arch.yml",
+    "scripts/ci/build-arch-package.sh",
   ]) {
     const text = fs.readFileSync(path.join(rootDirectory, file), "utf8");
     for (const name of [

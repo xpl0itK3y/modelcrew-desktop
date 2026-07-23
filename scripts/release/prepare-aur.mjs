@@ -26,7 +26,7 @@ const templatePath = path.resolve(
 // .deb запускается против более новых библиотек Arch и даёт чёрное окно.
 // Для aarch64 нативной сборки не существует, поэтому там остаётся .deb.
 const x86Name = `ModelCrew_${version}_linux_x86_64.pkg.tar.zst`;
-const armName = `ModelCrew_${version}_linux_aarch64.deb`;
+const armName = `ModelCrew_${version}_linux_aarch64.pkg.tar.zst`;
 const x86Path = path.join(dist, x86Name);
 const armPath = path.join(dist, armName);
 await assertNonEmptyFile(x86Path);
@@ -79,7 +79,7 @@ const srcinfo = `pkgbase = modelcrew-bin
 \toptions = !strip
 \tsource_x86_64 = modelcrew-bin-${version}-x86_64.pkg.tar.zst::${x86Url}
 \tsha256sums_x86_64 = ${x86Sha}
-\tsource_aarch64 = modelcrew-bin-${version}-aarch64.deb::${armUrl}
+\tsource_aarch64 = modelcrew-bin-${version}-aarch64.pkg.tar.zst::${armUrl}
 \tsha256sums_aarch64 = ${armSha}
 
 pkgname = modelcrew-bin

@@ -15,13 +15,27 @@ permissions:
 jobs:
   # Arch обновляет WebKitGTK заметно раньше Ubuntu, а собранный на Ubuntu
   # бинарь запускается уже против этих новых библиотек. Расхождение проявляется
-  # не отказом загрузки, а чёрным окном, поэтому пакет для x86_64 собираем
-  # прямо на Arch — теми же библиотеками, с которыми он потом работает.
+  # не отказом загрузки, а чёрным окном, поэтому пакет собираем прямо на Arch —
+  # теми же библиотеками, с которыми он потом работает.
   native:
-    name: Arch Linux x86_64
-    runs-on: ubuntu-22.04
-    container: archlinux:latest
-    timeout-minutes: 90
+    name: Arch Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    # У Arch Linux нет собственной сборки под ARM: этим занимается отдельный
+    # проект Arch Linux ARM, официального образа для CI у него нет. Берём самый
+    # живой из сообщества и закрепляем по digest — так же, как закреплены
+    # actions, иначе содержимое образа могло бы поменяться под нами.
+    container: ${{ matrix.container }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-22.04
+            container: archlinux:latest
+          - arch: aarch64
+            os: ubuntu-22.04-arm
+            container: menci/archlinuxarm@sha256:641e64b81b66794ef1c6bfdc68c38503fb7c32fd4f0d346a876b42803232fc7b
     steps:
       - name: Install build dependencies
         run: |
@@ -48,171 +62,18 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Build the application
+      - name: Build the pacman package
         env:
           # Public OAuth App Client ID for GitHub sign-in, injected at build
           # time so it stays out of the source tree. An empty secret just
           # leaves sign-in "not configured" — nothing breaks.
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
-        run: |
-          set -euo pipefail
-          # Только через CLI tauri: голый `cargo build` не включает фичу
-          # `custom-protocol`, и приложение остаётся в dev-режиме — грузит
-          # http://localhost:1420 вместо вшитого фронтенда и показывает
-          # «Connection refused» на чёрном экране. `--no-bundle` останавливает
-          # CLI после бинаря: пакет для pacman собираем сами, а deb/rpm/AppImage
-          # делает отдельный workflow.
-          npm run tauri build -- --ci --no-bundle
-
-      - name: Assemble the pacman package
-        run: |
-          set -euo pipefail
-          pkgver="$(node -p "require('./package.json').version")"
-          test -n "$pkgver"
-
-          stage="$(mktemp -d)"
-          install -Dm755 src-tauri/target/release/modelcrew-desktop \
-            "$stage/usr/bin/modelcrew-desktop"
-          install -Dm644 src-tauri/icons/32x32.png \
-            "$stage/usr/share/icons/hicolor/32x32/apps/modelcrew-desktop.png"
-          install -Dm644 src-tauri/icons/128x128.png \
-            "$stage/usr/share/icons/hicolor/128x128/apps/modelcrew-desktop.png"
-          install -Dm644 'src-tauri/icons/128x128@2x.png' \
-            "$stage/usr/share/icons/hicolor/256x256/apps/modelcrew-desktop.png"
-          install -d "$stage/usr/share/applications"
-          cat > "$stage/usr/share/applications/ModelCrew.desktop" <<'DESKTOP'
-          [Desktop Entry]
-          Type=Application
-          Name=ModelCrew
-          Comment=Desktop workspace for projects, sessions, and multiple terminals
-          Exec=modelcrew-desktop
-          Icon=modelcrew-desktop
-          Terminal=false
-          Categories=Development;
-          StartupWMClass=ModelCrew
-          DESKTOP
-
-          # makepkg отказывается работать от root, поэтому упаковываем под
-          # обычным пользователем. Компиляция уже позади: package() только
-          # раскладывает готовое дерево.
-          useradd -m builder
-          work=/home/builder/work
-          install -d -o builder -g builder "$work"
-          tar -C "$stage" -czf "$work/modelcrew-files.tar.gz" .
-          cat > "$work/PKGBUILD" <<'PKGBUILD'
-          pkgname=modelcrew-bin
-          pkgver=__VERSION__
-          pkgrel=1
-          pkgdesc='Desktop workspace for projects, sessions, and multiple terminals'
-          arch=('x86_64')
-          url='https://github.com/xpl0itK3y/modelcrew-desktop'
-          license=('MIT')
-          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1' 'xdg-utils')
-          provides=('modelcrew')
-          conflicts=('modelcrew')
-          options=('!strip')
-          source=('modelcrew-files.tar.gz')
-          sha256sums=('SKIP')
-          package() {
-          cp -a "$srcdir/usr" "$pkgdir/"
-          }
-          PKGBUILD
-          sed -i "s/__VERSION__/$pkgver/" "$work/PKGBUILD"
-          chown builder:builder "$work/PKGBUILD" "$work/modelcrew-files.tar.gz"
-          su builder -c "cd '$work' && makepkg -f --nodeps --clean"
-          mkdir -p arch-out
-          cp "$work"/*.pkg.tar.zst arch-out/
-
-      # Пакет обязан не только собираться, но и разрешать все библиотеки на
-      # самом Arch — ровно это и ломалось у переупакованного .deb.
-      - name: Check the package against Arch libraries
-        run: |
-          set -euo pipefail
-          package="$(find arch-out -name '*.pkg.tar.zst' -print -quit)"
-          test -n "$package" || { echo "No package built" >&2; exit 1; }
-          pacman -U --noconfirm "$package"
-          test -x /usr/bin/modelcrew-desktop
-          missing="$(ldd /usr/bin/modelcrew-desktop | grep 'not found' || true)"
-          if [ -n "$missing" ]; then
-            echo "Unresolved libraries on Arch:" >&2
-            echo "$missing" >&2
-            exit 1
-          fi
-          ldd /usr/bin/modelcrew-desktop | grep -E 'webkit2gtk|libsoup'
+        run: scripts/ci/build-arch-package.sh "${{ matrix.arch }}"
 
       - name: Upload Arch package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: stable-arch-x86_64
-          retention-days: 7
-          if-no-files-found: error
-          path: arch-out/*.pkg.tar.zst
-
-  # У Arch Linux нет официальной сборки под aarch64 — там отдельный проект
-  # Arch Linux ARM со своими репозиториями, и образа для CI не существует.
-  # Для этой архитектуры остаётся переупаковка .deb с той же оговоркой про
-  # версии библиотек, что и раньше.
-  repack:
-    name: Arch Linux aarch64
-    # Берёт .deb из сборки Linux, которой при ручном запуске просто нет.
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-22.04
-    container: archlinux:latest
-    timeout-minutes: 30
-    steps:
-      - name: Install packaging tools
-        run: pacman -Syu --needed --noconfirm base-devel nodejs
-
-      - name: Download Linux deb
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: stable-linux-aarch64
-          path: deb-input
-
-      - name: Repackage deb into a pacman package
-        run: |
-          set -euo pipefail
-          deb="$(find deb-input -name '*.deb' -print -quit)"
-          test -n "$deb" || { echo "No .deb found" >&2; exit 1; }
-          pkgver="$(basename "$deb" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
-          test -n "$pkgver" || { echo "Could not derive version from $deb" >&2; exit 1; }
-          useradd -m builder
-          work=/home/builder/work
-          install -d -o builder -g builder "$work"
-          install -o builder -g builder "$deb" "$work/modelcrew.deb"
-          # Only a prebuilt .deb is unpacked (no compilation), so CARCH just
-          # labels the package for the target architecture.
-          sed -i 's/^CARCH=.*/CARCH="aarch64"/' /etc/makepkg.conf
-          cat > "$work/PKGBUILD" <<'PKGBUILD'
-          pkgname=modelcrew-bin
-          pkgver=__VERSION__
-          pkgrel=1
-          pkgdesc='Desktop workspace for projects, sessions, and multiple terminals'
-          arch=('aarch64')
-          url='https://github.com/xpl0itK3y/modelcrew-desktop'
-          license=('MIT')
-          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1' 'xdg-utils')
-          provides=('modelcrew')
-          conflicts=('modelcrew')
-          options=('!strip')
-          source=('modelcrew.deb')
-          sha256sums=('SKIP')
-          package() {
-          cd "$srcdir"
-          ar x modelcrew.deb
-          bsdtar -xf data.tar.* -C "$pkgdir"
-          }
-          PKGBUILD
-          sed -i "s/__VERSION__/$pkgver/" "$work/PKGBUILD"
-          chown builder:builder "$work/PKGBUILD"
-          su builder -c "cd '$work' && makepkg -f --nodeps --clean"
-          mkdir -p arch-out
-          cp "$work"/*.pkg.tar.zst arch-out/
-
-      - name: Upload Arch package
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: stable-arch-aarch64
+          name: stable-arch-${{ matrix.arch }}
           retention-days: 7
           if-no-files-found: error
           path: arch-out/*.pkg.tar.zst

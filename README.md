@@ -82,7 +82,9 @@ On Arch Linux, prefer the native package:
 sudo pacman -U ModelCrew_x.y.z_linux_x86_64.pkg.tar.zst
 ```
 
-…or build `modelcrew-bin` from the attached `PKGBUILD`. Every package
+…or build `modelcrew-bin` from the attached `PKGBUILD`. Both x86_64 and
+aarch64 packages are compiled on Arch itself, against the same libraries they
+will run with. Every package
 declares what ModelCrew runs at runtime — `git` for the change panel,
 `pkexec` for installing updates, `xdg-open` for links, plus WebKitGTK,
 GStreamer audio plugins and tray support. The AppImage carries GStreamer
