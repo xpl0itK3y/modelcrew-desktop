@@ -534,6 +534,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn shell_roundtrip_and_exit() {
         let manager = PtyManager::default();
         let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
@@ -576,6 +577,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn kill_terminates_process() {
         let manager = PtyManager::default();
         let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
@@ -612,6 +614,7 @@ mod tests {
     /// с «терминал уже существует», и хендлер вытеснённой сессии не должен
     /// «завершить» уже новый терминал.
     #[test]
+    #[cfg(unix)]
     fn respawn_same_id_replaces_session() {
         let manager = PtyManager::default();
         let (stale_out_tx, _stale_out_rx) = mpsc::channel::<Vec<u8>>();
@@ -708,6 +711,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn agent_launcher_markers_do_not_leak_into_terminals() {
         // Приложение может быть запущено из-под CLI-агента; его маркеры не
         // должны доставаться пользовательским терминалам (см. spawn).
@@ -751,6 +755,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn fifty_megabytes_arrive_batched() {
         const PAYLOAD: usize = 50 * 1024 * 1024;
 
@@ -823,6 +828,7 @@ mod tests {
 
     /// Дюжина живых сессий одновременно: все отвечают, kill_all всех убирает.
     #[test]
+    #[cfg(unix)]
     fn dozen_concurrent_sessions() {
         const SESSIONS: usize = 12;
 
@@ -880,6 +886,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn spawn_in_missing_cwd_fails() {
         let manager = PtyManager::default();
         let result = manager.spawn(
