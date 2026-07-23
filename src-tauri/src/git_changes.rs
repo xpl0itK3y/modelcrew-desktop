@@ -6366,6 +6366,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
     }
 
     fn configure(root: &Path) {
+        git_at(root, &["config", "core.autocrlf", "false"]);
         git_at(root, &["config", "user.name", "Me"]);
         git_at(root, &["config", "user.email", "me@t"]);
     }
