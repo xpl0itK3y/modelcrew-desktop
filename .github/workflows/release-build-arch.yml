@@ -37,6 +37,14 @@ jobs:
             os: ubuntu-22.04-arm
             container: menci/archlinuxarm@sha256:641e64b81b66794ef1c6bfdc68c38503fb7c32fd4f0d346a876b42803232fc7b
     steps:
+      # pacman 7 качает пакеты в песочнице на Landlock и без неё отказывается
+      # работать вовсе. Внутри контейнера на раннере применить её ядро не даёт
+      # («switching to sandbox user 'alpm' failed»), и всё падает ещё на
+      # синхронизации баз. Правим конфиг, а не команду: pacman вызывается ещё
+      # и из build-arch-package.sh, флаг на одной команде дыру бы не закрыл.
+      - name: Let pacman work without the Landlock sandbox
+        run: printf '\nDisableSandbox\n' >> /etc/pacman.conf
+
       - name: Install build dependencies
         run: |
           pacman -Syu --needed --noconfirm \
