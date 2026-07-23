@@ -204,6 +204,8 @@ export const en: Record<MessageKey, string> = {
   "git.diffLoading": "Loading diff…",
   "git.diffUnavailable": "Failed to load the diff",
   "git.diffTruncated": "Diff truncated: the change is too large",
+  "git.diffSplit": "Show before and after side by side",
+  "git.diffUnified": "Show as a single column",
   "git.fileDeleted": "File deleted",
   "git.status.modified": "Modified",
   "git.status.added": "Added",

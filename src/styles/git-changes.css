@@ -601,13 +601,37 @@
   margin-top: 5px;
 }
 
-.git-commit-file {
+.git-commit-files-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 2px 0;
+}
+
+/* Файл раскрывается в diff, поэтому строка с именем — отдельная кнопка внутри. */
+.git-commit-file-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-commit-file-row:hover {
+  background: var(--mc-hover);
+}
+
+.git-commit-file-row:hover .git-commit-file-path {
+  color: var(--mc-text-bright);
 }
 
 .git-commit-file-path {
@@ -1037,6 +1061,84 @@
 
 .git-diff-line.is-del .git-diff-text {
   color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
+}
+
+/* ---------- Две колонки: было слева, стало справа ---------- */
+
+/* Половины одной строки обязаны стоять вровень, поэтому длинный текст здесь
+   переносится, а не уезжает вбок: горизонтальная прокрутка развалила бы
+   выравнивание, ради которого весь этот режим и нужен. */
+.git-diff.is-split .git-diff-body {
+  width: auto;
+}
+
+.git-diff-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.git-diff-half {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 50%;
+}
+
+.git-diff-half + .git-diff-half {
+  border-left: 1px solid var(--mc-border);
+}
+
+.git-diff.is-split .git-diff-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-diff-half.is-add {
+  background: color-mix(in srgb, #4fb864 12%, transparent);
+}
+
+.git-diff-half.is-add .git-diff-text {
+  color: color-mix(in srgb, #4fb864 60%, var(--mc-text-bright));
+}
+
+.git-diff-half.is-del {
+  background: color-mix(in srgb, #e05c5c 12%, transparent);
+}
+
+.git-diff-half.is-del .git-diff-text {
+  color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
+}
+
+/* Строки на этой стороне не существует. Штриховка отличает «пусто, потому что
+   добавили» от «пустая строка в файле». */
+.git-diff-half.is-empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 5px,
+    color-mix(in srgb, var(--mc-text-faint) 12%, transparent) 5px 6px
+  );
+}
+
+/* Изменившийся кусок внутри строки — то, ради чего и смотрят рядом. */
+.git-diff-mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  color: inherit;
+}
+
+/* Переключатель одна колонка / две. */
+.git-diff-view-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mc-text-faint);
+  cursor: pointer;
+}
+
+.git-diff-view-toggle:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
 }
 
 /* Счётчики уже видимого файла изменились: вспышка шапки и пружинка цифр. */

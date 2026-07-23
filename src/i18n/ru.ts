@@ -203,6 +203,8 @@ export const ru = {
   "git.diffLoading": "Загружаем diff…",
   "git.diffUnavailable": "Не удалось получить diff",
   "git.diffTruncated": "Diff обрезан: изменения слишком большие",
+  "git.diffSplit": "Показать «было» и «стало» рядом",
+  "git.diffUnified": "Показать одной колонкой",
   "git.fileDeleted": "Файл удалён",
   "git.status.modified": "Изменён",
   "git.status.added": "Добавлен",

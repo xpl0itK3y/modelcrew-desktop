@@ -2305,6 +2305,49 @@ pub fn list_commit_files(root: &Path, hash: &str) -> CommandResult<Vec<GitCommit
         .collect())
 }
 
+// Diff одного файла внутри коммита. Обход тот же, что у списка файлов, поэтому
+// и здесь виден корневой коммит: `git diff <hash>^` на нём просто падает.
+pub fn commit_file_diff(root: &Path, hash: &str, path: &str) -> CommandResult<GitFileDiff> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let raw = run_git(
+        &toplevel,
+        &[
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--patch",
+            "-r",
+            hash,
+            "--",
+            path,
+        ],
+    )?;
+    Ok(diff_payload(path, &raw, true))
+}
+
+#[tauri::command]
+pub async fn git_commit_file_diff(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    hash: String,
+    path: String,
+) -> CommandResult<GitFileDiff> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || commit_file_diff(&root, &hash, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
 #[tauri::command]
 pub async fn git_commit_files(
     window: tauri::WebviewWindow,
@@ -4142,6 +4185,16 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(files[0].path, "b.txt");
         assert_eq!(files[0].additions, Some(1));
         assert!(list_commit_files(root, "not-a-hash").is_err());
+
+        // Diff файла из коммита — для просмотра истории по строкам.
+        let patch = commit_file_diff(root, &log[0].hash, "b.txt").unwrap();
+        assert!(patch.diff.contains("+two"), "{}", patch.diff);
+        assert!(!patch.is_binary);
+        // Корневой коммит родителя не имеет, но показываться обязан.
+        let first = commit_file_diff(root, &log[1].hash, "a.txt").unwrap();
+        assert!(first.diff.contains("@@"), "{}", first.diff);
+        assert!(commit_file_diff(root, "not-a-hash", "b.txt").is_err());
+        assert!(commit_file_diff(root, &log[0].hash, "../escape").is_err());
 
         switch_branch(root, "main", "local").unwrap();
         let branches = list_branches(root).unwrap();

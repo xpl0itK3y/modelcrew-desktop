@@ -26,7 +26,8 @@ use agent_sessions::agent_session_locate;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_amend_commit, git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch,
-    git_commit, git_commit_action, git_commit_files, git_commit_patch, git_compare_file_diff,
+    git_commit, git_commit_action, git_commit_file_diff, git_commit_files, git_commit_patch,
+    git_compare_file_diff,
     git_compare_files, git_create_branch, git_create_tag, git_delete_branch, git_delete_tag,
     git_drop_commit, git_fetch_upstream, git_file_diff, git_log, git_merge_ref, git_publish_branch,
     git_pull, git_pull_rebase, git_push, git_read_file, git_rebase_onto, git_rename_branch,
@@ -762,6 +763,7 @@ pub fn run() {
             git_delete_branch,
             git_log,
             git_commit_files,
+            git_commit_file_diff,
             git_fetch_upstream,
             git_pull,
             git_push,

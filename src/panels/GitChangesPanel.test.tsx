@@ -44,6 +44,15 @@ const mocks = vi.hoisted(() => ({
     truncated: false,
     diff: "@@ -1 +1,2 @@\n one\n+two\n",
   })),
+  fetchCommitFiles: vi.fn(async () => [
+    { path: "src/a.ts", additions: 1, deletions: 1 },
+  ]),
+  commitFileDiff: vi.fn(async () => ({
+    path: "src/a.ts",
+    isBinary: false,
+    truncated: false,
+    diff: "@@ -1,2 +1,2 @@\n keep\n-const value = 1;\n+const value = 42;\n",
+  })),
   openUrl: vi.fn(async () => {}),
   writeClipboard: vi.fn(async () => {}),
   fetchBranches: vi.fn<() => Promise<GitBranchInfo[]>>(async () => []),
@@ -92,6 +101,8 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     publishBranch: mocks.publishBranch,
     compareFiles: mocks.compareFiles,
     compareFileDiff: mocks.compareFileDiff,
+    fetchCommitFiles: mocks.fetchCommitFiles,
+    commitFileDiff: mocks.commitFileDiff,
     fetchBranches: mocks.fetchBranches,
     fetchLog: mocks.fetchLog,
     refreshGitChanges: mocks.refreshGitChanges,
@@ -132,6 +143,9 @@ function emitSummary(workspaceId: string, next: GitChangesSummary): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Режим просмотра diff-а живёт в localStorage: без сброса выбор одного теста
+  // протёк бы в следующие.
+  localStorage.clear();
   mocks.summaries.clear();
   mocks.listeners.clear();
   mocks.summaries.set("project-a", summary("main", "from-a.txt"));
@@ -554,6 +568,63 @@ describe("GitChangesView workspace lifecycle", () => {
       ),
     );
     expect(await screen.findByText("+two".slice(1))).toBeInTheDocument();
+  });
+
+  it("opens a file from a commit in history with before and after side by side", async () => {
+    const commit = taggableCommit();
+    mocks.fetchLog.mockResolvedValue([commit]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByText("tag me"));
+    fireEvent.click(await screen.findByText("src/a.ts"));
+
+    await waitFor(() =>
+      expect(mocks.commitFileDiff).toHaveBeenCalledWith(
+        "project-a",
+        commit.hash,
+        "src/a.ts",
+      ),
+    );
+    // Изменённая строка стоит парой: старая версия слева, новая справа.
+    await waitFor(() =>
+      expect(document.querySelectorAll(".git-diff-half.is-del")).toHaveLength(1),
+    );
+    expect(document.querySelectorAll(".git-diff-half.is-add")).toHaveLength(1);
+    // Подсвечен только изменившийся кусок, а не строка целиком.
+    expect(
+      [...document.querySelectorAll(".git-diff-mark")].map(
+        (mark) => mark.textContent,
+      ),
+    ).toEqual(["1", "42"]);
+  });
+
+  it("switches the history diff to a single column and remembers it", async () => {
+    const commit = taggableCommit();
+    mocks.fetchLog.mockResolvedValue([commit]);
+    const view = render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByText("tag me"));
+    fireEvent.click(await screen.findByText("src/a.ts"));
+    await waitFor(() =>
+      expect(document.querySelector(".git-diff.is-split")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTitle("Показать одной колонкой"));
+    expect(document.querySelector(".git-diff.is-split")).not.toBeInTheDocument();
+    expect(document.querySelector(".git-diff-line.is-del")).toBeInTheDocument();
+
+    // Выбор переживает перемонтирование: следующий коммит откроется так же.
+    view.unmount();
+    render(<GitChangesView workspaceId="project-a" />);
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByText("tag me"));
+    fireEvent.click(await screen.findByText("src/a.ts"));
+    await waitFor(() =>
+      expect(document.querySelector(".git-diff-line.is-del")).toBeInTheDocument(),
+    );
+    expect(document.querySelector(".git-diff.is-split")).not.toBeInTheDocument();
   });
 
   it("keeps a long commit menu inside the window", async () => {
