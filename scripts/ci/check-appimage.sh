@@ -32,7 +32,16 @@ fi
 # новый затребованный символ и есть нижняя граница дистрибутивов, на которых
 # образ вообще запустится. Печатаем её, чтобы граница была фактом сборки, а не
 # догадкой при разборе жалоб.
-binary="$(find "$root/usr/bin" -type f -perm -u+x -print -quit)"
+# Рядом с бинарём приложения в usr/bin лежат вспомогательные скрипты вроде
+# xdg-open. Берём первый ELF, а не первый исполняемый файл: иначе проверка
+# зависит от порядка обхода каталога и objdump падает на shell-скрипте.
+binary=""
+while IFS= read -r candidate; do
+  if [ "$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')" = "7f454c46" ]; then
+    binary="$candidate"
+    break
+  fi
+done < <(find "$root/usr/bin" -type f -perm -u+x | sort)
 if [ -n "$binary" ]; then
   floor="$(objdump -T "$binary" \
     | grep -oE 'GLIBC_[0-9]+\.[0-9]+' \
