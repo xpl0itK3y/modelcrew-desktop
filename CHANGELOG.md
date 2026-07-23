@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.0.7
+
+### Русский
+
+Обновление больше не теряется до установки, второй запуск фокусирует уже открытое окно, а Linux-пакеты честно объявляют всё, что им нужно.
+
+- Скачанное обновление остаётся на виду до установки: видно, где лежит пакет и что с ним делать
+- Повторный запуск фокусирует уже работающее окно вместо второй копии приложения
+- Меню веток и коммитов больше не вылезают за границы Git-панели
+- Linux-пакеты объявляют все нужные программы, а про отсутствующий git приложение говорит прямо
+- Обходной путь DMABUF в Linux теперь можно выключить обратно в настройках
+- Сборка релиза прерывается, если в неё попал адрес дев-сервера
+- Git-сценарии целиком проверяются на настоящем сервере, включая слияние pull request в графе
+- Rust-тесты и проверка терминала гоняются ещё и на Windows и macOS, а пакет Arch aarch64 собирается нативно
+
+### English
+
+Downloaded updates stay visible until installed, launching again focuses the running window, and the Linux packages declare everything they need.
+
+- A downloaded update stays visible until installed, showing where the package is and how to install it
+- Launching the app again focuses the running window instead of starting a second copy
+- Branch and commit menus no longer escape the edges of the Git panel
+- Linux packages declare every program they need, and a missing git is reported plainly
+- The Linux DMABUF workaround can now be switched back off in settings
+- A release build now refuses to ship if it would load the dev server
+- The whole Git workflow is checked against a real server, including the pull-request merge shape in the graph
+- Rust tests and the terminal check also run on Windows and macOS, and the Arch aarch64 package is built natively
+
 ## 0.0.6
 
 ### Русский

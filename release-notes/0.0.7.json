@@ -1,0 +1,25 @@
+{
+  "version": "0.0.7",
+  "ru": {
+    "title": "Понятные обновления, одно окно приложения и надёжный Linux",
+    "summary": "Обновление больше не теряется до установки, второй запуск фокусирует уже открытое окно, а Linux-пакеты честно объявляют всё, что им нужно.",
+    "highlights": [
+      "Скачанное обновление остаётся на виду до установки: видно, где лежит пакет и что с ним делать",
+      "Повторный запуск фокусирует уже работающее окно вместо второй копии приложения",
+      "Меню веток и коммитов больше не вылезают за границы Git-панели",
+      "Linux-пакеты объявляют все нужные программы, а про отсутствующий git приложение говорит прямо",
+      "Обходной путь DMABUF в Linux теперь можно выключить обратно в настройках"
+    ]
+  },
+  "en": {
+    "title": "Clearer updates, a single app window, and a sturdier Linux build",
+    "summary": "Downloaded updates stay visible until installed, launching again focuses the running window, and the Linux packages declare everything they need.",
+    "highlights": [
+      "A downloaded update stays visible until installed, showing where the package is and how to install it",
+      "Launching the app again focuses the running window instead of starting a second copy",
+      "Branch and commit menus no longer escape the edges of the Git panel",
+      "Linux packages declare every program they need, and a missing git is reported plainly",
+      "The Linux DMABUF workaround can now be switched back off in settings"
+    ]
+  }
+}
