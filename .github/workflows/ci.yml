@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Frontend, Rust, and release metadata
+    name: Frontend and release metadata
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -26,22 +26,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
-        with:
-          toolchain: stable
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            build-essential \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev
-
       - name: Install JavaScript dependencies
         run: npm ci
 
@@ -50,9 +34,6 @@ jobs:
 
       - name: Test frontend
         run: npm test
-
-      - name: Test Rust backend
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Test release tooling and metadata
         run: |
@@ -66,21 +47,22 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$(go env GOPATH)/bin/actionlint" -color
 
-  # Rust-часть трогает файловую систему и вызывает git, а это ровно то, что
-  # ведёт себя по-разному на разных ОС: разделители путей, переводы строк,
-  # права доступа. Гоняем её и там, где живут пользователи, а не только на
-  # раннере сборки. Фронтенд собирать не нужно: в тестовом профиле окно берёт
-  # адрес dev-сервера и вшитые файлы не требуются.
+  # Rust-часть трогает файловую систему, вызывает git и поднимает настоящий
+  # терминал — всё это ведёт себя по-разному на разных системах: разделители
+  # путей, переводы строк, права доступа, ConPTY вместо unix-псевдотерминала.
+  # Поэтому она гоняется на всех трёх, а не только на раннере сборки.
   backend:
     name: Rust backend on ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: Windows
-            os: windows-latest
+          - label: Linux
+            os: ubuntu-22.04
           - label: macOS
             os: macos-latest
+          - label: Windows
+            os: windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -92,8 +74,22 @@ jobs:
         with:
           toolchain: stable
 
-      # Без кеша каждая сборка заново компилирует весь tauri — на Windows это
-      # самая долгая часть прогона.
+      # Системные библиотеки нужны только Linux: на macOS и Windows вебвью
+      # часть операционной системы.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
+
+      # Без кеша каждый прогон компилирует весь tauri заново — на Windows это
+      # самая долгая часть.
       - name: Cache Rust build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
