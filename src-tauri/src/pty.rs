@@ -459,28 +459,41 @@ pub struct ShellInfo {
 /// Bash из установки Git for Windows. Искать его только в PATH бесполезно:
 /// установщик по умолчанию добавляет туда каталог с `git.exe`, а `bash.exe`
 /// лежит рядом, в `bin`. Поэтому у большинства пользователей bash установлен,
-/// но обычным поиском не находится.
+/// но обычным поиском не находится. Принимает корни установки Git — то есть
+/// каталоги, внутри которых лежит `bin`.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn bash_in_git_install(roots: &[PathBuf]) -> Option<PathBuf> {
+fn bash_in_git_root(roots: &[PathBuf]) -> Option<PathBuf> {
     roots
         .iter()
-        .map(|root| root.join("Git").join("bin").join("bash.exe"))
+        .map(|root| root.join("bin").join("bash.exe"))
         .find(|candidate| candidate.is_file())
 }
 
 #[cfg(windows)]
 fn windows_git_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
+    // Git мог быть поставлен куда угодно — хоть на другой диск. Его корень
+    // вычисляется от самого git.exe: тот лежит в <корень>\cmd, а bash — в
+    // <корень>\bin. Этот путь надёжнее всех остальных, поэтому идёт первым.
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            if dir.join("git.exe").is_file() {
+                if let Some(root) = dir.parent() {
+                    roots.push(root.to_path_buf());
+                }
+            }
+        }
+    }
     // ProgramW6432 указывает на 64-битный Program Files даже из 32-битного
     // процесса; остальные покрывают обычную и 32-битную установки.
     for variable in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
         if let Some(value) = std::env::var_os(variable) {
-            roots.push(PathBuf::from(value));
+            roots.push(PathBuf::from(value).join("Git"));
         }
     }
     // Установка «только для меня» кладёт Git в профиль пользователя.
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        roots.push(PathBuf::from(local).join("Programs"));
+        roots.push(PathBuf::from(local).join("Programs").join("Git"));
     }
     roots
 }
@@ -518,7 +531,7 @@ pub fn available_shells() -> Vec<ShellInfo> {
         // Полный путь, а не имя: PATH до него всё равно не доведёт. Если Git
         // не установлен, остаётся обычный поиск — он найдёт bash из WSL или
         // поставленный вручную.
-        let (label, command) = match bash_in_git_install(&windows_git_roots()) {
+        let (label, command) = match bash_in_git_root(&windows_git_roots()) {
             Some(path) => ("Git Bash", path.display().to_string()),
             None if shell_exists("bash.exe") => ("Bash", "bash.exe".to_string()),
             None => return shells,
@@ -1150,20 +1163,16 @@ mod tests {
     #[test]
     fn finds_bash_inside_a_git_installation() {
         let dir = tempfile::tempdir().unwrap();
-        let without_git = dir.path().join("empty");
-        std::fs::create_dir_all(&without_git).unwrap();
-        let program_files = dir.path().join("Program Files");
-        let bash = program_files.join("Git").join("bin").join("bash.exe");
+        let missing = dir.path().join("Program Files (x86)").join("Git");
+        let installed = dir.path().join("Program Files").join("Git");
+        let bash = installed.join("bin").join("bash.exe");
         std::fs::create_dir_all(bash.parent().unwrap()).unwrap();
         std::fs::write(&bash, b"").unwrap();
 
-        // Корень без Git пропускается, а не обрывает поиск: у пользователя
-        // обычно есть и Program Files, и Program Files (x86).
-        assert_eq!(
-            bash_in_git_install(&[without_git.clone(), program_files]),
-            Some(bash)
-        );
-        assert_eq!(bash_in_git_install(&[without_git]), None);
+        // Несуществующий корень пропускается, а не обрывает поиск: у
+        // пользователя обычно есть и Program Files, и Program Files (x86).
+        assert_eq!(bash_in_git_root(&[missing.clone(), installed]), Some(bash));
+        assert_eq!(bash_in_git_root(&[missing]), None);
     }
 
     #[test]
