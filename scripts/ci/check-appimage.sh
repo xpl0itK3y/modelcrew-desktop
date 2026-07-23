@@ -28,6 +28,49 @@ else
   echo "No bundled GStreamer: the system one will be used."
 fi
 
+# Без этих элементов WebKit не соберёт конвейер для звука уведомлений: разбор
+# WAV, преобразование частоты и хоть какой-то вывод на звуковую карту.
+for element in libgstwavparse libgstaudioconvert libgstaudioresample; do
+  test -f "$plugins/$element.so" || {
+    echo "AppImage has no $element — notification sounds would be silent" >&2
+    exit 1
+  }
+done
+if ! find "$plugins" \( -name 'libgstalsa.so' -o -name 'libgstpulse*.so' \) -print | grep -q .; then
+  echo "AppImage has no audio sink (alsa or pulse) — nothing would be heard" >&2
+  exit 1
+fi
+
+# Библиотеки в образе лежат и плоско в usr/lib, и в multiarch-подкаталоге:
+# искать зависимости надо во всех, иначе годный плагин будет ошибочно признан
+# сломанным и удалён.
+libpath="$(find "$root/usr/lib" -maxdepth 1 -type d | tr '\n' ':')"
+# Плагин без своих зависимостей грузиться не станет и в бою даст
+# «undefined symbol»: ловим это здесь.
+for plugin in "$plugins"/*.so; do
+  missing="$(LD_LIBRARY_PATH="$libpath" ldd "$plugin" 2>/dev/null | grep 'not found' || true)"
+  if [ -n "$missing" ]; then
+    echo "Bundled plugin $(basename "$plugin") is missing its libraries:" >&2
+    echo "$missing" >&2
+    exit 1
+  fi
+done
+echo "Every bundled plugin resolves its libraries"
+
+# Драйверы графики обязаны быть системными. Собранные на Ubuntu Mesa и libEGL
+# не договариваются с драйвером другого дистрибутива, и приложение падает с
+# EGL_BAD_PARAMETER ещё до появления окна.
+graphics="$(find "$root" -type f \( \
+  -name 'libEGL*' -o -name 'libGL.so*' -o -name 'libGLX*' \
+  -o -name 'libGLdispatch*' -o -name 'libgbm*' -o -name 'libdrm*' \
+  -o -name 'libgallium*' -o -name 'libglapi*' \) -print)"
+if [ -n "$graphics" ]; then
+  echo "AppImage bundles graphics libraries that must come from the host:" >&2
+  echo "$graphics" >&2
+  exit 1
+fi
+echo "Graphics stack is left to the host"
+
 # AppImage несёт свои библиотеки, но не свою libc: она всегда системная. Самый
 # новый затребованный символ и есть нижняя граница дистрибутивов, на которых
 # образ вообще запустится. Печатаем её, чтобы граница была фактом сборки, а не
