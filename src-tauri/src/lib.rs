@@ -494,24 +494,9 @@ fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandRes
 
     #[cfg(target_os = "windows")]
     {
-        let icon = count.map(|_| {
-            const SIZE: usize = 32;
-            let mut rgba = vec![0_u8; SIZE * SIZE * 4];
-            let center = (SIZE as f32 - 1.0) / 2.0;
-            for y in 0..SIZE {
-                for x in 0..SIZE {
-                    let dx = x as f32 - center;
-                    let dy = y as f32 - center;
-                    if (dx * dx + dy * dy).sqrt() <= center {
-                        let index = (y * SIZE + x) * 4;
-                        rgba[index] = 0xe0;
-                        rgba[index + 1] = 0x4c;
-                        rgba[index + 2] = 0x4c;
-                        rgba[index + 3] = 0xff;
-                    }
-                }
-            }
-            tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32)
+        let icon = count.map(|value| {
+            let rgba = draw_badge_overlay(&badge_text(value));
+            tauri::image::Image::new_owned(rgba, BADGE_SIZE as u32, BADGE_SIZE as u32)
         });
         window.set_overlay_icon(icon).map_err(|error| {
             CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
@@ -540,6 +525,109 @@ fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandRes
     }
 
     Ok(())
+}
+
+// Windows не рисует числовые бейджи сам, поэтому оверлей-иконку в углу значка
+// на панели задач мы рисуем вручную. Число — как в вебе: до 9, дальше «9+».
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn badge_text(count: i64) -> String {
+    if count > 9 {
+        "9+".to_string()
+    } else {
+        count.to_string()
+    }
+}
+
+// Размер оверлея. Windows показывает его крошечным в углу, поэтому мельчить
+// незачем — берём кратно шрифту (5×7), чтобы цифры оставались чёткими.
+#[cfg(target_os = "windows")]
+const BADGE_SIZE: usize = 32;
+
+// Пиксельный шрифт 5×7 для цифр и «+»: подключать настоящий шрифт ради
+// одного-двух знаков — лишняя зависимость и путь к файлу в рантайме.
+#[cfg(target_os = "windows")]
+fn badge_glyph(symbol: char) -> [u8; 7] {
+    match symbol {
+        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+        '3' => [0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
+        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
+        '+' => [0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000],
+        _ => [0; 7],
+    }
+}
+
+// Красный кружок с белым числом по центру, RGBA. Масштаб шрифта подбираем так,
+// чтобы надпись целиком помещалась в круг с полями.
+#[cfg(target_os = "windows")]
+fn draw_badge_overlay(text: &str) -> Vec<u8> {
+    const GLYPH_W: usize = 5;
+    const GLYPH_H: usize = 7;
+    const GAP: usize = 1;
+    let mut rgba = vec![0_u8; BADGE_SIZE * BADGE_SIZE * 4];
+    let center = (BADGE_SIZE as f32 - 1.0) / 2.0;
+
+    // Красный круг во всю иконку.
+    for y in 0..BADGE_SIZE {
+        for x in 0..BADGE_SIZE {
+            let dx = x as f32 - center;
+            let dy = y as f32 - center;
+            if (dx * dx + dy * dy).sqrt() <= center {
+                let index = (y * BADGE_SIZE + x) * 4;
+                rgba[index] = 0xe0;
+                rgba[index + 1] = 0x4c;
+                rgba[index + 2] = 0x4c;
+                rgba[index + 3] = 0xff;
+            }
+        }
+    }
+
+    let glyphs: Vec<[u8; 7]> = text.chars().map(badge_glyph).collect();
+    if glyphs.is_empty() {
+        return rgba;
+    }
+    let cells = glyphs.len() * GLYPH_W + (glyphs.len() - 1) * GAP;
+    // Самый крупный масштаб, при котором надпись влезает в ~70% ширины круга.
+    let budget = (BADGE_SIZE as f32 * 0.7) as usize;
+    let scale = (budget / cells).min(budget / GLYPH_H).max(1);
+    let text_w = cells * scale;
+    let text_h = GLYPH_H * scale;
+    let start_x = (BADGE_SIZE - text_w) / 2;
+    let start_y = (BADGE_SIZE - text_h) / 2;
+
+    let mut pen_x = start_x;
+    for glyph in glyphs {
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..GLYPH_W {
+                // Скобки обязательны: у `&` приоритет ниже, чем у `==`.
+                if (*bits & (1u8 << (GLYPH_W - 1 - col))) == 0 {
+                    continue;
+                }
+                // Один «пиксель» шрифта — квадрат scale×scale белым.
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let px = pen_x + col * scale + sx;
+                        let py = start_y + row * scale + sy;
+                        if px < BADGE_SIZE && py < BADGE_SIZE {
+                            let index = (py * BADGE_SIZE + px) * 4;
+                            rgba[index] = 0xff;
+                            rgba[index + 1] = 0xff;
+                            rgba[index + 2] = 0xff;
+                            rgba[index + 3] = 0xff;
+                        }
+                    }
+                }
+            }
+        }
+        pen_x += (GLYPH_W + GAP) * scale;
+    }
+    rgba
 }
 
 // URI приложения для сигнала Unity: имя установленного .desktop-файла.
@@ -958,16 +1046,26 @@ mod dmabuf_tests {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod badge_tests {
-    use super::badge_app_uri;
+    use super::badge_text;
 
+    #[test]
+    fn badge_caps_the_overlay_text_at_nine_plus() {
+        assert_eq!(badge_text(1), "1");
+        assert_eq!(badge_text(9), "9");
+        // Больше одной цифры в углу значка не читается — как «9+» в вебе.
+        assert_eq!(badge_text(10), "9+");
+        assert_eq!(badge_text(42), "9+");
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn badge_uri_points_at_the_installed_desktop_file() {
         // Значок Unity цепляется к приложению по имени .desktop-файла, а его
         // ставят по productName — «ModelCrew», не по имени пакета.
         assert_eq!(
-            badge_app_uri("ModelCrew"),
+            super::badge_app_uri("ModelCrew"),
             "application://ModelCrew.desktop"
         );
     }
