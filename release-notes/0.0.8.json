@@ -1,0 +1,25 @@
+{
+  "version": "0.0.8",
+  "ru": {
+    "title": "Дифф коммита в две колонки, политика безопасности окна и звук в Linux",
+    "summary": "Файлы коммита открываются диффом «было рядом со стало», окно работает под политикой безопасности контента, звук уведомлений вернулся в Linux, а скачанное обновление остаётся с бейджем.",
+    "highlights": [
+      "Откройте файлы коммита и читайте изменение в две колонки: слева было, справа стало, строка напротив строки",
+      "Окно приложения теперь работает под политикой безопасности контента: скрипты только со своего источника",
+      "Звуки уведомлений снова играют в Linux — плеер получает их блобами, понятными загрузчику WebKit",
+      "Скачанное обновление остаётся с бейджем на колокольчике и иконке, пока вы его не установите",
+      "В Windows терминал находит Git Bash, даже если Git установлен вне Program Files"
+    ]
+  },
+  "en": {
+    "title": "Side-by-side commit diffs, a security policy for the window, and working Linux sounds",
+    "summary": "A commit's files open into an aligned before-and-after diff, the window runs under a content security policy, Linux notification sounds work again, and downloaded updates stay badged.",
+    "highlights": [
+      "Open a commit's files and read the change as two aligned columns, old on the left and new on the right",
+      "The app window now runs under a content security policy that limits scripts to its own origin",
+      "Notification sounds play on Linux again, delivered to the player as blobs the WebKit loader understands",
+      "A downloaded update stays badged on the bell and app icon until you install it",
+      "On Windows the terminal finds Git Bash even when Git is installed outside Program Files"
+    ]
+  }
+}

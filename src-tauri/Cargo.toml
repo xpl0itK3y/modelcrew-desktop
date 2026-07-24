@@ -1,6 +1,6 @@
 [package]
 name = "modelcrew-desktop"
-version = "0.0.7"
+version = "0.0.8"
 description = "ModelCrew terminal manager"
 authors = ["Denis"]
 edition = "2021"

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.0.8
+
+### Русский
+
+Файлы коммита открываются диффом «было рядом со стало», окно работает под политикой безопасности контента, звук уведомлений вернулся в Linux, а скачанное обновление остаётся с бейджем.
+
+- Откройте файлы коммита и читайте изменение в две колонки: слева было, справа стало, строка напротив строки
+- Окно приложения теперь работает под политикой безопасности контента: скрипты только со своего источника
+- Звуки уведомлений снова играют в Linux — плеер получает их блобами, понятными загрузчику WebKit
+- Скачанное обновление остаётся с бейджем на колокольчике и иконке, пока вы его не установите
+- В Windows терминал находит Git Bash, даже если Git установлен вне Program Files
+- Одноколоночный вид diff остался и переключается, а сравнение коммитов использует тот же рендерер
+- Релизный валидатор не пропустит сборку без политики безопасности или с разрешённым inline-скриптом
+- AppImage оставляет графику системе и несёт только те аудио-плагины, что действительно работают
+
+### English
+
+A commit's files open into an aligned before-and-after diff, the window runs under a content security policy, Linux notification sounds work again, and downloaded updates stay badged.
+
+- Open a commit's files and read the change as two aligned columns, old on the left and new on the right
+- The app window now runs under a content security policy that limits scripts to its own origin
+- Notification sounds play on Linux again, delivered to the player as blobs the WebKit loader understands
+- A downloaded update stays badged on the bell and app icon until you install it
+- On Windows the terminal finds Git Bash even when Git is installed outside Program Files
+- The single-column diff view stays and toggles, and commit compare now shares the same renderer
+- The release validator refuses a build with no security policy or one that allows inline scripts
+- The AppImage leaves graphics to the host and bundles only the audio plugins that actually work
+
 ## 0.0.7
 
 ### Русский
