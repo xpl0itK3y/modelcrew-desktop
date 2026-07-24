@@ -50,5 +50,13 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Threading",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Значок-счётчик на иконке в панели задач. Tauri делает это через libunity и
+# только если запущен Unity, поэтому на KDE/GNOME значка нет. Тот же сигнал
+# слушают все популярные окружения — шлём его сами через сессионную шину.
+# Версия совпадает с той, что уже в дереве (через single-instance), — второй
+# экземпляр не тянется.
+zbus = "5"
+
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"

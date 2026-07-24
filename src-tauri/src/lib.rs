@@ -485,8 +485,8 @@ fn workspace_unregister_root(
 }
 
 // Бейдж непрочитанного на иконке приложения: счётчик в Dock (macOS) и на
-// иконках доков Linux; на Windows числовых бейджей нет — красная точка
-// поверх иконки в панели задач.
+// иконках доков Linux (KDE, GNOME с доком, Cinnamon, Unity); на Windows
+// числовых бейджей нет — красная точка поверх иконки в панели задач.
 #[tauri::command]
 fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandResult<()> {
     ensure_main_window(&window)?;
@@ -518,13 +518,67 @@ fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandRes
         })?;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
         window.set_badge_count(count).map_err(|error| {
             CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
         })?;
     }
+
+    // На Linux Tauri зовёт libunity и молчит, если Unity не запущен, — на KDE и
+    // GNOME значка нет. Шлём тот же сигнал сами: его слушают все популярные
+    // доки. Значок цепляется к нашему .desktop по productName.
+    #[cfg(target_os = "linux")]
+    {
+        let desktop = window
+            .app_handle()
+            .config()
+            .product_name
+            .clone()
+            .unwrap_or_else(|| "ModelCrew".to_string());
+        emit_unity_badge(count, badge_app_uri(&desktop));
+    }
+
     Ok(())
+}
+
+// URI приложения для сигнала Unity: имя установленного .desktop-файла.
+#[cfg(target_os = "linux")]
+fn badge_app_uri(product_name: &str) -> String {
+    format!("application://{product_name}.desktop")
+}
+
+// Широковещательный сигнал com.canonical.Unity.LauncherEntry.Update — тот же,
+// что шлёт libunity, но без её проверки «запущен ли Unity», из-за которой
+// значок не появлялся на KDE/GNOME. Отправка — из отдельного потока: zbus
+// блокирует, а внутри tokio-рантайма Tauri это паникует; значок best-effort,
+// ждать его незачем.
+#[cfg(target_os = "linux")]
+fn emit_unity_badge(count: Option<i64>, app_uri: String) {
+    std::thread::spawn(move || {
+        if let Err(error) = send_unity_badge(count, &app_uri) {
+            log::debug!("unity launcher badge: {error}");
+        }
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn send_unity_badge(count: Option<i64>, app_uri: &str) -> Result<(), zbus::Error> {
+    use std::collections::HashMap;
+    use zbus::blocking::Connection;
+    use zbus::zvariant::Value;
+
+    let mut properties: HashMap<&str, Value> = HashMap::new();
+    properties.insert("count", Value::I64(count.unwrap_or(0)));
+    properties.insert("count-visible", Value::Bool(count.is_some()));
+
+    Connection::session()?.emit_signal(
+        None::<&str>,
+        "/com/canonical/unity/launcherentry/modelcrew",
+        "com.canonical.Unity.LauncherEntry",
+        "Update",
+        &(app_uri, properties),
+    )
 }
 
 #[tauri::command]
@@ -901,5 +955,20 @@ mod dmabuf_tests {
         for value in ["1", "true", "yes"] {
             assert_eq!(dmabuf_choice(Some(value)), DmabufChoice::Keep, "{value:?}");
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod badge_tests {
+    use super::badge_app_uri;
+
+    #[test]
+    fn badge_uri_points_at_the_installed_desktop_file() {
+        // Значок Unity цепляется к приложению по имени .desktop-файла, а его
+        // ставят по productName — «ModelCrew», не по имени пакета.
+        assert_eq!(
+            badge_app_uri("ModelCrew"),
+            "application://ModelCrew.desktop"
+        );
     }
 }

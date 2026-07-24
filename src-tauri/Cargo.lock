@@ -2305,6 +2305,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "windows-sys 0.59.0",
+ "zbus",
 ]
 
 [[package]]
