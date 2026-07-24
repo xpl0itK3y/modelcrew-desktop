@@ -12,6 +12,15 @@ import {
 const isTauri = "__TAURI_INTERNALS__" in window;
 const STORAGE_KEY = "modelcrew.systemNotifications";
 
+// На Linux демон уведомлений не связывает наш app-id с установленным ярлыком,
+// поэтому баннер приходит без иконки приложения. Указываем её имя явно — оно
+// одно и то же во всех Linux-пакетах (файлы hicolor/.../modelcrew-desktop.png,
+// Icon=modelcrew-desktop в .desktop). На macOS/Windows это имя не путь к файлу,
+// поэтому иконку там задаёт система, а не мы.
+const LINUX_NOTIFICATION_ICON = "modelcrew-desktop";
+const isLinux =
+  typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
+
 export function loadSystemNotificationsEnabled(): boolean {
   try {
     return localStorage.getItem(STORAGE_KEY) !== "off";
@@ -59,7 +68,11 @@ export async function sendSystemNotification(
     if (!(await ensurePermission())) {
       return;
     }
-    sendNotification(body ? { title, body } : { title });
+    sendNotification({
+      title,
+      ...(body ? { body } : {}),
+      ...(isLinux ? { icon: LINUX_NOTIFICATION_ICON } : {}),
+    });
   } catch {
     // Баннер — дополнение; его сбой не должен ломать поток уведомлений.
   }
