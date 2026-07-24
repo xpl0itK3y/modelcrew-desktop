@@ -101,9 +101,9 @@ jobs:
             build-essential \
             desktop-file-utils \
             file \
+            gstreamer1.0-alsa \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
-            gstreamer1.0-pulseaudio \
             libayatana-appindicator3-dev \
             libfuse2 \
             librsvg2-dev \
