@@ -58,6 +58,8 @@ pkgdesc='Desktop workspace for projects, sessions, and multiple terminals'
 arch=('$arch')
 url='https://github.com/xpl0itK3y/modelcrew-desktop'
 license=('MIT')
+# Эталонный список зависимостей. Nightly переупаковывает .deb своим PKGBUILD
+# (.github/workflows/nightly.yml) — держи его в точности таким же.
 depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1' 'xdg-utils')
 provides=('modelcrew')
 conflicts=('modelcrew')

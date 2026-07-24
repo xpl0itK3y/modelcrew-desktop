@@ -2,6 +2,10 @@ name: CI
 
 on:
   push:
+    # Тег v* уже запускает Stable release, а тот прогоняет те же проверки —
+    # незачем гонять CI второй раз параллельно с релизом. Ветки не трогаем.
+    tags-ignore:
+      - "v*"
   pull_request:
 
 permissions:

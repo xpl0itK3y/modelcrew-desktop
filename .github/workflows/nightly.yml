@@ -226,6 +226,10 @@ jobs:
           # Only a prebuilt .deb is unpacked (no compilation), so CARCH just
           # labels the package for the target architecture.
           sed -i "s/^CARCH=.*/CARCH=\"$PKG_ARCH\"/" /etc/makepkg.conf
+          # Список depends держим единым с нативной сборкой
+          # (scripts/ci/build-arch-package.sh) — это эталон. Разъехавшись, они
+          # дали бы nightly-пакет без git (панель изменений), gst-plugins-base
+          # (звук) и xdg-utils (ссылки). Меняя тут — меняй и там.
           cat > "$work/PKGBUILD" <<'PKGBUILD'
           pkgname=modelcrew-bin
           pkgver=__VERSION__
@@ -234,7 +238,7 @@ jobs:
           arch=('__ARCH__')
           url='https://github.com/xpl0itK3y/modelcrew-desktop'
           license=('MIT')
-          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1')
+          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'git' 'glib2' 'gst-plugins-base' 'gst-plugins-good' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'openssl' 'pango' 'polkit' 'webkit2gtk-4.1' 'xdg-utils')
           provides=('modelcrew')
           conflicts=('modelcrew')
           options=('!strip')
