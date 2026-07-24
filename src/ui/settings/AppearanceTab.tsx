@@ -24,6 +24,10 @@ const themeMessageKeys: Record<
     name: "theme.graphite.name",
     description: "theme.graphite.description",
   },
+  obsidian: {
+    name: "theme.obsidian.name",
+    description: "theme.obsidian.description",
+  },
   ocean: {
     name: "theme.ocean.name",
     description: "theme.ocean.description",
@@ -36,9 +40,17 @@ const themeMessageKeys: Record<
     name: "theme.aubergine.name",
     description: "theme.aubergine.description",
   },
+  sepia: {
+    name: "theme.sepia.name",
+    description: "theme.sepia.description",
+  },
   porcelain: {
     name: "theme.porcelain.name",
     description: "theme.porcelain.description",
+  },
+  parchment: {
+    name: "theme.parchment.name",
+    description: "theme.parchment.description",
   },
 };
 

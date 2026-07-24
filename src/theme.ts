@@ -47,10 +47,13 @@ export const ACCENT_COLORS: AccentColor[] = [
 export type ThemeId =
   | "midnight"
   | "graphite"
+  | "obsidian"
   | "ocean"
   | "forest"
   | "aubergine"
-  | "porcelain";
+  | "sepia"
+  | "porcelain"
+  | "parchment";
 
 type ThemeColors = {
   bg: string;
@@ -144,6 +147,32 @@ const lightTerminal: ITheme = {
   brightWhite: "#ffffff",
 };
 
+// Тёплый вариант светлого терминала: кремовый фон и слегка потеплевшие ANSI,
+// чтобы «Пергамент» не выглядел как «Фарфор» с другим фоном.
+const warmLightTerminal: ITheme = {
+  background: "#faf6ec",
+  foreground: "#4a4030",
+  cursor: "#2b2416",
+  cursorAccent: "#faf6ec",
+  selectionBackground: "rgba(150, 110, 40, 0.20)",
+  black: "#312a1e",
+  red: "#b83f3f",
+  green: "#4f7d2f",
+  yellow: "#976b00",
+  blue: "#3a6ea8",
+  magenta: "#8a4fa8",
+  cyan: "#2c7f80",
+  white: "#e2dac9",
+  brightBlack: "#7a6e58",
+  brightRed: "#c85a4a",
+  brightGreen: "#5c9137",
+  brightYellow: "#a97d00",
+  brightBlue: "#4a80bc",
+  brightMagenta: "#9c66b8",
+  brightCyan: "#3a9192",
+  brightWhite: "#fffaf0",
+};
+
 export const APP_THEMES: readonly AppTheme[] = [
   {
     id: "midnight",
@@ -221,6 +250,45 @@ export const APP_THEMES: readonly AppTheme[] = [
       "#d0d0d4",
       "#f4f4f5",
       "rgba(170, 170, 180, 0.25)",
+    ),
+  },
+  {
+    id: "obsidian",
+    scheme: "dark",
+    colors: {
+      bg: "#08090a",
+      panel: "#101113",
+      panelHeader: "#16171a",
+      sidebar: "#0c0d0f",
+      border: "#24262b",
+      panelBorder: "#1c1e22",
+      text: "#c7cace",
+      textBright: "#f0f1f3",
+      textMuted: "#8a8d94",
+      textFaint: "#595c64",
+      green: "#4ade80",
+      surfaceActive: "#191b1e",
+      surfaceRaised: "#141517",
+      button: "#212327",
+      buttonHover: "#2a2c31",
+      hover: "rgba(255, 255, 255, 0.06)",
+      hoverSubtle: "rgba(255, 255, 255, 0.035)",
+      hoverStrong: "rgba(255, 255, 255, 0.10)",
+      scrollbar: "rgba(150, 155, 165, 0.24)",
+      backdrop: "rgba(0, 0, 0, 0.64)",
+      shadow: "rgba(0, 0, 0, 0.62)",
+      danger: "#ff8fa3",
+      dangerSoft: "rgba(255, 114, 133, 0.14)",
+      dangerHover: "rgba(255, 114, 133, 0.22)",
+      dangerBorder: "rgba(255, 114, 133, 0.50)",
+      selectionRing: "#ffffff",
+      terminalBg: "#101113",
+    },
+    terminal: darkTerminal(
+      "#101113",
+      "#c7cace",
+      "#f0f1f3",
+      "rgba(150, 160, 175, 0.28)",
     ),
   },
   {
@@ -341,6 +409,45 @@ export const APP_THEMES: readonly AppTheme[] = [
     ),
   },
   {
+    id: "sepia",
+    scheme: "dark",
+    colors: {
+      bg: "#13110d",
+      panel: "#1c1813",
+      panelHeader: "#24201a",
+      sidebar: "#181410",
+      border: "#392f24",
+      panelBorder: "#31281d",
+      text: "#d9cdbc",
+      textBright: "#f8f1e6",
+      textMuted: "#a2917b",
+      textFaint: "#6f5f49",
+      green: "#5cc487",
+      surfaceActive: "#2a2419",
+      surfaceRaised: "#201b14",
+      button: "#322818",
+      buttonHover: "#3f331f",
+      hover: "rgba(255, 234, 205, 0.07)",
+      hoverSubtle: "rgba(255, 234, 205, 0.04)",
+      hoverStrong: "rgba(255, 234, 205, 0.11)",
+      scrollbar: "rgba(190, 162, 120, 0.28)",
+      backdrop: "rgba(12, 8, 4, 0.62)",
+      shadow: "rgba(0, 0, 0, 0.56)",
+      danger: "#ff9e86",
+      dangerSoft: "rgba(255, 130, 100, 0.14)",
+      dangerHover: "rgba(255, 130, 100, 0.22)",
+      dangerBorder: "rgba(255, 130, 100, 0.48)",
+      selectionRing: "#fff4e2",
+      terminalBg: "#1c1813",
+    },
+    terminal: darkTerminal(
+      "#1c1813",
+      "#d9cdbc",
+      "#f8f1e6",
+      "rgba(190, 150, 95, 0.30)",
+    ),
+  },
+  {
     id: "porcelain",
     scheme: "light",
     colors: {
@@ -373,6 +480,40 @@ export const APP_THEMES: readonly AppTheme[] = [
       terminalBg: "#f7f8fa",
     },
     terminal: lightTerminal,
+  },
+  {
+    id: "parchment",
+    scheme: "light",
+    colors: {
+      bg: "#e9e2d2",
+      panel: "#faf6ec",
+      panelHeader: "#f2ebdd",
+      sidebar: "#ede6d6",
+      border: "#d7cbb4",
+      panelBorder: "#e0d5c0",
+      text: "#544a39",
+      textBright: "#2b2416",
+      textMuted: "#7b6f5c",
+      textFaint: "#a99d85",
+      green: "#2f7d43",
+      surfaceActive: "#e2d9c6",
+      surfaceRaised: "#fcf9f1",
+      button: "#ebe3d3",
+      buttonHover: "#ddd3bf",
+      hover: "rgba(70, 55, 25, 0.07)",
+      hoverSubtle: "rgba(70, 55, 25, 0.04)",
+      hoverStrong: "rgba(70, 55, 25, 0.11)",
+      scrollbar: "rgba(130, 108, 70, 0.26)",
+      backdrop: "rgba(60, 48, 28, 0.24)",
+      shadow: "rgba(80, 62, 32, 0.20)",
+      danger: "#b4233f",
+      dangerSoft: "rgba(210, 45, 76, 0.10)",
+      dangerHover: "rgba(210, 45, 76, 0.17)",
+      dangerBorder: "rgba(180, 35, 63, 0.36)",
+      selectionRing: "#2b2416",
+      terminalBg: "#faf6ec",
+    },
+    terminal: warmLightTerminal,
   },
 ] as const;
 
