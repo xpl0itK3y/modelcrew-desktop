@@ -1,78 +1,187 @@
 /* ---------- Настройки ---------- */
 
+/* Диалог разделён на две колонки: слева навигация с поиском, справа — страница
+   раздела. Высота фиксирована, прокручивается только правая колонка: так
+   переключение разделов не дёргает окно и не меняет положение навигации. */
 .settings-dialog {
+  position: relative;
+  display: flex;
   box-sizing: border-box;
-  width: min(620px, calc(100vw - 48px));
+  width: min(980px, calc(100vw - 48px));
+  height: min(680px, calc(100vh - 48px));
   min-width: 0;
-  max-height: calc(100vh - 48px);
-  overflow-y: auto;
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.settings-header {
+.settings-nav {
+  display: flex;
+  box-sizing: border-box;
+  width: 252px;
+  flex: none;
+  flex-direction: column;
+  padding: 18px 14px 14px;
+  border-right: 1px solid var(--mc-border);
+  background: var(--mc-sidebar);
+}
+
+.settings-search {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.settings-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--mc-text-bright);
-}
-
-.settings-tabs {
-  display: flex;
-  gap: 2px;
   margin-bottom: 18px;
-  border-bottom: 1px solid var(--mc-border);
 }
 
-.settings-tab {
-  padding: 8px 14px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  background: transparent;
+.settings-search-icon {
+  position: absolute;
+  left: 11px;
+  width: 14px;
+  height: 14px;
   color: var(--mc-text-faint);
-  font: inherit;
-  font-weight: 550;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  pointer-events: none;
 }
 
-.settings-tab:hover {
+.settings-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 12px 9px 33px;
+  border: 1px solid var(--mc-border);
+  border-radius: 9px;
+  background: var(--mc-surface-raised);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.settings-search-input::placeholder {
+  color: var(--mc-text-faint);
+}
+
+.settings-search-input:focus-visible {
+  border-color: var(--mc-accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+}
+
+.settings-nav-label {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  color: var(--mc-text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.settings-nav-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-color: var(--mc-scrollbar) transparent;
+  scrollbar-width: thin;
+}
+
+.settings-nav-item {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--mc-hover-subtle);
   color: var(--mc-text);
 }
 
-.settings-tab.is-selected {
+.settings-nav-item.is-selected {
+  background: var(--mc-surface-active);
   color: var(--mc-text-bright);
-  border-bottom-color: var(--mc-accent);
 }
 
-.settings-tab:focus-visible {
+.settings-nav-item:focus-visible {
   outline: 1px solid var(--mc-accent);
-  outline-offset: 2px;
-  border-radius: 4px 4px 0 0;
+  outline-offset: 1px;
 }
 
-/* The body glides between tab heights instead of snapping. Its height is driven
-   from JS (measured active panel); the dialog's auto height follows each frame. */
-.settings-body {
-  position: relative;
-  overflow: hidden;
-  transition: height 360ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: height;
+.settings-nav-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--mc-text-faint);
 }
 
-.settings-body-track > [role="tabpanel"]:not([hidden]) {
-  animation: settings-panel-in 340ms cubic-bezier(0.22, 1, 0.36, 1);
+.settings-nav-item.is-selected .settings-nav-icon {
+  color: var(--mc-accent);
 }
 
-@keyframes settings-panel-in {
+.settings-nav-empty,
+.settings-content-empty {
+  margin: 0;
+  color: var(--mc-text-faint);
+  font-size: 12px;
+}
+
+.settings-nav-empty {
+  padding: 6px 10px;
+}
+
+.settings-content-empty {
+  padding-top: 8px;
+}
+
+.settings-nav-footer {
+  margin-top: 12px;
+  padding: 10px 10px 0;
+  border-top: 1px solid var(--mc-border);
+  color: var(--mc-text-faint);
+  font-size: 10.5px;
+  text-align: center;
+  user-select: text;
+}
+
+.settings-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+}
+
+.settings-content {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  padding: 30px 40px 40px;
+  overflow-y: auto;
+  scrollbar-color: var(--mc-scrollbar) transparent;
+  scrollbar-width: thin;
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-page {
+  animation: settings-page-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes settings-page-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -80,170 +189,251 @@
   }
 }
 
-.settings-section {
+.settings-page-title {
+  margin: 0 0 6px;
+  color: var(--mc-text-bright);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings-page-intro {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--mc-text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.settings-rows {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  margin-top: 10px;
 }
 
-.settings-section + .settings-section {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--mc-border);
-}
-
-.settings-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--mc-text-faint);
-}
-
-.language-options {
+/* Строка настройки: слева название с пояснением, справа сам переключатель —
+   ровно так же, как в списке настроек системы. */
+.settings-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-}
-
-.language-option {
-  display: flex;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  min-height: 42px;
-  padding: 0 13px;
-  border: 1px solid var(--mc-border);
-  border-radius: 8px;
-  background: var(--mc-button);
-  color: var(--mc-text);
-  font: inherit;
-  cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease,
-    box-shadow 120ms ease;
+  gap: 6px 28px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--mc-border);
 }
 
-.language-option:hover {
-  background: var(--mc-button-hover);
+.settings-row:last-child {
+  border-bottom: 0;
 }
 
-.language-option.is-selected {
-  border-color: var(--mc-accent);
-  color: var(--mc-text-bright);
-  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+/* Крупным элементам — сетке тем, палитре — правой колонки мало: они занимают
+   всю ширину под названием. */
+.settings-row.is-stacked {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.language-option-code {
-  color: var(--mc-text-faint);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.1em;
-}
-
-.shell-options {
+.settings-row-copy {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-row-title {
+  color: var(--mc-text-bright);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.settings-row-description {
+  color: var(--mc-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-row-control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.settings-row.is-stacked .settings-row-control {
+  display: block;
+  margin-top: 12px;
+}
+
+.settings-row-note {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+.settings-control-pair {
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: 8px;
 }
 
-.shell-option {
-  min-height: 38px;
-  padding: 0 15px;
-  border: 1px solid var(--mc-border);
-  border-radius: 8px;
-  background: var(--mc-button);
-  color: var(--mc-text);
-  font: inherit;
-  cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.shell-option:hover {
-  background: var(--mc-button-hover);
-}
-
-.shell-option:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-
-/* Постоянно недоступная опция (напр. «Из сети» без входа) — не «ожидание». */
-.shell-option.is-locked:disabled {
-  cursor: not-allowed;
-}
-
-.shell-option.is-selected {
-  border-color: var(--mc-accent);
-  color: var(--mc-text-bright);
-  box-shadow: 0 0 0 1px var(--mc-accent-glow);
-}
-
 .settings-note {
-  margin: 9px 0 0;
+  margin: 0;
   color: var(--mc-text-faint);
   font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .settings-note.is-warning {
   color: var(--mc-danger);
 }
 
-.sound-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-}
+/* ---------- Переключатели ---------- */
 
-.sound-option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 42px;
-  padding: 0 14px;
-  border: 1px solid var(--mc-border);
-  border-radius: 8px;
-  background: var(--mc-button);
-  color: var(--mc-text);
-  font: inherit;
-  text-align: left;
+.settings-switch {
+  position: relative;
+  width: 40px;
+  height: 23px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  /* Серый «выключено» считается от цвета текста, поэтому одинаково уместен и в
+     тёмных темах, и в светлых. */
+  background: color-mix(in srgb, var(--mc-text-faint) 45%, transparent);
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease,
-    box-shadow 120ms ease;
+  transition: background-color 150ms ease;
 }
 
-.sound-option:hover {
+.settings-switch.is-on {
+  background: var(--mc-accent);
+}
+
+.settings-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-switch:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 2px;
+}
+
+.settings-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px var(--mc-shadow);
+  transition: transform 150ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.settings-switch.is-on .settings-switch-thumb {
+  transform: translateX(17px);
+}
+
+.settings-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--mc-border);
+  border-radius: 9px;
+  background: var(--mc-button);
+}
+
+.settings-segment {
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.settings-segment:hover:not(:disabled) {
+  color: var(--mc-text-bright);
+}
+
+.settings-segment.is-selected {
+  background: var(--mc-accent-soft);
+  color: var(--mc-text-bright);
+  box-shadow: inset 0 0 0 1px var(--mc-accent-border);
+}
+
+.settings-segment:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-segment:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: -1px;
+}
+
+.settings-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.settings-select-input {
+  box-sizing: border-box;
+  min-width: 190px;
+  max-width: 264px;
+  padding: 8px 32px 8px 12px;
+  appearance: none;
+  border: 1px solid var(--mc-border);
+  border-radius: 9px;
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.settings-select-input:hover:not(:disabled) {
   background: var(--mc-button-hover);
 }
 
-.sound-option.is-selected {
+.settings-select-input:focus-visible {
   border-color: var(--mc-accent);
-  color: var(--mc-text-bright);
+  outline: none;
   box-shadow: 0 0 0 1px var(--mc-accent-glow);
 }
 
-.sound-option-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  font-size: 11px;
-  color: var(--mc-text-faint);
+.settings-select-input:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
-.sound-option.is-selected .sound-option-icon {
-  color: var(--mc-accent);
+.settings-select-chevron {
+  position: absolute;
+  right: 11px;
+  width: 12px;
+  height: 12px;
+  color: var(--mc-text-faint);
+  transform: rotate(90deg);
+  pointer-events: none;
 }
+
+.settings-select.is-disabled .settings-select-chevron {
+  opacity: 0.55;
+}
+
+/* ---------- Размер шрифта терминала ---------- */
 
 .terminal-font-size-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
+  grid-template-columns: 180px 46px;
   align-items: center;
-  gap: 16px;
-  min-height: 48px;
-  padding: 0 14px;
-  border: 1px solid var(--mc-border);
-  border-radius: 8px;
-  background: var(--mc-button);
+  gap: 14px;
 }
 
 .terminal-font-size-slider {
@@ -270,8 +460,7 @@
   border: 3px solid var(--mc-surface-raised);
   border-radius: 50%;
   background: var(--mc-accent);
-  box-shadow: 0 0 0 1px var(--mc-accent-border),
-    0 2px 7px var(--mc-shadow);
+  box-shadow: 0 0 0 1px var(--mc-accent-border), 0 2px 7px var(--mc-shadow);
 }
 
 .terminal-font-size-slider::-moz-range-thumb {
@@ -280,8 +469,7 @@
   border: 3px solid var(--mc-surface-raised);
   border-radius: 50%;
   background: var(--mc-accent);
-  box-shadow: 0 0 0 1px var(--mc-accent-border),
-    0 2px 7px var(--mc-shadow);
+  box-shadow: 0 0 0 1px var(--mc-accent-border), 0 2px 7px var(--mc-shadow);
 }
 
 .terminal-font-size-slider:focus-visible {
@@ -296,19 +484,21 @@
   text-align: right;
 }
 
+/* ---------- Темы и цвет подсветки ---------- */
+
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 9px;
 }
 
 .theme-card {
   display: grid;
-  grid-template-columns: 86px minmax(0, 1fr) 18px;
+  grid-template-columns: 64px minmax(0, 1fr) 14px;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   min-width: 0;
-  padding: 9px;
+  padding: 8px;
   border: 1px solid var(--mc-border);
   border-radius: 9px;
   background: var(--mc-button);
@@ -329,25 +519,30 @@
   box-shadow: 0 0 0 1px var(--mc-accent-glow);
 }
 
+.theme-card:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 2px;
+}
+
 .theme-preview {
   position: relative;
   display: block;
-  width: 86px;
-  height: 52px;
+  width: 64px;
+  height: 40px;
   overflow: hidden;
   border: 1px solid var(--mc-border);
-  border-radius: 6px;
+  border-radius: 5px;
 }
 
 .theme-preview-sidebar {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 20px;
+  width: 15px;
 }
 
 .theme-preview-panel {
   position: absolute;
-  inset: 6px 6px 6px 26px;
+  inset: 5px 5px 5px 20px;
   overflow: hidden;
   border: 1px solid;
   border-radius: 3px;
@@ -355,23 +550,23 @@
 
 .theme-preview-header {
   display: block;
-  height: 8px;
+  height: 6px;
 }
 
 .theme-preview-line {
   display: block;
-  width: 24px;
+  width: 18px;
   height: 3px;
-  margin: 9px 0 0 7px;
+  margin: 7px 0 0 5px;
   border-radius: 2px;
   opacity: 0.75;
 }
 
 .theme-preview-accent {
   position: absolute;
-  left: 25px;
-  top: 12px;
-  bottom: 12px;
+  left: 19px;
+  top: 9px;
+  bottom: 9px;
   width: 2px;
   border-radius: 2px;
   background: var(--mc-accent);
@@ -381,7 +576,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .theme-card-copy strong {
@@ -393,34 +588,37 @@
   white-space: nowrap;
 }
 
+/* Описание переносится, а не обрезается: «Приглушённый фиолетовый» должен
+   читаться целиком — места по высоте карточке хватает. */
 .theme-card-copy small {
-  overflow: hidden;
   color: var(--mc-text-faint);
   font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
 }
 
 .theme-card-check {
   color: var(--mc-accent);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   text-align: center;
 }
 
+/* Ровно девять в ряд: восемнадцать цветов ложатся двумя полными строками, а не
+   длинной лентой с одиноким кружком на переносе. */
 .accent-grid {
   display: grid;
-  grid-template-columns: repeat(9, 32px);
+  grid-template-columns: repeat(9, 30px);
   gap: 8px;
 }
 
 .accent-swatch {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  flex: none;
   padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
   transition: transform 100ms ease;
 }
 
@@ -430,14 +628,20 @@
 
 .accent-swatch.is-selected {
   border-color: var(--mc-selection-ring);
-  box-shadow: 0 0 0 2px var(--mc-bg), 0 0 10px var(--mc-accent-glow);
+  box-shadow: 0 0 0 2px var(--mc-surface-raised), 0 0 10px var(--mc-accent-glow);
+}
+
+.accent-swatch:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 3px;
 }
 
 .accent-custom {
   display: flex;
+  width: fit-content;
   align-items: center;
   gap: 10px;
-  margin-top: 4px;
+  margin-top: 12px;
   color: var(--mc-text-muted);
   font-size: 12.5px;
 }
@@ -452,32 +656,45 @@
   cursor: pointer;
 }
 
-@media (max-width: 680px) {
-  .theme-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 880px) {
+  .settings-nav {
+    width: 208px;
+  }
+
+  .settings-content {
+    padding: 28px 24px 32px;
+  }
+}
+
+/* Узкое окно: управление уже не помещается справа от названия и встаёт под ним. */
+@media (max-width: 720px) {
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-row-control {
+    justify-content: flex-start;
+    margin-top: 12px;
+  }
+
+  .settings-select-input {
+    min-width: 0;
+    width: 100%;
   }
 
   .accent-grid {
-    grid-template-columns: repeat(6, 32px);
+    grid-template-columns: repeat(6, 30px);
   }
 }
 
-/* Placed after the base rules above: with equal specificity the later rule
-   must win for reduced motion to actually disable the tab-switch glide. */
 @media (prefers-reduced-motion: reduce) {
-  .settings-body,
-  .settings-body-track > [role="tabpanel"]:not([hidden]) {
-    transition: none;
+  .settings-page {
     animation: none;
   }
-}
 
-.settings-footer {
-  margin-top: 16px;
-  padding-top: 10px;
-  border-top: 1px solid var(--mc-border);
-  font-size: 11px;
-  color: var(--mc-text-faint);
-  text-align: center;
-  user-select: text;
+  .settings-switch,
+  .settings-switch-thumb,
+  .theme-card {
+    transition: none;
+  }
 }
