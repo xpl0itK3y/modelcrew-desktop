@@ -167,3 +167,43 @@ export function GearIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function SearchIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="m10.4 10.4 3.1 3.1" />
+    </svg>
+  );
+}
+
+export function PaletteIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 2a6 6 0 0 0 0 12c1 0 1.6-.6 1.6-1.4 0-.9-.8-1.2-.8-2 0-.6.5-1 1.1-1h1.2A3.4 3.4 0 0 0 14 6.2C13.5 3.8 11 2 8 2Z" />
+      <circle cx="5.4" cy="6.4" r="0.85" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="4.9" r="0.85" fill="currentColor" stroke="none" />
+      <circle cx="5" cy="9.6" r="0.85" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function AgentIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 1.6v1.8" />
+      <rect x="2.8" y="3.4" width="10.4" height="8" rx="2.4" />
+      <path d="M6 13.4h4" />
+      <circle cx="6" cy="7.4" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="7.4" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function PlayIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 4.3 11 8l-5 3.7z" fill="currentColor" />
+    </svg>
+  );
+}
