@@ -268,6 +268,35 @@ mod tests {
         path
     }
 
+    // Id приходит прямо из вебвью и попадает в имя файла: один список опасных
+    // значений для всех точек входа.
+    fn invalid_ids() -> Vec<String> {
+        let mut ids: Vec<String> = [
+            "",
+            ".",
+            "..",
+            "../../etc/passwd",
+            "..\\..\\windows\\system32",
+            "a/b",
+            "a\\b",
+            "a\0b",
+            "id with space",
+            "panel.1",
+            ".hidden",
+            "a:b",
+            "*",
+            "~",
+            "%2e%2e",
+            "caf\u{e9}",
+            "\u{202e}sna.lenap",
+        ]
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect();
+        ids.push("x".repeat(129));
+        ids
+    }
+
     #[test]
     fn save_load_roundtrip_and_delete() {
         let dir = temp_dir("roundtrip");
@@ -414,6 +443,454 @@ mod tests {
         assert!(base.join("keep-me").exists());
         assert!(!base.join("drop-me").exists());
         assert!(base.join("weird name").exists());
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn every_entry_point_rejects_unsafe_ids() {
+        let sandbox = temp_dir("unsafe-ids");
+        let dir = sandbox.join("snapshots");
+        let base = sandbox.join("history");
+        let home = sandbox.join("home");
+        let outside = sandbox.join("outside");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.ans"), "user data").unwrap();
+
+        for id in invalid_ids() {
+            for error in [
+                save_snapshot(&dir, &id, "payload").unwrap_err(),
+                load_snapshot(&dir, &id).unwrap_err(),
+                delete_snapshot(&dir, &id).unwrap_err(),
+                prepare_panel_history(&base, &id, &home).unwrap_err(),
+                delete_panel_history(&base, &id).unwrap_err(),
+            ] {
+                assert_eq!(error.code, ErrorCode::TerminalSnapshotInvalidId, "id {id:?}");
+            }
+            // keep-списки prune проверяются до первого удаления.
+            assert_eq!(
+                prune_snapshots(&dir, &[id.clone()]).unwrap_err().code,
+                ErrorCode::TerminalSnapshotInvalidId,
+                "id {id:?}"
+            );
+            assert_eq!(
+                prune_panel_history(&base, &[id.clone()]).unwrap_err().code,
+                ErrorCode::TerminalSnapshotInvalidId,
+                "id {id:?}"
+            );
+        }
+
+        // Отказ случается до любого обращения к диску: рабочих папок нет вовсе,
+        // а соседние файлы не тронуты и не созданы заново.
+        assert!(!dir.exists());
+        assert!(!base.exists());
+        assert_eq!(
+            fs::read_to_string(outside.join("secret.ans")).unwrap(),
+            "user data"
+        );
+        let mut entries: Vec<String> = fs::read_dir(&sandbox)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(entries, ["home", "outside"]);
+        let _ = fs::remove_dir_all(sandbox);
+    }
+
+    #[test]
+    fn accepted_ids_stay_inside_their_base_directory() {
+        let sandbox = temp_dir("inside-base");
+        let dir = sandbox.join("snapshots");
+        let base = sandbox.join("history");
+        let home = sandbox.join("home");
+        fs::create_dir_all(&home).unwrap();
+        let longest = "x".repeat(128);
+        // Дефис, подчёркивание и предельная длина разрешены валидатором —
+        // важно, что ни одно из них не выводит запись за пределы папки.
+        for id in ["-lead", "_lead", "UPPER-case_9", longest.as_str()] {
+            save_snapshot(&dir, id, "data").unwrap();
+            let file = fs::canonicalize(dir.join(format!("{id}.{SNAPSHOT_EXT}"))).unwrap();
+            assert_eq!(
+                file.parent().unwrap(),
+                fs::canonicalize(&dir).unwrap().as_path(),
+                "id {id:?}"
+            );
+            assert_eq!(load_snapshot(&dir, id).unwrap().as_deref(), Some("data"));
+
+            let panel = prepare_panel_history(&base, id, &home).unwrap();
+            assert_eq!(
+                fs::canonicalize(&panel).unwrap().parent().unwrap(),
+                fs::canonicalize(&base).unwrap().as_path(),
+                "id {id:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(sandbox);
+    }
+
+    #[test]
+    fn snapshot_of_exactly_the_size_cap_is_accepted() {
+        let dir = temp_dir("cap-exact");
+        let data = "x".repeat(MAX_SNAPSHOT_BYTES);
+        save_snapshot(&dir, "panel-1", &data).unwrap();
+        assert_eq!(
+            load_snapshot(&dir, "panel-1").unwrap().unwrap().len(),
+            MAX_SNAPSHOT_BYTES
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rejected_writes_keep_the_previous_snapshot_and_leave_no_tmp() {
+        let dir = temp_dir("cap-reject");
+        save_snapshot(&dir, "panel-1", "previous").unwrap();
+
+        let oversized = "x".repeat(MAX_SNAPSHOT_BYTES + 1);
+        let error = save_snapshot(&dir, "panel-1", &oversized).unwrap_err();
+        assert_eq!(error.code, ErrorCode::TerminalSnapshotTooLarge);
+        let error = save_snapshot(&dir, "../panel-1", "PWNED").unwrap_err();
+        assert_eq!(error.code, ErrorCode::TerminalSnapshotInvalidId);
+
+        assert_eq!(
+            load_snapshot(&dir, "panel-1").unwrap().as_deref(),
+            Some("previous")
+        );
+        assert!(!dir.join(format!("panel-1.{SNAPSHOT_EXT}.tmp")).exists());
+        // Никакого мусора: в папке остался ровно один снимок.
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stale_tmp_file_is_never_served_as_a_snapshot() {
+        let dir = temp_dir("stale-tmp");
+        fs::create_dir_all(&dir).unwrap();
+        // Оборванная запись оставила .tmp: подхватывать его как снимок нельзя.
+        fs::write(dir.join(format!("panel-1.{SNAPSHOT_EXT}.tmp")), "half-\x1b[").unwrap();
+
+        assert_eq!(load_snapshot(&dir, "panel-1").unwrap(), None);
+
+        save_snapshot(&dir, "panel-1", "fresh").unwrap();
+        assert_eq!(
+            load_snapshot(&dir, "panel-1").unwrap().as_deref(),
+            Some("fresh")
+        );
+        assert!(!dir.join(format!("panel-1.{SNAPSHOT_EXT}.tmp")).exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn second_save_replaces_the_whole_previous_snapshot() {
+        let dir = temp_dir("replace");
+        save_snapshot(&dir, "panel-1", &"secret-token-".repeat(64)).unwrap();
+        save_snapshot(&dir, "panel-1", "short").unwrap();
+
+        // Хвост прежнего, более длинного снимка не должен пережить перезапись.
+        assert_eq!(
+            load_snapshot(&dir, "panel-1").unwrap().as_deref(),
+            Some("short")
+        );
+        assert_eq!(
+            fs::metadata(dir.join(format!("panel-1.{SNAPSHOT_EXT}")))
+                .unwrap()
+                .len(),
+            "short".len() as u64
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn planted_non_utf8_snapshot_fails_instead_of_panicking() {
+        let dir = temp_dir("bad-utf8");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("panel-1.{SNAPSHOT_EXT}")),
+            [0xffu8, 0xfe, 0xfd],
+        )
+        .unwrap();
+
+        let error = load_snapshot(&dir, "panel-1").unwrap_err();
+        assert_eq!(error.code, ErrorCode::TerminalSnapshotStorageFailed);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prune_with_an_unsafe_keep_id_deletes_nothing() {
+        let sandbox = temp_dir("prune-guard");
+        let dir = sandbox.join("snapshots");
+        let base = sandbox.join("history");
+        let home = sandbox.join("home");
+        fs::create_dir_all(&home).unwrap();
+        save_snapshot(&dir, "panel-1", "data").unwrap();
+        prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        assert_eq!(
+            prune_snapshots(&dir, &["../..".into()]).unwrap_err().code,
+            ErrorCode::TerminalSnapshotInvalidId
+        );
+        assert_eq!(
+            prune_panel_history(&base, &["../..".into()])
+                .unwrap_err()
+                .code,
+            ErrorCode::TerminalSnapshotInvalidId
+        );
+
+        // Отказ по невалидному keep не должен превратиться в «сохранить ничего».
+        assert!(load_snapshot(&dir, "panel-1").unwrap().is_some());
+        assert!(base.join("panel-1").exists());
+        let _ = fs::remove_dir_all(sandbox);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_does_not_write_through_a_symlinked_snapshot_path() {
+        let sandbox = temp_dir("snap-symlink");
+        let dir = sandbox.join("snapshots");
+        let victim = sandbox.join("victim.txt");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&victim, "user data").unwrap();
+        std::os::unix::fs::symlink(&victim, dir.join(format!("panel-1.{SNAPSHOT_EXT}"))).unwrap();
+
+        save_snapshot(&dir, "panel-1", "PWNED").unwrap();
+
+        // Подложенная ссылка заменяется файлом, а не превращается в запись
+        // в чужой файл.
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "user data");
+        assert!(
+            !fs::symlink_metadata(dir.join(format!("panel-1.{SNAPSHOT_EXT}")))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            load_snapshot(&dir, "panel-1").unwrap().as_deref(),
+            Some("PWNED")
+        );
+        let _ = fs::remove_dir_all(sandbox);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panel_history_never_writes_into_a_real_user_zshrc() {
+        use std::os::unix::fs::MetadataExt;
+
+        let base = temp_dir("rc-real");
+        let home = temp_dir("rc-real-home");
+        fs::create_dir_all(&home).unwrap();
+        let user_rc = home.join(".zshrc");
+        fs::write(&user_rc, "export USER_SECRET=1\n").unwrap();
+        let before = fs::read(&user_rc).unwrap();
+
+        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        assert_eq!(fs::read(&user_rc).unwrap(), before);
+        // Обёртка — самостоятельный файл, а не жёсткая ссылка на файл пользователя.
+        assert_ne!(
+            fs::metadata(dir.join(".zshrc")).unwrap().ino(),
+            fs::metadata(&user_rc).unwrap().ino()
+        );
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panel_history_replaces_a_user_symlink_instead_of_following_it() {
+        let base = temp_dir("rc-user-link");
+        let home = temp_dir("rc-user-link-home");
+        let dotfiles = home.join("dotfiles");
+        fs::create_dir_all(&dotfiles).unwrap();
+        let shared = dotfiles.join("zshrc");
+        fs::write(&shared, "shared config\n").unwrap();
+        // Симлинк на чужой файл мог поставить сам пользователь или локальный
+        // атакующий: запись обёртки не должна уйти по нему.
+        let dir = base.join("panel-1");
+        fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&shared, dir.join(".zshrc")).unwrap();
+
+        prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        assert_eq!(fs::read_to_string(&shared).unwrap(), "shared config\n");
+        assert!(fs::read_to_string(dir.join(".zshrc"))
+            .unwrap()
+            .contains("INC_APPEND_HISTORY"));
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panel_history_does_not_create_the_target_of_a_dangling_zshrc_symlink() {
+        let base = temp_dir("rc-dangling");
+        let home = temp_dir("rc-dangling-home");
+        fs::create_dir_all(&home).unwrap();
+        let target = home.join(".ssh-authorized-keys");
+        let dir = base.join("panel-1");
+        fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&target, dir.join(".zshrc")).unwrap();
+
+        prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        // Битая ссылка не должна материализовать файл в чужой папке.
+        assert!(fs::symlink_metadata(&target).is_err());
+        assert!(fs::read_to_string(dir.join(".zshrc"))
+            .unwrap()
+            .contains("INC_APPEND_HISTORY"));
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panel_history_leaves_a_read_only_user_zshrc_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = temp_dir("rc-readonly");
+        let home = temp_dir("rc-readonly-home");
+        fs::create_dir_all(&home).unwrap();
+        let user_rc = home.join(".zshrc");
+        fs::write(&user_rc, "read only config\n").unwrap();
+        fs::set_permissions(&user_rc, fs::Permissions::from_mode(0o444)).unwrap();
+        let dir = base.join("panel-1");
+        fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&user_rc, dir.join(".zshrc")).unwrap();
+
+        prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        assert_eq!(fs::read_to_string(&user_rc).unwrap(), "read only config\n");
+        assert_eq!(
+            fs::metadata(&user_rc).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+        let _ = fs::set_permissions(&user_rc, fs::Permissions::from_mode(0o644));
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zshrc_wrapper_keeps_history_inside_the_panel_directory() {
+        let base = temp_dir("rc-histfile");
+        let home = temp_dir("rc-histfile-home");
+        fs::create_dir_all(&home).unwrap();
+
+        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+
+        let rc = fs::read_to_string(dir.join(".zshrc")).unwrap();
+        assert!(rc.contains("HISTFILE=\"$ZDOTDIR/.zsh_history\""));
+        // История команд не должна уезжать в общее место или расшариваться
+        // между панелями: единственный HISTFILE указывает внутрь ZDOTDIR.
+        for line in rc.lines().filter(|line| line.starts_with("HISTFILE=")) {
+            assert!(line.starts_with("HISTFILE=\"$ZDOTDIR/"), "{line}");
+        }
+        assert!(!rc.contains("SHARE_HISTORY"));
+        assert!(!rc.contains("/tmp"));
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panel_histories_are_isolated_from_each_other() {
+        let base = temp_dir("hist-isolation");
+        let home = temp_dir("hist-isolation-home");
+        fs::create_dir_all(&home).unwrap();
+        fs::write(home.join(".zprofile"), "export FROM_PROFILE=1\n").unwrap();
+
+        let first = prepare_panel_history(&base, "panel-a", &home).unwrap();
+        let second = prepare_panel_history(&base, "panel-b", &home).unwrap();
+        assert_ne!(first, second);
+
+        fs::write(first.join(".zsh_history"), "npm token add SECRET\n").unwrap();
+        assert!(!second.join(".zsh_history").exists());
+        // Ни одна ссылка в папке панели не ведёт в папку другой панели.
+        for entry in fs::read_dir(&second).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_symlink() {
+                let target = fs::read_link(entry.path()).unwrap();
+                assert!(!target.starts_with(&first), "{target:?}");
+            }
+        }
+
+        delete_panel_history(&base, "panel-a").unwrap();
+        assert!(!first.exists());
+        assert!(second.join(".zshrc").exists());
+        assert_eq!(
+            fs::read_to_string(home.join(".zprofile")).unwrap(),
+            "export FROM_PROFILE=1\n"
+        );
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleting_panel_history_does_not_follow_dotfile_symlinks_into_home() {
+        let base = temp_dir("hist-delete-links");
+        let home = temp_dir("hist-delete-links-home");
+        fs::create_dir_all(&home).unwrap();
+        for name in ZSH_DOTFILES {
+            fs::write(home.join(name), format!("real {name}\n")).unwrap();
+        }
+
+        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        for name in ZSH_DOTFILES {
+            assert!(fs::symlink_metadata(dir.join(name))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+
+        delete_panel_history(&base, "panel-1").unwrap();
+        assert!(!dir.exists());
+        for name in ZSH_DOTFILES {
+            assert_eq!(
+                fs::read_to_string(home.join(name)).unwrap(),
+                format!("real {name}\n")
+            );
+        }
+
+        // Тот же путь удаления используется и при чистке — он тоже не должен
+        // проваливаться по ссылкам в дотфайлы пользователя.
+        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prune_panel_history(&base, &[]).unwrap();
+        assert!(!dir.exists());
+        for name in ZSH_DOTFILES {
+            assert_eq!(
+                fs::read_to_string(home.join(name)).unwrap(),
+                format!("real {name}\n")
+            );
+        }
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pruning_does_not_recurse_into_a_symlinked_panel_directory() {
+        let base = temp_dir("hist-prune-links");
+        let home = temp_dir("hist-prune-links-home");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        fs::write(home.join(".zshrc"), "user config\n").unwrap();
+        // Подложенная папка панели, ведущая в дом пользователя: чистка должна
+        // снять ссылку, а не вычистить её цель.
+        std::os::unix::fs::symlink(&home, base.join("panel-evil")).unwrap();
+
+        prune_panel_history(&base, &[]).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(home.join(".zshrc")).unwrap(),
+            "user config\n"
+        );
+
+        std::os::unix::fs::symlink(&home, base.join("panel-evil")).unwrap();
+        delete_panel_history(&base, "panel-evil").unwrap();
+        assert_eq!(
+            fs::read_to_string(home.join(".zshrc")).unwrap(),
+            "user config\n"
+        );
         let _ = fs::remove_dir_all(base);
         let _ = fs::remove_dir_all(home);
     }
