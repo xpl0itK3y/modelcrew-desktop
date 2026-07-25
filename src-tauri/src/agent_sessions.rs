@@ -643,4 +643,132 @@ mod tests {
         assert_eq!(codex_uuid_from_name("rollout-short.jsonl"), None);
         assert_eq!(codex_uuid_from_name("other-file.jsonl"), None);
     }
+
+    // Идентификатор сессии приходит с фронтенда и сравнивается с именами
+    // файлов, поэтому в нём не должно быть ничего, что читается как путь.
+    #[test]
+    fn session_ids_reject_anything_that_could_become_a_path() {
+        for good in ["a", "0195c9a1-1111-4222-8333-444455556666", "a_b-C9", &"x".repeat(128)] {
+            assert!(is_session_id(good), "rejected a legitimate id: {good}");
+        }
+        for bad in [
+            "",
+            "..",
+            "../secret",
+            "a/b",
+            "a\\b",
+            "a b",
+            "a.jsonl",
+            "a\0b",
+            "a\nb",
+            "сессия",
+            "a:b",
+            "~",
+            "*",
+            &"x".repeat(129),
+        ] {
+            assert!(!is_session_id(bad), "accepted a hostile id: {bad:?}");
+        }
+    }
+
+    // Путь проекта подставляется в имя папки. Любой разделитель обязан
+    // превратиться в дефис, иначе `..` увёл бы поиск в чужой каталог.
+    #[test]
+    fn project_dir_encoding_cannot_escape_the_projects_folder() {
+        for cwd in [
+            "../../etc",
+            "/../../root/.ssh",
+            "..\\..\\Windows\\System32",
+            "/tmp/a/../../etc/passwd",
+            "~/.ssh",
+            "/tmp/проект",
+            "/tmp/a b",
+            "/tmp/a\0b",
+        ] {
+            let encoded = encode_claude_project_dir(cwd);
+            assert!(
+                encoded.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
+                "{cwd:?} encoded into something that is not a flat name: {encoded:?}"
+            );
+            let path = Path::new(&encoded);
+            assert_eq!(
+                path.components().count(),
+                1,
+                "{cwd:?} encoded into more than one path component: {encoded:?}"
+            );
+            assert!(!path.is_absolute(), "{cwd:?} encoded into an absolute path");
+        }
+    }
+
+    // В каталоге проекта может лежать что угодно — берём только настоящие
+    // файлы сессий, а не всё подряд с расширением.
+    #[test]
+    fn claude_locator_ignores_files_that_are_not_session_files() {
+        let config = temp_dir("claude-hostile");
+        let project = config.join("projects").join("-tmp-proj");
+        let since = SystemTime::now();
+
+        for name in [
+            "not a session.jsonl",
+            "session.with.dots.jsonl",
+            "0195c9a1-1111-4222-8333-444455556666.txt",
+            "0195c9a1-1111-4222-8333-444455556666.jsonl.bak",
+        ] {
+            touch_with_mtime(&project.join(name), since);
+        }
+        touch_with_mtime(&project.join("real0195c9a11111.jsonl"), since);
+
+        assert_eq!(
+            locate_claude_session(&config, "/tmp/proj", since, &[]),
+            Some("real0195c9a11111".to_string())
+        );
+        let _ = fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn codex_uuid_extraction_rejects_separators_and_traversal() {
+        for name in [
+            "rollout-2026-07-16-../../../../etc/passwd0195c9a1-1111-4222.jsonl",
+            "rollout-2026-07-16-0195c9a1 1111 4222 8333 444455556666.jsonl",
+            "rollout-2026-07-16-0195c9a1.1111.4222.8333.444455556666.jsonl",
+            "rollout-.jsonl",
+        ] {
+            assert_eq!(codex_uuid_from_name(name), None, "accepted {name:?}");
+        }
+    }
+
+    // Файл сессии пишет агент, а не мы: он может оказаться огромным.
+    // Совпадение ищется только в начале, целиком его читать нельзя.
+    #[test]
+    fn cwd_matching_reads_only_the_head_of_a_session_file() {
+        let dir = temp_dir("head-only");
+        fs::create_dir_all(&dir).unwrap();
+        let cwd = "/tmp/needle-project";
+
+        let near = dir.join("near.jsonl");
+        fs::write(&near, format!("{{\"cwd\":\"{cwd}\"}}\n")).unwrap();
+        assert!(file_mentions_cwd(&near, cwd));
+
+        let far = dir.join("far.jsonl");
+        fs::write(&far, format!("{}{cwd}", "a".repeat(16 * 1024))).unwrap();
+        assert!(
+            !file_mentions_cwd(&far, cwd),
+            "the whole session file was scanned instead of its head"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // Метаданные сессии — чужой JSON. Поиск cwd ограничен по глубине, иначе
+    // вложенный на тысячу уровней объект увёл бы обход в рекурсию.
+    #[test]
+    fn cwd_lookup_in_session_metadata_is_depth_limited() {
+        let shallow = serde_json::json!({ "a": { "b": { "cwd": "/tmp/p" } } });
+        assert_eq!(json_find_cwd(&shallow, 3), Some("/tmp/p".to_string()));
+
+        let deep = serde_json::json!({ "a": { "b": { "c": { "d": { "cwd": "/tmp/p" } } } } });
+        assert_eq!(json_find_cwd(&deep, 3), None);
+
+        let wrong_type = serde_json::json!({ "cwd": ["/tmp/p"] });
+        assert_eq!(json_find_cwd(&wrong_type, 3), None);
+    }
 }
