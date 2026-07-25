@@ -11,6 +11,11 @@ import {
   saveNetworkAvatars,
 } from "../../terminal/preferences";
 import { isGithubSignedIn, subscribeGithubAuth } from "../../github/authState";
+import {
+  SettingRow,
+  SettingsPage,
+  SettingsSegmented,
+} from "./SettingsControls";
 
 const themeMessageKeys: Record<
   ThemeId,
@@ -75,6 +80,8 @@ const accentMessageKeys: Record<AccentColor["id"], MessageKey> = {
   gray: "accent.gray",
 };
 
+type AvatarSource = "network" | "initials";
+
 type AppearanceTabProps = {
   themeId: ThemeId;
   accent: string;
@@ -104,177 +111,170 @@ export function AppearanceTab(props: AppearanceTabProps) {
   const networkActive = signedIn && networkAvatars;
 
   return (
-    <>
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.language")}</div>
-        <div
-          className="language-options"
-          role="group"
-          aria-label={t("settings.language")}
-        >
-          {(["ru", "en"] as const).map((option: Locale) => {
-            const label =
-              option === "ru"
-                ? t("settings.languageRussian")
-                : t("settings.languageEnglish");
-            return (
-              <button
-                key={option}
-                type="button"
-                lang={option}
-                aria-pressed={locale === option}
-                className={`language-option ${
-                  locale === option ? "is-selected" : ""
-                }`}
-                onClick={() => setLocale(option)}
-              >
-                <span>{label}</span>
-                <span className="language-option-code">
-                  {option.toUpperCase()}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+    <SettingsPage
+      section="appearance"
+      title={t("settings.tabAppearance")}
+      intro={t("settings.appearanceIntro")}
+    >
+      <SettingRow
+        title={t("settings.language")}
+        description={t("settings.languageNote")}
+        control={
+          <SettingsSegmented<Locale>
+            label={t("settings.language")}
+            value={locale}
+            options={[
+              { value: "ru", label: t("settings.languageRussian"), lang: "ru" },
+              { value: "en", label: t("settings.languageEnglish"), lang: "en" },
+            ]}
+            onChange={setLocale}
+          />
+        }
+      />
 
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.theme")}</div>
-        <div className="theme-grid">
-          {APP_THEMES.map((theme) => {
-            const name = t(themeMessageKeys[theme.id].name);
-            const description = t(themeMessageKeys[theme.id].description);
-            return (
-              <button
-                key={theme.id}
-                type="button"
-                title={t("settings.selectTheme", { name })}
-                aria-label={t("settings.selectTheme", { name })}
-                aria-pressed={props.themeId === theme.id}
-                className={`theme-card ${
-                  props.themeId === theme.id ? "is-selected" : ""
-                }`}
-                onClick={() => props.onSelectTheme(theme.id)}
-              >
-                <span
-                  className="theme-preview"
-                  style={{ backgroundColor: theme.colors.bg }}
+      <SettingRow
+        layout="stacked"
+        title={t("settings.theme")}
+        description={t("settings.themeNote")}
+        keywords={APP_THEMES.map((theme) =>
+          t(themeMessageKeys[theme.id].name),
+        ).join(" ")}
+        control={
+          <div className="theme-grid">
+            {APP_THEMES.map((theme) => {
+              const name = t(themeMessageKeys[theme.id].name);
+              const description = t(themeMessageKeys[theme.id].description);
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  title={t("settings.selectTheme", { name })}
+                  aria-label={t("settings.selectTheme", { name })}
+                  aria-pressed={props.themeId === theme.id}
+                  className={`theme-card ${
+                    props.themeId === theme.id ? "is-selected" : ""
+                  }`}
+                  onClick={() => props.onSelectTheme(theme.id)}
                 >
                   <span
-                    className="theme-preview-sidebar"
-                    style={{ backgroundColor: theme.colors.sidebar }}
-                  />
-                  <span
-                    className="theme-preview-panel"
-                    style={{
-                      backgroundColor: theme.colors.panel,
-                      borderColor: theme.colors.panelBorder,
-                    }}
+                    className="theme-preview"
+                    style={{ backgroundColor: theme.colors.bg }}
                   >
                     <span
-                      className="theme-preview-header"
-                      style={{
-                        backgroundColor: theme.colors.panelHeader,
-                      }}
+                      className="theme-preview-sidebar"
+                      style={{ backgroundColor: theme.colors.sidebar }}
                     />
                     <span
-                      className="theme-preview-line"
-                      style={{ backgroundColor: theme.colors.textMuted }}
-                    />
+                      className="theme-preview-panel"
+                      style={{
+                        backgroundColor: theme.colors.panel,
+                        borderColor: theme.colors.panelBorder,
+                      }}
+                    >
+                      <span
+                        className="theme-preview-header"
+                        style={{
+                          backgroundColor: theme.colors.panelHeader,
+                        }}
+                      />
+                      <span
+                        className="theme-preview-line"
+                        style={{ backgroundColor: theme.colors.textMuted }}
+                      />
+                    </span>
+                    <span className="theme-preview-accent" />
                   </span>
-                  <span className="theme-preview-accent" />
-                </span>
-                <span className="theme-card-copy">
-                  <strong>{name}</strong>
-                  <small>{description}</small>
-                </span>
-                <span className="theme-card-check" aria-hidden="true">
-                  {props.themeId === theme.id ? "✓" : ""}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+                  <span className="theme-card-copy">
+                    <strong>{name}</strong>
+                    <small>{description}</small>
+                  </span>
+                  <span className="theme-card-check" aria-hidden="true">
+                    {props.themeId === theme.id ? "✓" : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        }
+      />
 
-      <div className="settings-section settings-accent-section">
-        <div className="settings-label">{t("settings.accent")}</div>
-        <div className="accent-grid">
-          {ACCENT_COLORS.map((color) => {
-            const name = t(accentMessageKeys[color.id]);
-            const label = t("settings.selectAccent", { name });
-            return (
-              <button
-                key={color.value}
-                type="button"
-                title={label}
-                aria-label={label}
-                aria-pressed={
-                  props.accent.toLowerCase() === color.value.toLowerCase()
-                }
-                className={`accent-swatch ${
-                  props.accent.toLowerCase() === color.value.toLowerCase()
-                    ? "is-selected"
-                    : ""
-                }`}
-                style={{ backgroundColor: color.value }}
-                onClick={() => props.onSelectAccent(color.value)}
+      <SettingRow
+        layout="stacked"
+        title={t("settings.accent")}
+        description={t("settings.accentNote")}
+        keywords={ACCENT_COLORS.map((color) =>
+          t(accentMessageKeys[color.id]),
+        ).join(" ")}
+        control={
+          <>
+            <div className="accent-grid">
+              {ACCENT_COLORS.map((color) => {
+                const name = t(accentMessageKeys[color.id]);
+                const label = t("settings.selectAccent", { name });
+                return (
+                  <button
+                    key={color.value}
+                    type="button"
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={
+                      props.accent.toLowerCase() === color.value.toLowerCase()
+                    }
+                    className={`accent-swatch ${
+                      props.accent.toLowerCase() === color.value.toLowerCase()
+                        ? "is-selected"
+                        : ""
+                    }`}
+                    style={{ backgroundColor: color.value }}
+                    onClick={() => props.onSelectAccent(color.value)}
+                  />
+                );
+              })}
+            </div>
+            <label className="accent-custom">
+              {t("settings.customColor")}
+              <input
+                type="color"
+                aria-label={t("settings.customColor")}
+                value={props.accent}
+                onChange={(event) => props.onSelectAccent(event.target.value)}
               />
-            );
-          })}
-        </div>
-        <label className="accent-custom">
-          {t("settings.customColor")}
-          <input
-            type="color"
-            aria-label={t("settings.customColor")}
-            value={props.accent}
-            onChange={(event) => props.onSelectAccent(event.target.value)}
-          />
-        </label>
-      </div>
+            </label>
+          </>
+        }
+      />
 
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.networkAvatars")}</div>
-        <div
-          className="shell-options"
-          role="group"
-          aria-label={t("settings.networkAvatars")}
-        >
-          {[true, false].map((enabled) => (
-            <button
-              key={String(enabled)}
-              type="button"
-              // «Из сети» доступна только вошедшим; без входа — только «Инициалы».
-              disabled={enabled && !signedIn}
-              aria-pressed={networkActive === enabled}
-              title={
-                enabled && !signedIn
-                  ? t("settings.networkAvatarsSignIn")
-                  : undefined
-              }
-              className={`shell-option ${
-                networkActive === enabled ? "is-selected" : ""
-              } ${enabled && !signedIn ? "is-locked" : ""}`}
-              onClick={() => {
-                setNetworkAvatars(enabled);
-                saveNetworkAvatars(enabled);
-              }}
-            >
-              {t(
-                enabled
-                  ? "settings.networkAvatarsOn"
-                  : "settings.networkAvatarsOff",
-              )}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">
-          {signedIn
+      <SettingRow
+        title={t("settings.networkAvatars")}
+        description={
+          signedIn
             ? t("settings.networkAvatarsNote")
-            : t("settings.networkAvatarsSignIn")}
-        </p>
-      </div>
-    </>
+            : t("settings.networkAvatarsSignIn")
+        }
+        control={
+          <SettingsSegmented<AvatarSource>
+            label={t("settings.networkAvatars")}
+            value={networkActive ? "network" : "initials"}
+            options={[
+              {
+                value: "network",
+                label: t("settings.networkAvatarsOn"),
+                // «Из сети» доступна только вошедшим; без входа — «Инициалы».
+                disabled: !signedIn,
+                title: signedIn
+                  ? undefined
+                  : t("settings.networkAvatarsSignIn"),
+              },
+              { value: "initials", label: t("settings.networkAvatarsOff") },
+            ]}
+            onChange={(value) => {
+              const enabled = value === "network";
+              setNetworkAvatars(enabled);
+              saveNetworkAvatars(enabled);
+            }}
+          />
+        }
+      />
+    </SettingsPage>
   );
 }
