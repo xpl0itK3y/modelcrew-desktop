@@ -1195,4 +1195,591 @@ mod tests {
             ErrorCode::UpdaterCacheInvalid
         );
     }
+
+    #[cfg(target_os = "linux")]
+    fn package_snapshot(path: &Path, bytes: &[u8]) -> PreparedLinuxPackageSnapshot {
+        PreparedLinuxPackageSnapshot {
+            version: "0.0.2".into(),
+            package_kind: LinuxPackageKind::Deb,
+            target: "linux-x86_64-deb".into(),
+            path: path.to_path_buf(),
+            sha256: sha256_bytes(bytes),
+            size: bytes.len() as u64,
+            total: Some(bytes.len() as u64),
+        }
+    }
+
+    #[test]
+    fn hostile_versions_are_rejected_before_they_reach_a_package_path() {
+        // Имя устанавливаемого пакета склеивается из версии, поэтому версия с
+        // разделителем пути, переводом строки или NUL не должна проходить
+        // разбор — до format! она просто не доходит.
+        for version in [
+            "../../etc/cron.d/modelcrew",
+            "1.2.3/../../evil",
+            "1.2.3\\..\\evil",
+            "/etc/cron.d/modelcrew",
+            "1.2.3\u{0}",
+            "1.2.3\n2.0.0",
+            "1.2.3; rm -rf /",
+            "-rf",
+            "..",
+            "",
+            "v1.2.3",
+            "1.2.3 ",
+        ] {
+            assert!(
+                crate::update_cache::parse_exact_version(version).is_err(),
+                "{version:?}"
+            );
+        }
+
+        // Всё, что разбор принимает, состоит только из SemVer-символов: ни
+        // разделителя каталогов, ни ведущего дефиса в имени файла не будет.
+        for version in ["1.2.3", "0.0.1-beta.1", "1.2.3-rc.1+sha.abcdef", "10.20.30"] {
+            let parsed = crate::update_cache::parse_exact_version(version).unwrap();
+            assert_eq!(parsed.to_string(), version);
+            assert!(parsed
+                .to_string()
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+')));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_package_name_never_escapes_the_artifact_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("pending-update");
+        std::fs::create_dir(&cache).unwrap();
+        let artifact = cache.join("artifact.bin");
+        std::fs::write(&artifact, b"package bytes").unwrap();
+        // Файл-сосед кеша: ни одна версия не должна дотянуться до него.
+        let victim = root.path().join("victim.deb");
+        std::fs::write(&victim, b"untouched").unwrap();
+
+        let long_version = "9".repeat(500);
+        for version in [
+            "../victim",
+            "0.0.0-x/../../victim",
+            "/etc/cron.d/modelcrew",
+            "..",
+            "",
+            "-rf",
+            "1.2.3\nrm -rf /",
+            "1.2.3\u{0}evil",
+            long_version.as_str(),
+        ] {
+            match installable_package_path(LinuxPackageKind::Deb, &artifact, version) {
+                Ok(staged) => {
+                    assert_eq!(staged.parent(), artifact.parent(), "{version:?}");
+                    let name = staged
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    // dpkg получит имя позиционным аргументом: ведущий дефис
+                    // превратил бы его в опцию.
+                    assert!(name.starts_with("ModelCrew-"), "{version:?}");
+                    assert!(!name.contains('/'), "{version:?}");
+                }
+                Err(error) => assert_eq!(error.code, ErrorCode::UpdaterCacheWriteFailed),
+            }
+        }
+
+        assert_eq!(std::fs::read(&victim).unwrap(), b"untouched");
+        assert_eq!(std::fs::read(&artifact).unwrap(), b"package bytes");
+        let mut top_level: Vec<String> = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        top_level.sort();
+        assert_eq!(top_level, ["pending-update", "victim.deb"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staging_overwrites_a_planted_package_and_never_follows_a_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("artifact.bin");
+        std::fs::write(&artifact, b"verified bytes").unwrap();
+        std::fs::set_permissions(&artifact, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        // Пакет с ожидаемым именем, подложенный заранее, не должен уехать в
+        // pkexec вместо проверенного артефакта.
+        let planted = dir.path().join("ModelCrew-1.2.3.deb");
+        std::fs::write(&planted, b"evil package").unwrap();
+        let staged = installable_package_path(LinuxPackageKind::Deb, &artifact, "1.2.3").unwrap();
+        assert_eq!(staged, planted);
+        assert_eq!(std::fs::read(&staged).unwrap(), b"verified bytes");
+
+        // Симлинк на посторонний файл: запись сквозь него недопустима.
+        let decoy = dir.path().join("decoy");
+        std::fs::write(&decoy, b"decoy bytes").unwrap();
+        std::fs::remove_file(&staged).unwrap();
+        std::os::unix::fs::symlink(&decoy, &staged).unwrap();
+        let staged = installable_package_path(LinuxPackageKind::Deb, &artifact, "1.2.3").unwrap();
+        assert!(!std::fs::symlink_metadata(&staged)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&staged).unwrap(), b"verified bytes");
+        assert_eq!(std::fs::read(&decoy).unwrap(), b"decoy bytes");
+        // Кандидат на установку под root не должен быть доступен на запись
+        // кому-то ещё между проверкой и pkexec.
+        assert_eq!(
+            std::fs::metadata(&staged).unwrap().permissions().mode() & 0o077,
+            0
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cached_package_verification_rejects_truncation_swaps_and_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("artifact.bin");
+        let bytes = b"signed package bytes";
+        std::fs::write(&path, bytes).unwrap();
+        let snapshot = package_snapshot(&path, bytes);
+        verify_cached_package(&snapshot).unwrap();
+
+        // Подмена на файл ровно той же длины: ловит только хеш.
+        std::fs::write(&path, b"SIGNED PACKAGE BYTES").unwrap();
+        assert_eq!(
+            verify_cached_package(&snapshot).unwrap_err().code,
+            ErrorCode::UpdaterCacheInvalid
+        );
+
+        std::fs::write(&path, &bytes[..5]).unwrap();
+        assert_eq!(
+            verify_cached_package(&snapshot).unwrap_err().code,
+            ErrorCode::UpdaterCacheInvalid
+        );
+
+        let mut extended = bytes.to_vec();
+        extended.extend_from_slice(b"appended payload");
+        std::fs::write(&path, &extended).unwrap();
+        assert_eq!(
+            verify_cached_package(&snapshot).unwrap_err().code,
+            ErrorCode::UpdaterCacheInvalid
+        );
+
+        // Размер сверяется отдельно от хеша, а не выводится из него.
+        std::fs::write(&path, bytes).unwrap();
+        let mut lying = package_snapshot(&path, bytes);
+        lying.size += 1;
+        assert_eq!(
+            verify_cached_package(&lying).unwrap_err().code,
+            ErrorCode::UpdaterCacheInvalid
+        );
+
+        // Артефакт заменён симлинком на чужие байты.
+        let other = dir.path().join("other.bin");
+        std::fs::write(&other, b"attacker package").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&other, &path).unwrap();
+        assert_eq!(
+            verify_cached_package(&snapshot).unwrap_err().code,
+            ErrorCode::UpdaterCacheInvalid
+        );
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            verify_cached_package(&snapshot).unwrap_err().code,
+            ErrorCode::UpdaterCacheMissing
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cached_package_is_reverified_from_disk_on_every_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("artifact.bin");
+        std::fs::write(&path, b"signed package bytes").unwrap();
+        let snapshot = package_snapshot(&path, b"signed package bytes");
+
+        // Проверка при скачивании не должна засчитываться за проверку перед
+        // установкой: между ними файл в пользовательском кеше могли подменить.
+        verify_cached_package(&snapshot).unwrap();
+        std::fs::write(&path, b"swapped after the first check").unwrap();
+        assert_eq!(
+            verify_cached_package(&snapshot).unwrap_err().code,
+            ErrorCode::UpdaterCacheInvalid
+        );
+        std::fs::write(&path, b"signed package bytes").unwrap();
+        verify_cached_package(&snapshot).unwrap();
+    }
+
+    #[test]
+    fn package_metadata_binds_the_package_on_disk_to_the_requested_version() {
+        let requested = Version::parse("1.2.3").unwrap();
+
+        // Понижение версии, посторонняя версия, чужой release-суффикс и
+        // build-метаданные — всё это другой пакет, а не запрошенный.
+        for (kind, metadata) in [
+            (LinuxPackageKind::Deb, "1.2.2"),
+            (LinuxPackageKind::Deb, "9.9.9"),
+            (LinuxPackageKind::Deb, "1.2.3-1"),
+            (LinuxPackageKind::Deb, "1.2.3-1ubuntu1"),
+            (LinuxPackageKind::Rpm, "0.0.1"),
+            (LinuxPackageKind::Rpm, "1.2.3+evil"),
+            (LinuxPackageKind::Rpm, "1.2.4"),
+            (LinuxPackageKind::Pacman, "1.2.2-1"),
+            (LinuxPackageKind::Pacman, "1.2.3-beta.1-1"),
+            (LinuxPackageKind::Pacman, "0.0.1-9"),
+        ] {
+            let actual = normalize_package_version(kind, metadata).unwrap();
+            let error = ensure_package_version_matches(kind, &actual, &requested).unwrap_err();
+            assert_eq!(
+                error.code,
+                ErrorCode::UpdaterPackageVersionMismatch,
+                "{kind} {metadata}"
+            );
+            assert_eq!(error.context["expectedVersion"], "1.2.3");
+        }
+
+        // Единственное допустимое расхождение — числовой pkgrel Arch-репака.
+        for (kind, metadata) in [
+            (LinuxPackageKind::Deb, "1.2.3"),
+            (LinuxPackageKind::Rpm, "1.2.3"),
+            (LinuxPackageKind::Pacman, "1.2.3"),
+            (LinuxPackageKind::Pacman, "1.2.3-1"),
+            (LinuxPackageKind::Pacman, "1.2.3-2.1"),
+        ] {
+            let actual = normalize_package_version(kind, metadata).unwrap();
+            ensure_package_version_matches(kind, &actual, &requested).unwrap();
+        }
+
+        // Prerelease не совпадает со стабильной версией ни в одну сторону.
+        let prerelease = Version::parse("1.2.3-beta.1").unwrap();
+        assert!(ensure_package_version_matches(
+            LinuxPackageKind::Deb,
+            &Version::new(1, 2, 3),
+            &prerelease
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn unreadable_package_metadata_never_yields_a_version() {
+        fn rejected(kind: LinuxPackageKind, output: PackageMetadataOutput, stdout: &[u8]) {
+            let error = package_metadata_value(kind, output, stdout).unwrap_err();
+            assert_eq!(error.code, ErrorCode::UpdaterPackageMetadataInvalid);
+        }
+
+        rejected(LinuxPackageKind::Deb, PackageMetadataOutput::DirectVersion, b"");
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            b"\n\n",
+        );
+        // Вторая строка не должна становиться версией.
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            b"1.2.3\n9.9.9\n",
+        );
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            b"1.2.3; rm -rf /",
+        );
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            b"1.2.3\x00",
+        );
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            b"1.2.\xff",
+        );
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            format!("1.2.{}", "3".repeat(130)).as_bytes(),
+        );
+        rejected(
+            LinuxPackageKind::Deb,
+            PackageMetadataOutput::DirectVersion,
+            vec![b'1'; 5000].as_slice(),
+        );
+
+        rejected(
+            LinuxPackageKind::Pacman,
+            PackageMetadataOutput::PacmanPackageInfo,
+            b"pkgname = modelcrew-bin\n",
+        );
+        rejected(
+            LinuxPackageKind::Pacman,
+            PackageMetadataOutput::PacmanPackageInfo,
+            b"pkgver = \n",
+        );
+        // Ключ распознаётся только точным префиксом: ни отступ, ни другой
+        // разделитель не подсунут вторую версию.
+        rejected(
+            LinuxPackageKind::Pacman,
+            PackageMetadataOutput::PacmanPackageInfo,
+            b" pkgver = 9.9.9\n",
+        );
+        rejected(
+            LinuxPackageKind::Pacman,
+            PackageMetadataOutput::PacmanPackageInfo,
+            b"pkgver=9.9.9\n",
+        );
+        rejected(
+            LinuxPackageKind::Pacman,
+            PackageMetadataOutput::PacmanPackageInfo,
+            b"",
+        );
+
+        // CRLF-вариант настоящего PKGINFO по-прежнему читается.
+        assert_eq!(
+            package_metadata_value(
+                LinuxPackageKind::Pacman,
+                PackageMetadataOutput::PacmanPackageInfo,
+                b"pkgver = 1.2.3-1\r\n",
+            )
+            .unwrap(),
+            "1.2.3-1"
+        );
+    }
+
+    #[test]
+    fn attacker_shaped_versions_are_rejected_instead_of_normalized() {
+        let huge = "9".repeat(4096);
+        for kind in [
+            LinuxPackageKind::Deb,
+            LinuxPackageKind::Rpm,
+            LinuxPackageKind::Pacman,
+        ] {
+            for value in [
+                "1.0.0; rm -rf /",
+                "1.0.0\n2.0.0",
+                "1.0.0\u{0}",
+                "$(id)",
+                "`id`",
+                "",
+                " 1.0.0",
+                "1.0.0 ",
+                "v1.0.0",
+                "1.0",
+                "01.0.0",
+                "-1",
+                "1.0.0-",
+                "../1.0.0",
+                huge.as_str(),
+            ] {
+                let error = normalize_package_version(kind, value).unwrap_err();
+                assert_eq!(
+                    error.code,
+                    ErrorCode::UpdaterPackageMetadataInvalid,
+                    "{kind} {value:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_numeric_pacman_release_suffix_is_stripped() {
+        assert_eq!(strip_numeric_release_suffix("0.0.2-1"), Some("0.0.2"));
+        assert_eq!(strip_numeric_release_suffix("0.0.2-1.2"), Some("0.0.2"));
+        assert_eq!(
+            strip_numeric_release_suffix("0.0.2-beta.1-1"),
+            Some("0.0.2-beta.1")
+        );
+        // Всё, что не чисто числовой pkgrel, остаётся частью версии: иначе
+        // "0.0.2-1ubuntu1" сравнялся бы со стабильной 0.0.2.
+        assert_eq!(strip_numeric_release_suffix("0.0.2-1ubuntu1"), None);
+        assert_eq!(strip_numeric_release_suffix("0.0.2-beta.1"), None);
+        assert_eq!(strip_numeric_release_suffix("0.0.2"), None);
+        assert_eq!(strip_numeric_release_suffix("-1"), None);
+        assert_eq!(strip_numeric_release_suffix("0.0.2-"), None);
+        assert_eq!(strip_numeric_release_suffix("0.0.2-1."), None);
+        assert_eq!(strip_numeric_release_suffix("0.0.2-1 "), None);
+        assert_eq!(strip_numeric_release_suffix(""), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_that_only_looks_like_a_package_yields_no_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("ModelCrew-9.9.9.deb");
+        // Версию называет только менеджер пакетов: ни имя файла, ни строки
+        // внутри него не должны сойти за метаданные.
+        std::fs::write(&package, b"Version: 9.9.9\npkgver = 9.9.9\n").unwrap();
+
+        for kind in [
+            LinuxPackageKind::Deb,
+            LinuxPackageKind::Rpm,
+            LinuxPackageKind::Pacman,
+        ] {
+            let error = read_package_version(kind, &package).unwrap_err();
+            assert!(
+                matches!(
+                    error.code,
+                    ErrorCode::UpdaterPackageMetadataUnavailable
+                        | ErrorCode::UpdaterPackageMetadataInvalid
+                ),
+                "{kind}: {error:?}"
+            );
+            assert!(verify_package_version(kind, &package, &Version::new(9, 9, 9)).is_err());
+        }
+    }
+
+    #[test]
+    fn privileged_installer_argv_is_absolute_fixed_and_ends_with_one_package_argument() {
+        // Ни pkexec, ни менеджеры пакетов не ищутся через PATH.
+        for program in [
+            PKEXEC_PATH,
+            DPKG_PATH,
+            DPKG_DEB_PATH,
+            RPM_PATH,
+            PACMAN_PATH,
+            BSDTAR_PATH,
+        ] {
+            assert!(program.starts_with('/'), "{program}");
+            assert!(!program.contains(".."), "{program}");
+            assert!(!program.contains(' '), "{program}");
+        }
+        assert_eq!(PKEXEC_PATH, "/usr/bin/pkexec");
+
+        let package = PathBuf::from("/var/cache/modelcrew/ModelCrew-1.2.3.deb; rm -rf /");
+        let hostile = package.to_string_lossy().into_owned();
+        for kind in [
+            LinuxPackageKind::Deb,
+            LinuxPackageKind::Rpm,
+            LinuxPackageKind::Pacman,
+        ] {
+            let spec = package_installer_spec(kind);
+            // Так же собирает команду run_package_installer.
+            let mut argv = vec![PKEXEC_PATH.to_string(), spec.program.to_string()];
+            argv.extend(spec.arguments.iter().map(|argument| (*argument).to_string()));
+            argv.push(hostile.clone());
+
+            assert_eq!(argv.len(), 3 + spec.arguments.len());
+            assert!(spec.program.starts_with('/'), "{kind}");
+            assert!(spec.arguments.iter().all(|argument| argument
+                .starts_with("--")
+                && !argument.contains(' ')
+                && !argument.contains('/')));
+            // Путь к пакету — ровно один последний аргумент, а не кусок
+            // шелл-строки: метасимволы в имени остаются данными.
+            assert_eq!(argv.last(), Some(&hostile));
+            assert_eq!(
+                argv.iter()
+                    .filter(|argument| argument.as_str() == hostile)
+                    .count(),
+                1
+            );
+            assert!(argv[..argv.len() - 1].iter().all(|argument| {
+                !argument.contains(';')
+                    && !argument.contains('|')
+                    && !argument.contains('&')
+                    && !argument.contains('$')
+            }));
+        }
+    }
+
+    #[test]
+    fn a_cancelled_or_killed_installer_is_never_reported_as_installed() {
+        for code in [126, 127] {
+            assert_eq!(
+                classify_installer_exit(Some(code), false),
+                InstallerExit::AuthorizationCancelled
+            );
+            assert_ne!(
+                classify_installer_exit(Some(code), false),
+                InstallerExit::Success
+            );
+        }
+        // Убит сигналом: кода нет, но установка не состоялась.
+        assert_eq!(classify_installer_exit(None, false), InstallerExit::Failed);
+        for code in [1, 2, 8, 100, 125, 128, 130, 255, -1, i32::MIN, i32::MAX] {
+            assert_eq!(
+                classify_installer_exit(Some(code), false),
+                InstallerExit::Failed,
+                "{code}"
+            );
+        }
+        // Нулевой код без успешного статуса тоже не успех.
+        assert_eq!(
+            classify_installer_exit(Some(0), false),
+            InstallerExit::Failed
+        );
+    }
+
+    #[test]
+    fn unknown_or_hostile_arch_never_produces_a_download_target() {
+        for arch in [
+            "",
+            "amd64",
+            "i686",
+            "riscv64",
+            "X86_64",
+            "x86_64 ",
+            "x86_64\n",
+            "x86_64;id",
+            "../x86_64",
+            "aarch64/../x86_64",
+            "x86_64-appimage",
+        ] {
+            assert_eq!(appimage_target_for_arch(arch), None, "{arch:?}");
+            for kind in [
+                LinuxPackageKind::Deb,
+                LinuxPackageKind::Rpm,
+                LinuxPackageKind::Pacman,
+            ] {
+                assert_eq!(native_target_for_arch(kind, arch), None, "{arch:?}");
+            }
+        }
+
+        // Ключ манифеста, который получится из известной архитектуры, не может
+        // стать путём: только буквы, цифры, дефис и подчёркивание.
+        for arch in ["x86_64", "aarch64"] {
+            let mut targets = vec![appimage_target_for_arch(arch).unwrap()];
+            for kind in [
+                LinuxPackageKind::Deb,
+                LinuxPackageKind::Rpm,
+                LinuxPackageKind::Pacman,
+            ] {
+                targets.push(native_target_for_arch(kind, arch).unwrap());
+            }
+            for target in targets {
+                assert!(target.bytes().all(|byte| byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'-' | b'_')));
+            }
+        }
+    }
+
+    #[test]
+    fn package_ownership_and_markers_cannot_be_confused_into_a_foreign_installer() {
+        assert_eq!(
+            classify_linux_install(evidence(true, Some(LinuxBundleMarker::AppImage))),
+            DetectedLinuxInstall::SelfUpdate
+        );
+        assert_eq!(
+            classify_linux_install(evidence(true, None)),
+            DetectedLinuxInstall::Native(LinuxPackageKind::Pacman)
+        );
+        assert_eq!(
+            classify_linux_install(evidence(true, Some(LinuxBundleMarker::Rpm))),
+            DetectedLinuxInstall::Native(LinuxPackageKind::Pacman)
+        );
+    }
+
+    #[test]
+    fn a_second_privileged_operation_cannot_start_while_one_is_running() {
+        let state = LinuxUpdaterState::default();
+        let guard = state.begin_operation().unwrap();
+        // Пока открыт запрос polkit, второй установщик стартовать не должен.
+        match state.begin_operation() {
+            Ok(_) => panic!("a concurrent updater operation must be rejected"),
+            Err(error) => assert_eq!(error.code, ErrorCode::UpdaterOperationInProgress),
+        }
+        drop(guard);
+        assert!(state.begin_operation().is_ok());
+    }
 }
