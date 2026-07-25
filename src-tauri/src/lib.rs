@@ -964,6 +964,666 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    const LIB_RS: &str = include_str!("lib.rs");
+    const CAPABILITY_JSON: &str = include_str!("../capabilities/default.json");
+    const TAURI_CONF_JSON: &str = include_str!("../tauri.conf.json");
+    const COMMAND_ATTRIBUTE: &str = "#[tauri::command]";
+
+    // Все модули бэкенда. Полнота списка проверяется отдельным тестом по
+    // объявлениям `mod` — иначе новый модуль с командами тихо выпал бы из
+    // проверок ниже.
+    const MODULE_SOURCES: &[(&str, &str)] = &[
+        ("lib.rs", LIB_RS),
+        ("agent_sessions.rs", include_str!("agent_sessions.rs")),
+        ("command_error.rs", include_str!("command_error.rs")),
+        ("git_changes.rs", include_str!("git_changes.rs")),
+        ("github_auth.rs", include_str!("github_auth.rs")),
+        ("linux_updater.rs", include_str!("linux_updater.rs")),
+        ("pty.rs", include_str!("pty.rs")),
+        ("terminal_snapshots.rs", include_str!("terminal_snapshots.rs")),
+        ("update_cache.rs", include_str!("update_cache.rs")),
+        ("win_proc.rs", include_str!("win_proc.rs")),
+        ("workspace_roots.rs", include_str!("workspace_roots.rs")),
+    ];
+
+    // Полный список команд, доступных веб-вью. Снимок, а не вычисление:
+    // добавление команды обязано быть отдельной осознанной правкой теста.
+    const EXPECTED_COMMANDS: &[&str] = &[
+        "agent_session_locate",
+        "app_set_badge",
+        "app_set_locale",
+        "git_amend_commit",
+        "git_branches",
+        "git_changes_summary",
+        "git_changes_unwatch",
+        "git_changes_watch",
+        "git_commit",
+        "git_commit_action",
+        "git_commit_file_diff",
+        "git_commit_files",
+        "git_commit_patch",
+        "git_compare_file_diff",
+        "git_compare_files",
+        "git_create_branch",
+        "git_create_tag",
+        "git_delete_branch",
+        "git_delete_tag",
+        "git_drop_commit",
+        "git_fetch_upstream",
+        "git_file_diff",
+        "git_log",
+        "git_merge_ref",
+        "git_publish_branch",
+        "git_pull",
+        "git_pull_rebase",
+        "git_push",
+        "git_read_file",
+        "git_rebase_onto",
+        "git_rename_branch",
+        "git_reset_to_commit",
+        "git_reset_to_upstream",
+        "git_revert_file",
+        "git_reword_commit",
+        "git_save_commit_patch",
+        "git_squash_commit",
+        "git_switch_branch",
+        "git_write_file",
+        "github_auth_available",
+        "github_commit_avatars",
+        "github_commit_url",
+        "github_current_user",
+        "github_device_poll",
+        "github_device_start",
+        "github_logout",
+        "list_shells",
+        "pty_create",
+        "pty_kill",
+        "pty_kill_all",
+        "pty_resize",
+        "pty_write",
+        "terminal_snapshot_delete",
+        "terminal_snapshot_load",
+        "terminal_snapshot_save",
+        "terminal_snapshots_prune",
+        "updater_install_linux_package",
+        "updater_install_self_update",
+        "updater_install_target",
+        "updater_prepare_linux_package",
+        "updater_prepare_self_update",
+        "workspace_pick_root",
+        "workspace_reconcile_roots",
+        "workspace_register_root",
+        "workspace_unregister_root",
+        "workspace_validate_root",
+    ];
+
+    struct IpcCommand {
+        module: &'static str,
+        name: String,
+        signature: String,
+        body: String,
+    }
+
+    /// Исходник модуля без его собственного `mod tests`: иначе строковые
+    /// литералы из проверок ниже находили бы сами себя.
+    fn production_source(source: &str) -> &str {
+        source.split("#[cfg(test)]").next().unwrap()
+    }
+
+    /// Разбор `#[tauri::command]` по исходникам: имя, сигнатура и тело до
+    /// закрывающей скобки на нулевом отступе (весь код прогнан rustfmt).
+    fn ipc_commands() -> Vec<IpcCommand> {
+        let mut commands = Vec::new();
+        for (module, source) in MODULE_SOURCES.iter() {
+            let lines: Vec<&str> = source.lines().collect();
+            let mut index = 0;
+            while index < lines.len() {
+                if lines[index].trim() != COMMAND_ATTRIBUTE {
+                    index += 1;
+                    continue;
+                }
+                let mut cursor = index + 1;
+                // Между атрибутом команды и fn могут стоять #[cfg(...)].
+                while cursor < lines.len() && lines[cursor].trim_start().starts_with("#[") {
+                    cursor += 1;
+                }
+                let name = lines
+                    .get(cursor)
+                    .and_then(|line| line.split("fn ").nth(1))
+                    .and_then(|rest| rest.split('(').next())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let mut signature = String::new();
+                while cursor < lines.len() {
+                    signature.push_str(lines[cursor]);
+                    signature.push('\n');
+                    if lines[cursor].trim_end().ends_with('{') {
+                        break;
+                    }
+                    cursor += 1;
+                }
+                cursor += 1;
+                let mut body = String::new();
+                while cursor < lines.len() && lines[cursor] != "}" {
+                    body.push_str(lines[cursor]);
+                    body.push('\n');
+                    cursor += 1;
+                }
+                commands.push(IpcCommand {
+                    module: *module,
+                    name,
+                    signature,
+                    body,
+                });
+                index = cursor + 1;
+            }
+        }
+        commands
+    }
+
+    fn command_body(name: &str) -> String {
+        ipc_commands()
+            .into_iter()
+            .find(|command| command.name == name)
+            .unwrap_or_else(|| panic!("{name} is no longer an IPC command"))
+            .body
+    }
+
+    /// Тело функции верхнего уровня по началу её сигнатуры.
+    fn function_body(source: &str, signature_start: &str) -> String {
+        let after = source
+            .split_once(signature_start)
+            .unwrap_or_else(|| panic!("{signature_start} is gone"))
+            .1;
+        after
+            .split_once("\n}\n")
+            .unwrap_or_else(|| panic!("{signature_start} has no closing brace"))
+            .0
+            .to_string()
+    }
+
+    fn csp_directives(csp: &str) -> std::collections::BTreeMap<&str, Vec<&str>> {
+        csp.split(';')
+            .filter_map(|directive| {
+                let mut tokens = directive.split_whitespace();
+                let name = tokens.next()?;
+                Some((name, tokens.collect::<Vec<_>>()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ensure_main_window_matches_the_label_exactly() {
+        let body = function_body(LIB_RS, "fn ensure_main_window(");
+
+        // Единственная допустимая проверка — точное равенство: с
+        // `starts_with` окно с меткой «main-2» или «mainx» прошло бы охрану.
+        assert!(
+            body.contains("window.label() == \"main\""),
+            "ensure_main_window no longer compares the label exactly: {body}"
+        );
+        for loose in [
+            "starts_with",
+            "ends_with",
+            "contains",
+            "to_lowercase",
+            "to_uppercase",
+            "trim",
+            "!=",
+        ] {
+            assert!(
+                !body.contains(loose),
+                "ensure_main_window matches the label loosely via {loose}: {body}"
+            );
+        }
+        assert!(body.contains("ErrorCode::MainWindowOnly"), "{body}");
+
+        // Код отказа — часть контракта IPC: фронт по нему различает «не то
+        // окно» и настоящую ошибку операции.
+        assert_eq!(
+            serde_json::to_value(CommandError::new(ErrorCode::MainWindowOnly)).unwrap(),
+            serde_json::json!({ "code": "main_window_only" })
+        );
+    }
+
+    #[test]
+    fn every_ipc_command_is_restricted_to_the_main_window() {
+        // Единственные команды без охраны: список установленных оболочек и
+        // «собран ли OAuth-клиент». Ни одна ничего не читает, не пишет и не
+        // запускает. Третья запись здесь — сознательная правка, а не случай.
+        const UNGUARDED: &[&str] = &["github_auth_available", "list_shells"];
+
+        let commands = ipc_commands();
+        assert_eq!(
+            commands.len(),
+            EXPECTED_COMMANDS.len(),
+            "the source scan missed some commands"
+        );
+
+        let unguarded: Vec<String> = commands
+            .iter()
+            .filter(|command| !command.body.contains("ensure_main_window(&window)"))
+            .map(|command| format!("{}::{}", command.module, command.name))
+            .collect();
+        let expected: Vec<String> = commands
+            .iter()
+            .filter(|command| UNGUARDED.contains(&command.name.as_str()))
+            .map(|command| format!("{}::{}", command.module, command.name))
+            .collect();
+
+        assert_eq!(expected.len(), UNGUARDED.len(), "stale allowlist entry");
+        assert_eq!(
+            unguarded.join("\n"),
+            expected.join("\n"),
+            "a command reachable from a non-main webview window"
+        );
+
+        // Охрана должна стоять до любой работы: первая исполняемая строка
+        // (локальные `use` и комментарии кода не выполняют).
+        for command in &commands {
+            if UNGUARDED.contains(&command.name.as_str()) {
+                continue;
+            }
+            let first = command
+                .body
+                .lines()
+                .map(str::trim)
+                .find(|line| {
+                    !line.is_empty() && !line.starts_with("//") && !line.starts_with("use ")
+                })
+                .unwrap_or_default();
+            assert!(
+                first.contains("ensure_main_window(&window)?"),
+                "{}::{} does something before checking the window: {first}",
+                command.module,
+                command.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_registered_command_surface_is_pinned() {
+        let list = production_source(LIB_RS)
+            .split_once("tauri::generate_handler![")
+            .expect("invoke handler is gone")
+            .1
+            .split_once(']')
+            .expect("unterminated invoke handler")
+            .0;
+        let mut registered: Vec<&str> = list
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .collect();
+        registered.sort_unstable();
+
+        assert_eq!(
+            registered.join("\n"),
+            EXPECTED_COMMANDS.join("\n"),
+            "the IPC surface exposed to the webview changed"
+        );
+
+        // Обратная сторона: команда, объявленная, но не зарегистрированная,
+        // — мёртвый код, который легко «оживить» одной строкой.
+        let mut defined: Vec<String> = ipc_commands()
+            .into_iter()
+            .map(|command| command.name)
+            .collect();
+        defined.sort();
+        assert_eq!(defined.join("\n"), EXPECTED_COMMANDS.join("\n"));
+    }
+
+    #[test]
+    fn the_ipc_scan_covers_every_backend_module() {
+        let mut declared: Vec<String> = production_source(LIB_RS)
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| {
+                let name = line.strip_prefix("mod ")?.strip_suffix(';')?;
+                Some(format!("{name}.rs"))
+            })
+            .collect();
+        declared.push("lib.rs".to_string());
+        declared.sort();
+
+        let mut scanned: Vec<String> = MODULE_SOURCES
+            .iter()
+            .map(|(module, _)| (*module).to_string())
+            .collect();
+        scanned.sort();
+
+        assert_eq!(
+            scanned.join("\n"),
+            declared.join("\n"),
+            "a backend module is not covered by the IPC source scan"
+        );
+    }
+
+    #[test]
+    fn commands_reach_the_disk_only_through_workspace_roots() {
+        // Команды жизненного цикла реестра: они и есть привязка/отвязка, а
+        // git_changes_unwatch только снимает вотчер и к диску не ходит.
+        const REGISTRY_LIFECYCLE: &[&str] = &[
+            "git_changes_unwatch",
+            "workspace_pick_root",
+            "workspace_register_root",
+            "workspace_unregister_root",
+        ];
+
+        let commands = ipc_commands();
+        for command in &commands {
+            if !command.signature.contains("workspace_id: String")
+                || REGISTRY_LIFECYCLE.contains(&command.name.as_str())
+            {
+                continue;
+            }
+            assert!(
+                command.body.contains("roots.resolve(&workspace_id)")
+                    || command.body.contains("state.resolve(&workspace_id)"),
+                "{}::{} uses a workspace id without resolving it through WorkspaceRoots",
+                command.module,
+                command.name
+            );
+        }
+
+        // Ни одна команда в lib.rs, кроме привязки корня, не принимает путь
+        // от веб-вью: cwd терминала берётся только из реестра.
+        let with_raw_paths: Vec<&str> = commands
+            .iter()
+            .filter(|command| command.module == "lib.rs")
+            .filter(|command| {
+                command.signature.contains("path: String")
+                    || command.signature.contains("cwd: String")
+                    || command.signature.contains("PathBuf")
+            })
+            .map(|command| command.name.as_str())
+            .collect();
+        assert_eq!(with_raw_paths, ["workspace_register_root"]);
+
+        // pty_create получает cwd из реестра, а не из аргументов.
+        let pty_create_body = command_body("pty_create");
+        assert!(
+            pty_create_body.contains("roots.resolve(&workspace_id)?"),
+            "{pty_create_body}"
+        );
+    }
+
+    #[test]
+    fn pty_events_are_delivered_only_to_the_main_window() {
+        // Вывод терминала и заголовки панелей — самый чувствительный поток:
+        // широковещательный emit доставил бы его любому будущему веб-вью.
+        let dense: String = production_source(LIB_RS)
+            .chars()
+            .filter(|symbol| !symbol.is_whitespace())
+            .collect();
+        let broadcast = format!(".{}(", "emit");
+        assert!(
+            !dense.contains(&broadcast),
+            "lib.rs broadcasts an event to every window"
+        );
+        assert_eq!(
+            dense.matches("emit_to(").count(),
+            dense.matches("emit_to(\"main\",").count(),
+            "an event is emitted to a window other than main"
+        );
+    }
+
+    #[test]
+    fn app_locale_rejects_hostile_locale_strings() {
+        // Локаль уходит в заголовок нативного диалога выбора папки и в сборку
+        // меню macOS, поэтому принимаются ровно два известных значения.
+        for locale in [
+            "",
+            " ",
+            "RU",
+            "EN",
+            "ru ",
+            " ru",
+            "ru\n",
+            "ru\u{0}",
+            "ru-RU",
+            "en_US",
+            "../../../etc/passwd",
+            "/etc/passwd",
+            "..\\..\\windows\\system32",
+            "ru; rm -rf /",
+            "\u{1b}]0;pwn\u{7}",
+            "\u{202e}ne",
+            "рус",
+            "en\u{200b}",
+        ] {
+            let error = AppLocale::parse(locale).unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidLocale, "{locale:?}");
+            assert_eq!(error.context["locale"], locale, "{locale:?}");
+        }
+
+        let absurd = "e".repeat(4096);
+        let error = AppLocale::parse(&absurd).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidLocale);
+        assert_eq!(error.context["locale"].len(), 4096);
+
+        assert_eq!(AppLocale::parse("ru").unwrap(), AppLocale::Ru);
+        assert_eq!(AppLocale::parse("en").unwrap(), AppLocale::En);
+    }
+
+    #[test]
+    fn an_already_open_folder_is_never_reported_as_a_fresh_binding() {
+        // Папка уже открыта другим воркспейсом: фронт обязан увидеть чужой id,
+        // иначе два воркспейса разделили бы один корень и его git-состояние.
+        let value = serde_json::to_value(WorkspaceRootResult::from(BindOutcome::AlreadyOpen(
+            WorkspaceRootBinding {
+                workspace_id: "workspace-owner".into(),
+                path: "/projects/secret".into(),
+            },
+        )))
+        .unwrap();
+        assert_eq!(value["status"], "alreadyOpen");
+        assert_eq!(value["workspaceId"], "workspace-owner");
+
+        // Отменённый выбор не отдаёт путь наружу вообще.
+        let cancelled = serde_json::to_value(WorkspaceRootResult::Cancelled).unwrap();
+        assert_eq!(cancelled, serde_json::json!({ "status": "cancelled" }));
+    }
+
+    #[test]
+    fn friendly_name_never_leaks_a_path_or_a_flag_into_the_panel_title() {
+        // comm и argv приходят из чужого процесса — его мог запустить код из
+        // открытого репозитория, а имя становится подписью панели.
+        let hostile: Vec<(&str, Vec<&str>)> = vec![
+            ("/usr/bin/evil", vec![]),
+            ("node", vec!["node", "/etc/../etc/passwd"]),
+            ("node", vec!["node", "/"]),
+            ("node", vec!["node", "--inspect=0.0.0.0:9229"]),
+            ("-node", vec!["-node"]),
+            ("---", vec!["---"]),
+            ("node", vec!["node", "C:\\Windows\\System32\\cmd.exe"]),
+            ("python3.13", vec!["python3.13", "-m", "http.server"]),
+            ("node", vec!["node", ".js"]),
+            ("node", vec!["node", "/tmp/пример.js"]),
+        ];
+        for (comm, argv) in hostile {
+            let name = friendly_name(comm, &argv);
+            assert!(
+                !name.contains('/') && !name.contains('\\'),
+                "{comm:?} {argv:?} -> {name:?} leaks a path"
+            );
+            assert!(
+                !name.starts_with('-'),
+                "{comm:?} {argv:?} -> {name:?} starts with a flag dash"
+            );
+        }
+
+        assert_eq!(friendly_name("node", &["node", "/etc/../etc/passwd"]), "passwd");
+        assert_eq!(
+            friendly_name("node", &["node", "C:\\Windows\\System32\\cmd.exe"]),
+            "cmd.exe"
+        );
+        // Расширение не срезается в пустоту — панель не должна остаться без
+        // подписи из-за процесса, названного «.js».
+        assert_eq!(friendly_name("node", &["node", ".js"]), ".js");
+        // Флаг интерпретатора не становится заголовком.
+        assert_eq!(friendly_name("node", &["node", "--inspect=0.0.0.0:9229"]), "node");
+        // Многобайтовое имя произвольной длины: режем по символам, не по байтам.
+        let huge = format!("/tmp/{}.js", "п".repeat(4096));
+        assert_eq!(
+            friendly_name("node", &["node", huge.as_str()]),
+            "п".repeat(4096)
+        );
+    }
+
+    #[test]
+    fn a_hostile_badge_count_never_reaches_the_native_renderer() {
+        // count приходит из веб-вью как i64. Отрицательные и ноль гасят бейдж,
+        // иначе badge_text(-1) дал бы многознаковую надпись, а на Windows —
+        // отрисовку '-' по нулевой битовой маске глифа.
+        let body = command_body("app_set_badge");
+        assert!(
+            body.contains("count.filter(|value| *value > 0)"),
+            "app_set_badge no longer drops non-positive counts: {body}"
+        );
+    }
+
+    #[test]
+    fn the_capability_allowlist_stays_minimal() {
+        let capability: serde_json::Value = serde_json::from_str(CAPABILITY_JSON).unwrap();
+
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+
+        // Точный список: любая новая привилегия должна пройти через правку
+        // теста, потому что capability обходит охрану #[tauri::command].
+        let permissions: Vec<&str> = capability["permissions"]
+            .as_array()
+            .expect("permissions must be an array")
+            .iter()
+            .map(|value| value.as_str().expect("permission must be a string"))
+            .collect();
+        assert_eq!(
+            permissions,
+            [
+                "core:default",
+                "core:window:allow-start-dragging",
+                "core:window:allow-set-background-color",
+                "core:window:allow-set-theme",
+                "opener:default",
+                "dialog:default",
+                "notification:default",
+                "updater:allow-check",
+                "updater:allow-download",
+                "updater:allow-install",
+                "process:allow-restart",
+            ]
+        );
+        for permission in &permissions {
+            for forbidden in ["fs:", "shell:", "http:", "allow-execute", "webview-window"] {
+                assert!(
+                    !permission.contains(forbidden),
+                    "{permission} grants the webview direct {forbidden} reach"
+                );
+            }
+        }
+
+        // Второй файл в каталоге — ещё одна capability, которую никто не
+        // проверяет: Tauri применяет их все.
+        let mut files: Vec<String> = std::fs::read_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities"),
+        )
+        .expect("capabilities directory")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.ends_with(".json") || name.ends_with(".json5") || name.ends_with(".toml")
+        })
+        .collect();
+        files.sort();
+        assert_eq!(files, ["default.json"]);
+    }
+
+    #[test]
+    fn the_release_csp_stays_locked_down() {
+        let config: serde_json::Value = serde_json::from_str(TAURI_CONF_JSON).unwrap();
+        let security = &config["app"]["security"];
+
+        // Никаких dangerous*-ключей: они снимают CSP или открывают IPC чужим
+        // origin'ам.
+        let mut keys: Vec<&str> = security
+            .as_object()
+            .expect("app.security must exist")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["csp", "devCsp"]);
+        assert!(config["app"].get("withGlobalTauri").is_none());
+
+        let csp = security["csp"].as_str().expect("release csp is missing");
+        assert!(!csp.contains('*'), "wildcard source in the release CSP: {csp}");
+        assert!(!csp.contains("unsafe-eval"), "{csp}");
+
+        // Панель Git рисует имена и содержимое файлов из враждебного
+        // репозитория, а opener:default даёт канал наружу — CSP здесь
+        // последний рубеж.
+        let directives = csp_directives(csp);
+        for (name, expected) in [
+            ("default-src", "'self'"),
+            ("script-src", "'self'"),
+            ("object-src", "'none'"),
+            ("frame-src", "'none'"),
+            ("base-uri", "'self'"),
+            ("form-action", "'none'"),
+            ("font-src", "'self'"),
+        ] {
+            assert_eq!(
+                directives.get(name),
+                Some(&vec![expected]),
+                "{name} in the release CSP"
+            );
+        }
+        assert_eq!(
+            directives.get("connect-src"),
+            Some(&vec!["'self'", "ipc:", "http://ipc.localhost"]),
+            "connect-src must stay limited to the Tauri IPC origins"
+        );
+        // Аватары GitHub — единственный внешний источник, и только по https.
+        for source in directives.get("img-src").expect("img-src") {
+            assert!(
+                *source == "'self'" || *source == "data:" || source.starts_with("https://"),
+                "plaintext image source in the CSP: {source}"
+            );
+        }
+
+        // Ровно одно окно: и capability, и ensure_main_window опираются на то,
+        // что метка веб-вью — «main».
+        let windows = config["app"]["windows"]
+            .as_array()
+            .expect("app.windows must exist");
+        assert_eq!(windows.len(), 1);
+        assert!(matches!(
+            windows[0].get("label").and_then(serde_json::Value::as_str),
+            None | Some("main")
+        ));
+    }
+
+    #[test]
+    fn the_updater_only_trusts_signed_artifacts_over_https() {
+        let config: serde_json::Value = serde_json::from_str(TAURI_CONF_JSON).unwrap();
+        let updater = &config["plugins"]["updater"];
+
+        assert!(
+            updater["pubkey"].as_str().is_some_and(|key| !key.is_empty()),
+            "without a pubkey the updater accepts unsigned packages"
+        );
+        assert!(updater.get("dangerousInsecureTransportProtocol").is_none());
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], true);
+
+        for endpoint in updater["endpoints"].as_array().expect("endpoints") {
+            let endpoint = endpoint.as_str().expect("endpoint must be a string");
+            assert!(
+                endpoint.starts_with("https://"),
+                "update metadata fetched over a plaintext channel: {endpoint}"
+            );
+        }
+    }
+
     #[test]
     fn friendly_name_unwraps_interpreters() {
         // codex как node-скрипт с shebang: kernel запускает `node <path>/codex`.
@@ -1057,6 +1717,37 @@ mod badge_tests {
         // Больше одной цифры в углу значка не читается — как «9+» в вебе.
         assert_eq!(badge_text(10), "9+");
         assert_eq!(badge_text(42), "9+");
+    }
+
+    #[test]
+    fn badge_text_stays_bounded_for_any_webview_supplied_count() {
+        // Счётчик приходит из веб-вью как i64; app_set_badge пропускает в
+        // отрисовку только положительные значения.
+        for count in [1_i64, 9, 10, 1_000_000, i64::MAX] {
+            let text = badge_text(count);
+            assert!(text.len() <= 2, "{count} -> {text:?}");
+            assert!(
+                text.chars().all(|symbol| symbol.is_ascii_digit() || symbol == '+'),
+                "{count} -> {text:?}"
+            );
+        }
+    }
+
+    // Оверлей рисуется в буфер фиксированного размера по индексам, посчитанным
+    // из длины надписи: счётчик из веб-вью не должен выводить их за границы.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn badge_overlay_stays_inside_its_buffer() {
+        use super::{draw_badge_overlay, BADGE_SIZE};
+
+        for count in [1_i64, 2, 9, 10, 99, i64::MAX] {
+            let rgba = draw_badge_overlay(&badge_text(count));
+            assert_eq!(rgba.len(), BADGE_SIZE * BADGE_SIZE * 4, "count {count}");
+            assert!(
+                rgba.chunks(4).any(|pixel| pixel[3] == 0xff),
+                "count {count} produced a fully transparent overlay"
+            );
+        }
     }
 
     #[cfg(target_os = "linux")]
