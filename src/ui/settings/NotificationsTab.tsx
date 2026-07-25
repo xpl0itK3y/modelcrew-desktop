@@ -12,6 +12,13 @@ import {
   loadSystemNotificationsEnabled,
   saveSystemNotificationsEnabled,
 } from "../../notifications";
+import { PlayIcon } from "../Icons";
+import {
+  SettingRow,
+  SettingsPage,
+  SettingsSelect,
+  SettingsSwitch,
+} from "./SettingsControls";
 
 const soundMessageKeys: Record<NotificationSoundId, MessageKey> = {
   off: "settings.soundOff",
@@ -34,87 +41,82 @@ export function NotificationsTab() {
     loadSystemNotificationsEnabled(),
   );
 
-  // Selecting a sound also auditions it so the choice is audible immediately.
-  // Selecting "off" clears the hang-protection verdict (see sound.ts), so the
-  // suppression note is re-read after every pick.
-  const selectSound = (id: NotificationSoundId) => {
-    setSound(id);
-    saveNotificationSound(id);
+  // Вердикт защиты от зависаний (см. sound.ts) перечитывается после каждого
+  // воспроизведения — и выбора, и повторного прослушивания. Иначе кнопка
+  // однажды замолчала бы без объяснений, а «Без звука» снимает вердикт, и
+  // предупреждение обязано исчезнуть.
+  const playSound = (id: NotificationSoundId) => {
     previewNotificationSound(id);
     setSoundSuppressed(isNotificationSoundSuppressed());
   };
 
-  return (
-    <>
-    <div className="settings-section">
-      <div className="settings-label">{t("settings.notificationSound")}</div>
-      <div
-        className="sound-options"
-        role="group"
-        aria-label={t("settings.notificationSound")}
-      >
-        {NOTIFICATION_SOUNDS.map((option) => {
-          const name = t(soundMessageKeys[option.id]);
-          const isOff = option.id === "off";
-          const label = isOff ? name : t("settings.previewSound", { name });
-          return (
-            <button
-              key={option.id}
-              type="button"
-              title={label}
-              aria-label={label}
-              aria-pressed={sound === option.id}
-              className={`sound-option ${
-                sound === option.id ? "is-selected" : ""
-              }`}
-              onClick={() => selectSound(option.id)}
-            >
-              <span className="sound-option-icon" aria-hidden="true">
-                {isOff ? "🔇" : "▶"}
-              </span>
-              <span>{name}</span>
-            </button>
-          );
-        })}
-      </div>
-      <p className="settings-note">{t("settings.notificationSoundNote")}</p>
-      {soundSuppressed && (
-        <p className="settings-note is-warning" role="alert">
-          {t("settings.notificationSoundSuppressed")}
-        </p>
-      )}
-    </div>
+  // Выбор звука сразу его проигрывает — иначе выбирать пришлось бы вслепую.
+  const selectSound = (id: NotificationSoundId) => {
+    setSound(id);
+    saveNotificationSound(id);
+    playSound(id);
+  };
 
-    <div className="settings-section">
-      <div className="settings-label">{t("settings.systemNotifications")}</div>
-      <div
-        className="shell-options"
-        role="group"
-        aria-label={t("settings.systemNotifications")}
-      >
-        {[true, false].map((enabled) => (
-          <button
-            key={String(enabled)}
-            type="button"
-            aria-pressed={systemEnabled === enabled}
-            className={`shell-option ${
-              systemEnabled === enabled ? "is-selected" : ""
-            }`}
-            onClick={() => {
+  const soundName = t(soundMessageKeys[sound]);
+
+  return (
+    <SettingsPage
+      section="notifications"
+      title={t("settings.tabNotifications")}
+      intro={t("settings.notificationsIntro")}
+    >
+      <SettingRow
+        title={t("settings.notificationSound")}
+        description={t("settings.notificationSoundNote")}
+        keywords={NOTIFICATION_SOUNDS.map((option) =>
+          t(soundMessageKeys[option.id]),
+        ).join(" ")}
+        control={
+          <div className="settings-control-pair">
+            <SettingsSelect<NotificationSoundId>
+              label={t("settings.notificationSound")}
+              value={sound}
+              options={NOTIFICATION_SOUNDS.map((option) => ({
+                value: option.id,
+                label: t(soundMessageKeys[option.id]),
+              }))}
+              onChange={selectSound}
+            />
+            <button
+              type="button"
+              className="icon-button"
+              disabled={sound === "off"}
+              title={t("settings.previewSound", { name: soundName })}
+              aria-label={t("settings.previewSound", { name: soundName })}
+              onClick={() => playSound(sound)}
+            >
+              <PlayIcon />
+            </button>
+          </div>
+        }
+        note={
+          soundSuppressed ? (
+            <p className="settings-note is-warning" role="alert">
+              {t("settings.notificationSoundSuppressed")}
+            </p>
+          ) : undefined
+        }
+      />
+
+      <SettingRow
+        title={t("settings.systemNotifications")}
+        description={t("settings.systemNotificationsNote")}
+        control={
+          <SettingsSwitch
+            label={t("settings.systemNotifications")}
+            checked={systemEnabled}
+            onChange={(enabled) => {
               setSystemEnabled(enabled);
               saveSystemNotificationsEnabled(enabled);
             }}
-          >
-            {t(
-              enabled
-                ? "settings.systemNotificationsOn"
-                : "settings.systemNotificationsOff",
-            )}
-          </button>
-        ))}
-      </div>
-      <p className="settings-note">{t("settings.systemNotificationsNote")}</p>
-    </div>
-    </>
+          />
+        }
+      />
+    </SettingsPage>
   );
 }
