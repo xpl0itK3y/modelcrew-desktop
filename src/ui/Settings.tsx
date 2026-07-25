@@ -1,24 +1,45 @@
 import {
   useEffect,
   useId,
-  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type ComponentType,
   type KeyboardEvent as ReactKeyboardEvent,
+  type SVGProps,
 } from "react";
 import { type ThemeId } from "../theme";
 import { type MessageKey, useI18n } from "../i18n";
 import { APP_VERSION } from "../version";
+import {
+  AgentIcon,
+  BellIcon,
+  CloseIcon,
+  PaletteIcon,
+  SearchIcon,
+  TerminalGlyphIcon,
+} from "./Icons";
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
+import { AgentsTab } from "./settings/AgentsTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
+import {
+  SettingsSearchProvider,
+  useSettingsSearch,
+  type SettingsSectionId,
+} from "./settings/SettingsSearch";
 
-type SettingsTab = "appearance" | "terminal" | "notifications";
+type SettingsTab = SettingsSectionId;
 
-const SETTINGS_TABS: { id: SettingsTab; label: MessageKey }[] = [
-  { id: "appearance", label: "settings.tabAppearance" },
-  { id: "terminal", label: "settings.tabTerminal" },
-  { id: "notifications", label: "settings.tabNotifications" },
+const SETTINGS_TABS: {
+  id: SettingsTab;
+  label: MessageKey;
+  Icon: ComponentType<SVGProps<SVGSVGElement>>;
+}[] = [
+  { id: "appearance", label: "settings.tabAppearance", Icon: PaletteIcon },
+  { id: "terminal", label: "settings.tabTerminal", Icon: TerminalGlyphIcon },
+  { id: "agents", label: "settings.tabAgents", Icon: AgentIcon },
+  { id: "notifications", label: "settings.tabNotifications", Icon: BellIcon },
 ];
 
 const settingsTabId = (tab: SettingsTab) => `settings-tab-${tab}`;
@@ -40,29 +61,8 @@ type SettingsProps = {
 };
 
 export function Settings(props: SettingsProps) {
-  const { t } = useI18n();
   const titleId = useId();
-  const [tab, setTab] = useState<SettingsTab>("appearance");
-  // The visible tab defines the body height; the rest are display:none. We track
-  // the active panel's height so the container can glide between sizes instead of
-  // snapping when the user switches tabs.
-  const bodyTrackRef = useRef<HTMLDivElement>(null);
-  const [bodyHeight, setBodyHeight] = useState<number>();
-
-  // Keep the animated body height in sync with whatever the active tab needs —
-  // tab switches, the async shell list arriving, locale reflow, window resizing.
-  // A ResizeObserver covers them all uniformly; the CSS transition does the glide.
-  useLayoutEffect(() => {
-    const track = bodyTrackRef.current;
-    if (!track || typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const sync = () => setBodyHeight(track.offsetHeight);
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(track);
-    return () => observer.disconnect();
-  }, []);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -75,36 +75,6 @@ export function Settings(props: SettingsProps) {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [props]);
-
-  const onTabKeyDown = (
-    event: ReactKeyboardEvent<HTMLButtonElement>,
-    currentTab: SettingsTab,
-  ) => {
-    const currentIndex = SETTINGS_TABS.findIndex(
-      (entry) => entry.id === currentTab,
-    );
-    let nextIndex: number | null = null;
-
-    if (event.key === "ArrowRight") {
-      nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
-    } else if (event.key === "ArrowLeft") {
-      nextIndex =
-        (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
-    } else if (event.key === "Home") {
-      nextIndex = 0;
-    } else if (event.key === "End") {
-      nextIndex = SETTINGS_TABS.length - 1;
-    }
-
-    if (nextIndex === null) {
-      return;
-    }
-
-    event.preventDefault();
-    const nextTab = SETTINGS_TABS[nextIndex].id;
-    setTab(nextTab);
-    document.getElementById(settingsTabId(nextTab))?.focus();
-  };
 
   return (
     <div
@@ -119,28 +89,119 @@ export function Settings(props: SettingsProps) {
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <div className="settings-header">
-          <span id={titleId} className="settings-title">
-            {t("settings.title")}
-          </span>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={props.onClose}
-            title={t("common.close")}
-            aria-label={t("common.close")}
-          >
-            ✕
-          </button>
+        {/* Поиск живёт над провайдером: строки настроек регистрируются в нём и
+            сами решают, показываться ли по текущему запросу. */}
+        <SettingsSearchProvider query={query}>
+          <SettingsShell
+            {...props}
+            titleId={titleId}
+            query={query}
+            onQueryChange={setQuery}
+          />
+        </SettingsSearchProvider>
+      </div>
+    </div>
+  );
+}
+
+type ShellProps = SettingsProps & {
+  titleId: string;
+  query: string;
+  onQueryChange: (query: string) => void;
+};
+
+function SettingsShell(props: ShellProps) {
+  const { t } = useI18n();
+  const search = useSettingsSearch();
+  const [tab, setTab] = useState<SettingsTab>("appearance");
+  const contentRef = useRef<HTMLDivElement>(null);
+  const searching = props.query.trim().length > 0;
+
+  const visibleTabs = useMemo(() => {
+    if (!searching || !search) {
+      return SETTINGS_TABS;
+    }
+    return SETTINGS_TABS.filter((entry) =>
+      search.matchedSections.has(entry.id),
+    );
+  }, [searching, search]);
+
+  // Поиск может выбросить открытый раздел из списка — тогда показываем первый
+  // из оставшихся, иначе пользователь смотрел бы в пустую панель.
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((e) => e.id === tab)) {
+      setTab(visibleTabs[0].id);
+    }
+  }, [visibleTabs, tab]);
+
+  // Новый раздел читают с начала, а не с прокрутки, оставшейся от прошлого.
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+  }, [tab]);
+
+  const onTabKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentTab: SettingsTab,
+  ) => {
+    const currentIndex = visibleTabs.findIndex(
+      (entry) => entry.id === currentTab,
+    );
+    if (currentIndex < 0) {
+      return;
+    }
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % visibleTabs.length;
+    } else if (event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + visibleTabs.length) % visibleTabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = visibleTabs.length - 1;
+    }
+
+    if (nextIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextTab = visibleTabs[nextIndex].id;
+    setTab(nextTab);
+    document.getElementById(settingsTabId(nextTab))?.focus();
+  };
+
+  const nothingFound = visibleTabs.length === 0;
+  const isHidden = (section: SettingsTab) => nothingFound || tab !== section;
+
+  return (
+    <>
+      <div className="settings-nav">
+        <div className="settings-search">
+          <SearchIcon className="settings-search-icon" aria-hidden="true" />
+          <input
+            type="search"
+            className="settings-search-input"
+            placeholder={t("settings.searchPlaceholder")}
+            aria-label={t("settings.searchPlaceholder")}
+            value={props.query}
+            onChange={(event) => props.onQueryChange(event.target.value)}
+          />
+        </div>
+
+        <div className="settings-nav-label" id={props.titleId}>
+          {t("settings.title")}
         </div>
 
         <div
-          className="settings-tabs"
+          className="settings-nav-list"
           role="tablist"
-          aria-orientation="horizontal"
+          aria-orientation="vertical"
           aria-label={t("settings.title")}
         >
-          {SETTINGS_TABS.map((entry) => (
+          {visibleTabs.map((entry) => (
             <button
               key={entry.id}
               type="button"
@@ -149,67 +210,96 @@ export function Settings(props: SettingsProps) {
               aria-controls={settingsPanelId(entry.id)}
               aria-selected={tab === entry.id}
               tabIndex={tab === entry.id ? 0 : -1}
-              className={`settings-tab ${tab === entry.id ? "is-selected" : ""}`}
+              className={`settings-nav-item ${
+                tab === entry.id ? "is-selected" : ""
+              }`}
               onClick={() => setTab(entry.id)}
               onKeyDown={(event) => onTabKeyDown(event, entry.id)}
             >
-              {t(entry.label)}
+              <entry.Icon className="settings-nav-icon" aria-hidden="true" />
+              <span>{t(entry.label)}</span>
             </button>
           ))}
+          {nothingFound && (
+            <p className="settings-nav-empty">{t("settings.searchEmpty")}</p>
+          )}
         </div>
 
-        <div
-          className="settings-body"
-          style={bodyHeight === undefined ? undefined : { height: bodyHeight }}
-        >
-          <div className="settings-body-track" ref={bodyTrackRef}>
-            <div
-              id={settingsPanelId("appearance")}
-              role="tabpanel"
-              aria-labelledby={settingsTabId("appearance")}
-              hidden={tab !== "appearance"}
-              tabIndex={0}
-            >
-              <AppearanceTab
-                themeId={props.themeId}
-                accent={props.accent}
-                onSelectTheme={props.onSelectTheme}
-                onSelectAccent={props.onSelectAccent}
-              />
-            </div>
-
-            <div
-              id={settingsPanelId("terminal")}
-              role="tabpanel"
-              aria-labelledby={settingsTabId("terminal")}
-              hidden={tab !== "terminal"}
-              tabIndex={0}
-            >
-              <TerminalTab
-                shell={props.shell}
-                shellBusy={props.shellBusy}
-                terminalFontSize={props.terminalFontSize}
-                onSelectShell={props.onSelectShell}
-                onSelectTerminalFontSize={props.onSelectTerminalFontSize}
-              />
-            </div>
-
-            <div
-              id={settingsPanelId("notifications")}
-              role="tabpanel"
-              aria-labelledby={settingsTabId("notifications")}
-              hidden={tab !== "notifications"}
-              tabIndex={0}
-            >
-              <NotificationsTab />
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-footer">
+        <div className="settings-nav-footer">
           ModelCrew · {t("settings.appVersion", { version: APP_VERSION })}
         </div>
       </div>
-    </div>
+
+      <button
+        type="button"
+        className="icon-button settings-close"
+        onClick={props.onClose}
+        title={t("common.close")}
+        aria-label={t("common.close")}
+      >
+        <CloseIcon />
+      </button>
+
+      <div className="settings-content" ref={contentRef}>
+        <div
+          id={settingsPanelId("appearance")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("appearance")}
+          hidden={isHidden("appearance")}
+          tabIndex={0}
+        >
+          <AppearanceTab
+            themeId={props.themeId}
+            accent={props.accent}
+            onSelectTheme={props.onSelectTheme}
+            onSelectAccent={props.onSelectAccent}
+          />
+        </div>
+
+        <div
+          id={settingsPanelId("terminal")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("terminal")}
+          hidden={isHidden("terminal")}
+          tabIndex={0}
+        >
+          <TerminalTab
+            shell={props.shell}
+            shellBusy={props.shellBusy}
+            terminalFontSize={props.terminalFontSize}
+            onSelectShell={props.onSelectShell}
+            onSelectTerminalFontSize={props.onSelectTerminalFontSize}
+          />
+        </div>
+
+        <div
+          id={settingsPanelId("agents")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("agents")}
+          hidden={isHidden("agents")}
+          tabIndex={0}
+        >
+          <AgentsTab />
+        </div>
+
+        <div
+          id={settingsPanelId("notifications")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("notifications")}
+          hidden={isHidden("notifications")}
+          tabIndex={0}
+        >
+          <NotificationsTab />
+        </div>
+
+        {nothingFound && (
+          <p className="settings-content-empty">{t("settings.searchEmpty")}</p>
+        )}
+      </div>
+    </>
   );
 }
