@@ -1,34 +1,23 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { type MessageKey, useI18n } from "../../i18n";
+import { useI18n } from "../../i18n";
 import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
-  loadAgentAlertsEnabled,
   loadEagerSessionRestore,
   loadGridOrientation,
   loadTerminalHistoryIsolation,
-  saveAgentAlertsEnabled,
   saveEagerSessionRestore,
   saveGridOrientation,
   saveTerminalHistoryIsolation,
   type GridOrientation,
 } from "../../terminal/preferences";
-import {
-  AGENTS,
-  loadAgentResumeMode,
-  saveAgentResumeMode,
-  type AgentResumeMode,
-} from "../../agents";
+import { SettingRow, SettingsPage, SettingsSelect } from "./SettingsControls";
 
-const resumeModeMessageKeys: Record<AgentResumeMode, MessageKey> = {
-  off: "settings.agentResumeOff",
-  insert: "settings.agentResumeInsert",
-  auto: "settings.agentResumeAuto",
-};
-
-const RESUME_MODES: AgentResumeMode[] = ["auto", "insert", "off"];
+// Значение «системная оболочка» приходит из App как null, а <select> умеет
+// хранить только строки — пустая строка и есть этот случай.
+const SYSTEM_SHELL = "";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -43,20 +32,14 @@ type TerminalTabProps = {
 export function TerminalTab(props: TerminalTabProps) {
   const { t } = useI18n();
   const [shells, setShells] = useState<ShellOption[]>([]);
-  const [resumeMode, setResumeMode] = useState<AgentResumeMode>(() =>
-    loadAgentResumeMode(),
-  );
   const [historyIsolated, setHistoryIsolated] = useState(() =>
     loadTerminalHistoryIsolation(),
   );
   const [eagerRestore, setEagerRestore] = useState(() =>
     loadEagerSessionRestore(),
   );
-  const [gridOrientation, setGridOrientation] = useState<GridOrientation>(
-    () => loadGridOrientation(),
-  );
-  const [agentAlerts, setAgentAlerts] = useState(() =>
-    loadAgentAlertsEnabled(),
+  const [gridOrientation, setGridOrientation] = useState<GridOrientation>(() =>
+    loadGridOrientation(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -81,240 +64,146 @@ export function TerminalTab(props: TerminalTabProps) {
   }, []);
 
   return (
-    <>
+    <SettingsPage
+      section="terminal"
+      title={t("settings.tabTerminal")}
+      intro={t("settings.terminalIntro")}
+    >
       {isTauri && shells.length > 0 && (
-        <div className="settings-section">
-          <div className="settings-label">{t("settings.shell")}</div>
-          <div
-            className="shell-options"
-            role="group"
-            aria-label={t("settings.shell")}
-            aria-busy={props.shellBusy}
-          >
-            <button
-              type="button"
-              disabled={props.shellBusy}
-              aria-pressed={props.shell === null}
-              className={`shell-option ${props.shell === null ? "is-selected" : ""}`}
-              onClick={() =>
-                props.onSelectShell(null, t("settings.shellDefault"))
-              }
-            >
-              {t("settings.shellDefault")}
-            </button>
-            {shells.map((option) => (
-              <button
-                key={option.command}
-                type="button"
-                disabled={props.shellBusy}
-                title={t("settings.selectShell", { name: option.label })}
-                aria-label={t("settings.selectShell", {
-                  name: option.label,
-                })}
-                aria-pressed={props.shell === option.command}
-                className={`shell-option ${
-                  props.shell === option.command ? "is-selected" : ""
-                }`}
-                onClick={() =>
-                  props.onSelectShell(option.command, option.label)
-                }
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <p className="settings-note">
-            {props.shellBusy
+        <SettingRow
+          title={t("settings.shell")}
+          description={
+            props.shellBusy
               ? t("settings.shellApplying")
-              : t("settings.shellNote")}
-          </p>
-        </div>
+              : t("settings.shellNote")
+          }
+          keywords={shells.map((option) => option.label).join(" ")}
+          control={
+            <SettingsSelect
+              label={t("settings.shell")}
+              value={props.shell ?? SYSTEM_SHELL}
+              busy={props.shellBusy}
+              disabled={props.shellBusy}
+              options={[
+                {
+                  value: SYSTEM_SHELL,
+                  label: t("settings.shellDefault"),
+                },
+                ...shells.map((option) => ({
+                  value: option.command,
+                  label: option.label,
+                })),
+              ]}
+              onChange={(value) => {
+                if (value === SYSTEM_SHELL) {
+                  props.onSelectShell(null, t("settings.shellDefault"));
+                  return;
+                }
+                const picked = shells.find(
+                  (option) => option.command === value,
+                );
+                props.onSelectShell(value, picked?.label ?? value);
+              }}
+            />
+          }
+        />
       )}
 
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.terminalFontSize")}</div>
-        <div className="terminal-font-size-control">
-          <input
-            type="range"
-            className="terminal-font-size-slider"
-            min={MIN_TERMINAL_FONT_SIZE}
-            max={MAX_TERMINAL_FONT_SIZE}
-            step={1}
-            value={props.terminalFontSize}
-            aria-label={t("settings.terminalFontSize")}
-            aria-valuetext={t("settings.terminalFontSizeValue", {
-              size: props.terminalFontSize,
-            })}
-            style={
+      <SettingRow
+        title={t("settings.terminalFontSize")}
+        description={t("settings.terminalFontSizeNote")}
+        control={
+          <div className="terminal-font-size-control">
+            <input
+              type="range"
+              className="terminal-font-size-slider"
+              min={MIN_TERMINAL_FONT_SIZE}
+              max={MAX_TERMINAL_FONT_SIZE}
+              step={1}
+              value={props.terminalFontSize}
+              aria-label={t("settings.terminalFontSize")}
+              aria-valuetext={t("settings.terminalFontSizeValue", {
+                size: props.terminalFontSize,
+              })}
+              style={
+                {
+                  "--terminal-font-size-progress": `${fontSizeProgress}%`,
+                } as CSSProperties
+              }
+              onChange={(event) =>
+                props.onSelectTerminalFontSize(Number(event.target.value))
+              }
+            />
+            <output className="terminal-font-size-value" aria-live="polite">
+              {t("settings.terminalFontSizeValue", {
+                size: props.terminalFontSize,
+              })}
+            </output>
+          </div>
+        }
+      />
+
+      <SettingRow
+        title={t("settings.terminalHistory")}
+        description={t("settings.terminalHistoryNote")}
+        control={
+          <SettingsSelect
+            label={t("settings.terminalHistory")}
+            value={historyIsolated ? "panel" : "shared"}
+            options={[
               {
-                "--terminal-font-size-progress": `${fontSizeProgress}%`,
-              } as CSSProperties
-            }
-            onChange={(event) =>
-              props.onSelectTerminalFontSize(Number(event.target.value))
-            }
+                value: "panel",
+                label: t("settings.terminalHistoryPerPanel"),
+              },
+              { value: "shared", label: t("settings.terminalHistoryShared") },
+            ]}
+            onChange={(value) => {
+              const isolated = value === "panel";
+              setHistoryIsolated(isolated);
+              saveTerminalHistoryIsolation(isolated);
+            }}
           />
-          <output className="terminal-font-size-value" aria-live="polite">
-            {t("settings.terminalFontSizeValue", {
-              size: props.terminalFontSize,
-            })}
-          </output>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.agentResume")}</div>
-        <div
-          className="shell-options"
-          role="group"
-          aria-label={t("settings.agentResume")}
-        >
-          {RESUME_MODES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={resumeMode === mode}
-              className={`shell-option ${resumeMode === mode ? "is-selected" : ""}`}
-              onClick={() => {
-                setResumeMode(mode);
-                saveAgentResumeMode(mode);
-              }}
-            >
-              {t(resumeModeMessageKeys[mode])}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">{t("settings.agentResumeNote")}</p>
-        <p className="settings-note">
-          {t("settings.agentResumeSupported", {
-            agents: AGENTS.map((agent) => agent.label).join(" · "),
-          })}
-        </p>
-      </div>
+      <SettingRow
+        title={t("settings.gridOrientation")}
+        description={t("settings.gridOrientationNote")}
+        control={
+          <SettingsSelect<GridOrientation>
+            label={t("settings.gridOrientation")}
+            value={gridOrientation}
+            options={[
+              { value: "columns", label: t("settings.gridColumns") },
+              { value: "rows", label: t("settings.gridRows") },
+            ]}
+            onChange={(value) => {
+              setGridOrientation(value);
+              saveGridOrientation(value);
+            }}
+          />
+        }
+      />
 
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.agentAlerts")}</div>
-        <div
-          className="shell-options"
-          role="group"
-          aria-label={t("settings.agentAlerts")}
-        >
-          {[true, false].map((enabled) => (
-            <button
-              key={String(enabled)}
-              type="button"
-              aria-pressed={agentAlerts === enabled}
-              className={`shell-option ${
-                agentAlerts === enabled ? "is-selected" : ""
-              }`}
-              onClick={() => {
-                setAgentAlerts(enabled);
-                saveAgentAlertsEnabled(enabled);
-              }}
-            >
-              {t(
-                enabled
-                  ? "settings.agentAlertsOn"
-                  : "settings.agentAlertsOff",
-              )}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">{t("settings.agentAlertsNote")}</p>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.gridOrientation")}</div>
-        <div
-          className="shell-options"
-          role="group"
-          aria-label={t("settings.gridOrientation")}
-        >
-          {(["columns", "rows"] as const).map((orientation) => (
-            <button
-              key={orientation}
-              type="button"
-              aria-pressed={gridOrientation === orientation}
-              className={`shell-option ${
-                gridOrientation === orientation ? "is-selected" : ""
-              }`}
-              onClick={() => {
-                setGridOrientation(orientation);
-                saveGridOrientation(orientation);
-              }}
-            >
-              {t(
-                orientation === "columns"
-                  ? "settings.gridColumns"
-                  : "settings.gridRows",
-              )}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">{t("settings.gridOrientationNote")}</p>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.sessionRestore")}</div>
-        <div
-          className="shell-options"
-          role="group"
-          aria-label={t("settings.sessionRestore")}
-        >
-          {[true, false].map((eager) => (
-            <button
-              key={String(eager)}
-              type="button"
-              aria-pressed={eagerRestore === eager}
-              className={`shell-option ${
-                eagerRestore === eager ? "is-selected" : ""
-              }`}
-              onClick={() => {
-                setEagerRestore(eager);
-                saveEagerSessionRestore(eager);
-              }}
-            >
-              {t(
-                eager
-                  ? "settings.sessionRestoreAll"
-                  : "settings.sessionRestoreActive",
-              )}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">{t("settings.sessionRestoreNote")}</p>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.terminalHistory")}</div>
-        <div
-          className="shell-options"
-          role="group"
-          aria-label={t("settings.terminalHistory")}
-        >
-          {[true, false].map((isolated) => (
-            <button
-              key={String(isolated)}
-              type="button"
-              aria-pressed={historyIsolated === isolated}
-              className={`shell-option ${
-                historyIsolated === isolated ? "is-selected" : ""
-              }`}
-              onClick={() => {
-                setHistoryIsolated(isolated);
-                saveTerminalHistoryIsolation(isolated);
-              }}
-            >
-              {t(
-                isolated
-                  ? "settings.terminalHistoryPerPanel"
-                  : "settings.terminalHistoryShared",
-              )}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">{t("settings.terminalHistoryNote")}</p>
-      </div>
-    </>
+      <SettingRow
+        title={t("settings.sessionRestore")}
+        description={t("settings.sessionRestoreNote")}
+        control={
+          <SettingsSelect
+            label={t("settings.sessionRestore")}
+            value={eagerRestore ? "all" : "active"}
+            options={[
+              { value: "all", label: t("settings.sessionRestoreAll") },
+              { value: "active", label: t("settings.sessionRestoreActive") },
+            ]}
+            onChange={(value) => {
+              const eager = value === "all";
+              setEagerRestore(eager);
+              saveEagerSessionRestore(eager);
+            }}
+          />
+        }
+      />
+    </SettingsPage>
   );
 }
