@@ -309,11 +309,24 @@ export const ru = {
   "sidebar.newTerminalIn": "Новый терминал в сессии «{name}»",
 
   "settings.title": "Настройки",
+  "settings.searchPlaceholder": "Поиск настроек",
+  "settings.searchEmpty": "Ничего не нашлось",
+  "settings.appearanceIntro":
+    "Язык, тема и цвета. Всё применяется сразу — перезапуск не нужен.",
+  "settings.terminalIntro":
+    "Оболочка, размер шрифта и то, как ведут себя панели и сессии.",
+  "settings.agentsIntro":
+    "Как ModelCrew возвращается к диалогам агентов и сообщает об их работе.",
+  "settings.notificationsIntro":
+    "Звук и системные баннеры о том, что происходит в приложении.",
   "settings.language": "Язык интерфейса",
   "settings.languageRussian": "Русский",
   "settings.languageEnglish": "English",
+  "settings.languageNote": "Меняется сразу, перезапуск не нужен",
   "settings.theme": "Тема интерфейса",
+  "settings.themeNote": "Цвета окна, панелей и терминала",
   "settings.accent": "Цвет подсветки",
+  "settings.accentNote": "Цвет выделения и активных элементов",
   "settings.customColor": "Свой цвет",
   "settings.selectTheme": "Выбрать тему «{name}»",
   "settings.selectAccent": "Выбрать цвет «{name}»",
@@ -337,8 +350,6 @@ export const ru = {
   "settings.agentResumeInsert": "Подставить команду",
   "settings.agentResumeAuto": "Запускать автоматически",
   "settings.agentAlerts": "Уведомления от агентов",
-  "settings.agentAlertsOn": "Включены",
-  "settings.agentAlertsOff": "Выключены",
   "settings.agentAlertsNote":
     "Звук и системное уведомление, когда агент вне поля зрения закончил работу или ждёт ответа: терминальный звонок либо тишина после активности. Счётчик ожидающих панелей попадает на иконку приложения.",
   "terminal.agentWaiting": "{agent} ждёт ответа",
@@ -360,20 +371,20 @@ export const ru = {
   "settings.terminalHistoryNote":
     "Стрелка вверх возвращает команды именно этой панели; история переживает перезапуск. Действует для новых терминалов.",
   "settings.terminalFontSize": "Размер шрифта терминала",
+  "settings.terminalFontSizeNote": "Размер текста во всех терминалах",
   "settings.terminalFontSizeValue": "{size} px",
   "settings.tabAppearance": "Внешний вид",
   "settings.tabTerminal": "Терминал",
+  "settings.tabAgents": "Агенты",
   "settings.tabNotifications": "Уведомления",
   "settings.appVersion": "версия {version}",
   "settings.notificationSound": "Звук уведомления",
   "settings.notificationSoundNote":
-    "Проигрывается при новом уведомлении. Нажмите, чтобы прослушать.",
+    "Проигрывается при новом уведомлении. Выбранный звук сразу слышно.",
   "settings.notificationSoundSuppressed":
     "Похоже, аудиосистема зависла при прошлой попытке, поэтому звук временно отключён. Выберите «Без звука», а затем нужный звук, чтобы попробовать снова.",
   "settings.previewSound": "Прослушать «{name}»",
   "settings.systemNotifications": "Системные уведомления",
-  "settings.systemNotificationsOn": "Включены",
-  "settings.systemNotificationsOff": "Выключены",
   "settings.systemNotificationsNote":
     "Баннер на уровне ОС, когда окно не в фокусе: обновления и анонсы видно даже со свёрнутым приложением.",
   "settings.soundOff": "Без звука",
