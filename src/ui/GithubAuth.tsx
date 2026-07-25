@@ -11,7 +11,10 @@ import {
   type GithubUser,
 } from "../github/auth";
 import { refreshGithubCommitAvatars } from "../git/githubAvatars";
-import { setGithubSignedIn } from "../github/authState";
+import {
+  setGithubSignedIn,
+  subscribeGithubAuthRequests,
+} from "../github/authState";
 import { saveNetworkAvatars } from "../terminal/preferences";
 
 type FlowState =
@@ -160,6 +163,22 @@ export function GithubAuth() {
     // Токена больше нет — карту GitHub-аватарок сбрасываем на Gravatar/инициалы.
     refreshGithubCommitAvatars();
   };
+
+  // Кнопки в настройках только просят войти или выйти: сам вход остаётся здесь,
+  // вместе с опросом подтверждения и текущим пользователем. Обработчики читают
+  // только стабильные сеттеры, поэтому подписка живёт от монтирования до
+  // размонтирования.
+  useEffect(
+    () =>
+      subscribeGithubAuthRequests((request) => {
+        if (request === "login") {
+          void startLogin();
+          return;
+        }
+        void logout();
+      }),
+    [],
+  );
 
   if (!isTauri) {
     return null;
