@@ -310,11 +310,24 @@ export const en: Record<MessageKey, string> = {
   "sidebar.newTerminalIn": "New terminal in session “{name}”",
 
   "settings.title": "Settings",
+  "settings.searchPlaceholder": "Search settings",
+  "settings.searchEmpty": "Nothing found",
+  "settings.appearanceIntro":
+    "Language, theme, and colors. Everything applies right away — no restart needed.",
+  "settings.terminalIntro":
+    "The shell, the font size, and how panels and sessions behave.",
+  "settings.agentsIntro":
+    "How ModelCrew returns to agent chats and reports on their work.",
+  "settings.notificationsIntro":
+    "Sound and system banners for what happens in the app.",
   "settings.language": "Interface language",
   "settings.languageRussian": "Русский",
   "settings.languageEnglish": "English",
+  "settings.languageNote": "Applies immediately, no restart needed",
   "settings.theme": "Interface theme",
+  "settings.themeNote": "Colors of the window, panels, and terminal",
   "settings.accent": "Accent color",
+  "settings.accentNote": "The color of selection and active elements",
   "settings.customColor": "Custom color",
   "settings.selectTheme": "Select the “{name}” theme",
   "settings.selectAccent": "Select the “{name}” color",
@@ -338,8 +351,6 @@ export const en: Record<MessageKey, string> = {
   "settings.agentResumeInsert": "Type the command",
   "settings.agentResumeAuto": "Run automatically",
   "settings.agentAlerts": "Agent alerts",
-  "settings.agentAlertsOn": "On",
-  "settings.agentAlertsOff": "Off",
   "settings.agentAlertsNote":
     "Sound and a system notification when an out-of-sight agent finishes or waits for input: a terminal bell or silence after activity. Waiting panels are counted on the app icon badge.",
   "terminal.agentWaiting": "{agent} is waiting for your reply",
@@ -361,20 +372,20 @@ export const en: Record<MessageKey, string> = {
   "settings.terminalHistoryNote":
     "Arrow-up recalls commands from this panel only; history survives restarts. Applies to new terminals.",
   "settings.terminalFontSize": "Terminal font size",
+  "settings.terminalFontSizeNote": "Text size in every terminal",
   "settings.terminalFontSizeValue": "{size} px",
   "settings.tabAppearance": "Appearance",
   "settings.tabTerminal": "Terminal",
+  "settings.tabAgents": "Agents",
   "settings.tabNotifications": "Notifications",
   "settings.appVersion": "version {version}",
   "settings.notificationSound": "Notification sound",
   "settings.notificationSoundNote":
-    "Plays when a new notification arrives. Click to preview.",
+    "Plays when a new notification arrives. The sound you pick plays at once.",
   "settings.notificationSoundSuppressed":
     "Audio appeared to hang last time a sound played, so sound is temporarily disabled. Select “Off”, then pick a sound to try again.",
   "settings.previewSound": "Preview “{name}”",
   "settings.systemNotifications": "System notifications",
-  "settings.systemNotificationsOn": "On",
-  "settings.systemNotificationsOff": "Off",
   "settings.systemNotificationsNote":
     "OS-level banner when the window is unfocused: updates and announcements stay visible even with the app minimized.",
   "settings.soundOff": "Off",
