@@ -67,8 +67,10 @@ function source(
   return {
     version: overrides.version ?? "0.0.2",
     body: overrides.body ?? FALLBACK_BODY,
-    rawJson,
-  } as ReleaseSource;
+    // Манифест приходит как произвольный JSON: тесты сознательно подставляют
+    // сюда не только объекты.
+    rawJson: rawJson as Record<string, unknown>,
+  };
 }
 
 function notes(payload: unknown, locale: "ru" | "en" = "en"): ReleaseSource {
@@ -437,14 +439,18 @@ describe("rendering untrusted notification content", () => {
         hostileNotification({
           installKind: "manual",
           phase: "manual",
-          releaseUrl: "javascript:alert(1)",
+          title: "Update ready",
+          summary: "Manual installation",
+          highlights: [],
+          releaseUrl: "javascript:alert('hostile-release-url')",
         }),
       ],
     });
 
     expect(document.querySelector("a")).toBeNull();
     expect(document.querySelector("[href]")).toBeNull();
-    expect(document.body.innerHTML).not.toContain("javascript:alert(1)");
+    expect(document.body.innerHTML).not.toContain("hostile-release-url");
+    expect(document.body.innerHTML).not.toContain("javascript:");
   });
 
   it("passes no URL to the release affordance", () => {
@@ -537,7 +543,9 @@ describe("poisoned notification storage", () => {
       ]),
     );
 
-    expect(load()).toEqual(["update:0.0.2", "announcement:one"]);
+    // Дубликат схлопывается к самому свежему вхождению, объекты и числа
+    // отбрасываются: наружу выходят только строковые id.
+    expect(load()).toEqual(["announcement:one", "update:0.0.2"]);
   });
 
   it.each(STORAGE_KEYS)("does not pollute Object.prototype from %s", (key) => {

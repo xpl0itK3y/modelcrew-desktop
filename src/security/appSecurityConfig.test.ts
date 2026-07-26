@@ -187,6 +187,16 @@ describe("production CSP", () => {
     expect(img.some((source) => source.startsWith("http://"))).toBe(false);
   });
 
+  it("pins the remote image hosts", () => {
+    expect(sourcesOf("img-src")).toEqual([
+      "'self'",
+      "data:",
+      "https://avatars.githubusercontent.com",
+      "https://github.com",
+      "https://www.gravatar.com",
+    ]);
+  });
+
   it("keeps media and fonts off the network", () => {
     const media = sourcesOf("media-src");
     expect(hasWildcard(media)).toBe(false);
@@ -282,9 +292,8 @@ describe("capabilities", () => {
     // читать глазами, а не пропускать мимо этого теста.
     for (const [name, capability] of capabilities) {
       for (const permission of capability.permissions ?? []) {
-        expect(typeof permission, `${name}: ${JSON.stringify(permission)}`).toBe(
-          "string",
-        );
+        const where = `${name}: ${JSON.stringify(permission)}`;
+        expect(typeof permission, where).toBe("string");
       }
     }
   });
@@ -297,6 +306,9 @@ describe("capabilities", () => {
       /^core:webview:allow-create/u,
       /allow-execute$/u,
       /allow-spawn$/u,
+      // open_path отдаёт произвольный путь системному обработчику, то есть
+      // запускает файл из репозитория, который открыл пользователь.
+      /allow-open-path$/u,
       /allow-write-file$/u,
       /allow-read-file$/u,
       /\*/u,
@@ -324,8 +336,12 @@ describe("updater plugin", () => {
       const url = new URL(endpoint);
       expect(url.protocol).toBe("https:");
       expect(url.hostname).toBe("github.com");
+      // Логин в URL увёл бы запрос на другой хост в глазах невнимательного ревью.
       expect(url.username).toBe("");
       expect(url.password).toBe("");
+      expect(url.pathname.startsWith("/xpl0itK3y/modelcrew-desktop/")).toBe(
+        true,
+      );
     }
   });
 
@@ -336,7 +352,9 @@ describe("updater plugin", () => {
 
     const block = atob(updater?.pubkey ?? "");
     const [comment, encodedKey] = block.trim().split(/\r?\n/u);
-    expect(comment).toMatch(/^untrusted comment: minisign public key: [0-9A-F]{16}$/u);
+    expect(comment).toMatch(
+      /^untrusted comment: minisign public key: [0-9A-F]{16}$/u,
+    );
 
     // Тело ключа minisign: 2 байта алгоритма + 8 байт key id + 32 байта Ed25519.
     const key = decodeBase64(encodedKey);
