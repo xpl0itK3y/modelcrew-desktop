@@ -27,5 +27,7 @@ dist-ssr
 *.sw?
 .codegraph
 .secrets/
+AGENTS.md
+.agents/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
