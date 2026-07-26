@@ -200,6 +200,15 @@ export function AgentIcon(props: IconProps) {
   );
 }
 
+export function UserIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="5.6" r="2.6" />
+      <path d="M3 13.4a5 5 0 0 1 10 0" />
+    </svg>
+  );
+}
+
 export function PlayIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
