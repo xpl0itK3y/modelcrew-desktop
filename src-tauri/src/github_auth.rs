@@ -32,6 +32,10 @@ fn token_path(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
     Ok(dir.join("github-token"))
 }
 
+fn identity_path(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
+    Ok(token_path(app)?.with_file_name("github-identity.json"))
+}
+
 fn read_token(app: &tauri::AppHandle) -> Option<String> {
     let path = token_path(app).ok()?;
     let token = std::fs::read_to_string(path).ok()?;
@@ -57,6 +61,9 @@ fn store_token(app: &tauri::AppHandle, token: &str) -> CommandResult<()> {
 
 fn clear_token(app: &tauri::AppHandle) {
     if let Ok(path) = token_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Ok(path) = identity_path(app) {
         let _ = std::fs::remove_file(path);
     }
 }
@@ -108,8 +115,71 @@ struct TokenResponse {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct GithubUser {
+    #[serde(skip_serializing)]
+    id: u64,
     login: String,
     avatar_url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GithubCommitIdentity {
+    pub(crate) name: String,
+    pub(crate) email: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct GithubIdentityCache {
+    id: u64,
+    login: String,
+}
+
+impl GithubIdentityCache {
+    fn from_user(user: &GithubUser) -> Self {
+        Self {
+            id: user.id,
+            login: user.login.clone(),
+        }
+    }
+
+    fn commit_identity(&self) -> Option<GithubCommitIdentity> {
+        let login = self.login.trim();
+        if self.id == 0
+            || login.is_empty()
+            || login.len() > 100
+            || !login
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return None;
+        }
+        Some(GithubCommitIdentity {
+            name: login.to_owned(),
+            email: format!("{}+{}@users.noreply.github.com", self.id, login),
+        })
+    }
+}
+
+fn store_commit_identity(app: &tauri::AppHandle, user: &GithubUser) -> CommandResult<()> {
+    let path = identity_path(app)?;
+    let content = serde_json::to_vec(&GithubIdentityCache::from_user(user))
+        .map_err(|error| CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error))?;
+    std::fs::write(&path, content)
+        .map_err(|error| CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+pub(crate) fn github_commit_identity(app: &tauri::AppHandle) -> Option<GithubCommitIdentity> {
+    // Identity is active only while the OAuth token is present.
+    read_token(app)?;
+    let content = std::fs::read(identity_path(app).ok()?).ok()?;
+    serde_json::from_slice::<GithubIdentityCache>(&content)
+        .ok()?
+        .commit_identity()
 }
 
 #[tauri::command]
@@ -219,6 +289,7 @@ pub async fn github_current_user(
         .json()
         .await
         .map_err(|error| CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error))?;
+    store_commit_identity(&app, &user)?;
     Ok(Some(user))
 }
 
@@ -500,6 +571,34 @@ mod tests {
         let json = serde_json::to_string(&user).unwrap();
         assert!(json.contains("\"avatarUrl\""), "frontend gets camelCase");
         assert!(!json.contains("avatar_url"));
+        assert!(!json.contains("\"id\""), "numeric id stays on the backend");
+        assert_eq!(
+            GithubIdentityCache::from_user(&user).commit_identity(),
+            Some(GithubCommitIdentity {
+                name: "octocat".to_owned(),
+                email: "1+octocat@users.noreply.github.com".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_tampered_cached_github_identities() {
+        for cache in [
+            GithubIdentityCache {
+                id: 0,
+                login: "octocat".to_owned(),
+            },
+            GithubIdentityCache {
+                id: 1,
+                login: "octo\ncat".to_owned(),
+            },
+            GithubIdentityCache {
+                id: 1,
+                login: "octocat@example.com".to_owned(),
+            },
+        ] {
+            assert_eq!(cache.commit_identity(), None);
+        }
     }
 
     // Ответ device-токена: авторизован (access_token) и «ещё ждём» (error).
@@ -978,6 +1077,7 @@ mod tests {
         );
 
         let user = GithubUser {
+            id: 1,
             login: "octocat".to_owned(),
             avatar_url: "https://avatars.githubusercontent.com/u/1?v=4".to_owned(),
         };

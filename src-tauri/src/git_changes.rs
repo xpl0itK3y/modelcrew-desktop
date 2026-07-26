@@ -3,6 +3,7 @@
 // массивом (без шелла). Парсеры вынесены в чистые функции под юнит-тесты.
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::github_auth::{github_commit_identity, GithubCommitIdentity};
 use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -97,7 +98,19 @@ fn git_command() -> Command {
 }
 
 fn run_git(root: &Path, args: &[&str]) -> CommandResult<Vec<u8>> {
-    let output = git_command()
+    run_git_with_env(root, args, &[])
+}
+
+fn run_git_with_env(
+    root: &Path,
+    args: &[&str],
+    environment: &[(&str, &str)],
+) -> CommandResult<Vec<u8>> {
+    let mut command = git_command();
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+    let output = command
         .arg("-c")
         .arg("core.quotepath=false")
         .args(args)
@@ -2467,6 +2480,14 @@ pub async fn git_log(
 const MAX_COMMIT_MESSAGE_CHARS: usize = 4000;
 
 pub fn commit_all(root: &Path, message: &str) -> CommandResult<()> {
+    commit_all_with_identity(root, message, None)
+}
+
+fn commit_all_with_identity(
+    root: &Path,
+    message: &str,
+    identity: Option<&GithubCommitIdentity>,
+) -> CommandResult<()> {
     let message = message.trim();
     if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
         return Err(
@@ -2477,7 +2498,17 @@ pub fn commit_all(root: &Path, message: &str) -> CommandResult<()> {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
     run_git(&toplevel, &["add", "-A"])?;
-    run_git(&toplevel, &["commit", "-m", message])?;
+    if let Some(identity) = identity {
+        let environment = [
+            ("GIT_AUTHOR_NAME", identity.name.as_str()),
+            ("GIT_AUTHOR_EMAIL", identity.email.as_str()),
+            ("GIT_COMMITTER_NAME", identity.name.as_str()),
+            ("GIT_COMMITTER_EMAIL", identity.email.as_str()),
+        ];
+        run_git_with_env(&toplevel, &["commit", "-m", message], &environment)?;
+    } else {
+        run_git(&toplevel, &["commit", "-m", message])?;
+    }
     Ok(())
 }
 
@@ -2517,15 +2548,20 @@ pub fn revert_file(root: &Path, path: &str, orig_path: Option<&str>) -> CommandR
 #[tauri::command]
 pub async fn git_commit(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     message: String,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || commit_all(&root, &message))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    let identity = github_commit_identity(&app);
+    tauri::async_runtime::spawn_blocking(move || match identity.as_ref() {
+        Some(identity) => commit_all_with_identity(&root, &message, Some(identity)),
+        None => commit_all(&root, &message),
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -7672,6 +7708,28 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         reword_commit(root, &head, "-m still data").unwrap();
         assert_eq!(git_at(root, &["log", "-1", "--format=%s"]), "-m still data");
         assert!(reword_commit(root, &head_of(&git), "  ").is_err());
+    }
+
+    #[test]
+    fn github_identity_applies_only_to_the_created_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        let identity = GithubCommitIdentity {
+            name: "octocat".to_owned(),
+            email: "1+octocat@users.noreply.github.com".to_owned(),
+        };
+
+        commit_all_with_identity(root, "github-authored", Some(&identity)).unwrap();
+
+        assert_eq!(
+            git_at(root, &["log", "-1", "--format=%an <%ae>|%cn <%ce>"]),
+            "octocat <1+octocat@users.noreply.github.com>|octocat <1+octocat@users.noreply.github.com>"
+        );
+        assert_eq!(git_at(root, &["config", "user.name"]), "Me");
+        assert_eq!(git_at(root, &["config", "user.email"]), "me@t");
+        drop(git);
     }
 
     #[test]
