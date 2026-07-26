@@ -33,7 +33,6 @@ describe("agent catalog", () => {
     expect(matchAgent("Kimi")?.agent.id).toBe("kimi");
     expect(matchAgent("grok")?.agent.id).toBe("grok");
     expect(matchAgent("cursor-agent")?.agent.id).toBe("cursor");
-    expect(matchAgent("gemini")?.agent.id).toBe("gemini");
     expect(matchAgent("qwen")?.agent.id).toBe("qwen");
     expect(matchAgent("aider")?.agent.id).toBe("aider");
     expect(matchAgent("amp")?.agent.id).toBe("amp");

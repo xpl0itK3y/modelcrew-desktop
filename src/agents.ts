@@ -85,14 +85,6 @@ export const AGENTS: AgentDefinition[] = [
     resumeSession: ["--resume"],
   },
   {
-    id: "gemini",
-    label: "Gemini CLI",
-    processNames: ["gemini"],
-    resumeLast: ["--resume"],
-    resumePicker: ["--resume"],
-    resumeSession: ["--resume"],
-  },
-  {
     id: "qwen",
     label: "Qwen Code",
     processNames: ["qwen"],
