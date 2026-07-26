@@ -41,6 +41,7 @@ export function saveAgentAlertsEnabled(enabled: boolean): void {
 }
 
 const GRID_ORIENTATION_STORAGE_KEY = "modelcrew.gridOrientation";
+const GRID_ORIENTATION_EVENT = "modelcrew:grid-orientation";
 
 // Ориентация дерева при выравнивании сеткой: columns — парные горизонтальные
 // границы, rows — парные вертикальные (сквозной в дереве бывает только одна
@@ -63,6 +64,21 @@ export function saveGridOrientation(orientation: GridOrientation): void {
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }
+  window.dispatchEvent(
+    new CustomEvent<GridOrientation>(GRID_ORIENTATION_EVENT, {
+      detail: orientation,
+    }),
+  );
+}
+
+export function subscribeGridOrientation(
+  listener: (orientation: GridOrientation) => void,
+): () => void {
+  const handler = (event: Event) => {
+    listener((event as CustomEvent<GridOrientation>).detail);
+  };
+  window.addEventListener(GRID_ORIENTATION_EVENT, handler);
+  return () => window.removeEventListener(GRID_ORIENTATION_EVENT, handler);
 }
 
 const EAGER_RESTORE_STORAGE_KEY = "modelcrew.eagerSessionRestore";
