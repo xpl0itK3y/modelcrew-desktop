@@ -7288,4 +7288,1071 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             );
         }
     }
+
+    // ---------- Безопасность: репозиторий считаем враждебным ----------
+
+    // Репозиторий в подпапке временного каталога: рядом с ним остаётся место
+    // для «внешних» файлов и маркеров, которые панель трогать не должна.
+    fn repo_beside_outside(dir: &Path) -> PathBuf {
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        repo
+    }
+
+    #[test]
+    fn repo_paths_that_escape_or_look_like_options_are_rejected() {
+        for accepted in [
+            "src/app.ts",
+            "new file.txt",
+            "ещё файл.md",
+            "a/b/c/d.txt",
+            // Дефис не в начале строки опцией стать не может: путь всегда
+            // уходит в git после `--`.
+            "dir/-not-an-option.txt",
+            ".gitignore",
+            "a.lock",
+        ] {
+            assert!(is_safe_repo_path(accepted), "{accepted}");
+        }
+        assert!(is_safe_repo_path(&"a".repeat(4096)));
+
+        for rejected in [
+            "",
+            "/etc/passwd",
+            "/",
+            "-o",
+            "-rf",
+            "--output=/tmp/x",
+            "..",
+            "../secret",
+            "../../etc/passwd",
+            "a/../../etc/passwd",
+            "a/..",
+            "a/../b",
+            "a\\b",
+            "..\\..\\windows\\win.ini",
+            "\\\\server\\share\\x",
+            "//server/share/x",
+        ] {
+            assert!(!is_safe_repo_path(rejected), "{rejected}");
+        }
+        assert!(!is_safe_repo_path(&"a".repeat(4097)));
+    }
+
+    #[test]
+    fn panel_never_touches_a_file_outside_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, "OUTSIDE-SECRET\n").unwrap();
+
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+
+        let absolute = secret.to_str().unwrap().to_owned();
+        let escapes = [
+            "../outside/secret.txt",
+            "../../outside/secret.txt",
+            "a/../../outside/secret.txt",
+            "..",
+            absolute.as_str(),
+        ];
+        for path in escapes {
+            assert!(collect_file_diff(root, path).is_err(), "diff {path}");
+            assert!(read_repo_file(root, path).is_err(), "read {path}");
+            assert!(
+                write_repo_file(root, path, "OVERWRITTEN").is_err(),
+                "write {path}"
+            );
+            assert!(revert_file(root, path, None).is_err(), "revert {path}");
+            assert!(
+                commit_file_diff(root, &head, path).is_err(),
+                "commit diff {path}"
+            );
+            assert!(
+                compare_file_diff(root, &head, None, path).is_err(),
+                "compare {path}"
+            );
+            assert!(
+                list_log(
+                    root,
+                    20,
+                    false,
+                    &GitLogFilter {
+                        path: Some(path.to_owned()),
+                        ..Default::default()
+                    },
+                )
+                .is_err(),
+                "log {path}"
+            );
+        }
+
+        // Старое имя переименованного файла — второй путь того же вызова:
+        // через него checkout тоже не должен выйти за корень.
+        revert_file(root, "a.txt", Some("../outside/secret.txt")).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "OUTSIDE-SECRET\n");
+        assert_eq!(
+            std::fs::read_dir(&outside).unwrap().count(),
+            1,
+            "за корнем репозитория ничего не создано"
+        );
+    }
+
+    #[test]
+    fn revision_arguments_must_be_hashes_not_git_expressions() {
+        assert!(is_safe_hash("abcd"));
+        assert!(is_safe_hash("0123456789abcdef0123456789abcdef01234567"));
+        // Hex в верхнем регистре — обычный ответ git на некоторых платформах.
+        assert!(is_safe_hash("DeAdBeEf"));
+        assert!(is_safe_hash(&"a".repeat(64)));
+        let too_long = "a".repeat(65);
+        for rejected in [
+            "",
+            "abc",
+            too_long.as_str(),
+            "HEAD",
+            "master",
+            "main",
+            "..",
+            "-x",
+            "--all",
+            "$(id)",
+            "@{-1}",
+            "HEAD~1",
+            "refs/heads/main",
+            "dead beef",
+            "dead;id",
+        ] {
+            assert!(!is_safe_hash(rejected), "{rejected}");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+
+        for hash in [
+            "HEAD",
+            "main",
+            "..",
+            "-x",
+            "$(id)",
+            "@{-1}",
+            "HEAD~1",
+            "refs/heads/main",
+            "",
+        ] {
+            assert!(list_commit_files(root, hash).is_err(), "files {hash}");
+            assert!(commit_file_diff(root, hash, "a.txt").is_err(), "diff {hash}");
+            assert!(commit_patch(root, hash).is_err(), "patch {hash}");
+            assert!(compare_files(root, hash, None).is_err(), "compare {hash}");
+            assert!(
+                compare_file_diff(root, hash, None, "a.txt").is_err(),
+                "compare diff {hash}"
+            );
+            assert!(
+                compare_files(root, &head, Some(hash)).is_err(),
+                "compare to {hash}"
+            );
+            assert!(
+                commit_action(root, "checkout", hash, None).is_err(),
+                "checkout {hash}"
+            );
+            assert!(
+                commit_action(root, "cherryPick", hash, None).is_err(),
+                "cherry-pick {hash}"
+            );
+            assert!(
+                commit_action(root, "revert", hash, None).is_err(),
+                "revert {hash}"
+            );
+            assert!(create_tag(root, "v1", hash, None).is_err(), "tag {hash}");
+            assert!(reword_commit(root, hash, "new").is_err(), "reword {hash}");
+            assert!(
+                reset_to_commit(root, hash, "hard", &head).is_err(),
+                "reset {hash}"
+            );
+            assert!(
+                squash_commit(root, hash, "squash", &head).is_err(),
+                "squash {hash}"
+            );
+            assert!(drop_commit(root, hash, &head).is_err(), "drop {hash}");
+        }
+
+        // Ни один отказ не должен был дойти до git.
+        assert_eq!(head_of(&git), head);
+        assert_eq!(git_at(root, &["tag", "--list"]), "");
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
+        // Настоящий сокращённый hash при этом работает.
+        assert_eq!(list_commit_files(root, &head[..12]).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn branch_names_cannot_become_git_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+        git(&["branch", "victim"]);
+
+        for hostile in [
+            "-D",
+            "-d",
+            "--force",
+            "--all",
+            "--upload-pack=/tmp/x",
+            "HEAD",
+            "",
+            "a b",
+            "a..b",
+            "a//b",
+            "a/",
+            "x.lock",
+            "@{-1}",
+            "..",
+            "a\u{1}b",
+        ] {
+            assert!(validate_branch_name(root, hostile).is_err(), "{hostile}");
+            assert!(create_branch(root, hostile).is_err(), "create {hostile}");
+            assert!(
+                switch_branch(root, hostile, "local").is_err(),
+                "switch {hostile}"
+            );
+            assert!(
+                rename_branch(root, "victim", hostile).is_err(),
+                "rename to {hostile}"
+            );
+            assert!(
+                rename_branch(root, hostile, "safe").is_err(),
+                "rename from {hostile}"
+            );
+            assert!(
+                delete_branch(root, hostile, true, &head).is_err(),
+                "delete {hostile}"
+            );
+            assert!(
+                commit_action(root, "branch", &head, Some(hostile)).is_err(),
+                "branch at commit {hostile}"
+            );
+        }
+        assert_eq!(
+            git_at(root, &["for-each-ref", "--format=%(refname)", "refs/heads"]),
+            "refs/heads/main\nrefs/heads/victim"
+        );
+        assert_eq!(git_at(root, &["symbolic-ref", "--short", "HEAD"]), "main");
+
+        // Обычные имена продолжают работать.
+        create_branch(root, "feature/new-thing").unwrap();
+        switch_branch(root, "main", "local").unwrap();
+        rename_branch(root, "victim", "renamed").unwrap();
+        assert_eq!(
+            git_at(root, &["for-each-ref", "--format=%(refname)", "refs/heads"]),
+            "refs/heads/feature/new-thing\nrefs/heads/main\nrefs/heads/renamed"
+        );
+    }
+
+    #[test]
+    fn tag_names_cannot_become_git_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+        // Тег с ведущим дефисом создаёт чужой репозиторий: имя приходит из
+        // refs, а не от пользователя, и позиционным аргументом уходить не может.
+        git(&["update-ref", "refs/tags/-rf", &head]);
+
+        for hostile in [
+            "-D", "--force", "-rf", "--delete", "..", "a..b", "", "a b", "a/",
+        ] {
+            assert!(validated_tag_ref(root, hostile).is_err(), "{hostile}");
+            assert!(
+                create_tag(root, hostile, &head, None).is_err(),
+                "create {hostile}"
+            );
+            assert!(delete_tag(root, hostile).is_err(), "delete {hostile}");
+        }
+        assert_eq!(
+            git_at(root, &["for-each-ref", "--format=%(refname)", "refs/tags"]),
+            "refs/tags/-rf"
+        );
+
+        // Сообщение тега с ведущим дефисом остаётся данными.
+        create_tag(root, "v1.0", &head, Some("-x marks the spot")).unwrap();
+        assert_eq!(
+            git_at(root, &["tag", "-l", "--format=%(contents)", "v1.0"]),
+            "-x marks the spot"
+        );
+        delete_tag(root, "v1.0").unwrap();
+        assert_eq!(
+            git_at(root, &["for-each-ref", "--format=%(refname)", "refs/tags"]),
+            "refs/tags/-rf"
+        );
+    }
+
+    #[test]
+    fn merge_and_rebase_only_accept_existing_full_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+
+        for hostile in [
+            "-x",
+            "--no-ff",
+            "--onto=/tmp/x",
+            "HEAD",
+            "main",
+            "",
+            "refs/heads/main..refs/heads/main",
+            "refs/heads/missing",
+            "refs/heads/a..b",
+            "refs/../../etc/passwd",
+        ] {
+            assert!(
+                merge_ref(root, hostile, "main", &head, false).is_err(),
+                "merge {hostile}"
+            );
+            assert!(
+                rebase_onto(root, hostile, "main", &head).is_err(),
+                "rebase {hostile}"
+            );
+        }
+        assert_eq!(head_of(&git), head);
+        assert!(!repository_operation_in_progress(root).unwrap());
+    }
+
+    #[test]
+    fn commit_messages_are_data_not_git_options() {
+        assert!(validated_message("").is_err());
+        assert!(validated_message("   \n\t ").is_err());
+        assert!(validated_message(&"я".repeat(MAX_COMMIT_MESSAGE_CHARS + 1)).is_err());
+        assert!(validated_message(&"я".repeat(MAX_COMMIT_MESSAGE_CHARS)).is_ok());
+        assert!(validated_message("-x").is_ok());
+        assert!(validated_message("subject\n\nbody").is_ok());
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+
+        assert!(commit_all(root, "   ").is_err());
+        assert!(commit_all(root, &"я".repeat(MAX_COMMIT_MESSAGE_CHARS + 1)).is_err());
+        // Отказ произошёл до `add -A`: индекс не тронут.
+        assert_eq!(git_at(root, &["status", "--porcelain"]), "?? a.txt");
+
+        commit_all(root, "-x --amend").unwrap();
+        assert_eq!(git_at(root, &["log", "-1", "--format=%s"]), "-x --amend");
+
+        std::fs::write(root.join("b.txt"), "two\n").unwrap();
+        commit_all(root, "subject line\n\nbody stays\n").unwrap();
+        assert_eq!(git_at(root, &["log", "-1", "--format=%s"]), "subject line");
+        assert_eq!(git_at(root, &["log", "-1", "--format=%b"]), "body stays");
+
+        let head = head_of(&git);
+        reword_commit(root, &head, "-m still data").unwrap();
+        assert_eq!(git_at(root, &["log", "-1", "--format=%s"]), "-m still data");
+        assert!(reword_commit(root, &head_of(&git), "  ").is_err());
+    }
+
+    #[test]
+    fn history_filters_stay_data_not_git_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "usual subject"]);
+
+        let planted = dir.path().join("planted.txt");
+        let filtered = |text: Option<&str>, author: Option<&str>| {
+            list_log(
+                root,
+                20,
+                false,
+                &GitLogFilter {
+                    text: text.map(str::to_owned),
+                    author: author.map(str::to_owned),
+                    path: None,
+                },
+            )
+        };
+        // `git log --output=<file>` действительно существует: если бы значение
+        // фильтра стало опцией, файл появился бы на диске.
+        let injections = [
+            format!("--output={}", planted.display()),
+            "--all".to_owned(),
+            "-n1".to_owned(),
+            "--exit-code".to_owned(),
+        ];
+        for value in &injections {
+            assert!(
+                filtered(Some(value.as_str()), None).unwrap().is_empty(),
+                "text {value}"
+            );
+            assert!(
+                filtered(None, Some(value.as_str())).unwrap().is_empty(),
+                "author {value}"
+            );
+        }
+        assert!(!planted.exists(), "фильтр не должен стать опцией git");
+
+        let by_path = |path: &str| {
+            list_log(
+                root,
+                20,
+                false,
+                &GitLogFilter {
+                    path: Some(path.to_owned()),
+                    ..Default::default()
+                },
+            )
+        };
+        assert!(by_path("-rf").is_err());
+        assert!(by_path("--all").is_err());
+        assert!(by_path("../outside").is_err());
+
+        // Обычный фильтр по-прежнему находит коммит.
+        assert_eq!(filtered(Some("usual"), None).unwrap().len(), 1);
+        assert_eq!(filtered(None, Some("Me")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn attacker_controlled_file_names_stay_inert_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+
+        std::fs::write(root.join("-rf"), "payload\n").unwrap();
+        std::fs::write(root.join("quo'te.txt"), "quoted\n").unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        // Имена возвращаются байт в байт: core.quotepath=false плюс -z.
+        let dashed = by_path_in(&summary, "-rf");
+        assert_eq!(dashed.status, "untracked");
+        assert_eq!(dashed.additions, Some(1));
+        assert_eq!(by_path_in(&summary, "quo'te.txt").status, "untracked");
+
+        // Имя, похожее на опцию, панель в git не отправляет вовсе.
+        assert!(collect_file_diff(root, "-rf").is_err());
+        assert!(read_repo_file(root, "-rf").is_err());
+        assert!(write_repo_file(root, "-rf", "overwritten").is_err());
+        assert!(revert_file(root, "-rf", None).is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.join("-rf")).unwrap(),
+            "payload\n"
+        );
+
+        // Кавычка в имени — обычный файл, а не разделитель.
+        assert!(collect_file_diff(root, "quo'te.txt")
+            .unwrap()
+            .diff
+            .contains("+quoted"));
+        revert_file(root, "quo'te.txt", None).unwrap();
+        assert!(!root.join("quo'te.txt").exists());
+    }
+
+    // Перевод строки в имени файла легален только на unix; проверяем, что
+    // -z-разбор не превращает один файл в два (и не теряет остаток имени).
+    #[cfg(unix)]
+    #[test]
+    fn a_newline_in_a_file_name_does_not_split_the_status_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "init"]);
+
+        // Разделителей пути в имени быть не должно — иначе это уже вложенный
+        // путь, а не одно имя файла; подделку заголовка диффа это не портит.
+        let hostile = "a.txt\n--- a-dev-null\n+++ b-etc-passwd\n@@ -0,0 +1 @@\n";
+        std::fs::write(root.join(hostile), "x\n").unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(summary.files.len(), 1);
+        assert_eq!(summary.files[0].path, hostile);
+        assert_eq!(summary.files[0].status, "untracked");
+    }
+
+    #[test]
+    fn attacker_controlled_ref_names_stay_inert_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        let subject = "\u{1b}[2J\u{1b}[H not a terminal command";
+        git(&["commit", "--quiet", "-m", subject]);
+        let head = head_of(&git);
+        // Такие refs делает только чужой репозиторий: их имена приходят из
+        // refs, а не от пользователя, и опциями стать не должны.
+        git(&["update-ref", "refs/heads/--help", &head]);
+        git(&["update-ref", "refs/tags/--version", &head]);
+
+        let branches = list_branches(root).unwrap();
+        let hostile = branches
+            .iter()
+            .find(|branch| branch.name == "--help")
+            .expect("ветка должна вернуться как данные");
+        assert_eq!(hostile.tip_hash, head);
+        assert!(!hostile.is_current);
+
+        let log = list_log(root, 20, true, &GitLogFilter::default()).unwrap();
+        assert_eq!(log[0].subject, subject);
+        assert!(log[0]
+            .ref_details
+            .iter()
+            .any(|reference| reference.name == "--help" && reference.kind == "local"));
+        assert!(log[0]
+            .ref_details
+            .iter()
+            .any(|reference| reference.name == "--version" && reference.kind == "tag"));
+
+        assert!(switch_branch(root, "--help", "local").is_err());
+        assert!(delete_branch(root, "--help", true, &head).is_err());
+        assert!(delete_tag(root, "--version").is_err());
+        assert_eq!(git_at(root, &["rev-parse", "refs/heads/--help"]), head);
+        assert_eq!(git_at(root, &["rev-parse", "refs/tags/--version"]), head);
+    }
+
+    // .git/config чужого репозитория умеет запускать программы. Здесь заперты
+    // те векторы, которые сейчас не срабатывают: pager (вывод идёт в pipe),
+    // editor (сообщение всегда передаётся аргументом) и alias поверх
+    // встроенных команд. Маркер лежит вне репозитория, чтобы не попасть в
+    // статус и не быть удалённым самими командами.
+    #[cfg(unix)]
+    #[test]
+    fn panel_never_runs_the_repository_pager_editor_or_aliases() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+
+        let marker = dir.path().join("marker");
+        let script = dir.path().join("payload.sh");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\n: > \"{}\"\nexit 0\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let program = script.to_str().unwrap();
+        let alias = format!("!{program}");
+        git(&["config", "core.pager", program]);
+        git(&["config", "core.editor", program]);
+        git(&["config", "sequence.editor", program]);
+        for name in ["alias.status", "alias.diff", "alias.log", "alias.commit"] {
+            git(&["config", name, &alias]);
+        }
+
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+
+        assert!(collect_summary(root).unwrap().is_repo);
+        assert!(collect_file_diff(root, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+two"));
+        assert!(!list_log(root, 20, false, &GitLogFilter::default())
+            .unwrap()
+            .is_empty());
+        list_branches(root).unwrap();
+        commit_all(root, "second").unwrap();
+        let head = head_of(&git);
+        assert_eq!(list_commit_files(root, &head).unwrap().len(), 1);
+        commit_action(root, "revert", &head, None).unwrap();
+
+        assert!(
+            !marker.exists(),
+            "команды панели не должны запускать программы из конфигурации репозитория"
+        );
+    }
+
+    // Чужой .git/config может увести core.hooksPath куда угодно. Простой
+    // просмотр репозитория — статус, дифф, история, ветки, патч — обязан
+    // оставаться read-only: ни один хук не должен запуститься от того, что
+    // пользователь всего лишь открыл папку.
+    #[cfg(unix)]
+    #[test]
+    fn read_only_panel_entry_points_never_run_repository_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+        git(&["branch", "other"]);
+        git(&["tag", "v1"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(root.join("new.txt"), "fresh\n").unwrap();
+
+        // Хуки и маркеры лежат вне рабочего дерева: внутри они сами попали бы
+        // в статус и в дифф. Конфигурацию ставим после фикстуры, иначе хуки
+        // сработали бы на её собственных коммитах.
+        let hooks = dir.path().join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let names = [
+            "pre-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-commit",
+            "post-checkout",
+            "post-merge",
+            "post-rewrite",
+            "reference-transaction",
+            "pre-push",
+        ];
+        for name in names {
+            let hook = hooks.join(name);
+            std::fs::write(
+                &hook,
+                format!(
+                    "#!/bin/sh\n: > \"{}\"\nexit 0\n",
+                    dir.path().join(format!("fired-{name}")).display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(by_path_in(&summary, "a.txt").status, "modified");
+        assert_eq!(by_path_in(&summary, "new.txt").status, "untracked");
+        assert!(collect_file_diff(root, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+two"));
+        assert!(collect_file_diff(root, "new.txt")
+            .unwrap()
+            .diff
+            .contains("+fresh"));
+        assert!(read_repo_file(root, "a.txt").unwrap().content.contains("two"));
+        assert!(!list_log(root, 20, false, &GitLogFilter::default())
+            .unwrap()
+            .is_empty());
+        assert!(!list_log(root, 20, true, &GitLogFilter::default())
+            .unwrap()
+            .is_empty());
+        assert!(list_branches(root)
+            .unwrap()
+            .iter()
+            .any(|branch| branch.name == "other"));
+        assert_eq!(list_commit_files(root, &head).unwrap().len(), 1);
+        assert!(commit_file_diff(root, &head, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+one"));
+        assert!(commit_patch(root, &head).unwrap().contains("+one"));
+        assert_eq!(compare_files(root, &head, None).unwrap().len(), 1);
+        assert!(compare_file_diff(root, &head, None, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+two"));
+
+        for name in names {
+            assert!(
+                !dir.path().join(format!("fired-{name}")).exists(),
+                "хук {name} не должен запускаться при просмотре репозитория"
+            );
+        }
+    }
+
+    // ext::-URL превращает fetch в запуск произвольной команды. Git запрещает
+    // такой транспорт по умолчанию — фиксируем это как требование панели.
+    #[cfg(unix)]
+    #[test]
+    fn fetch_refuses_a_command_executing_remote_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+
+        let marker = dir.path().join("marker");
+        git(&[
+            "remote",
+            "add",
+            "origin",
+            &format!("ext::sh -c \"touch {}\"", marker.display()),
+        ]);
+
+        assert!(fetch_upstream(root).is_err());
+        assert!(!marker.exists());
+    }
+
+    // insteadOf переписывает URL уже внутри git, поэтому безобидная на вид
+    // ссылка на локальный путь превращается в ext::-команду. Запрет транспорта
+    // обязан работать и после подстановки.
+    #[cfg(unix)]
+    #[test]
+    fn fetch_refuses_a_remote_url_rewritten_into_a_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+
+        let marker = dir.path().join("marker");
+        // URL указывает на несуществующий локальный путь: сети тест не касается
+        // ни при каком исходе.
+        let url = dir.path().join("server.git");
+        git(&["remote", "add", "origin", url.to_str().unwrap()]);
+        git(&[
+            "config",
+            &format!("url.ext::sh -c \"touch {}\".insteadOf", marker.display()),
+            &format!("{}/", dir.path().display()),
+        ]);
+
+        assert!(fetch_upstream(root).is_err());
+        assert!(!marker.exists());
+    }
+
+    // Конфигурация чужого репозитория не должна прятать от панели ни одного
+    // изменения: невидимый в обзоре файл всё равно попадёт в коммит, ведь
+    // commit_all делает `add -A`.
+    #[test]
+    fn summary_ignores_repository_config_that_hides_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+
+        for (key, value) in [
+            ("status.showUntrackedFiles", "no"),
+            ("status.short", "true"),
+            ("status.branch", "false"),
+            ("status.relativePaths", "true"),
+            ("core.quotepath", "true"),
+            ("diff.noprefix", "true"),
+        ] {
+            git(&["config", key, value]);
+        }
+
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub").join("deep.txt"), "planted\n").unwrap();
+        std::fs::write(root.join("ещё файл.md"), "planted\n").unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        assert_eq!(summary.branch.as_deref(), Some("main"));
+        assert_eq!(summary.head_hash.as_deref(), Some(head.as_str()));
+        assert_eq!(by_path_in(&summary, "sub/deep.txt").status, "untracked");
+        // core.quotepath=true в чужом конфиге не должен превратить имя в
+        // экранированную строку: панель ищет файл по этому же имени.
+        assert_eq!(by_path_in(&summary, "ещё файл.md").status, "untracked");
+        let modified = by_path_in(&summary, "a.txt");
+        assert_eq!(modified.status, "modified");
+        assert_eq!(modified.additions, Some(1));
+        assert!(collect_file_diff(root, "a.txt")
+            .unwrap()
+            .diff
+            .contains("+two"));
+    }
+
+    // NUL проходит проверку пути, но системный вызов видит строку целиком и
+    // обязан отказать: обрезка до префикса означала бы работу с чужим файлом.
+    #[test]
+    fn an_embedded_nul_in_a_path_never_reaches_another_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+
+        for path in ["a.txt\u{0}", "a.txt\u{0}b"] {
+            assert!(collect_file_diff(root, path).is_err(), "diff {path:?}");
+            assert!(
+                commit_file_diff(root, &head, path).is_err(),
+                "commit diff {path:?}"
+            );
+            assert!(
+                compare_file_diff(root, &head, None, path).is_err(),
+                "compare {path:?}"
+            );
+            assert!(
+                write_repo_file(root, path, "OVERWRITTEN").is_err(),
+                "write {path:?}"
+            );
+            assert!(revert_file(root, path, None).is_err(), "revert {path:?}");
+            assert!(
+                list_log(
+                    root,
+                    20,
+                    false,
+                    &GitLogFilter {
+                        path: Some(path.to_owned()),
+                        ..Default::default()
+                    },
+                )
+                .is_err(),
+                "log {path:?}"
+            );
+            // Чтение либо падает, либо сообщает «файла нет», но содержимого
+            // a.txt не отдаёт никогда.
+            if let Ok(file) = read_repo_file(root, path) {
+                assert!(!file.exists && file.content.is_empty(), "read {path:?}");
+            }
+        }
+
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
+        assert!(
+            collect_summary(root).unwrap().files.is_empty(),
+            "репозиторий должен остаться нетронутым"
+        );
+    }
+
+    // Имя remote-ref приходит из чужого репозитория, а из него выводится имя
+    // новой локальной ветки: она не должна стать опцией `switch -c`.
+    #[test]
+    fn switch_branch_rejects_hostile_remote_refs_and_unknown_kinds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let head = head_of(&git);
+        git(&["remote", "add", "origin", dir.path().join("srv.git").to_str().unwrap()]);
+        git(&["update-ref", "refs/remotes/origin/feature", &head]);
+        git(&["update-ref", "refs/remotes/origin/--help", &head]);
+
+        for hostile in [
+            "-x",
+            "--all",
+            "",
+            "main",
+            "refs/heads/main",
+            "refs/tags/v1",
+            "refs/remotes",
+            "refs/remotes/../../heads/main",
+            "refs/remotes/origin/--help",
+            "refs/remotes/origin/missing",
+        ] {
+            assert!(
+                switch_branch(root, hostile, "remote").is_err(),
+                "remote {hostile}"
+            );
+        }
+        for kind in ["--force", "", "Local", "branch", "remotes"] {
+            assert!(switch_branch(root, "main", kind).is_err(), "kind {kind}");
+        }
+        assert_eq!(
+            git_at(root, &["for-each-ref", "--format=%(refname)", "refs/heads"]),
+            "refs/heads/main"
+        );
+        assert_eq!(git_at(root, &["symbolic-ref", "--short", "HEAD"]), "main");
+
+        // Нормальный remote-ref по-прежнему создаёт отслеживающую ветку.
+        switch_branch(root, "refs/remotes/origin/feature", "remote").unwrap();
+        assert_eq!(git_at(root, &["symbolic-ref", "--short", "HEAD"]), "feature");
+        assert_eq!(git_at(root, &["config", "branch.feature.remote"]), "origin");
+    }
+
+    // Режимы и действия — такие же строки из webview, как и всё остальное:
+    // каждое значение обязано проверяться по белому списку, а не подставляться
+    // в командную строку git.
+    #[test]
+    fn mode_arguments_cannot_become_git_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+        let first = head_of(&git);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "second"]);
+        let head = head_of(&git);
+
+        for mode in ["--hard", "hard --exec=touch x", "hard;id", "", "Hard", "keep"] {
+            assert!(
+                reset_to_commit(root, &first, mode, &head).is_err(),
+                "reset {mode}"
+            );
+        }
+        for mode in ["--squash", "squash --exec=touch x", "", "Squash", "reword"] {
+            assert!(
+                squash_commit(root, &head, mode, &head).is_err(),
+                "squash {mode}"
+            );
+        }
+        for action in ["--exec=touch x", "", "Checkout", "switch", "reset"] {
+            assert!(
+                commit_action(root, action, &head, None).is_err(),
+                "action {action}"
+            );
+        }
+
+        assert_eq!(head_of(&git), head);
+        assert_eq!(subjects(root), vec!["second".to_owned(), "init".to_owned()]);
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\ntwo\n"
+        );
+    }
+
+    #[test]
+    fn oversized_untracked_files_stay_within_the_panel_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "init"]);
+
+        // Больше и лимита подсчёта строк, и лимита диффа, и лимита редактора.
+        let huge = "заполнение\n".repeat(300_000);
+        assert!(huge.len() as u64 > MAX_UNTRACKED_BYTES);
+        std::fs::write(root.join("huge.txt"), &huge).unwrap();
+
+        let summary = collect_summary(root).unwrap();
+        let entry = by_path_in(&summary, "huge.txt");
+        assert_eq!(entry.status, "untracked");
+        assert_eq!(entry.additions, None);
+
+        let diff = collect_file_diff(root, "huge.txt").unwrap();
+        assert!(diff.truncated);
+        assert!(diff.diff.len() <= MAX_DIFF_BYTES + 1024);
+
+        let content = read_repo_file(root, "huge.txt").unwrap();
+        assert!(content.too_large && content.content.is_empty());
+
+        assert!(write_repo_file(root, "huge.txt", &"a".repeat(MAX_WRITE_BYTES + 1)).is_err());
+        assert_eq!(
+            std::fs::metadata(root.join("huge.txt")).unwrap().len(),
+            huge.len() as u64
+        );
+    }
+
+    // Архив чужого репозитория может привезти симлинк на каталог за пределами
+    // рабочего дерева и именованный канал. Сводка не должна ни спускаться по
+    // такому симлинку, ни открывать канал (иначе поток панели встанет навсегда).
+    #[cfg(unix)]
+    #[test]
+    fn summary_does_not_follow_a_symlinked_directory_or_open_a_pipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "OUTSIDE-SECRET\n").unwrap();
+
+        let repo = repo_beside_outside(dir.path());
+        let root = repo.as_path();
+        let git = history_repo(root);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "init"]);
+
+        std::os::unix::fs::symlink("../outside", root.join("dirlink")).unwrap();
+        std::os::unix::fs::symlink("../outside/missing", root.join("dangling")).unwrap();
+        let pipe_created = Command::new("mkfifo")
+            .arg(root.join("pipe"))
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+
+        // Зависание здесь было бы неотличимо от «тест долго идёт», поэтому
+        // сводку собираем в отдельном потоке со сторожевым таймером.
+        let path = root.to_path_buf();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(collect_summary(&path));
+        });
+        let summary = receiver
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("сводка не должна зависать на специальных файлах")
+            .unwrap();
+
+        assert_eq!(by_path_in(&summary, "dirlink").status, "untracked");
+        assert_eq!(by_path_in(&summary, "dirlink").additions, None);
+        assert_eq!(by_path_in(&summary, "dangling").additions, None);
+        assert!(
+            summary
+                .files
+                .iter()
+                .all(|file| !file.path.starts_with("dirlink/")),
+            "содержимое внешнего каталога не должно попасть в сводку"
+        );
+        if pipe_created {
+            assert!(
+                summary
+                    .files
+                    .iter()
+                    .all(|file| file.path != "pipe" || file.additions.is_none()),
+                "канал не должен читаться"
+            );
+        }
+        // Симлинк на каталог — не редактируемый файл.
+        assert!(read_repo_file(root, "dirlink").is_err());
+    }
+
+    // Каталог очереди лежит внутри .git, поэтому его содержимое полностью
+    // подконтрольно чужому репозиторию: подложенный marker не должен ни
+    // менять config живой ветки, ни блокировать создание новых.
+    #[test]
+    fn planted_branch_cleanup_markers_leave_a_live_branch_config_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = history_repo(root);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "init"]);
+        git(&["config", "branch.main.remote", "origin"]);
+        git(&["config", "branch.main.merge", "refs/heads/main"]);
+
+        let queue = root.join(".git").join("modelcrew-branch-cleanup");
+        std::fs::create_dir_all(&queue).unwrap();
+        std::fs::write(queue.join("1-1-1.pending"), "main\n").unwrap();
+        std::fs::write(queue.join("2-2-2.pending"), "--global\n").unwrap();
+        std::fs::write(queue.join("3-3-3.pending"), "\n").unwrap();
+
+        list_branches(root).unwrap();
+
+        assert_eq!(
+            git_at(root, &["config", "--local", "branch.main.remote"]),
+            "origin"
+        );
+        assert_eq!(
+            git_at(root, &["config", "--local", "branch.main.merge"]),
+            "refs/heads/main"
+        );
+        create_branch(root, "feature").unwrap();
+        assert_eq!(git_at(root, &["symbolic-ref", "--short", "HEAD"]), "feature");
+    }
 }
