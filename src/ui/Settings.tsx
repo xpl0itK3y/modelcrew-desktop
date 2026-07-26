@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -92,8 +93,15 @@ type SettingsProps = {
 };
 
 export function Settings(props: SettingsProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [query, setQuery] = useState("");
+
+  // Запрос набран на прежнем языке, а ищем мы по переведённым строкам: после
+  // смены языка он перестал бы совпадать с чем угодно и оставил бы диалог
+  // пустым — вместе с той самой строкой, где язык и переключают.
+  useLayoutEffect(() => {
+    setQuery("");
+  }, [locale]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

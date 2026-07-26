@@ -310,4 +310,19 @@ describe("Settings search", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(5);
     expect(screen.getByText("Тема интерфейса")).toBeInTheDocument();
   });
+
+  it("drops the query when the interface language changes", () => {
+    renderSettings();
+
+    fireEvent.change(searchBox(), { target: { value: "язык" } });
+    expect(screen.queryAllByRole("tab")).toHaveLength(1);
+
+    // Запрос набран по-русски: после переключения он не совпал бы ни с чем и
+    // оставил бы диалог пустым — вместе с этим самым переключателем.
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+
+    expect(searchBox()).toHaveValue("");
+    expect(screen.queryAllByRole("tab")).toHaveLength(5);
+    expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
+  });
 });
