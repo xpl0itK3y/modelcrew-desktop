@@ -58,6 +58,8 @@ import {
   loadGridOrientation,
   loadTerminalFontSize,
   saveTerminalFontSize,
+  subscribeGridOrientation,
+  type GridOrientation,
 } from "./terminal/preferences";
 import { useAppUpdater } from "./updater/useAppUpdater";
 import { useNotificationSounds } from "./updater/useNotificationSounds";
@@ -391,20 +393,32 @@ export default function App() {
   }, [activeGitWorkspaceId]);
 
   // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
-  // Ориентация дерева — из настроек (Терминал → «Сетка терминалов»).
+  const applyGridOrientation = useCallback(
+    (orientation: GridOrientation) => {
+      const api = apiRef.current;
+      if (!api) {
+        return;
+      }
+      suppressCleanupRef.current = true;
+      try {
+        arrangeEvenGrid(api, orientation);
+      } finally {
+        suppressCleanupRef.current = false;
+      }
+      schedulePersist();
+    },
+    [schedulePersist],
+  );
+
+  // Кнопка использует сохранённую ориентацию, а смена настройки немедленно
+  // перестраивает активную сессию тем же безопасным путём.
   const arrangeGrid = useCallback(() => {
-    const api = apiRef.current;
-    if (!api) {
-      return;
-    }
-    suppressCleanupRef.current = true;
-    try {
-      arrangeEvenGrid(api, loadGridOrientation());
-    } finally {
-      suppressCleanupRef.current = false;
-    }
-    schedulePersist();
-  }, [schedulePersist]);
+    applyGridOrientation(loadGridOrientation());
+  }, [applyGridOrientation]);
+  useEffect(
+    () => subscribeGridOrientation(applyGridOrientation),
+    [applyGridOrientation],
+  );
 
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
