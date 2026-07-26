@@ -377,6 +377,13 @@ export const ru = {
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",
   "settings.tabNotifications": "Уведомления",
+  "settings.tabAccount": "GitHub",
+  "settings.groupAccount": "Аккаунт",
+  "settings.accountIntro":
+    "Аккаунт GitHub нужен для настоящих аватаров авторов в коммитах и графе. Выход удаляет токен, сохранённый на этом компьютере.",
+  "settings.accountGithub": "Учётная запись",
+  "settings.accountSignedOutNote":
+    "Вы не вошли — авторы коммитов показываются инициалами",
   "settings.appVersion": "версия {version}",
   "settings.notificationSound": "Звук уведомления",
   "settings.notificationSoundNote":

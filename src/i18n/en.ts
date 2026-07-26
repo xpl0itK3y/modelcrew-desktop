@@ -378,6 +378,13 @@ export const en: Record<MessageKey, string> = {
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
   "settings.tabNotifications": "Notifications",
+  "settings.tabAccount": "GitHub",
+  "settings.groupAccount": "Account",
+  "settings.accountIntro":
+    "A GitHub account gives real author avatars in commits and the graph. Signing out deletes the token stored on this computer.",
+  "settings.accountGithub": "Account",
+  "settings.accountSignedOutNote":
+    "You are not signed in — commit authors show as initials",
   "settings.appVersion": "version {version}",
   "settings.notificationSound": "Notification sound",
   "settings.notificationSoundNote":
