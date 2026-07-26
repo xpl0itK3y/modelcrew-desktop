@@ -658,6 +658,93 @@ mod tests {
             }
         }
 
+        // Маркер пробы окружения. В набранной строке его нет ни на одной
+        // платформе — он собирается шеллом, поэтому эхо ввода не сойдёт за
+        // результат подстановки.
+        const EVALUATED_PROBE: &'static str = "PROBE_OK_";
+
+        // Проба произвольных переменных окружения: печатает EVALUATED_PROBE
+        // и значения (или «clean», если переменной нет).
+        fn evaluated_env_probe(names: &[&str]) -> Vec<Vec<u8>> {
+            if cfg!(windows) {
+                let refs = names
+                    .iter()
+                    .map(|name| format!("%{name}%"))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                vec![
+                    Self::line("set PART=OK"),
+                    Self::line(&format!("echo PROBE_%PART%_{refs}")),
+                ]
+            } else {
+                let refs = names
+                    .iter()
+                    .map(|name| format!("${{{name}:-clean}}"))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                vec![Self::line(&format!("echo PRO\"BE\"_OK_{refs}"))]
+            }
+        }
+
+        // Печатает файл из текущей папки процесса. Маркер лежит в файле, а не
+        // в набранной строке, поэтому эхо ввода его подделать не может.
+        fn print_local_file(name: &str) -> Vec<u8> {
+            if cfg!(windows) {
+                Self::line(&format!("type {name}"))
+            } else {
+                Self::line(&format!("cat {name}"))
+            }
+        }
+
+        // Строка-пустышка примерно в 60 байт: шелл её принимает и ничего не
+        // делает. Нужна, чтобы собрать одну крупную запись из целых строк.
+        fn padding_line() -> Vec<u8> {
+            let pad = "a".repeat(56);
+            if cfg!(windows) {
+                Self::line(&format!("rem {pad}"))
+            } else {
+                Self::line(&format!(": {pad}"))
+            }
+        }
+
+        // Путь с NUL внутри: и unix, и Windows обязаны отвергнуть такой шелл,
+        // а не обрезать строку по нулевому байту.
+        fn nul_path() -> String {
+            if cfg!(windows) {
+                "C:\\Windows\\System32\\cmd.exe\0evil".to_string()
+            } else {
+                "/bin/sh\0evil".to_string()
+            }
+        }
+
+        // Строки, которыми фронт может попробовать протащить вторую команду:
+        // метасимволы, подстановка, путь с дописанным аргументом. Ни одна не
+        // должна дойти до интерпретатора — canary создаётся только если её
+        // содержимое кто-то выполнил.
+        fn injection_attempts(canary: &std::path::Path) -> Vec<String> {
+            let canary = canary.display().to_string();
+            let mut attempts = vec![
+                "echo pwned; id".to_string(),
+                "sh -c \"id\"".to_string(),
+                "cmd /c whoami".to_string(),
+                "$(id)".to_string(),
+                "`id`".to_string(),
+            ];
+            if cfg!(windows) {
+                attempts.push(format!(
+                    "C:\\Windows\\System32\\cmd.exe /c echo pwned > \"{canary}\""
+                ));
+                attempts.push(format!(
+                    "C:\\Windows\\System32\\cmd.exe&echo pwned>\"{canary}\""
+                ));
+            } else {
+                attempts.push(format!("/bin/sh -c 'touch {canary}'"));
+                attempts.push(format!("/bin/sh; touch {canary}"));
+                attempts.push(format!("/bin/sh -l | touch {canary}"));
+            }
+            attempts
+        }
+
         // ConPTY при старте сессии спрашивает позицию курсора (DSR) и ждёт
         // ответа, прежде чем выполнять что-либо ещё. В приложении отвечает
         // xterm.js — это работа эмулятора терминала, и в PTY-слое ей не место.
@@ -1209,5 +1296,471 @@ mod tests {
 
         let kill_error = manager.kill("missing").unwrap_err();
         assert_eq!(kill_error.code, ErrorCode::TerminalNotFound);
+    }
+
+    /// Строка shell приходит из webview. Она обязана оставаться именем одной
+    /// программы: ни `;`, ни `&`, ни подстановка, ни дописанный аргумент не
+    /// должны исполниться — иначе фронт получает произвольный запуск кода.
+    #[test]
+    fn spawn_never_runs_the_shell_string_through_an_interpreter() {
+        let canary_dir = tempfile::tempdir().expect("временная папка");
+        let canary = canary_dir.path().join("pwned.txt");
+        let manager = PtyManager::default();
+
+        for attempt in Shell::injection_attempts(&canary) {
+            let result = manager.spawn(
+                SpawnOptions {
+                    id: "inject".into(),
+                    shell: Some(attempt.clone()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                |_| {},
+                |_| {},
+            );
+            let error = result.expect_err(&format!("«{attempt}» не должна запускаться"));
+            assert_eq!(error.code, ErrorCode::TerminalShellNotFound, "{attempt}");
+            assert_eq!(error.context["shell"], attempt);
+            assert_eq!(error.context["terminalId"], "inject");
+            assert!(
+                manager.write("inject", b"x").is_err(),
+                "неудачный spawn не должен оставлять сессию: {attempt}"
+            );
+        }
+
+        assert!(
+            !canary.exists(),
+            "часть строки shell выполнилась: {}",
+            canary.display()
+        );
+    }
+
+    /// Папка проходит проверку существования, но программой не является:
+    /// запуск обязан провалиться с внятным кодом, а не «умереть» терминалом.
+    #[test]
+    fn spawn_rejects_a_shell_path_that_is_a_directory() {
+        let dir = tempfile::tempdir().expect("временная папка");
+        let shell = dir.path().display().to_string();
+        let manager = PtyManager::default();
+
+        let result = manager.spawn(
+            SpawnOptions {
+                id: "dir".into(),
+                shell: Some(shell.clone()),
+                cwd: test_cwd(),
+                cols: 80,
+                rows: 24,
+                history_dir: None,
+            },
+            |_| {},
+            |_| {},
+        );
+        let error = result.expect_err("папка не должна запускаться как шелл");
+        assert_eq!(error.code, ErrorCode::TerminalSpawnFailed);
+        assert_eq!(error.context["shell"], shell);
+        assert_eq!(error.context["terminalId"], "dir");
+        assert!(manager.write("dir", b"x").is_err(), "сессии быть не должно");
+    }
+
+    /// Пустая строка и пробелы не должны молча превращаться в оболочку по
+    /// умолчанию: подмену шелла фронт обязан увидеть как ошибку.
+    #[test]
+    fn spawn_rejects_a_blank_shell_without_falling_back_to_the_default() {
+        let manager = PtyManager::default();
+
+        for shell in ["", "   ", "\t"] {
+            let result = manager.spawn(
+                SpawnOptions {
+                    id: "blank".into(),
+                    shell: Some(shell.to_string()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                |_| {},
+                |_| {},
+            );
+            let error = result.expect_err(&format!("«{shell:?}» не должна запускать шелл"));
+            // Пустая строка отсекается на разных этапах в зависимости от ОС;
+            // важно, что запуска не происходит ни на одной.
+            assert!(
+                matches!(
+                    error.code,
+                    ErrorCode::TerminalShellNotFound | ErrorCode::TerminalSpawnFailed
+                ),
+                "неожиданный код для {shell:?}: {:?}",
+                error.code
+            );
+            assert_eq!(error.context["terminalId"], "blank");
+            assert!(
+                manager.write("blank", b"x").is_err(),
+                "неудачный spawn не должен оставлять сессию: {shell:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_rejects_a_shell_path_with_an_embedded_nul() {
+        let manager = PtyManager::default();
+        let shell = Shell::nul_path();
+
+        let result = manager.spawn(
+            SpawnOptions {
+                id: "nul".into(),
+                shell: Some(shell.clone()),
+                cwd: test_cwd(),
+                cols: 80,
+                rows: 24,
+                history_dir: None,
+            },
+            |_| {},
+            |_| {},
+        );
+        let error = result.expect_err("путь с NUL не должен запускаться");
+        assert_eq!(error.code, ErrorCode::TerminalShellNotFound);
+        assert_eq!(error.context["shell"], shell);
+        assert!(manager.write("nul", b"x").is_err(), "сессии быть не должно");
+    }
+
+    /// Фронт выбирает шелл только из этого списка и возвращает command обратно
+    /// в pty_create. Значит, каждый элемент обязан проходить ту же проверку
+    /// существования, что и spawn, иначе пользователь получит мёртвый пункт.
+    #[test]
+    fn available_shells_only_offers_resolvable_commands() {
+        let shells = available_shells();
+        assert!(!shells.is_empty(), "нужен хотя бы один рабочий шелл");
+
+        let mut seen_ids: Vec<String> = Vec::new();
+        for shell in &shells {
+            assert!(
+                !seen_ids.contains(&shell.id),
+                "дубликат id в списке: {}",
+                shell.id
+            );
+            seen_ids.push(shell.id.clone());
+            assert!(!shell.id.trim().is_empty(), "пустой id");
+            assert!(!shell.label.trim().is_empty(), "пустая подпись");
+            assert!(!shell.command.trim().is_empty(), "пустая команда");
+            assert!(
+                !shell.command.contains('\0') && !shell.command.contains('\n'),
+                "команда с управляющими символами: {:?}",
+                shell.command
+            );
+            assert!(
+                shell_exists(&shell.command),
+                "команда не резолвится: {}",
+                shell.command
+            );
+            let path = std::path::Path::new(&shell.command);
+            if path.is_absolute() {
+                assert!(path.is_file(), "абсолютный путь не файл: {}", shell.command);
+            }
+        }
+    }
+
+    /// Процесс обязан стартовать ровно в выданной backend-реестром папке:
+    /// именно она — граница, за которую терминал не должен выходить сам.
+    #[test]
+    fn spawn_starts_the_process_in_the_requested_cwd() {
+        let dir = tempfile::tempdir().expect("временная папка");
+        std::fs::write(dir.path().join("cwd_probe.txt"), b"CWD_9137_OK\n").expect("маркер");
+
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "cwd-probe".into(),
+                    shell: Some(Shell::path()),
+                    cwd: dir.path().to_path_buf(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        manager
+            .write("cwd-probe", &Shell::print_local_file("cwd_probe.txt"))
+            .expect("запись в PTY");
+        wait_for_output(
+            &manager,
+            "cwd-probe",
+            &out_rx,
+            "CWD_9137_OK",
+            Duration::from_secs(20),
+        )
+        .expect("файл виден только из выданной папки");
+
+        let _ = manager.kill("cwd-probe");
+    }
+
+    /// Операции по чужому/несуществующему id не должны задевать живую сессию:
+    /// скомпрометированный фронт не может погасить соседний терминал опечаткой.
+    #[test]
+    fn unknown_terminal_operations_never_touch_a_live_session() {
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "live".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                move |code| {
+                    let _ = exit_tx.send(code);
+                },
+            )
+            .expect("шелл должен запуститься");
+
+        for ghost in ["", "live ", "LIVE", "../live", "live\0", "l"] {
+            assert_eq!(
+                manager.write(ghost, b"exit\n").unwrap_err().code,
+                ErrorCode::TerminalNotFound,
+                "{ghost:?}"
+            );
+            assert_eq!(
+                manager.resize(ghost, 10, 10).unwrap_err().code,
+                ErrorCode::TerminalNotFound,
+                "{ghost:?}"
+            );
+            let kill_error = manager.kill(ghost).unwrap_err();
+            assert_eq!(kill_error.code, ErrorCode::TerminalNotFound, "{ghost:?}");
+            assert_eq!(kill_error.context["terminalId"], ghost);
+        }
+
+        assert!(
+            exit_rx.try_recv().is_err(),
+            "живая сессия не должна была завершиться"
+        );
+        let (command, needle) = Shell::evaluated(2);
+        manager.write("live", &command).expect("запись в живую сессию");
+        wait_for_output(&manager, "live", &out_rx, &needle, Duration::from_secs(20))
+            .expect("живая сессия должна ответить");
+
+        manager.kill("live").expect("kill живой сессии");
+        exit_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("после kill процесс должен завершиться");
+        // Повторный kill — стабильная ошибка, а не паника и не чужая сессия.
+        assert_eq!(
+            manager.kill("live").unwrap_err().code,
+            ErrorCode::TerminalNotFound
+        );
+    }
+
+    /// Размеры приходят из webview. Ноль и предельное значение не должны ни
+    /// ронять spawn/resize, ни оставлять сессию неуправляемой.
+    #[test]
+    fn absurd_terminal_dimensions_never_panic_or_wedge_the_session() {
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "dim".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 0,
+                    rows: 0,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("нулевой размер должен поджиматься, а не ронять spawn");
+
+        manager
+            .resize("dim", 0, 0)
+            .expect("нулевой ресайз поджимается до минимума");
+        // Верхнюю границу PTY-слой не задаёт: unix такой размер принимает,
+        // ConPTY отвергает. Важно, что ни то, ни другое не рвёт сессию.
+        let _ = manager.resize("dim", u16::MAX, u16::MAX);
+        manager
+            .resize("dim", 80, 24)
+            .expect("после абсурдных размеров сессия должна остаться живой");
+
+        let (command, needle) = Shell::evaluated(3);
+        manager.write("dim", &command).expect("запись после ресайзов");
+        wait_for_output(&manager, "dim", &out_rx, &needle, Duration::from_secs(20))
+            .expect("шелл должен отвечать после абсурдных размеров");
+
+        manager.kill("dim").expect("kill после ресайзов");
+    }
+
+    /// Вставка большого куска — одна запись из множества целых строк. Объём
+    /// держим в пределах буфера ввода tty: write держит общий мьютекс сессий,
+    /// и на большем куске тест проверял бы уже не доставку, а блокировку.
+    #[test]
+    fn a_paste_sized_write_reaches_the_shell_without_breaking_it() {
+        const LINES: usize = if cfg!(windows) { 20 } else { 48 };
+
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "paste".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 120,
+                    rows: 40,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        let (command, needle) = Shell::evaluated(4);
+        let mut payload = Vec::new();
+        for _ in 0..LINES {
+            payload.extend_from_slice(&Shell::padding_line());
+        }
+        payload.extend_from_slice(&command);
+        assert!(
+            payload.len() > 1000,
+            "кусок должен быть заметно больше одной строки"
+        );
+
+        manager
+            .write("paste", &payload)
+            .expect("одна крупная запись должна дойти целиком");
+        wait_for_output(&manager, "paste", &out_rx, &needle, Duration::from_secs(60))
+            .expect("хвост крупной вставки должен исполниться");
+
+        // Сессия не «съехала»: следующая команда исполняется как обычно.
+        let (next, next_needle) = Shell::evaluated(5);
+        manager.write("paste", &next).expect("запись после вставки");
+        wait_for_output(
+            &manager,
+            "paste",
+            &out_rx,
+            &next_needle,
+            Duration::from_secs(20),
+        )
+        .expect("сессия должна остаться рабочей");
+
+        manager.kill("paste").expect("kill после вставки");
+    }
+
+    /// Маркеры запускавшего агента вычищаются по точному имени и по префиксу
+    /// (см. spawn). Проверяем обе ветки правила, а не только CLAUDECODE.
+    #[test]
+    fn agent_effort_and_prefixed_markers_never_reach_the_terminal() {
+        std::env::set_var("CLAUDE_EFFORT", "leak-effort");
+        std::env::set_var("CLAUDE_CODE_MC_PROBE", "leak-probe");
+
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-env2".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        for line in Shell::evaluated_env_probe(&["CLAUDE_EFFORT", "CLAUDE_CODE_MC_PROBE"]) {
+            manager.write("t-env2", &line).expect("запись в PTY");
+        }
+        let output = wait_for_output(
+            &manager,
+            "t-env2",
+            &out_rx,
+            Shell::EVALUATED_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+
+        assert!(
+            !output.contains("leak-effort") && !output.contains("leak-probe"),
+            "маркеры агента протекли в терминал: {output}"
+        );
+        #[cfg(unix)]
+        assert!(
+            output.contains("PROBE_OK_clean_clean"),
+            "шелл должен видеть обе переменные пустыми: {output}"
+        );
+
+        let _ = manager.kill("t-env2");
+    }
+
+    /// id панели приходит из webview и попадает в значение переменной
+    /// fish_history. В окружение он обязан уходить только алфавитно-цифровым:
+    /// иначе туда уезжают метасимволы и подстановки.
+    #[test]
+    fn hostile_terminal_id_reaches_the_shell_environment_sanitized() {
+        let history = tempfile::tempdir().expect("временная папка");
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "p1/../$(id)".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: Some(history.path().to_path_buf()),
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        for line in Shell::evaluated_env_probe(&["fish_history"]) {
+            manager.write("p1/../$(id)", &line).expect("запись в PTY");
+        }
+        let output = wait_for_output(
+            &manager,
+            "p1/../$(id)",
+            &out_rx,
+            Shell::EVALUATED_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+
+        assert!(
+            output.contains("PROBE_OK_mcp1id"),
+            "id попал в окружение неочищенным: {output}"
+        );
+        #[cfg(unix)]
+        assert!(
+            !output.contains("uid="),
+            "подстановка из id выполнилась шеллом: {output}"
+        );
+
+        let _ = manager.kill("p1/../$(id)");
     }
 }
