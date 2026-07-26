@@ -1,0 +1,25 @@
+{
+  "version": "0.0.9",
+  "ru": {
+    "title": "Настройки, темы и безопаснее релизы",
+    "summary": "Настройки получили разделы, поиск и GitHub-аккаунт, появились новые темы и badges, а проверки безопасности и релиза закрывают больше рискованных сценариев.",
+    "highlights": [
+      "Навигация по настройкам разделена на вкладки с поиском и сбросом запроса при смене языка",
+      "GitHub-вход вынесен в раздел аккаунта и синхронизирует аватары авторов коммитов",
+      "Добавлены темы Obsidian, Sepia и Parchment",
+      "Badges и системные уведомления стали заметнее в Windows и Linux",
+      "Security- и release-тесты покрывают манифесты, пути, подписи, CSP и GitHub/device flow"
+    ]
+  },
+  "en": {
+    "title": "Settings, themes, and safer releases",
+    "summary": "Settings now have tabs, search, and a GitHub account area, new themes and badges improve the desktop polish, and security/release checks cover more risky inputs.",
+    "highlights": [
+      "Settings are split into searchable tabs and reset search on language changes",
+      "GitHub sign-in now feeds the account section and commit author avatars",
+      "Added Obsidian, Sepia, and Parchment themes",
+      "Windows and Linux badges and notification icons are clearer",
+      "Security and release tests cover manifests, paths, signatures, CSP, and GitHub device flow"
+    ]
+  }
+}

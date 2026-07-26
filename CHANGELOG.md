@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.0.9
+
+### Русский
+
+Настройки получили разделы, поиск и GitHub-аккаунт, появились новые темы и badges, а проверки безопасности и релиза закрывают больше рискованных сценариев.
+
+- Настройки разделены на вкладки: внешний вид, терминал, агенты, уведомления и GitHub-аккаунт
+- Поиск настроек работает по зарегистрированным строкам интерфейса и сбрасывается при смене языка
+- GitHub-вход синхронизируется между титлбаром, настройками и аватарами авторов коммитов
+- Добавлены темы Obsidian, Sepia и Parchment
+- Badge count теперь виден в Windows taskbar overlay и на Linux docks, а Linux-уведомления получают иконку приложения
+- Проверки закрывают рискованные входы: updater manifests, локальные пути пакетов, подписи, CSP, capability allowlist, symlink/path traversal и forged GitHub device flow
+- Релизная оснастка получила дополнительные тесты package validation и nightly Arch-сборка выровнена со стабильным релизом
+
+### English
+
+Settings now have tabs, search, and a GitHub account area, new themes and badges improve the desktop polish, and security/release checks cover more risky inputs.
+
+- Settings are split into Appearance, Terminal, Agents, Notifications, and GitHub account tabs
+- Settings search indexes the actual registered UI rows and resets when the interface language changes
+- GitHub sign-in state is shared between the titlebar, settings, and commit author avatars
+- Added Obsidian, Sepia, and Parchment themes
+- Badge counts now show in the Windows taskbar overlay and Linux docks, and Linux notifications use the app icon
+- Tests cover risky inputs in updater manifests, local package paths, signatures, CSP, capability allowlists, symlink/path traversal, and forged GitHub device flow
+- Release package validation has more automated coverage, and nightly Arch packaging is aligned with the stable release path
+
 ## 0.0.8
 
 ### Русский
