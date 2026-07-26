@@ -2286,6 +2286,7 @@ name = "modelcrew-desktop"
 version = "0.0.9"
 dependencies = [
  "base64 0.22.1",
+ "log",
  "minisign-verify",
  "notify",
  "portable-pty",
