@@ -79,10 +79,19 @@
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  gap: 2px;
   overflow-y: auto;
   scrollbar-color: var(--mc-scrollbar) transparent;
   scrollbar-width: thin;
+}
+
+.settings-nav-group + .settings-nav-group {
+  margin-top: 16px;
+}
+
+.settings-nav-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .settings-nav-item {
@@ -153,11 +162,14 @@
   user-select: text;
 }
 
+/* Кнопка висит над прокручиваемой колонкой, поэтому у неё свой фон: иначе
+   уезжающий вверх текст просвечивал бы сквозь неё. */
 .settings-close {
   position: absolute;
   top: 14px;
   right: 14px;
   z-index: 2;
+  background: var(--mc-surface-raised);
 }
 
 .settings-content {
@@ -268,11 +280,53 @@
   margin-top: 8px;
 }
 
+.settings-row.has-media {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.settings-account-avatar {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--mc-border);
+  object-fit: cover;
+  background: var(--mc-button);
+}
+
 .settings-control-pair {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 8px;
+}
+
+.settings-button {
+  padding: 7px 15px;
+  border: 1px solid var(--mc-border);
+  border-radius: 9px;
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.settings-button:hover:not(:disabled) {
+  background: var(--mc-button-hover);
+}
+
+.settings-button:focus-visible {
+  border-color: var(--mc-accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+}
+
+.settings-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .settings-note {
@@ -661,15 +715,21 @@
     width: 208px;
   }
 
+  /* Справа остаётся место под кнопку закрытия — она висит над этой колонкой. */
   .settings-content {
-    padding: 28px 24px 32px;
+    padding: 28px 46px 32px 24px;
   }
 }
 
 /* Узкое окно: управление уже не помещается справа от названия и встаёт под ним. */
 @media (max-width: 720px) {
-  .settings-row {
+  .settings-row,
+  .settings-row.has-media {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-account-avatar {
+    margin-bottom: 10px;
   }
 
   .settings-row-control {

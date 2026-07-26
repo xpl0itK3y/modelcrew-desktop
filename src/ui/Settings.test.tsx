@@ -36,8 +36,15 @@ function renderSettings() {
   );
 }
 
-const searchBox = () =>
-  screen.getByRole("searchbox", { name: "Поиск настроек" });
+const searchBox = () => screen.getByRole("searchbox");
+
+const SECTION_IDS = [
+  "appearance",
+  "terminal",
+  "agents",
+  "notifications",
+  "account",
+] as const;
 
 afterEach(() => setLocale("ru"));
 
@@ -48,15 +55,15 @@ describe("Settings sections", () => {
     const appearanceTab = screen.getByRole("tab", { name: "Внешний вид" });
     const terminalTab = screen.getByRole("tab", { name: "Терминал" });
     const agentsTab = screen.getByRole("tab", { name: "Агенты" });
-    const notificationsTab = screen.getByRole("tab", {
-      name: "Уведомления",
-    });
+    const notificationsTab = screen.getByRole("tab", { name: "Уведомления" });
+    const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
     const tabPanelPairs = [
       [appearanceTab, "appearance"],
       [terminalTab, "terminal"],
       [agentsTab, "agents"],
       [notificationsTab, "notifications"],
+      [accountTab, "account"],
     ] as const;
 
     for (const [tab, id] of tabPanelPairs) {
@@ -70,22 +77,29 @@ describe("Settings sections", () => {
 
     expect(appearanceTab).toHaveAttribute("aria-selected", "true");
     expect(appearanceTab).toHaveAttribute("tabindex", "0");
-    expect(terminalTab).toHaveAttribute("tabindex", "-1");
-    expect(agentsTab).toHaveAttribute("tabindex", "-1");
-    expect(notificationsTab).toHaveAttribute("tabindex", "-1");
+    for (const tab of [terminalTab, agentsTab, notificationsTab, accountTab]) {
+      expect(tab).toHaveAttribute("tabindex", "-1");
+    }
 
-    expect(document.getElementById("settings-panel-appearance")).not.toHaveAttribute(
-      "hidden",
-    );
-    expect(document.getElementById("settings-panel-terminal")).toHaveAttribute(
-      "hidden",
-    );
-    expect(document.getElementById("settings-panel-agents")).toHaveAttribute(
-      "hidden",
-    );
     expect(
-      document.getElementById("settings-panel-notifications"),
-    ).toHaveAttribute("hidden");
+      document.getElementById("settings-panel-appearance"),
+    ).not.toHaveAttribute("hidden");
+    for (const id of SECTION_IDS.filter((entry) => entry !== "appearance")) {
+      expect(document.getElementById(`settings-panel-${id}`)).toHaveAttribute(
+        "hidden",
+      );
+    }
+  });
+
+  it("keeps the navigation lists free of anything but tabs", () => {
+    renderSettings();
+
+    for (const list of screen.getAllByRole("tablist")) {
+      expect(list).toHaveAttribute("aria-orientation", "vertical");
+      for (const child of Array.from(list.children)) {
+        expect(child).toHaveAttribute("role", "tab");
+      }
+    }
   });
 
   it("switches and focuses sections with arrow keys, including wraparound", () => {
@@ -94,18 +108,17 @@ describe("Settings sections", () => {
     const appearanceTab = screen.getByRole("tab", { name: "Внешний вид" });
     const terminalTab = screen.getByRole("tab", { name: "Терминал" });
     const agentsTab = screen.getByRole("tab", { name: "Агенты" });
-    const notificationsTab = screen.getByRole("tab", {
-      name: "Уведомления",
-    });
+    const notificationsTab = screen.getByRole("tab", { name: "Уведомления" });
+    const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
     appearanceTab.focus();
     fireEvent.keyDown(appearanceTab, { key: "ArrowDown" });
 
     expect(terminalTab).toHaveFocus();
     expect(terminalTab).toHaveAttribute("aria-selected", "true");
-    expect(document.getElementById("settings-panel-terminal")).not.toHaveAttribute(
-      "hidden",
-    );
+    expect(
+      document.getElementById("settings-panel-terminal"),
+    ).not.toHaveAttribute("hidden");
 
     fireEvent.keyDown(terminalTab, { key: "ArrowDown" });
     expect(agentsTab).toHaveFocus();
@@ -113,12 +126,16 @@ describe("Settings sections", () => {
     fireEvent.keyDown(agentsTab, { key: "ArrowDown" });
     expect(notificationsTab).toHaveFocus();
 
+    // Через границу группы навигации — «Аккаунт» отдельным списком.
     fireEvent.keyDown(notificationsTab, { key: "ArrowDown" });
+    expect(accountTab).toHaveFocus();
+
+    fireEvent.keyDown(accountTab, { key: "ArrowDown" });
     expect(appearanceTab).toHaveFocus();
 
     fireEvent.keyDown(appearanceTab, { key: "ArrowUp" });
-    expect(notificationsTab).toHaveFocus();
-    expect(notificationsTab).toHaveAttribute("tabindex", "0");
+    expect(accountTab).toHaveFocus();
+    expect(accountTab).toHaveAttribute("tabindex", "0");
     expect(appearanceTab).toHaveAttribute("tabindex", "-1");
   });
 
@@ -127,28 +144,28 @@ describe("Settings sections", () => {
 
     const appearanceTab = screen.getByRole("tab", { name: "Внешний вид" });
     const terminalTab = screen.getByRole("tab", { name: "Терминал" });
-    const notificationsTab = screen.getByRole("tab", {
-      name: "Уведомления",
-    });
+    const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
     fireEvent.click(terminalTab);
     expect(terminalTab).toHaveAttribute("aria-selected", "true");
-    expect(document.getElementById("settings-panel-terminal")).not.toHaveAttribute(
-      "hidden",
-    );
+    expect(
+      document.getElementById("settings-panel-terminal"),
+    ).not.toHaveAttribute("hidden");
 
     terminalTab.focus();
     fireEvent.keyDown(terminalTab, { key: "End" });
-    expect(notificationsTab).toHaveFocus();
+    expect(accountTab).toHaveFocus();
 
-    fireEvent.keyDown(notificationsTab, { key: "Home" });
+    fireEvent.keyDown(accountTab, { key: "Home" });
     expect(appearanceTab).toHaveFocus();
     expect(appearanceTab).toHaveAttribute("aria-selected", "true");
   });
 
   it("shows the app version beneath the navigation", () => {
     renderSettings();
-    expect(screen.getByText(/ModelCrew · версия \d+\.\d+\.\d+/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/ModelCrew · версия \d+\.\d+\.\d+/),
+    ).toBeInTheDocument();
   });
 
   it("warns in the notifications section when audio is suppressed after a hang", () => {
@@ -160,6 +177,21 @@ describe("Settings sections", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "звук временно отключён",
     );
+    soundSuppressed.mockReturnValue(false);
+  });
+
+  it("re-reads the hang verdict after replaying the current sound", () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    // Аудио подвисло на этом воспроизведении — следующее нажатие обязано
+    // показать объяснение, а не молчать.
+    soundSuppressed.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: /Прослушать/ }));
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
     soundSuppressed.mockReturnValue(false);
   });
 
@@ -178,35 +210,81 @@ describe("Settings sections", () => {
   });
 });
 
+describe("Settings account", () => {
+  it("asks GithubAuth to sign in instead of running its own flow", () => {
+    const requests: string[] = [];
+    const listener = (event: Event) => {
+      requests.push((event as CustomEvent<string>).detail);
+    };
+    window.addEventListener("modelcrew:github-auth-request", listener);
+
+    try {
+      renderSettings();
+      fireEvent.click(screen.getByRole("tab", { name: "GitHub" }));
+      fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+      expect(requests).toEqual(["login"]);
+      expect(screen.getByText(/Вы не вошли/)).toBeInTheDocument();
+    } finally {
+      window.removeEventListener("modelcrew:github-auth-request", listener);
+    }
+  });
+
+  it("keeps the avatar source with the account it depends on", () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("tab", { name: "GitHub" }));
+
+    expect(screen.getByText("Аватары авторов")).toBeInTheDocument();
+    // Без входа «Из сети» недоступна.
+    expect(screen.getByRole("button", { name: "Из сети" })).toBeDisabled();
+  });
+});
+
 describe("Settings search", () => {
   it("keeps only the sections and rows that match the query", () => {
     renderSettings();
 
-    fireEvent.change(searchBox(), { target: { value: "тема" } });
+    fireEvent.change(searchBox(), { target: { value: "подсветк" } });
 
     expect(screen.getByRole("tab", { name: "Внешний вид" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Терминал" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Агенты" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Уведомления" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "GitHub" })).toBeNull();
 
-    expect(screen.getByText("Тема интерфейса")).toBeInTheDocument();
-    expect(screen.queryByText("Цвет подсветки")).toBeNull();
+    expect(screen.getByText("Цвет подсветки")).toBeInTheDocument();
+    expect(screen.queryByText("Тема интерфейса")).toBeNull();
     expect(screen.queryByText("Язык интерфейса")).toBeNull();
+  });
+
+  it("finds a section by its own name and then shows all of its rows", () => {
+    renderSettings();
+
+    fireEvent.change(searchBox(), { target: { value: "агенты" } });
+
+    expect(screen.queryAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "Агенты" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Возобновление агентов")).toBeInTheDocument();
+    expect(screen.getByText("Уведомления от агентов")).toBeInTheDocument();
   });
 
   it("opens the first matching section when the query hides the open one", () => {
     renderSettings();
 
     fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
-    fireEvent.change(searchBox(), { target: { value: "тема" } });
+    fireEvent.change(searchBox(), { target: { value: "подсветк" } });
 
     expect(screen.getByRole("tab", { name: "Внешний вид" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(document.getElementById("settings-panel-appearance")).not.toHaveAttribute(
-      "hidden",
-    );
+    expect(
+      document.getElementById("settings-panel-appearance"),
+    ).not.toHaveAttribute("hidden");
   });
 
   it("reports an empty result and hides every panel", () => {
@@ -216,7 +294,7 @@ describe("Settings search", () => {
 
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.getAllByText("Ничего не нашлось")).toHaveLength(2);
-    for (const id of ["appearance", "terminal", "agents", "notifications"]) {
+    for (const id of SECTION_IDS) {
       expect(document.getElementById(`settings-panel-${id}`)).toHaveAttribute(
         "hidden",
       );
@@ -226,10 +304,10 @@ describe("Settings search", () => {
   it("restores every section once the query is cleared", () => {
     renderSettings();
 
-    fireEvent.change(searchBox(), { target: { value: "тема" } });
+    fireEvent.change(searchBox(), { target: { value: "подсветк" } });
     fireEvent.change(searchBox(), { target: { value: "" } });
 
-    expect(screen.queryAllByRole("tab")).toHaveLength(4);
-    expect(screen.getByText("Цвет подсветки")).toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(5);
+    expect(screen.getByText("Тема интерфейса")).toBeInTheDocument();
   });
 });

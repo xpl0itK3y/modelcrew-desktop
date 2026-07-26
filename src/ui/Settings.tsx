@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -18,11 +17,13 @@ import {
   PaletteIcon,
   SearchIcon,
   TerminalGlyphIcon,
+  UserIcon,
 } from "./Icons";
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
 import { AgentsTab } from "./settings/AgentsTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
+import { AccountTab } from "./settings/AccountTab";
 import {
   SettingsSearchProvider,
   useSettingsSearch,
@@ -31,19 +32,49 @@ import {
 
 type SettingsTab = SettingsSectionId;
 
-const SETTINGS_TABS: {
+type SettingsTabEntry = {
   id: SettingsTab;
   label: MessageKey;
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
+};
+
+// Навигация разбита на группы: у каждой свой заголовок и свой tablist, чтобы
+// внутри списка вкладок не оказалось ничего, кроме самих вкладок.
+const SETTINGS_GROUPS: {
+  id: string;
+  label: MessageKey;
+  tabs: SettingsTabEntry[];
 }[] = [
-  { id: "appearance", label: "settings.tabAppearance", Icon: PaletteIcon },
-  { id: "terminal", label: "settings.tabTerminal", Icon: TerminalGlyphIcon },
-  { id: "agents", label: "settings.tabAgents", Icon: AgentIcon },
-  { id: "notifications", label: "settings.tabNotifications", Icon: BellIcon },
+  {
+    id: "settings",
+    label: "settings.title",
+    tabs: [
+      { id: "appearance", label: "settings.tabAppearance", Icon: PaletteIcon },
+      {
+        id: "terminal",
+        label: "settings.tabTerminal",
+        Icon: TerminalGlyphIcon,
+      },
+      { id: "agents", label: "settings.tabAgents", Icon: AgentIcon },
+      {
+        id: "notifications",
+        label: "settings.tabNotifications",
+        Icon: BellIcon,
+      },
+    ],
+  },
+  {
+    id: "account",
+    label: "settings.groupAccount",
+    tabs: [{ id: "account", label: "settings.tabAccount", Icon: UserIcon }],
+  },
 ];
+
+const SETTINGS_TABS = SETTINGS_GROUPS.flatMap((group) => group.tabs);
 
 const settingsTabId = (tab: SettingsTab) => `settings-tab-${tab}`;
 const settingsPanelId = (tab: SettingsTab) => `settings-panel-${tab}`;
+const settingsGroupId = (group: string) => `settings-nav-group-${group}`;
 
 type SettingsProps = {
   themeId: ThemeId;
@@ -61,7 +92,7 @@ type SettingsProps = {
 };
 
 export function Settings(props: SettingsProps) {
-  const titleId = useId();
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -85,19 +116,14 @@ export function Settings(props: SettingsProps) {
         className="dialog settings-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-label={t("settings.title")}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
       >
         {/* Поиск живёт над провайдером: строки настроек регистрируются в нём и
             сами решают, показываться ли по текущему запросу. */}
         <SettingsSearchProvider query={query}>
-          <SettingsShell
-            {...props}
-            titleId={titleId}
-            query={query}
-            onQueryChange={setQuery}
-          />
+          <SettingsShell {...props} query={query} onQueryChange={setQuery} />
         </SettingsSearchProvider>
       </div>
     </div>
@@ -105,7 +131,6 @@ export function Settings(props: SettingsProps) {
 }
 
 type ShellProps = SettingsProps & {
-  titleId: string;
   query: string;
   onQueryChange: (query: string) => void;
 };
@@ -191,35 +216,54 @@ function SettingsShell(props: ShellProps) {
           />
         </div>
 
-        <div className="settings-nav-label" id={props.titleId}>
-          {t("settings.title")}
-        </div>
-
-        <div
-          className="settings-nav-list"
-          role="tablist"
-          aria-orientation="vertical"
-          aria-label={t("settings.title")}
-        >
-          {visibleTabs.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="tab"
-              id={settingsTabId(entry.id)}
-              aria-controls={settingsPanelId(entry.id)}
-              aria-selected={tab === entry.id}
-              tabIndex={tab === entry.id ? 0 : -1}
-              className={`settings-nav-item ${
-                tab === entry.id ? "is-selected" : ""
-              }`}
-              onClick={() => setTab(entry.id)}
-              onKeyDown={(event) => onTabKeyDown(event, entry.id)}
-            >
-              <entry.Icon className="settings-nav-icon" aria-hidden="true" />
-              <span>{t(entry.label)}</span>
-            </button>
-          ))}
+        <div className="settings-nav-list">
+          {SETTINGS_GROUPS.map((group) => {
+            const tabs = group.tabs.filter((entry) =>
+              visibleTabs.includes(entry),
+            );
+            if (tabs.length === 0) {
+              return null;
+            }
+            return (
+              <div className="settings-nav-group" key={group.id}>
+                <div
+                  className="settings-nav-label"
+                  id={settingsGroupId(group.id)}
+                >
+                  {t(group.label)}
+                </div>
+                <div
+                  className="settings-nav-tabs"
+                  role="tablist"
+                  aria-orientation="vertical"
+                  aria-labelledby={settingsGroupId(group.id)}
+                >
+                  {tabs.map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      role="tab"
+                      id={settingsTabId(entry.id)}
+                      aria-controls={settingsPanelId(entry.id)}
+                      aria-selected={tab === entry.id}
+                      tabIndex={tab === entry.id ? 0 : -1}
+                      className={`settings-nav-item ${
+                        tab === entry.id ? "is-selected" : ""
+                      }`}
+                      onClick={() => setTab(entry.id)}
+                      onKeyDown={(event) => onTabKeyDown(event, entry.id)}
+                    >
+                      <entry.Icon
+                        className="settings-nav-icon"
+                        aria-hidden="true"
+                      />
+                      <span>{t(entry.label)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
           {nothingFound && (
             <p className="settings-nav-empty">{t("settings.searchEmpty")}</p>
           )}
@@ -294,6 +338,17 @@ function SettingsShell(props: ShellProps) {
           tabIndex={0}
         >
           <NotificationsTab />
+        </div>
+
+        <div
+          id={settingsPanelId("account")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("account")}
+          hidden={isHidden("account")}
+          tabIndex={0}
+        >
+          <AccountTab />
         </div>
 
         {nothingFound && (

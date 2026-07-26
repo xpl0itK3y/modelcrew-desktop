@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   ACCENT_COLORS,
   APP_THEMES,
@@ -6,11 +5,6 @@ import {
   type ThemeId,
 } from "../../theme";
 import { type MessageKey, type Locale, useI18n } from "../../i18n";
-import {
-  loadNetworkAvatars,
-  saveNetworkAvatars,
-} from "../../terminal/preferences";
-import { isGithubSignedIn, subscribeGithubAuth } from "../../github/authState";
 import {
   SettingRow,
   SettingsPage,
@@ -80,8 +74,6 @@ const accentMessageKeys: Record<AccentColor["id"], MessageKey> = {
   gray: "accent.gray",
 };
 
-type AvatarSource = "network" | "initials";
-
 type AppearanceTabProps = {
   themeId: ThemeId;
   accent: string;
@@ -91,24 +83,6 @@ type AppearanceTabProps = {
 
 export function AppearanceTab(props: AppearanceTabProps) {
   const { locale, setLocale, t } = useI18n();
-  const [networkAvatars, setNetworkAvatars] = useState(() =>
-    loadNetworkAvatars(),
-  );
-  // Сетевые аватарки доступны только после входа через GitHub.
-  const [signedIn, setSignedIn] = useState(() => isGithubSignedIn());
-  useEffect(
-    () => subscribeGithubAuth(() => setSignedIn(isGithubSignedIn())),
-    [],
-  );
-  // Настройку могли переключить извне (автовключение при входе) — подхватываем.
-  useEffect(() => {
-    const onChange = () => setNetworkAvatars(loadNetworkAvatars());
-    window.addEventListener("modelcrew:network-avatars", onChange);
-    return () =>
-      window.removeEventListener("modelcrew:network-avatars", onChange);
-  }, []);
-  // Что реально показывается: «Из сети» действует лишь когда пользователь вошёл.
-  const networkActive = signedIn && networkAvatars;
 
   return (
     <SettingsPage
@@ -244,37 +218,6 @@ export function AppearanceTab(props: AppearanceTabProps) {
         }
       />
 
-      <SettingRow
-        title={t("settings.networkAvatars")}
-        description={
-          signedIn
-            ? t("settings.networkAvatarsNote")
-            : t("settings.networkAvatarsSignIn")
-        }
-        control={
-          <SettingsSegmented<AvatarSource>
-            label={t("settings.networkAvatars")}
-            value={networkActive ? "network" : "initials"}
-            options={[
-              {
-                value: "network",
-                label: t("settings.networkAvatarsOn"),
-                // «Из сети» доступна только вошедшим; без входа — «Инициалы».
-                disabled: !signedIn,
-                title: signedIn
-                  ? undefined
-                  : t("settings.networkAvatarsSignIn"),
-              },
-              { value: "initials", label: t("settings.networkAvatarsOff") },
-            ]}
-            onChange={(value) => {
-              const enabled = value === "network";
-              setNetworkAvatars(enabled);
-              saveNetworkAvatars(enabled);
-            }}
-          />
-        }
-      />
     </SettingsPage>
   );
 }
