@@ -22,6 +22,7 @@ export function saveNetworkAvatars(enabled: boolean): void {
 }
 
 const AGENT_ALERTS_STORAGE_KEY = "modelcrew.agentAlerts";
+const AGENT_ALERT_DETAIL_STORAGE_KEY = "modelcrew.agentAlertDetail";
 
 // Уведомления «агент закончил/ждёт ответа» для панелей вне поля зрения.
 export function loadAgentAlertsEnabled(): boolean {
@@ -35,6 +36,26 @@ export function loadAgentAlertsEnabled(): boolean {
 export function saveAgentAlertsEnabled(enabled: boolean): void {
   try {
     localStorage.setItem(AGENT_ALERTS_STORAGE_KEY, enabled ? "on" : "off");
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}
+
+export type AgentAlertDetailMode = "brief" | "detailed";
+
+export function loadAgentAlertDetailMode(): AgentAlertDetailMode {
+  try {
+    return localStorage.getItem(AGENT_ALERT_DETAIL_STORAGE_KEY) === "detailed"
+      ? "detailed"
+      : "brief";
+  } catch {
+    return "brief";
+  }
+}
+
+export function saveAgentAlertDetailMode(mode: AgentAlertDetailMode): void {
+  try {
+    localStorage.setItem(AGENT_ALERT_DETAIL_STORAGE_KEY, mode);
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }

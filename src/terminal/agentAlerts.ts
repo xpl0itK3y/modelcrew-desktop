@@ -8,7 +8,10 @@ import { AGENTS, getAgentRecord } from "../agents";
 import { sendSystemNotification } from "../notifications";
 import { playNotificationSound } from "../sound";
 import { translate } from "../i18n";
-import { loadAgentAlertsEnabled } from "./preferences";
+import {
+  loadAgentAlertDetailMode,
+  loadAgentAlertsEnabled,
+} from "./preferences";
 
 type AttentionScanMode = 0 | 1 | 2 | 3;
 
@@ -295,6 +298,21 @@ export type AgentAlertContext = {
 export type PreciseAgentAlertKind =
   "permission" | "question" | "completed" | "error" | "waiting";
 
+const MAX_AGENT_ALERT_DETAIL_CHARS = 200;
+
+export function formatAgentAlertDetail(
+  notification: TerminalAttentionNotification,
+): string {
+  const normalized = cleanNotificationText(
+    notification.body || notification.title,
+  ).replace(/\s+/g, " ");
+  const characters = Array.from(normalized);
+  if (characters.length <= MAX_AGENT_ALERT_DETAIL_CHARS) {
+    return normalized;
+  }
+  return `${characters.slice(0, MAX_AGENT_ALERT_DETAIL_CHARS - 3).join("")}...`;
+}
+
 export function classifyTerminalNotification(
   notification: TerminalAttentionNotification,
 ): PreciseAgentAlertKind {
@@ -331,7 +349,10 @@ export function classifyTerminalNotification(
 
 function mostImportantNotification(
   notifications: TerminalAttentionNotification[],
-): PreciseAgentAlertKind {
+): {
+  kind: PreciseAgentAlertKind;
+  notification: TerminalAttentionNotification;
+} {
   const priority: Record<PreciseAgentAlertKind, number> = {
     error: 5,
     permission: 4,
@@ -340,9 +361,12 @@ function mostImportantNotification(
     completed: 1,
   };
   return notifications
-    .map(classifyTerminalNotification)
+    .map((notification) => ({
+      kind: classifyTerminalNotification(notification),
+      notification,
+    }))
     .reduce((selected, candidate) =>
-      priority[candidate] > priority[selected] ? candidate : selected,
+      priority[candidate.kind] > priority[selected.kind] ? candidate : selected,
     );
 }
 
@@ -367,10 +391,12 @@ export function trackAgentOutput(
       tracker.quietTimer = undefined;
     }
     if (!muted) {
+      const selected = mostImportantNotification(scan.notifications);
       void raiseAgentAlert(
         terminalId,
-        mostImportantNotification(scan.notifications),
+        selected.kind,
         getContext(),
+        selected.notification,
       );
     }
     return;
@@ -468,6 +494,7 @@ export async function raiseAgentAlert(
   terminalId: string,
   kind: AgentAlertKind,
   context: AgentAlertContext,
+  notification?: TerminalAttentionNotification,
 ): Promise<void> {
   if (!loadAgentAlertsEnabled()) {
     return;
@@ -501,10 +528,19 @@ export async function raiseAgentAlert(
   const project = context.workspaceId
     ? workspaceNameResolver(context.workspaceId)
     : null;
+  const detail =
+    notification && loadAgentAlertDetailMode() === "detailed"
+      ? formatAgentAlertDetail(notification)
+      : "";
+  const body = [
+    project ? translate("terminal.agentProject", { project }) : "",
+    detail,
+  ]
+    .filter(Boolean)
+    .join("\n");
   playNotificationSound();
   void sendSystemNotification(
     translate(alertTranslationKey(kind), { agent }),
-    // Откуда сигнал: имя проекта в теле баннера.
-    project ? translate("terminal.agentProject", { project }) : "",
+    body,
   );
 }

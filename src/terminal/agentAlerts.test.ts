@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   windowFocused: { value: false },
   record: { value: null as { agentId: string; command: string } | null },
   playSound: vi.fn(),
-  systemNotification: vi.fn(async () => {}),
+  systemNotification: vi.fn(async (_title: string, _body: string) => {}),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -32,6 +32,7 @@ import {
   clearAgentAttention,
   createAgentAlertTracker,
   createAttentionScanState,
+  formatAgentAlertDetail,
   getAgentAttentionCount,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
@@ -40,6 +41,7 @@ import {
   subscribeAgentAttention,
   trackAgentOutput,
 } from "./agentAlerts";
+import { saveAgentAlertDetailMode } from "./preferences";
 
 // Ожидание микрозадач: raiseAgentAlert асинхронно спрашивает фокус окна.
 async function settle() {
@@ -172,6 +174,28 @@ describe("scanTerminalAttention", () => {
   });
 });
 
+describe("formatAgentAlertDetail", () => {
+  it("prefers the body, collapses whitespace, and caps long text", () => {
+    expect(
+      formatAgentAlertDetail({
+        protocol: "osc777",
+        title: "Permission needed",
+        body: "  Run\n\n npm   test  ",
+        types: [],
+      }),
+    ).toBe("Run npm test");
+
+    const formatted = formatAgentAlertDetail({
+      protocol: "osc9",
+      title: "x".repeat(250),
+      body: "",
+      types: [],
+    });
+    expect(Array.from(formatted)).toHaveLength(200);
+    expect(formatted.endsWith("...")).toBe(true);
+  });
+});
+
 describe("agent attention store", () => {
   it("notifies subscribers and clears acknowledged panels", () => {
     const seen: number[] = [];
@@ -199,6 +223,7 @@ describe("trackAgentOutput", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    localStorage.clear();
     mocks.windowFocused.value = false;
     mocks.record.value = { agentId: "claude", command: "claude" };
     clearAgentAttention("panel-1");
@@ -263,13 +288,76 @@ describe("trackAgentOutput", () => {
 
     expect(mocks.systemNotification).toHaveBeenCalledWith(
       expect.stringMatching(/Claude Code.*(permission|разреш)/i),
-      expect.any(String),
+      expect.not.stringContaining("Approval requested"),
     );
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
     clearAgentAttention("permission-panel");
+    vi.useRealTimers();
+  });
+
+  it("adds the agent message only in detailed mode", async () => {
+    saveAgentAlertDetailMode("detailed");
+    setWorkspaceNameResolver((id) => (id === "ws-1" ? "ModelCrew" : null));
+    const tracker = engaged("detailed-panel");
+    trackAgentOutput(
+      tracker,
+      "detailed-panel",
+      "\x1b]777;notify;Permission needed;Approve npm test\x07",
+      () => hidden,
+    );
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringMatching(/Claude Code.*(permission|разреш)/i),
+      expect.stringMatching(/(?:Проект|Project): ModelCrew\nApprove npm test/),
+    );
+    clearAgentAttention("detailed-panel");
+    vi.useRealTimers();
+  });
+
+  it("cleans and caps the detailed message in the system banner", async () => {
+    saveAgentAlertDetailMode("detailed");
+    setWorkspaceNameResolver(() => "ModelCrew");
+    const tracker = engaged("sanitized-detail-panel");
+    trackAgentOutput(
+      tracker,
+      "sanitized-detail-panel",
+      `\x1b]777;notify;Permission needed; Run\n\n${"x".repeat(220)}\x01\x07`,
+      () => hidden,
+    );
+    await settle();
+
+    const body = mocks.systemNotification.mock.calls[0]?.[1] ?? "";
+    const [project, detail] = body.split("\n");
+    expect(project).toMatch(/(?:Проект|Project): ModelCrew/);
+    expect(Array.from(detail)).toHaveLength(200);
+    expect(detail).not.toContain("\x01");
+    expect(detail).not.toContain("\n");
+    expect(detail.endsWith("...")).toBe(true);
+    clearAgentAttention("sanitized-detail-panel");
+    vi.useRealTimers();
+  });
+
+  it("never exposes raw terminal output for fallback bells", async () => {
+    saveAgentAlertDetailMode("detailed");
+    setWorkspaceNameResolver(() => "ModelCrew");
+    const tracker = engaged("detailed-bell-panel");
+    trackAgentOutput(
+      tracker,
+      "detailed-bell-panel",
+      "secret terminal output\x07",
+      () => hidden,
+    );
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringContaining("Claude Code"),
+      expect.not.stringContaining("secret terminal output"),
+    );
+    clearAgentAttention("detailed-bell-panel");
     vi.useRealTimers();
   });
 
