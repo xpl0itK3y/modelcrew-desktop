@@ -28,8 +28,10 @@ import {
   AGENT_IDLE_QUIET_MS,
   SPAWN_ALERT_MUTE_MS,
   acknowledgeAgentPanel,
+  classifyTerminalNotification,
   clearAgentAttention,
   createAgentAlertTracker,
+  createAttentionScanState,
   getAgentAttentionCount,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
@@ -46,38 +48,127 @@ async function settle() {
 
 describe("scanTerminalAttention", () => {
   it("counts plain bells", () => {
-    const result = scanTerminalAttention("hello\x07world\x07", 0);
-    expect(result).toEqual({ bells: 2, state: 0 });
+    const result = scanTerminalAttention(
+      "hello\x07world\x07",
+      createAttentionScanState(),
+    );
+    expect(result.bells).toBe(2);
+    expect(result.notifications).toEqual([]);
+    expect(result.state.mode).toBe(0);
   });
 
   it("ignores the BEL that terminates an OSC title sequence", () => {
     // Смена заголовка окна: OSC 0;title BEL — это не «звонок».
-    const result = scanTerminalAttention("\x1b]0;my title\x07after", 0);
-    expect(result).toEqual({ bells: 0, state: 0 });
+    const result = scanTerminalAttention(
+      "\x1b]0;my title\x07after",
+      createAttentionScanState(),
+    );
+    expect(result.bells).toBe(0);
+    expect(result.notifications).toEqual([]);
+    expect(result.state.mode).toBe(0);
   });
 
   it("handles ST-terminated OSC and real bell after it", () => {
-    const result = scanTerminalAttention("\x1b]8;;link\x1b\\text\x07", 0);
-    expect(result).toEqual({ bells: 1, state: 0 });
+    const result = scanTerminalAttention(
+      "\x1b]8;;link\x1b\\text\x07",
+      createAttentionScanState(),
+    );
+    expect(result.bells).toBe(1);
+    expect(result.notifications).toEqual([]);
+    expect(result.state.mode).toBe(0);
   });
 
   it("keeps state across chunk boundaries", () => {
     // OSC разорван между чанками: BEL из второго чанка — терминатор, не звонок.
-    const first = scanTerminalAttention("\x1b]0;par", 0);
+    const first = scanTerminalAttention(
+      "\x1b]0;par",
+      createAttentionScanState(),
+    );
     expect(first.bells).toBe(0);
-    expect(first.state).toBe(2);
+    expect(first.state.mode).toBe(2);
     const second = scanTerminalAttention("tial\x07\x07", first.state);
-    expect(second).toEqual({ bells: 1, state: 0 });
+    expect(second.bells).toBe(1);
+    expect(second.notifications).toEqual([]);
+    expect(second.state.mode).toBe(0);
   });
 
   it("does not treat CSI sequences as OSC", () => {
-    const result = scanTerminalAttention("\x1b[31mred\x07", 0);
+    const result = scanTerminalAttention(
+      "\x1b[31mred\x07",
+      createAttentionScanState(),
+    );
     expect(result.bells).toBe(1);
   });
 
   it("scans binary chunks too", () => {
     const bytes = new Uint8Array([104, 7, 105]).buffer;
-    expect(scanTerminalAttention(bytes, 0).bells).toBe(1);
+    expect(scanTerminalAttention(bytes, createAttentionScanState()).bells).toBe(
+      1,
+    );
+  });
+
+  it("extracts OSC 9 and OSC 777 notifications", () => {
+    const state = createAttentionScanState();
+    const result = scanTerminalAttention(
+      "\x1b]9;Agent turn complete\x1b\\" +
+        "\x1b]777;notify;Permission needed;Approve Bash\x07",
+      state,
+    );
+    expect(result.bells).toBe(0);
+    expect(result.notifications).toEqual([
+      {
+        protocol: "osc9",
+        title: "Agent turn complete",
+        body: "",
+        types: [],
+      },
+      {
+        protocol: "osc777",
+        title: "Permission needed",
+        body: "Approve Bash",
+        types: [],
+      },
+    ]);
+    expect(classifyTerminalNotification(result.notifications[0])).toBe(
+      "completed",
+    );
+    expect(classifyTerminalNotification(result.notifications[1])).toBe(
+      "permission",
+    );
+  });
+
+  it("assembles chunked OSC 99 title, body, and notification type", () => {
+    const state = createAttentionScanState();
+    const first = scanTerminalAttention(
+      "\x1b]99;i=turn-1:d=0:p=title;Codex\x1b\\",
+      state,
+    );
+    expect(first.notifications).toEqual([]);
+    const second = scanTerminalAttention(
+      "\x1b]99;i=turn-1:p=body:t=cXVlc3Rpb24=;Waiting for input\x1b\\",
+      first.state,
+    );
+    expect(second.notifications).toEqual([
+      {
+        protocol: "osc99",
+        title: "Codex",
+        body: "Waiting for input",
+        types: ["question"],
+      },
+    ]);
+    expect(classifyTerminalNotification(second.notifications[0])).toBe(
+      "question",
+    );
+  });
+
+  it("drops oversized OSC payloads without turning their terminator into BEL", () => {
+    const result = scanTerminalAttention(
+      `\x1b]9;${"x".repeat(20_000)}\x07`,
+      createAttentionScanState(),
+    );
+    expect(result.bells).toBe(0);
+    expect(result.notifications).toEqual([]);
+    expect(result.state.mode).toBe(0);
   });
 });
 
@@ -157,6 +248,49 @@ describe("trackAgentOutput", () => {
     // Ответ пользователя гасит сигнал.
     acknowledgeAgentPanel(tracker, "bell-panel");
     expect(getAgentAttentionCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("uses a precise permission notification and cancels idle fallback", async () => {
+    const tracker = engaged("permission-panel");
+    trackAgentOutput(
+      tracker,
+      "permission-panel",
+      `${"x".repeat(AGENT_IDLE_MIN_BYTES)}\x1b]9;Approval requested\x1b\\`,
+      () => hidden,
+    );
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringMatching(/Claude Code.*(permission|разреш)/i),
+      expect.any(String),
+    );
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    clearAgentAttention("permission-panel");
+    vi.useRealTimers();
+  });
+
+  it("accepts precise completion after spawn mute without requiring keyboard input", async () => {
+    const tracker = createAgentAlertTracker();
+    muteAlertsAfterSpawn(tracker);
+    await vi.advanceTimersByTimeAsync(SPAWN_ALERT_MUTE_MS + 1);
+    trackAgentOutput(
+      tracker,
+      "precise-restored-panel",
+      "\x1b]9;Agent turn complete\x1b\\",
+      () => hidden,
+    );
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringMatching(/Claude Code.*(finished|completed|закончил)/i),
+      expect.any(String),
+    );
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    clearAgentAttention("precise-restored-panel");
     vi.useRealTimers();
   });
 

@@ -1,7 +1,7 @@
 // Уведомления «агент ждёт вас»: звук + системный баннер, когда агент в
 // панели закончил работу или просит ответа, а пользователь смотрит не туда
-// (окно не в фокусе или панель в скрытой сессии). Сигналы: терминальный
-// звонок BEL и тишина после активного вывода.
+// (окно не в фокусе или панель в скрытой сессии). Точные сигналы приходят
+// через terminal notification OSC; BEL и тишина остаются fallback.
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AGENTS, getAgentRecord } from "../agents";
@@ -10,46 +10,214 @@ import { playNotificationSound } from "../sound";
 import { translate } from "../i18n";
 import { loadAgentAlertsEnabled } from "./preferences";
 
-// Состояние сканера между чанками вывода: 0 — обычный поток, 1 — после ESC,
-// 2 — внутри OSC (его BEL-терминатор звонком не считается), 3 — ESC в OSC.
-export type AttentionScanState = 0 | 1 | 2 | 3;
+type AttentionScanMode = 0 | 1 | 2 | 3;
+
+type KittyNotificationDraft = {
+  title: string;
+  body: string;
+  types: string[];
+};
+
+// OSC может быть разорван на произвольной границе PTY-чанка. Храним только
+// небольшой ограниченный payload и незавершённые части chunked OSC 99.
+export type AttentionScanState = {
+  mode: AttentionScanMode;
+  osc: string;
+  oscOverflow: boolean;
+  kitty: Record<string, KittyNotificationDraft>;
+};
+
+export type TerminalAttentionNotification = {
+  protocol: "osc9" | "osc99" | "osc777";
+  title: string;
+  body: string;
+  types: string[];
+};
+
+const MAX_OSC_CHARS = 16_384;
+const MAX_KITTY_DRAFTS = 8;
+
+export function createAttentionScanState(): AttentionScanState {
+  return {
+    mode: 0,
+    osc: "",
+    oscOverflow: false,
+    kitty: {},
+  };
+}
+
+function cleanNotificationText(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim();
+}
+
+function decodeBase64Utf8(value: string): string {
+  try {
+    const binary = atob(value);
+    const bytes = Uint8Array.from(binary, (character) =>
+      character.charCodeAt(0),
+    );
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function parseOsc99(
+  payload: string,
+  state: AttentionScanState,
+): TerminalAttentionNotification | null {
+  const metadataEnd = payload.indexOf(";", 3);
+  if (metadataEnd < 0) {
+    return null;
+  }
+  const metadata = payload.slice(3, metadataEnd);
+  const rawPayload = payload.slice(metadataEnd + 1);
+  const fields = metadata.split(":").map((field) => {
+    const separator = field.indexOf("=");
+    return separator < 0
+      ? ([field, ""] as const)
+      : ([field.slice(0, separator), field.slice(separator + 1)] as const);
+  });
+  const valueOf = (key: string) =>
+    fields.find(([fieldKey]) => fieldKey === key)?.[1];
+  const encoded = valueOf("e") === "1";
+  const part = valueOf("p") ?? "title";
+  if (part !== "title" && part !== "body") {
+    return null;
+  }
+
+  const id = valueOf("i") || "__anonymous";
+  const existing = state.kitty[id] ?? { title: "", body: "", types: [] };
+  const decodedPayload = cleanNotificationText(
+    encoded ? decodeBase64Utf8(rawPayload) : rawPayload,
+  );
+  existing[part] = (existing[part] + decodedPayload).slice(0, MAX_OSC_CHARS);
+  for (const [, rawType] of fields.filter(([key]) => key === "t")) {
+    const decodedType = cleanNotificationText(decodeBase64Utf8(rawType));
+    if (
+      decodedType &&
+      existing.types.length < MAX_KITTY_DRAFTS &&
+      !existing.types.includes(decodedType)
+    ) {
+      existing.types.push(decodedType);
+    }
+  }
+  state.kitty[id] = existing;
+
+  const ids = Object.keys(state.kitty);
+  if (ids.length > MAX_KITTY_DRAFTS) {
+    delete state.kitty[ids[0]];
+  }
+  if (valueOf("d") === "0") {
+    return null;
+  }
+  delete state.kitty[id];
+  if (!existing.title && !existing.body) {
+    return null;
+  }
+  return {
+    protocol: "osc99",
+    title: existing.title,
+    body: existing.body,
+    types: existing.types,
+  };
+}
+
+function parseTerminalNotification(
+  payload: string,
+  state: AttentionScanState,
+): TerminalAttentionNotification | null {
+  if (payload.startsWith("9;") && !payload.startsWith("9;4;")) {
+    const title = cleanNotificationText(payload.slice(2));
+    return title ? { protocol: "osc9", title, body: "", types: [] } : null;
+  }
+  if (payload.startsWith("777;notify;")) {
+    const parts = payload.slice("777;notify;".length).split(";");
+    const title = cleanNotificationText(parts.shift() ?? "");
+    const body = cleanNotificationText(parts.join(";"));
+    return title || body
+      ? { protocol: "osc777", title, body, types: [] }
+      : null;
+  }
+  if (payload.startsWith("99;")) {
+    return parseOsc99(payload, state);
+  }
+  return null;
+}
+
+function finishOsc(
+  state: AttentionScanState,
+): TerminalAttentionNotification | null {
+  const notification = state.oscOverflow
+    ? null
+    : parseTerminalNotification(state.osc, state);
+  state.mode = 0;
+  state.osc = "";
+  state.oscOverflow = false;
+  return notification;
+}
 
 export function scanTerminalAttention(
   data: string | ArrayBuffer,
   state: AttentionScanState,
-): { bells: number; state: AttentionScanState } {
-  const bytes =
-    typeof data === "string" ? null : new Uint8Array(data);
+): {
+  bells: number;
+  notifications: TerminalAttentionNotification[];
+  state: AttentionScanState;
+} {
+  const bytes = typeof data === "string" ? null : new Uint8Array(data);
   const length = bytes ? bytes.length : (data as string).length;
   let bells = 0;
+  const notifications: TerminalAttentionNotification[] = [];
   for (let index = 0; index < length; index += 1) {
-    const code = bytes
-      ? bytes[index]
-      : (data as string).charCodeAt(index);
-    switch (state) {
+    const code = bytes ? bytes[index] : (data as string).charCodeAt(index);
+    switch (state.mode) {
       case 0:
         if (code === 0x1b) {
-          state = 1;
+          state.mode = 1;
         } else if (code === 0x07) {
           bells += 1;
         }
         break;
       case 1:
-        state = code === 0x5d /* ] */ ? 2 : 0;
+        if (code === 0x5d /* ] */) {
+          state.mode = 2;
+          state.osc = "";
+          state.oscOverflow = false;
+        } else {
+          state.mode = 0;
+        }
         break;
       case 2:
         if (code === 0x07) {
-          state = 0; // BEL завершил OSC — не звонок
+          const notification = finishOsc(state);
+          if (notification) {
+            notifications.push(notification);
+          }
         } else if (code === 0x1b) {
-          state = 3;
+          state.mode = 3;
+        } else if (!state.oscOverflow) {
+          if (state.osc.length < MAX_OSC_CHARS) {
+            state.osc += String.fromCharCode(code);
+          } else {
+            state.oscOverflow = true;
+            state.osc = "";
+          }
         }
         break;
       case 3:
-        state = code === 0x5c /* \\ */ ? 0 : 2;
+        if (code === 0x5c /* \\ */) {
+          const notification = finishOsc(state);
+          if (notification) {
+            notifications.push(notification);
+          }
+        } else {
+          state.mode = 2;
+        }
         break;
     }
   }
-  return { bells, state };
+  return { bells, notifications, state };
 }
 
 // ---------- Панели, ждущие внимания (для бейджа на иконке) ----------
@@ -106,7 +274,7 @@ export type AgentAlertTracker = {
 
 export function createAgentAlertTracker(): AgentAlertTracker {
   return {
-    scanState: 0,
+    scanState: createAttentionScanState(),
     activityBytes: 0,
     quietTimer: undefined,
     muteUntil: 0,
@@ -124,9 +292,63 @@ export type AgentAlertContext = {
   workspaceId: string | null;
 };
 
-// Живой вывод PTY: звонок BEL — мгновенный сигнал, тишина после активного
-// вывода — отложенный. Контекст читается в момент срабатывания: панель
-// могла смениться за время тишины.
+export type PreciseAgentAlertKind =
+  "permission" | "question" | "completed" | "error" | "waiting";
+
+export function classifyTerminalNotification(
+  notification: TerminalAttentionNotification,
+): PreciseAgentAlertKind {
+  const text = [...notification.types, notification.title, notification.body]
+    .join(" ")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+  if (
+    /\b(error|failed|failure|quota|rate limit|unauthorized|authentication)\b/.test(
+      text,
+    )
+  ) {
+    return "error";
+  }
+  if (/\b(permission|approval|approve|confirmation|confirm)\b/.test(text)) {
+    return "permission";
+  }
+  if (
+    /\b(question|answer|input|elicitation|plan mode prompt|idle prompt)\b/.test(
+      text,
+    )
+  ) {
+    return "question";
+  }
+  if (
+    /\b(complete|completed|done|finished|ready|task completed|agent turn complete)\b/.test(
+      text,
+    )
+  ) {
+    return "completed";
+  }
+  return "waiting";
+}
+
+function mostImportantNotification(
+  notifications: TerminalAttentionNotification[],
+): PreciseAgentAlertKind {
+  const priority: Record<PreciseAgentAlertKind, number> = {
+    error: 5,
+    permission: 4,
+    question: 3,
+    waiting: 2,
+    completed: 1,
+  };
+  return notifications
+    .map(classifyTerminalNotification)
+    .reduce((selected, candidate) =>
+      priority[candidate] > priority[selected] ? candidate : selected,
+    );
+}
+
+// Живой вывод PTY: structured OSC даёт точный тип, звонок BEL — мгновенный
+// fallback, тишина после активного вывода — отложенный fallback. Контекст
+// читается в момент срабатывания: панель могла смениться за время тишины.
 export function trackAgentOutput(
   tracker: AgentAlertTracker,
   terminalId: string,
@@ -137,12 +359,27 @@ export function trackAgentOutput(
   // сломают разбор после того, как пользователь начнёт работать.
   const scan = scanTerminalAttention(data, tracker.scanState);
   tracker.scanState = scan.state;
+  const muted = Date.now() < tracker.muteUntil;
+  if (scan.notifications.length > 0) {
+    tracker.activityBytes = 0;
+    if (tracker.quietTimer !== undefined) {
+      window.clearTimeout(tracker.quietTimer);
+      tracker.quietTimer = undefined;
+    }
+    if (!muted) {
+      void raiseAgentAlert(
+        terminalId,
+        mostImportantNotification(scan.notifications),
+        getContext(),
+      );
+    }
+    return;
+  }
   // Пока пользователь не работал с панелью, её вывод не повод сигналить:
   // восстановленный агент простаивает штатно.
   if (!tracker.engaged) {
     return;
   }
-  const muted = Date.now() < tracker.muteUntil;
   if (scan.bells > 0 && !muted) {
     void raiseAgentAlert(terminalId, "bell", getContext());
   }
@@ -195,8 +432,7 @@ export function disposeAgentAlertTracker(tracker: AgentAlertTracker): void {
 
 // Имя проекта по id воркспейса: список проектов живёт в React-состоянии
 // App, модуль получает к нему доступ через зарегистрированный резолвер.
-let workspaceNameResolver: (workspaceId: string) => string | null = () =>
-  null;
+let workspaceNameResolver: (workspaceId: string) => string | null = () => null;
 
 export function setWorkspaceNameResolver(
   resolver: (workspaceId: string) => string | null,
@@ -208,7 +444,25 @@ export function setWorkspaceNameResolver(
 const MIN_ALERT_GAP_MS = 15_000;
 const lastAlertAt = new Map<string, number>();
 
-export type AgentAlertKind = "bell" | "idle";
+export type AgentAlertKind = PreciseAgentAlertKind | "bell" | "idle";
+
+function alertTranslationKey(kind: AgentAlertKind) {
+  switch (kind) {
+    case "permission":
+      return "terminal.agentPermission" as const;
+    case "question":
+      return "terminal.agentQuestion" as const;
+    case "completed":
+      return "terminal.agentCompleted" as const;
+    case "error":
+      return "terminal.agentError" as const;
+    case "waiting":
+    case "bell":
+      return "terminal.agentWaiting" as const;
+    case "idle":
+      return "terminal.agentIdle" as const;
+  }
+}
 
 export async function raiseAgentAlert(
   terminalId: string,
@@ -249,10 +503,7 @@ export async function raiseAgentAlert(
     : null;
   playNotificationSound();
   void sendSystemNotification(
-    translate(
-      kind === "bell" ? "terminal.agentWaiting" : "terminal.agentIdle",
-      { agent },
-    ),
+    translate(alertTranslationKey(kind), { agent }),
     // Откуда сигнал: имя проекта в теле баннера.
     project ? translate("terminal.agentProject", { project }) : "",
   );
