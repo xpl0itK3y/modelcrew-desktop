@@ -325,6 +325,59 @@ pub fn locate_grok_session(
     best.map(|(_, id)| id)
 }
 
+/// Kimi Code: `<home>/session_index.jsonl` maps a work directory and session
+/// id to `<home>/sessions/<work-dir-key>/session_<uuid>/`.
+pub fn locate_kimi_session(
+    kimi_home: &Path,
+    cwd: &str,
+    since: SystemTime,
+    exclude: &[String],
+) -> Option<String> {
+    let sessions_root = fs::canonicalize(kimi_home.join("sessions")).ok()?;
+    let index = fs::read_to_string(kimi_home.join("session_index.jsonl")).ok()?;
+    let mut best: Option<(Duration, String)> = None;
+
+    for line in index.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(id) = entry.get("sessionId").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(work_dir) = entry.get("workDir").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(session_dir) = entry.get("sessionDir").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if work_dir != cwd || !is_session_id(id) || exclude.iter().any(|excluded| excluded == id) {
+            continue;
+        }
+
+        // sessionDir is user-owned metadata. Keep lookup confined to Kimi's
+        // session store before reading state.json.
+        let Ok(session_dir) = fs::canonicalize(session_dir) else {
+            continue;
+        };
+        if !session_dir.starts_with(&sessions_root) {
+            continue;
+        }
+        let state_path = session_dir.join("state.json");
+        let Some(instant) = file_instant(&state_path) else {
+            continue;
+        };
+        if !within_window(instant, since) {
+            continue;
+        }
+        let dist = distance(instant, since);
+        if best.as_ref().is_none_or(|(best_dist, _)| dist < *best_dist) {
+            best = Some((dist, id.to_string()));
+        }
+    }
+
+    best.map(|(_, id)| id)
+}
+
 /// Дешёвая проверка принадлежности файла сессии проекту: cwd упомянут в
 /// первых килобайтах (метаданные пишутся в начале).
 fn file_mentions_cwd(path: &Path, cwd: &str) -> bool {
@@ -389,6 +442,12 @@ fn grok_dir(home: &Path) -> PathBuf {
     home.join(".grok")
 }
 
+fn kimi_code_home_dir(home: &Path) -> PathBuf {
+    std::env::var_os("KIMI_CODE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".kimi-code"))
+}
+
 #[tauri::command]
 pub fn agent_session_locate(
     window: tauri::WebviewWindow,
@@ -417,6 +476,7 @@ pub fn agent_session_locate(
         "kilocode" => kilo_db_candidates(&home)
             .iter()
             .find_map(|db| locate_opencode_session(db, &cwd, since, &exclude)),
+        "kimi" => locate_kimi_session(&kimi_code_home_dir(&home), &cwd, since, &exclude),
         "antigravity" => {
             locate_antigravity_session(&antigravity_cli_dir(&home), &cwd, since, &exclude)
         }
@@ -630,6 +690,62 @@ mod tests {
             None
         );
         let _ = fs::remove_dir_all(grok);
+    }
+
+    #[test]
+    fn kimi_locator_uses_index_work_dir_and_respects_exclude() {
+        let home = temp_dir("kimi");
+        let sessions = home.join("sessions/wd_project");
+        let target_id = "df13800a-7139-4259-8330-6769145fc02e";
+        let other_id = "ab90edc1-964b-4e04-ad5b-f4b20f5994e0";
+        let target = sessions.join(format!("session_{target_id}/state.json"));
+        let other = sessions.join(format!("session_{other_id}/state.json"));
+        let since = SystemTime::now();
+        touch_with_mtime(&target, since + Duration::from_secs(2));
+        touch_with_mtime(&other, since + Duration::from_secs(1));
+        fs::write(
+            home.join("session_index.jsonl"),
+            format!(
+                "{{\"sessionId\":\"{target_id}\",\"sessionDir\":\"{}\",\"workDir\":\"/tmp/proj\"}}\n\
+                 {{\"sessionId\":\"{other_id}\",\"sessionDir\":\"{}\",\"workDir\":\"/tmp/other\"}}\n",
+                target.parent().unwrap().display(),
+                other.parent().unwrap().display(),
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            locate_kimi_session(&home, "/tmp/proj", since, &[]).as_deref(),
+            Some(target_id)
+        );
+        assert_eq!(
+            locate_kimi_session(&home, "/tmp/proj", since, &[target_id.into()]),
+            None
+        );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn kimi_locator_rejects_session_dirs_outside_its_store() {
+        let home = temp_dir("kimi-confined");
+        let outside = temp_dir("kimi-outside");
+        let id = "df13800a-7139-4259-8330-6769145fc02e";
+        let state = outside.join("state.json");
+        let since = SystemTime::now();
+        fs::create_dir_all(home.join("sessions")).unwrap();
+        touch_with_mtime(&state, since);
+        fs::write(
+            home.join("session_index.jsonl"),
+            format!(
+                "{{\"sessionId\":\"{id}\",\"sessionDir\":\"{}\",\"workDir\":\"/tmp/proj\"}}\n",
+                outside.display(),
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(locate_kimi_session(&home, "/tmp/proj", since, &[]), None);
+        let _ = fs::remove_dir_all(home);
+        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]

@@ -61,6 +61,14 @@ export const AGENTS: AgentDefinition[] = [
     resumeSession: ["--session"],
   },
   {
+    id: "kimi",
+    label: "Kimi Code",
+    processNames: ["kimi"],
+    resumeLast: ["--continue"],
+    resumePicker: ["--session"],
+    resumeSession: ["--session"],
+  },
+  {
     id: "grok",
     label: "Grok Build",
     processNames: ["grok"],

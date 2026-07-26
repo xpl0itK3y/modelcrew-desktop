@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AGENTS,
   bindAgentSession,
   boundAgentSessionIds,
   buildAgentResume,
@@ -29,6 +30,7 @@ describe("agent catalog", () => {
     expect(matchAgent("Codex")?.agent.id).toBe("codex");
     expect(matchAgent(" agy ")?.agent.id).toBe("antigravity");
     expect(matchAgent("kilo")?.agent.id).toBe("kilocode");
+    expect(matchAgent("Kimi")?.agent.id).toBe("kimi");
     expect(matchAgent("grok")?.agent.id).toBe("grok");
     expect(matchAgent("cursor-agent")?.agent.id).toBe("cursor");
     expect(matchAgent("gemini")?.agent.id).toBe("gemini");
@@ -37,6 +39,9 @@ describe("agent catalog", () => {
     expect(matchAgent("amp")?.agent.id).toBe("amp");
     expect(matchAgent("zsh")).toBeNull();
     expect(matchAgent("vim")).toBeNull();
+    expect(AGENTS.find((agent) => agent.id === "kimi")?.label).toBe(
+      "Kimi Code",
+    );
   });
 
   it("keeps transient subprocesses but clears an explicit shell immediately", () => {
@@ -83,6 +88,11 @@ describe("agent catalog", () => {
     const claude = getAgentRecord("panel-2")!;
     expect(buildAgentResume(claude, false)).toBe("claude --continue");
     expect(buildAgentResume(claude, true)).toBe("claude --resume");
+
+    rememberAgentProcess("panel-3", "kimi");
+    const kimi = getAgentRecord("panel-3")!;
+    expect(buildAgentResume(kimi, false)).toBe("kimi --continue");
+    expect(buildAgentResume(kimi, true)).toBe("kimi --session");
   });
 
   it("falls back to the canonical binary when the stored command is tampered", () => {
@@ -122,6 +132,12 @@ describe("agent catalog", () => {
     bindAgentSession("panel-2", "abc-123");
     expect(buildAgentResume(getAgentRecord("panel-2")!, false)).toBe(
       "codex resume abc-123",
+    );
+
+    rememberAgentProcess("panel-kimi", "kimi");
+    bindAgentSession("panel-kimi", "df13800a-7139-4259-8330-6769145fc02e");
+    expect(buildAgentResume(getAgentRecord("panel-kimi")!, false)).toBe(
+      "kimi --session df13800a-7139-4259-8330-6769145fc02e",
     );
 
     // Многословные команды и агент без адресного resume.

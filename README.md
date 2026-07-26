@@ -55,13 +55,13 @@ installers with auto-update.
 ## Supported agents
 
 Each panel remembers **which** conversation it was running and resumes
-exactly that one — six Claude Code panels get six different chats. Eleven
+exactly that one — six Claude Code panels get six different chats. Twelve
 CLIs are recognized:
 
 <div align="center">
 
-`Claude Code` · `Codex` · `OpenCode` · `Kilo Code` · `Grok` · `Cursor` ·
-`Gemini CLI` · `Qwen Code` · `Aider` · `Amp` · `Antigravity`
+`Claude Code` · `Codex` · `OpenCode` · `Kilo Code` · `Kimi Code` · `Grok` ·
+`Cursor` · `Gemini CLI` · `Qwen Code` · `Aider` · `Amp` · `Antigravity`
 
 </div>
 
