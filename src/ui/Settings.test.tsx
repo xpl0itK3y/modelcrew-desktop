@@ -208,6 +208,30 @@ describe("Settings sections", () => {
 
     expect(alerts.getAttribute("aria-checked")).not.toBe(before);
   });
+
+  it("shows brief agent notifications by default and persists detailed mode", () => {
+    const first = renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+
+    const detail = screen.getByRole("combobox", {
+      name: "Содержимое уведомлений агентов",
+    });
+    expect(detail).toHaveValue("brief");
+    expect(screen.getByText(/Кратко — только статус и проект/)).toBeVisible();
+
+    fireEvent.change(detail, { target: { value: "detailed" } });
+    expect(detail).toHaveValue("detailed");
+    expect(localStorage.getItem("modelcrew.agentAlertDetail")).toBe("detailed");
+
+    first.unmount();
+    renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+    expect(
+      screen.getByRole("combobox", {
+        name: "Содержимое уведомлений агентов",
+      }),
+    ).toHaveValue("detailed");
+  });
 });
 
 describe("Settings account", () => {

@@ -12,6 +12,11 @@ import {
   loadSystemNotificationsEnabled,
   saveSystemNotificationsEnabled,
 } from "../../notifications";
+import {
+  loadAgentAlertDetailMode,
+  saveAgentAlertDetailMode,
+  type AgentAlertDetailMode,
+} from "../../terminal/preferences";
 import { PlayIcon } from "../Icons";
 import {
   SettingRow,
@@ -40,6 +45,8 @@ export function NotificationsTab() {
   const [systemEnabled, setSystemEnabled] = useState(() =>
     loadSystemNotificationsEnabled(),
   );
+  const [agentAlertDetail, setAgentAlertDetail] =
+    useState<AgentAlertDetailMode>(() => loadAgentAlertDetailMode());
 
   // Вердикт защиты от зависаний (см. sound.ts) перечитывается после каждого
   // воспроизведения — и выбора, и повторного прослушивания. Иначе кнопка
@@ -113,6 +120,31 @@ export function NotificationsTab() {
             onChange={(enabled) => {
               setSystemEnabled(enabled);
               saveSystemNotificationsEnabled(enabled);
+            }}
+          />
+        }
+      />
+
+      <SettingRow
+        title={t("settings.agentAlertDetail")}
+        description={t("settings.agentAlertDetailNote")}
+        control={
+          <SettingsSelect<AgentAlertDetailMode>
+            label={t("settings.agentAlertDetail")}
+            value={agentAlertDetail}
+            options={[
+              {
+                value: "brief",
+                label: t("settings.agentAlertDetailBrief"),
+              },
+              {
+                value: "detailed",
+                label: t("settings.agentAlertDetailDetailed"),
+              },
+            ]}
+            onChange={(mode) => {
+              setAgentAlertDetail(mode);
+              saveAgentAlertDetailMode(mode);
             }}
           />
         }

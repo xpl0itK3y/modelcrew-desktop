@@ -399,6 +399,11 @@ export const en: Record<MessageKey, string> = {
   "settings.systemNotifications": "System notifications",
   "settings.systemNotificationsNote":
     "OS-level banner when the window is unfocused: updates and announcements stay visible even with the app minimized.",
+  "settings.agentAlertDetail": "Agent notification content",
+  "settings.agentAlertDetailNote":
+    "Brief shows only the status and project. Detailed also includes a short message supplied by the agent.",
+  "settings.agentAlertDetailBrief": "Brief",
+  "settings.agentAlertDetailDetailed": "Detailed",
   "settings.soundOff": "Off",
   "settings.soundChime": "Chime",
   "settings.soundClick": "Click",

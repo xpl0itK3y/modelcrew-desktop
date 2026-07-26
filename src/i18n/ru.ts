@@ -398,6 +398,11 @@ export const ru = {
   "settings.systemNotifications": "Системные уведомления",
   "settings.systemNotificationsNote":
     "Баннер на уровне ОС, когда окно не в фокусе: обновления и анонсы видно даже со свёрнутым приложением.",
+  "settings.agentAlertDetail": "Содержимое уведомлений агентов",
+  "settings.agentAlertDetailNote":
+    "Кратко — только статус и проект. Подробно — ещё и короткое сообщение, присланное агентом.",
+  "settings.agentAlertDetailBrief": "Кратко",
+  "settings.agentAlertDetailDetailed": "Подробно",
   "settings.soundOff": "Без звука",
   "settings.soundChime": "Перезвон",
   "settings.soundClick": "Клик",
