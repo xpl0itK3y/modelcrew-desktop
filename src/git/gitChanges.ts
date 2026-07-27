@@ -47,6 +47,11 @@ export type LocalGitSnapshot = GitChangesSummary & {
   generation: number;
 };
 
+export type GitStatePrecondition = {
+  branch?: string;
+  head?: string;
+};
+
 export type GitFileDiff = {
   path: string;
   isBinary: boolean;
@@ -235,9 +240,15 @@ export function refreshGitChanges(workspaceId: string): Promise<void> {
 export function commitAll(
   workspaceId: string,
   message: string,
+  expected: GitStatePrecondition,
   identityProvider?: "github" | "gitlab",
 ): Promise<void> {
-  return invoke("git_commit", { workspaceId, message, identityProvider });
+  return invoke("git_commit", {
+    workspaceId,
+    message,
+    expected,
+    identityProvider,
+  });
 }
 
 export function revertFile(
@@ -331,13 +342,23 @@ export type GitRefKind = "local" | "remote" | "tag";
 export function switchBranch(
   workspaceId: string,
   refName: string,
+  expected: GitStatePrecondition,
   kind: GitRefKind = "local",
 ): Promise<void> {
-  return invoke("git_switch_branch", { workspaceId, branch: refName, kind });
+  return invoke("git_switch_branch", {
+    workspaceId,
+    branch: refName,
+    kind,
+    expected,
+  });
 }
 
-export function createBranch(workspaceId: string, name: string): Promise<void> {
-  return invoke("git_create_branch", { workspaceId, name });
+export function createBranch(
+  workspaceId: string,
+  name: string,
+  expected: GitStatePrecondition,
+): Promise<void> {
+  return invoke("git_create_branch", { workspaceId, name, expected });
 }
 
 export function renameBranch(
@@ -399,12 +420,14 @@ export function commitAction(
   workspaceId: string,
   action: CommitAction,
   hash: string,
+  expected: GitStatePrecondition,
   name?: string,
 ): Promise<void> {
   return invoke("git_commit_action", {
     workspaceId,
     action,
     hash,
+    expected,
     ...(name === undefined ? {} : { name }),
   });
 }

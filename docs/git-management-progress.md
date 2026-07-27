@@ -11,7 +11,7 @@ Scope may be removed or deferred only after an explicit user decision.
 | --- | --- | --- | --- |
 | 1. Baseline and progress infrastructure | complete | `chore: establish git management implementation baseline` | Progress tracking, one verification command, rustfmt baseline, and CI lint gate |
 | 2. Local/provider state and commit identity | complete | `refactor: separate local git and provider state` | Separate snapshots and repository/global/manual identity precedence |
-| 3. Operation coordinator | pending | `feat: coordinate repository operations` | Shared/exclusive repository locks, queue, stale-state checks, managed runner |
+| 3. Operation coordinator | complete | `feat: coordinate repository operations` | Shared/exclusive repository locks, queue, stale-state checks, managed runner |
 | 4. Progress, cancellation, and watcher | pending | `feat: track and cancel git operations` | Operation events, process cancellation, external changes, hybrid watcher |
 | 5. Repository trust, config, and signing | pending | `feat: add repository trust and git configuration` | Trust policy, executable integration audit, config scopes, signing |
 | 6. Full recovery | pending | `feat: protect destructive git operations` | Backup refs, stash/patch state, conflict index, untracked archive |
@@ -80,6 +80,55 @@ Scope may be removed or deferred only after an explicit user decision.
 - Identity configuration and signing management remain required in Stage 5;
   this stage only reads complete repository or global `user.name`/`user.email`
   pairs and exposes a manual authenticated-provider override.
+
+## Stage 3 Evidence
+
+- Added one process-wide `GitOperationCoordinator` with fair shared/exclusive
+  queues keyed by canonical worktree and common Git directory. Linked
+  worktrees therefore serialize shared-ref mutations while unrelated
+  repositories remain independent.
+- All current Git-panel mutations and network operations run inside one
+  exclusive operation closure. Panel reads, watcher summaries, and GitHub
+  repository metadata reads use shared operations. Git subprocesses are
+  constructed by the central shell-less argv runner.
+- Commit, branch switch/create, and history actions carry the branch/HEAD
+  snapshot shown by the UI. The backend validates it after acquiring the
+  exclusive lock and immediately before the first mutation; attached,
+  detached, and unborn HEAD states are covered.
+- Stage integration coverage verifies FIFO exclusive execution, concurrent
+  readers with writer fairness, independent unrelated repositories,
+  common-directory locking across linked worktrees, all snapshot shapes, stale
+  HEAD rejection, and a queued operation rejecting an external HEAD change
+  after it finally acquires the lock.
+- Validation after changes: `npm run verify:stage` passed the production
+  typecheck/build, 320 frontend tests, 271 Rust tests, rustfmt, clippy with
+  warnings denied, and `git diff --check`. The existing credentialed live
+  remote test remains opt-in and ignored.
+- Review after changes: CocoIndex found two alternate read paths outside the
+  initial Tauri wrappers: GitHub remote/email lookup and the notify watcher.
+  Both now use shared coordination. CodeGraph confirmed the frontend-to-IPC
+  precondition flow, all current mutation wrappers entering the exclusive
+  coordinator, shared provider/watcher reads, and common-Git-dir impact across
+  linked worktrees. Manual and security-focused diff review found no remaining
+  shell interpolation or production `Command::new("git")` bypass.
+
+## Stage 3 Known Limitations
+
+- The coordinator is in-process. Git commands entered in a general terminal or
+  run by an IDE/external client cannot be locked; Stage 4 must detect their
+  locks and state changes, and Stage 14 must route the dedicated Git console
+  through this coordinator.
+- Operation IDs, progress events, cancellation/process-group termination, and
+  watching the worktree Git dir plus common Git dir with polling fallback
+  remain required in Stage 4.
+- Repository-controlled hooks, filters, helpers, signing commands, merge
+  drivers, aliases, and related inherited Git environment trust are not made
+  safe by serialization. Restricted/trusted execution remains required in
+  Stage 5.
+- Branch/HEAD preconditions prevent ref-state drift, but the current commit
+  still stages the entire worktree and file edit/discard actions do not have a
+  content compare-and-swap or recovery snapshot. Full recovery and the staged
+  changes workflow remain required in Stages 6 and 7.
 
 ## Known Baseline Limitations
 

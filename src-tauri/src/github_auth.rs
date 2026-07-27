@@ -5,9 +5,11 @@
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use crate::git_identity::GitIdentity;
+use crate::git_operations::{run_git, run_shared as coordinate_shared};
 use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
 use tauri::Manager;
 
@@ -358,19 +360,12 @@ fn parse_github_slug(url: &str) -> Option<(String, String)> {
     Some((owner.to_owned(), repo.to_owned()))
 }
 
-// Обёртка над git без консольного окна на Windows; None, если git упал.
+// Короткие provider-read операции участвуют в общей Git-очереди, но сетевой
+// запрос GitHub выполняется уже без lock.
 fn git_capture(root: &Path, args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let output = command.args(args).current_dir(root).output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    coordinate_shared(root, || run_git(root, args))
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output).trim().to_owned())
 }
 
 fn origin_url(root: &Path) -> Option<String> {
