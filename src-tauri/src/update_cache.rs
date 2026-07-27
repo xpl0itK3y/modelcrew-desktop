@@ -670,13 +670,9 @@ mod tests {
         assert!(verify_cached(&loaded, &artifact));
 
         let bytes = fs::read(&artifact).unwrap();
-        let error = verify_cached_update_signature(
-            dir.path(),
-            &bytes,
-            &encoded_signature(),
-            &encoded_key(),
-        )
-        .unwrap_err();
+        let error =
+            verify_cached_update_signature(dir.path(), &bytes, &encoded_signature(), &encoded_key())
+                .unwrap_err();
         assert_eq!(error.code, ErrorCode::UpdaterCacheInvalid);
         assert_eq!(error.context["reason"], "signature");
         assert!(!dir.path().join(ARTIFACT_FILE).exists());
@@ -713,8 +709,9 @@ mod tests {
 
         // Доверенный комментарий (имя файла, отметка времени) тоже подписан.
         let forged = SIGNATURE.replace("file:test", "file:evil");
-        let error = verify_update_signature(SIGNED_BYTES, &BASE64.encode(forged), &encoded_key())
-            .unwrap_err();
+        let error =
+            verify_update_signature(SIGNED_BYTES, &BASE64.encode(forged), &encoded_key())
+                .unwrap_err();
         assert_eq!(error.code, ErrorCode::UpdaterCacheInvalid);
         assert_eq!(error.context["reason"], "signature");
     }

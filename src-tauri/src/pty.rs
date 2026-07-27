@@ -288,7 +288,7 @@ impl PtyManager {
                 session
                     .master
                     .process_group_leader()
-                    .map(|pid| (id.clone(), pid))
+                    .map(|pid| (id.clone(), pid as i32))
             })
             .collect()
     }
@@ -1549,9 +1549,7 @@ mod tests {
             "живая сессия не должна была завершиться"
         );
         let (command, needle) = Shell::evaluated(2);
-        manager
-            .write("live", &command)
-            .expect("запись в живую сессию");
+        manager.write("live", &command).expect("запись в живую сессию");
         wait_for_output(&manager, "live", &out_rx, &needle, Duration::from_secs(20))
             .expect("живая сессия должна ответить");
 
@@ -1600,9 +1598,7 @@ mod tests {
             .expect("после абсурдных размеров сессия должна остаться живой");
 
         let (command, needle) = Shell::evaluated(3);
-        manager
-            .write("dim", &command)
-            .expect("запись после ресайзов");
+        manager.write("dim", &command).expect("запись после ресайзов");
         wait_for_output(&manager, "dim", &out_rx, &needle, Duration::from_secs(20))
             .expect("шелл должен отвечать после абсурдных размеров");
 

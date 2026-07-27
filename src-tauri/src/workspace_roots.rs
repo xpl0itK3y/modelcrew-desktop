@@ -486,7 +486,7 @@ mod tests {
         let error = roots.resolve("workspace-unknown").unwrap_err();
         assert_eq!(error.code, ErrorCode::WorkspaceRootNotRegistered);
         assert_eq!(error.context["workspaceId"], "workspace-unknown");
-        assert!(!error.context.contains_key("path"));
+        assert!(error.context.get("path").is_none());
 
         roots.bind("workspace", &path).unwrap();
         roots.unbind("workspace").unwrap();
@@ -498,7 +498,7 @@ mod tests {
         roots.retain_only(&[]).unwrap();
         let error = roots.resolve("workspace").unwrap_err();
         assert_eq!(error.code, ErrorCode::WorkspaceRootNotRegistered);
-        assert!(!error.context.contains_key("path"));
+        assert!(error.context.get("path").is_none());
 
         roots.unbind("workspace").unwrap();
         assert!(roots.resolve("workspace").is_err());
@@ -630,9 +630,10 @@ mod tests {
         assert!(resolved.starts_with(root.canonicalize().unwrap()));
         // В сохранённом пути не остаётся сегментов, которые ещё раз пройдут
         // разрешение позже и уведут cwd выше корня.
-        assert!(resolved
-            .components()
-            .all(|component| !matches!(component, Component::CurDir | Component::ParentDir)));
+        assert!(resolved.components().all(|component| !matches!(
+            component,
+            Component::CurDir | Component::ParentDir
+        )));
         let _ = std::fs::remove_dir_all(root);
     }
 

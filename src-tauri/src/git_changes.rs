@@ -2077,10 +2077,7 @@ pub struct GitLogFilter {
 
 impl GitLogFilter {
     fn value(field: &Option<String>) -> Option<&str> {
-        field
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
+        field.as_deref().map(str::trim).filter(|text| !text.is_empty())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -2862,9 +2859,7 @@ fn move_branch(root: &Path, branch: &str, reason: &str, to: &str, from: &str) ->
         ],
     )
     .map(|_| ())
-    .map_err(|_| {
-        CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
-    })
+    .map_err(|_| CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved"))
 }
 
 fn validated_message(message: &str) -> CommandResult<&str> {
@@ -2894,13 +2889,7 @@ pub fn amend_commit(root: &Path, expected_head: &str, message: Option<&str>) -> 
         None => meta.message.clone(),
     };
     let amended = create_commit(&toplevel, &tree, &meta.parents, &meta, &message)?;
-    move_branch(
-        &toplevel,
-        &branch,
-        "modelcrew: amend commit",
-        &amended,
-        &head,
-    )
+    move_branch(&toplevel, &branch, "modelcrew: amend commit", &amended, &head)
 }
 
 // Переставляет текущую ветку на выбранный коммит. soft двигает только ссылку,
@@ -3104,11 +3093,7 @@ pub fn drop_commit(root: &Path, hash: &str, expected_head: &str) -> CommandResul
     // одной командой. `--keep` откажется работать, если между проверкой и
     // выполнением появились правки, которые пришлось бы затереть.
     ensure_history_snapshot(&toplevel, expected_head)?;
-    run_git(
-        &toplevel,
-        &["reset", "--keep", &format!("{tip}^{{commit}}")],
-    )
-    .map(|_| ())
+    run_git(&toplevel, &["reset", "--keep", &format!("{tip}^{{commit}}")]).map(|_| ())
 }
 
 // ---------- Слияние, перенос и публикация ветки ----------
@@ -3175,8 +3160,9 @@ pub fn merge_ref(
     };
     ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
     let Some(message) = merge_message(reference) else {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed)
-            .with_context("reason", "ref-kind-invalid"));
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "ref-kind-invalid")
+        );
     };
     existing_ref(&toplevel, reference)?;
     let mut args = vec!["merge", "--no-edit", "-m", message.as_str()];
@@ -3200,8 +3186,9 @@ pub fn rebase_onto(
     };
     ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
     if merge_message(reference).is_none() {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed)
-            .with_context("reason", "ref-kind-invalid"));
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "ref-kind-invalid")
+        );
     }
     existing_ref(&toplevel, reference)?;
     conflict_or(
@@ -3224,8 +3211,9 @@ pub fn publish_branch(
     };
     ensure_sync_snapshot(&toplevel, expected_branch, expected_head)?;
     if upstream_target_for_branch(&toplevel, expected_branch).is_ok() {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed)
-            .with_context("reason", "upstream-exists"));
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "upstream-exists")
+        );
     }
     let remotes = remote_names(&toplevel)?;
     let remote = match remote.map(str::trim).filter(|name| !name.is_empty()) {
@@ -3436,7 +3424,12 @@ fn validated_tag_ref(root: &Path, name: &str) -> CommandResult<String> {
 
 // Создаёт локальный тег на коммите. С сообщением тег будет аннотированным
 // (собственный объект с автором и датой), без него — лёгким указателем.
-pub fn create_tag(root: &Path, name: &str, hash: &str, message: Option<&str>) -> CommandResult<()> {
+pub fn create_tag(
+    root: &Path,
+    name: &str,
+    hash: &str,
+    message: Option<&str>,
+) -> CommandResult<()> {
     if !is_safe_hash(hash) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
     }
@@ -3517,10 +3510,7 @@ pub fn commit_patch(root: &Path, hash: &str) -> CommandResult<String> {
     // предыдущего обычного коммита, поэтому merge отправляем сразу в `show`.
     // `--root` нужен, иначе у самого первого коммита патча бы не оказалось.
     let raw = if read_commit_meta(&toplevel, &commit)?.parents.len() > 1 {
-        run_git(
-            &toplevel,
-            &["show", "--patch", "--format=fuller", &revision],
-        )?
+        run_git(&toplevel, &["show", "--patch", "--format=fuller", &revision])?
     } else {
         run_git(
             &toplevel,
@@ -3659,9 +3649,11 @@ pub async fn git_squash_commit(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || squash_commit(&root, &hash, &mode, &expected_head))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+    tauri::async_runtime::spawn_blocking(move || {
+        squash_commit(&root, &hash, &mode, &expected_head)
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3696,10 +3688,10 @@ pub fn is_relevant_event_path(repo_root: &Path, path: &Path) -> bool {
     if first != ".git" {
         return true;
     }
-    matches!(
-        components.next().as_deref(),
-        Some("index") | Some("HEAD") | Some("refs")
-    )
+    match components.next().as_deref() {
+        Some("index") | Some("HEAD") | Some("refs") => true,
+        _ => false,
+    }
 }
 
 struct GitWatchHandle {
@@ -3747,31 +3739,36 @@ fn spawn_watch(
 
     std::thread::spawn(move || {
         let mut last_key: Option<String> = None;
-        while let Ok(()) = event_receiver.recv() {
-            // Тихое окно: серия событий (npm install, генерация кода)
-            // схлопывается в один прогон git status.
-            while event_receiver
-                .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
-                .is_ok()
-            {}
-            let Ok(summary) = collect_summary(&root) else {
-                continue;
-            };
-            let key = serde_json::to_string(&summary).unwrap_or_default();
-            if last_key.as_deref() == Some(key.as_str()) {
-                continue;
+        loop {
+            match event_receiver.recv() {
+                Ok(()) => {
+                    // Тихое окно: серия событий (npm install, генерация кода)
+                    // схлопывается в один прогон git status.
+                    while event_receiver
+                        .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
+                        .is_ok()
+                    {}
+                    let Ok(summary) = collect_summary(&root) else {
+                        continue;
+                    };
+                    let key = serde_json::to_string(&summary).unwrap_or_default();
+                    if last_key.as_deref() == Some(key.as_str()) {
+                        continue;
+                    }
+                    last_key = Some(key);
+                    use tauri::Emitter;
+                    let _ = app.emit(
+                        "git-changes",
+                        GitChangesEvent {
+                            workspace_id: &workspace_id,
+                            summary: &summary,
+                        },
+                    );
+                }
+                // Вотчер удалён (unwatch/выход) — отправитель закрыт.
+                Err(_) => break,
             }
-            last_key = Some(key);
-            use tauri::Emitter;
-            let _ = app.emit(
-                "git-changes",
-                GitChangesEvent {
-                    workspace_id: &workspace_id,
-                    summary: &summary,
-                },
-            );
         }
-        // Вотчер удалён (unwatch/выход) — отправитель закрыт.
     });
 
     Ok(GitWatchHandle { _watcher: watcher })
@@ -3899,7 +3896,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
     #[test]
     fn parses_numstat_with_binary_and_rename() {
-        let raw = b"12\t3\tsrc/app.ts\0-\t-\tlogo.png\x005\t0\t\0old.rs\0new.rs\0";
+        let raw = b"12\t3\tsrc/app.ts\0-\t-\tlogo.png\05\t0\t\0old.rs\0new.rs\0";
         assert_eq!(
             parse_numstat(raw),
             vec![
@@ -4402,9 +4399,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .output()
             .unwrap();
         assert!(init.status.success());
-        assert!(list_log_unfiltered(fresh.path(), 10, false)
-            .unwrap()
-            .is_empty());
+        assert!(list_log_unfiltered(fresh.path(), 10, false).unwrap().is_empty());
     }
 
     #[test]
@@ -6402,10 +6397,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert_eq!(by_text("PARSER"), vec!["add the parser".to_owned()]);
         assert!(by_text("par.er").is_empty());
         // Значение с ведущим дефисом не должно превратиться в опцию git.
-        assert_eq!(
-            by_text("-- renderer"),
-            vec!["tune the -- renderer".to_owned()]
-        );
+        assert_eq!(by_text("-- renderer"), vec!["tune the -- renderer".to_owned()]);
 
         let by_author = list_log(
             root,
@@ -6532,10 +6524,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
         // 4. Возврат на main и слияние ветки в неё.
         switch_branch(root, "main", "local").unwrap();
-        assert_eq!(
-            collect_summary(root).unwrap().branch.as_deref(),
-            Some("main")
-        );
+        assert_eq!(collect_summary(root).unwrap().branch.as_deref(), Some("main"));
         let head = git_at(root, &["rev-parse", "HEAD"]);
         merge_ref(root, "refs/heads/feature/panel", "main", &head, false).unwrap();
         assert!(root.join("b.txt").exists(), "слияние принесло файл ветки");
@@ -6550,12 +6539,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let other = dir.path().join("other");
         git_at(
             dir.path(),
-            &[
-                "clone",
-                "--quiet",
-                bare.to_str().unwrap(),
-                other.to_str().unwrap(),
-            ],
+            &["clone", "--quiet", bare.to_str().unwrap(), other.to_str().unwrap()],
         );
         configure(&other);
         let theirs = commit_file(&other, "c.txt", "from colleague\n", "colleague work");
@@ -6574,11 +6558,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git_at(&other, &["push", "--quiet", "origin", "main"]);
         fetch_upstream(root).unwrap();
         let summary = collect_summary(root).unwrap();
-        assert_eq!(
-            (summary.ahead, summary.behind),
-            (Some(1), Some(1)),
-            "ветки разошлись"
-        );
+        assert_eq!((summary.ahead, summary.behind), (Some(1), Some(1)), "ветки разошлись");
 
         // Простая перемотка тут невозможна — именно поэтому есть rebase.
         assert!(pull_upstream(root, "main", &ours).is_err());
@@ -6633,9 +6613,9 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .iter()
             .map(|commit| (commit.subject.as_str(), commit.editable))
             .collect();
-        assert!(editable["third"]);
-        assert!(editable["second"]);
-        assert!(!editable["published"], "коммит уже на сервере");
+        assert_eq!(editable["third"], true);
+        assert_eq!(editable["second"], true);
+        assert_eq!(editable["published"], false, "коммит уже на сервере");
         assert_eq!(
             reword_commit(root, &published, "rewritten")
                 .unwrap_err()
@@ -6919,10 +6899,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         assert!(collect_summary(root).unwrap().upstream_ref.is_none());
         publish_branch(root, branch, &first, None).unwrap();
 
-        let listed = git_at(
-            root,
-            &["ls-remote", "origin", &format!("refs/heads/{branch}")],
-        );
+        let listed = git_at(root, &["ls-remote", "origin", &format!("refs/heads/{branch}")]);
         assert!(listed.starts_with(&first), "сервер принял ветку: {listed}");
         let summary = collect_summary(root).unwrap();
         assert_eq!(
@@ -6934,11 +6911,8 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // 2. Обычная отправка следующего коммита.
         let second = commit_file(root, "live.txt", "first\nsecond\n", "live: second");
         push_upstream(root, branch, &second).unwrap();
-        assert!(git_at(
-            root,
-            &["ls-remote", "origin", &format!("refs/heads/{branch}")]
-        )
-        .starts_with(&second));
+        assert!(git_at(root, &["ls-remote", "origin", &format!("refs/heads/{branch}")])
+            .starts_with(&second));
 
         // 3. Чужой коммит: вторая рабочая копия того же репозитория.
         let other = dir.join("other");
@@ -7460,10 +7434,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // через него checkout тоже не должен выйти за корень.
         revert_file(root, "a.txt", Some("../outside/secret.txt")).unwrap();
 
-        assert_eq!(
-            std::fs::read_to_string(&secret).unwrap(),
-            "OUTSIDE-SECRET\n"
-        );
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "OUTSIDE-SECRET\n");
         assert_eq!(
             std::fs::read_dir(&outside).unwrap().count(),
             1,
@@ -7519,10 +7490,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "",
         ] {
             assert!(list_commit_files(root, hash).is_err(), "files {hash}");
-            assert!(
-                commit_file_diff(root, hash, "a.txt").is_err(),
-                "diff {hash}"
-            );
+            assert!(commit_file_diff(root, hash, "a.txt").is_err(), "diff {hash}");
             assert!(commit_patch(root, hash).is_err(), "patch {hash}");
             assert!(compare_files(root, hash, None).is_err(), "compare {hash}");
             assert!(
@@ -7561,10 +7529,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         // Ни один отказ не должен был дойти до git.
         assert_eq!(head_of(&git), head);
         assert_eq!(git_at(root, &["tag", "--list"]), "");
-        assert_eq!(
-            std::fs::read_to_string(root.join("a.txt")).unwrap(),
-            "one\n"
-        );
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
         // Настоящий сокращённый hash при этом работает.
         assert_eq!(list_commit_files(root, &head[..12]).unwrap().len(), 1);
     }
@@ -8050,10 +8015,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             .unwrap()
             .diff
             .contains("+fresh"));
-        assert!(read_repo_file(root, "a.txt")
-            .unwrap()
-            .content
-            .contains("two"));
+        assert!(read_repo_file(root, "a.txt").unwrap().content.contains("two"));
         assert!(!list_log(root, 20, false, &GitLogFilter::default())
             .unwrap()
             .is_empty());
@@ -8230,10 +8192,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             }
         }
 
-        assert_eq!(
-            std::fs::read_to_string(root.join("a.txt")).unwrap(),
-            "one\n"
-        );
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
         assert!(
             collect_summary(root).unwrap().files.is_empty(),
             "репозиторий должен остаться нетронутым"
@@ -8251,12 +8210,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "init"]);
         let head = head_of(&git);
-        git(&[
-            "remote",
-            "add",
-            "origin",
-            dir.path().join("srv.git").to_str().unwrap(),
-        ]);
+        git(&["remote", "add", "origin", dir.path().join("srv.git").to_str().unwrap()]);
         git(&["update-ref", "refs/remotes/origin/feature", &head]);
         git(&["update-ref", "refs/remotes/origin/--help", &head]);
 
@@ -8288,10 +8242,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
         // Нормальный remote-ref по-прежнему создаёт отслеживающую ветку.
         switch_branch(root, "refs/remotes/origin/feature", "remote").unwrap();
-        assert_eq!(
-            git_at(root, &["symbolic-ref", "--short", "HEAD"]),
-            "feature"
-        );
+        assert_eq!(git_at(root, &["symbolic-ref", "--short", "HEAD"]), "feature");
         assert_eq!(git_at(root, &["config", "branch.feature.remote"]), "origin");
     }
 
@@ -8312,14 +8263,7 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git(&["commit", "--quiet", "-m", "second"]);
         let head = head_of(&git);
 
-        for mode in [
-            "--hard",
-            "hard --exec=touch x",
-            "hard;id",
-            "",
-            "Hard",
-            "keep",
-        ] {
+        for mode in ["--hard", "hard --exec=touch x", "hard;id", "", "Hard", "keep"] {
             assert!(
                 reset_to_commit(root, &first, mode, &head).is_err(),
                 "reset {mode}"
@@ -8467,9 +8411,6 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
             "refs/heads/main"
         );
         create_branch(root, "feature").unwrap();
-        assert_eq!(
-            git_at(root, &["symbolic-ref", "--short", "HEAD"]),
-            "feature"
-        );
+        assert_eq!(git_at(root, &["symbolic-ref", "--short", "HEAD"]), "feature");
     }
 }

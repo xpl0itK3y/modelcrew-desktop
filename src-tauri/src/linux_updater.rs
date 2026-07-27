@@ -1468,11 +1468,7 @@ mod tests {
             assert_eq!(error.code, ErrorCode::UpdaterPackageMetadataInvalid);
         }
 
-        rejected(
-            LinuxPackageKind::Deb,
-            PackageMetadataOutput::DirectVersion,
-            b"",
-        );
+        rejected(LinuxPackageKind::Deb, PackageMetadataOutput::DirectVersion, b"");
         rejected(
             LinuxPackageKind::Deb,
             PackageMetadataOutput::DirectVersion,
@@ -1659,21 +1655,15 @@ mod tests {
             let spec = package_installer_spec(kind);
             // Так же собирает команду run_package_installer.
             let mut argv = vec![PKEXEC_PATH.to_string(), spec.program.to_string()];
-            argv.extend(
-                spec.arguments
-                    .iter()
-                    .map(|argument| (*argument).to_string()),
-            );
+            argv.extend(spec.arguments.iter().map(|argument| (*argument).to_string()));
             argv.push(hostile.clone());
 
             assert_eq!(argv.len(), 3 + spec.arguments.len());
             assert!(spec.program.starts_with('/'), "{kind}");
-            assert!(spec
-                .arguments
-                .iter()
-                .all(|argument| argument.starts_with("--")
-                    && !argument.contains(' ')
-                    && !argument.contains('/')));
+            assert!(spec.arguments.iter().all(|argument| argument
+                .starts_with("--")
+                && !argument.contains(' ')
+                && !argument.contains('/')));
             // Путь к пакету — ровно один последний аргумент, а не кусок
             // шелл-строки: метасимволы в имени остаются данными.
             assert_eq!(argv.last(), Some(&hostile));

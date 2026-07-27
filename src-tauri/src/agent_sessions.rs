@@ -764,12 +764,7 @@ mod tests {
     // файлов, поэтому в нём не должно быть ничего, что читается как путь.
     #[test]
     fn session_ids_reject_anything_that_could_become_a_path() {
-        for good in [
-            "a",
-            "0195c9a1-1111-4222-8333-444455556666",
-            "a_b-C9",
-            &"x".repeat(128),
-        ] {
+        for good in ["a", "0195c9a1-1111-4222-8333-444455556666", "a_b-C9", &"x".repeat(128)] {
             assert!(is_session_id(good), "rejected a legitimate id: {good}");
         }
         for bad in [
@@ -808,9 +803,7 @@ mod tests {
         ] {
             let encoded = encode_claude_project_dir(cwd);
             assert!(
-                encoded
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
+                encoded.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
                 "{cwd:?} encoded into something that is not a flat name: {encoded:?}"
             );
             let path = Path::new(&encoded);
