@@ -232,7 +232,6 @@ describe("GitChangesView workspace lifecycle", () => {
       expect(mocks.commitAll).toHaveBeenCalledWith(
         "project-a",
         "feat: history controls\n\nAdds local branch management.",
-        { branch: "main", head: undefined },
         undefined,
       ),
     );
@@ -262,7 +261,6 @@ describe("GitChangesView workspace lifecycle", () => {
       expect(mocks.commitAll).toHaveBeenCalledWith(
         "project-a",
         "provider identity",
-        { branch: "main", head: undefined },
         "github",
       ),
     );
@@ -856,7 +854,6 @@ describe("GitChangesView workspace lifecycle", () => {
       expect(mocks.switchBranch).toHaveBeenCalledWith(
         "project-a",
         "release",
-        { branch: "main", head: undefined },
         "tag",
       ),
     );
@@ -901,7 +898,6 @@ describe("GitChangesView workspace lifecycle", () => {
       expect(mocks.switchBranch).toHaveBeenCalledWith(
         "project-a",
         "refs/remotes/origin/topic",
-        { branch: "main", head: undefined },
         "remote",
       ),
     );
@@ -993,7 +989,6 @@ describe("branch integration", () => {
       expect(mocks.switchBranch).toHaveBeenCalledWith(
         "project-a",
         "main",
-        { head: "dddddddddddddddddddddddddddddddddddddddd" },
         "local",
       ),
     );
@@ -1192,7 +1187,6 @@ describe("BranchSwitcher local management", () => {
       expect(mocks.createBranch).toHaveBeenCalledWith(
         "project-a",
         "feature/history",
-        { branch: "main", head: undefined },
       ),
     );
 

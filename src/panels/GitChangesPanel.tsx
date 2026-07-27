@@ -640,7 +640,6 @@ function BranchSwitcher(props: {
       await switchBranch(
         props.workspaceId,
         branch.isRemote ? branch.refName : branch.name,
-        { branch: props.currentBranch, head: props.headHash },
         branch.isRemote ? "remote" : "local",
       );
       void refreshGitChanges(props.workspaceId);
@@ -675,10 +674,7 @@ function BranchSwitcher(props: {
     setBusy(true);
     try {
       if (editor.kind === "create") {
-        await createBranch(props.workspaceId, name, {
-          branch: props.currentBranch,
-          head: props.headHash,
-        });
+        await createBranch(props.workspaceId, name);
       } else {
         await renameBranch(props.workspaceId, editor.branch.name, name);
       }
@@ -1619,13 +1615,7 @@ function CommitActionsMenu(props: {
       } else if (action === "deleteTag") {
         await deleteTag(props.workspaceId, name ?? "");
       } else {
-        await commitAction(
-          props.workspaceId,
-          action as CommitAction,
-          hash,
-          { branch: props.currentBranch, head: props.headHash },
-          name,
-        );
+        await commitAction(props.workspaceId, action as CommitAction, hash, name);
       }
       await refreshGitChanges(props.workspaceId);
       props.onDone();
@@ -2069,12 +2059,7 @@ function DetachedHeadBanner(props: {
   const back = async (branch: string) => {
     setBusy(true);
     try {
-      await switchBranch(
-        props.workspaceId,
-        branch,
-        { head: props.headHash },
-        "local",
-      );
+      await switchBranch(props.workspaceId, branch, "local");
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       props.onError(localizeBackendError(error));
@@ -2975,12 +2960,7 @@ function HistoryView(props: {
   // показывается баннером.
   const switchTo = async (name: string, kind: GitRefKind) => {
     try {
-      await switchBranch(
-        props.workspaceId,
-        name,
-        { branch: props.currentBranch, head: props.headHash },
-        kind,
-      );
+      await switchBranch(props.workspaceId, name, kind);
       void refreshGitChanges(props.workspaceId);
       setReloadNonce((value) => value + 1);
     } catch (error) {
@@ -3400,7 +3380,6 @@ function GitChangesWorkspaceView(props: {
       await commitAll(
         workspaceId,
         commitMessage,
-        { branch: summary?.branch, head: summary?.headHash },
         commitIdentity === "configured" ? undefined : commitIdentity,
       );
       props.onDraftChange({ subject: "", description: "" });

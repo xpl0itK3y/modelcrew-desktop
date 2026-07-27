@@ -41,13 +41,11 @@ describe("git mutation IPC", () => {
   });
 
   it("creates a branch with the expected command arguments", async () => {
-    const expected = { branch: "main", head: "abc123def456" };
-    await createBranch("ws-1", "feature/history", expected);
+    await createBranch("ws-1", "feature/history");
 
     expect(mocks.invoke).toHaveBeenCalledWith("git_create_branch", {
       workspaceId: "ws-1",
       name: "feature/history",
-      expected,
     });
   });
 
@@ -73,32 +71,27 @@ describe("git mutation IPC", () => {
   });
 
   it("sends the uncommit action without an optional name", async () => {
-    const expected = { branch: "main", head: "abcdef123456" };
-    await commitAction("ws-4", "uncommit", "abcdef123456", expected);
+    await commitAction("ws-4", "uncommit", "abcdef123456");
 
     expect(mocks.invoke).toHaveBeenCalledWith("git_commit_action", {
       workspaceId: "ws-4",
       action: "uncommit",
       hash: "abcdef123456",
-      expected,
     });
   });
 
   it("sends a provider identity only when it is explicitly selected", async () => {
-    const expected = { branch: "main", head: "abcdef123456" };
-    await commitAll("ws-identity", "configured commit", expected);
-    await commitAll("ws-identity", "provider commit", expected, "github");
+    await commitAll("ws-identity", "configured commit");
+    await commitAll("ws-identity", "provider commit", "github");
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, "git_commit", {
       workspaceId: "ws-identity",
       message: "configured commit",
-      expected,
       identityProvider: undefined,
     });
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, "git_commit", {
       workspaceId: "ws-identity",
       message: "provider commit",
-      expected,
       identityProvider: "github",
     });
   });

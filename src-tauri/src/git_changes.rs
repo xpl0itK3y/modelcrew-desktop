@@ -6,15 +6,10 @@ use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use crate::git_identity::{
     configured_git_identity_from, ConfiguredGitIdentity, GitIdentity, GitIdentitySource,
 };
-use crate::git_operations::{
-    git_command, run_exclusive as coordinate_exclusive, run_git, run_git_with_env,
-    run_shared as coordinate_shared,
-};
 use crate::github_auth::github_commit_identity;
 use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-#[cfg(test)]
 use std::process::Command;
 
 // Diff больше этого не отдаём целиком: панель предложит открыть файл.
@@ -91,26 +86,59 @@ pub struct GitFileDiff {
     pub diff: String,
 }
 
-async fn spawn_shared_git<T, F>(root: PathBuf, task: F) -> CommandResult<T>
-where
-    T: Send + 'static,
-    F: FnOnce(&Path) -> CommandResult<T> + Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(move || coordinate_shared(&root, || task(root.as_path())))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+// Команда git без консольного окна: на Windows каждый дочерний процесс с
+// консолью мигает окном, а статус мы гоняем постоянно.
+fn git_command() -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    // Машиночитаемые парсеры ниже не должны зависеть от языка ОС. Это также
+    // стабилизирует диагностику Git на Windows/macOS/Linux.
+    command.env("LC_ALL", "C").env("LANG", "C");
+    command
 }
 
-async fn spawn_exclusive_git<T, F>(root: PathBuf, task: F) -> CommandResult<T>
-where
-    T: Send + 'static,
-    F: FnOnce(&Path) -> CommandResult<T> + Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(move || {
-        coordinate_exclusive(&root, || task(root.as_path()))
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+fn run_git(root: &Path, args: &[&str]) -> CommandResult<Vec<u8>> {
+    run_git_with_env(root, args, &[])
+}
+
+fn run_git_with_env(
+    root: &Path,
+    args: &[&str],
+    environment: &[(&str, &str)],
+) -> CommandResult<Vec<u8>> {
+    let mut command = git_command();
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+    let output = command
+        .arg("-c")
+        .arg("core.quotepath=false")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map_err(|error| CommandError::new(ErrorCode::GitUnavailable).with_debug(error))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("not a git repository") {
+            return Err(CommandError::new(ErrorCode::GitNotARepository));
+        }
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context(
+                "exitCode",
+                output
+                    .status
+                    .code()
+                    .map_or_else(|| "signal".to_string(), |code| code.to_string()),
+            )
+            .with_debug(stderr.chars().take(4096).collect::<String>()));
+    }
+    Ok(output.stdout)
 }
 
 fn configured_git_identity(root: &Path) -> Option<ConfiguredGitIdentity> {
@@ -582,7 +610,9 @@ pub async fn git_read_file(
 ) -> CommandResult<GitFileContent> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| read_repo_file(root, &path)).await
+    tauri::async_runtime::spawn_blocking(move || read_repo_file(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -595,7 +625,9 @@ pub async fn git_write_file(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| write_repo_file(root, &path, &content)).await
+    tauri::async_runtime::spawn_blocking(move || write_repo_file(&root, &path, &content))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Ветки и история ----------
@@ -1233,88 +1265,6 @@ fn ensure_expected_branch_head(
     Ok(())
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct GitStatePrecondition {
-    branch: Option<String>,
-    head: Option<String>,
-}
-
-fn optional_git_value(root: &Path, args: &[&str]) -> CommandResult<Option<String>> {
-    let output = git_command()
-        .arg("-c")
-        .arg("core.quotepath=false")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|error| CommandError::new(ErrorCode::GitUnavailable).with_debug(error))?;
-    if output.status.success() {
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        return Ok((!value.is_empty()).then_some(value));
-    }
-    if output.stderr.is_empty() {
-        return Ok(None);
-    }
-    Err(CommandError::new(ErrorCode::GitCommandFailed)
-        .with_context(
-            "exitCode",
-            output
-                .status
-                .code()
-                .map_or_else(|| "signal".to_string(), |code| code.to_string()),
-        )
-        .with_debug(
-            String::from_utf8_lossy(&output.stderr)
-                .chars()
-                .take(4096)
-                .collect::<String>(),
-        ))
-}
-
-fn current_git_state(root: &Path) -> CommandResult<GitStatePrecondition> {
-    let branch = optional_git_value(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
-    let head = optional_git_value(root, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])?;
-    if branch.as_deref().is_some_and(str::is_empty)
-        || head.as_deref().is_some_and(|value| !is_safe_hash(value))
-    {
-        return Err(
-            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
-        );
-    }
-    Ok(GitStatePrecondition { branch, head })
-}
-
-fn ensure_git_state_precondition(
-    root: &Path,
-    expected: &GitStatePrecondition,
-) -> CommandResult<()> {
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    if let Some(branch) = expected.branch.as_deref() {
-        validate_branch_name(&toplevel, branch)?;
-    }
-    if expected
-        .head
-        .as_deref()
-        .is_some_and(|value| !is_safe_hash(value))
-    {
-        return Err(
-            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
-        );
-    }
-    if repository_operation_in_progress(&toplevel)? {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed)
-            .with_context("reason", "operation-in-progress"));
-    }
-    if current_git_state(&toplevel)? != *expected {
-        return Err(
-            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
-        );
-    }
-    Ok(())
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct UpstreamTarget {
     remote: String,
@@ -1487,7 +1437,9 @@ pub async fn git_fetch_upstream(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, fetch_upstream).await
+    tauri::async_runtime::spawn_blocking(move || fetch_upstream(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1500,10 +1452,11 @@ pub async fn git_pull(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        pull_upstream(root, &expected_branch, &expected_head)
+    tauri::async_runtime::spawn_blocking(move || {
+        pull_upstream(&root, &expected_branch, &expected_head)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1516,10 +1469,11 @@ pub async fn git_push(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        push_upstream(root, &expected_branch, &expected_head)
+    tauri::async_runtime::spawn_blocking(move || {
+        push_upstream(&root, &expected_branch, &expected_head)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1532,10 +1486,11 @@ pub async fn git_pull_rebase(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        pull_rebase(root, &expected_branch, &expected_head)
+    tauri::async_runtime::spawn_blocking(move || {
+        pull_rebase(&root, &expected_branch, &expected_head)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1548,10 +1503,11 @@ pub async fn git_reset_to_upstream(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        reset_to_upstream(root, &expected_branch, &expected_head)
+    tauri::async_runtime::spawn_blocking(move || {
+        reset_to_upstream(&root, &expected_branch, &expected_head)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -1562,15 +1518,14 @@ pub async fn git_commit_action(
     action: String,
     hash: String,
     name: Option<String>,
-    expected: GitStatePrecondition,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        ensure_git_state_precondition(root, &expected)?;
-        commit_action(root, &action, &hash, name.as_deref())
+    tauri::async_runtime::spawn_blocking(move || {
+        commit_action(&root, &action, &hash, name.as_deref())
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 pub fn switch_branch(root: &Path, name: &str, kind: &str) -> CommandResult<()> {
@@ -2424,7 +2379,9 @@ pub async fn git_commit_file_diff(
 ) -> CommandResult<GitFileDiff> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| commit_file_diff(root, &hash, &path)).await
+    tauri::async_runtime::spawn_blocking(move || commit_file_diff(&root, &hash, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2436,7 +2393,9 @@ pub async fn git_commit_files(
 ) -> CommandResult<Vec<GitCommitFile>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| list_commit_files(root, &hash)).await
+    tauri::async_runtime::spawn_blocking(move || list_commit_files(&root, &hash))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2447,8 +2406,9 @@ pub async fn git_branches(
 ) -> CommandResult<Vec<GitBranch>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    // list_branches may finish a previously queued branch-config cleanup.
-    spawn_exclusive_git(root, list_branches).await
+    tauri::async_runtime::spawn_blocking(move || list_branches(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2458,15 +2418,14 @@ pub async fn git_switch_branch(
     workspace_id: String,
     branch: String,
     kind: Option<String>,
-    expected: GitStatePrecondition,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        ensure_git_state_precondition(root, &expected)?;
-        switch_branch(root, &branch, kind.as_deref().unwrap_or("local"))
+    tauri::async_runtime::spawn_blocking(move || {
+        switch_branch(&root, &branch, kind.as_deref().unwrap_or("local"))
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2475,15 +2434,12 @@ pub async fn git_create_branch(
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     name: String,
-    expected: GitStatePrecondition,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        ensure_git_state_precondition(root, &expected)?;
-        create_branch(root, &name)
-    })
-    .await
+    tauri::async_runtime::spawn_blocking(move || create_branch(&root, &name))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2496,7 +2452,9 @@ pub async fn git_rename_branch(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| rename_branch(root, &branch, &new_name)).await
+    tauri::async_runtime::spawn_blocking(move || rename_branch(&root, &branch, &new_name))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2510,10 +2468,11 @@ pub async fn git_delete_branch(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        delete_branch(root, &branch, force, &expected_tip)
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_branch(&root, &branch, force, &expected_tip)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2527,15 +2486,16 @@ pub async fn git_log(
 ) -> CommandResult<Vec<GitCommitInfo>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| {
+    tauri::async_runtime::spawn_blocking(move || {
         list_log(
-            root,
+            &root,
             limit,
             all.unwrap_or(false),
             &filter.unwrap_or_default(),
         )
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Действия: коммит и откат файла ----------
@@ -2615,7 +2575,6 @@ pub async fn git_commit(
     workspace_id: String,
     message: String,
     identity_provider: Option<String>,
-    expected: GitStatePrecondition,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
@@ -2630,14 +2589,12 @@ pub async fn git_commit(
                 .with_context("reason", "identity-provider"))
         }
     };
-    spawn_exclusive_git(root, move |root| {
-        ensure_git_state_precondition(root, &expected)?;
-        match provider_identity {
-            Some(identity) => commit_all_with_identity(root, &message, &identity),
-            None => commit_all(root, &message),
-        }
+    tauri::async_runtime::spawn_blocking(move || match provider_identity {
+        Some(identity) => commit_all_with_identity(&root, &message, &identity),
+        None => commit_all(&root, &message),
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -2650,10 +2607,9 @@ pub async fn git_revert_file(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        revert_file(root, &path, orig_path.as_deref())
-    })
-    .await
+    tauri::async_runtime::spawn_blocking(move || revert_file(&root, &path, orig_path.as_deref()))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Редактирование сообщения локального коммита ----------
@@ -2802,7 +2758,9 @@ pub async fn git_reword_commit(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| reword_commit(root, &hash, &message)).await
+    tauri::async_runtime::spawn_blocking(move || reword_commit(&root, &hash, &message))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Правка локальной истории ----------
@@ -3347,9 +3305,9 @@ pub async fn git_merge_ref(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
+    tauri::async_runtime::spawn_blocking(move || {
         merge_ref(
-            root,
+            &root,
             &reference,
             &expected_branch,
             &expected_head,
@@ -3357,6 +3315,7 @@ pub async fn git_merge_ref(
         )
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3370,10 +3329,11 @@ pub async fn git_rebase_onto(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        rebase_onto(root, &reference, &expected_branch, &expected_head)
+    tauri::async_runtime::spawn_blocking(move || {
+        rebase_onto(&root, &reference, &expected_branch, &expected_head)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3387,10 +3347,11 @@ pub async fn git_publish_branch(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        publish_branch(root, &expected_branch, &expected_head, remote.as_deref())
+    tauri::async_runtime::spawn_blocking(move || {
+        publish_branch(&root, &expected_branch, &expected_head, remote.as_deref())
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Сравнение двух состояний ----------
@@ -3467,7 +3428,9 @@ pub async fn git_compare_files(
 ) -> CommandResult<Vec<GitCommitFile>> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| compare_files(root, &from, to.as_deref())).await
+    tauri::async_runtime::spawn_blocking(move || compare_files(&root, &from, to.as_deref()))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3481,10 +3444,11 @@ pub async fn git_compare_file_diff(
 ) -> CommandResult<GitFileDiff> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| {
-        compare_file_diff(root, &from, to.as_deref(), &path)
+    tauri::async_runtime::spawn_blocking(move || {
+        compare_file_diff(&root, &from, to.as_deref(), &path)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Теги и патчи ----------
@@ -3607,10 +3571,11 @@ pub async fn git_create_tag(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        create_tag(root, &name, &hash, message.as_deref())
+    tauri::async_runtime::spawn_blocking(move || {
+        create_tag(&root, &name, &hash, message.as_deref())
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3622,7 +3587,9 @@ pub async fn git_delete_tag(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| delete_tag(root, &name)).await
+    tauri::async_runtime::spawn_blocking(move || delete_tag(&root, &name))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3634,7 +3601,9 @@ pub async fn git_commit_patch(
 ) -> CommandResult<String> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| commit_patch(root, &hash)).await
+    tauri::async_runtime::spawn_blocking(move || commit_patch(&root, &hash))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // Сохраняет патч в выбранный пользователем файл. Возвращает false, если диалог
@@ -3651,8 +3620,11 @@ pub async fn git_save_commit_patch(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     let patch = {
+        let root = root.clone();
         let hash = hash.clone();
-        spawn_shared_git(root, move |root| commit_patch(root, &hash)).await?
+        tauri::async_runtime::spawn_blocking(move || commit_patch(&root, &hash))
+            .await
+            .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))??
     };
     let Some(target) = window
         .dialog()
@@ -3681,10 +3653,11 @@ pub async fn git_amend_commit(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        amend_commit(root, &expected_head, message.as_deref())
+    tauri::async_runtime::spawn_blocking(move || {
+        amend_commit(&root, &expected_head, message.as_deref())
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3698,10 +3671,11 @@ pub async fn git_reset_to_commit(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        reset_to_commit(root, &hash, &mode, &expected_head)
+    tauri::async_runtime::spawn_blocking(move || {
+        reset_to_commit(&root, &hash, &mode, &expected_head)
     })
     .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3715,10 +3689,9 @@ pub async fn git_squash_commit(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| {
-        squash_commit(root, &hash, &mode, &expected_head)
-    })
-    .await
+    tauri::async_runtime::spawn_blocking(move || squash_commit(&root, &hash, &mode, &expected_head))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3731,7 +3704,9 @@ pub async fn git_drop_commit(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_exclusive_git(root, move |root| drop_commit(root, &hash, &expected_head)).await
+    tauri::async_runtime::spawn_blocking(move || drop_commit(&root, &hash, &expected_head))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 // ---------- Реал-тайм: вотчер рабочего дерева ----------
@@ -3809,7 +3784,7 @@ fn spawn_watch(
                 .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
                 .is_ok()
             {}
-            let Ok(summary) = coordinate_shared(&root, || collect_summary(&root)) else {
+            let Ok(summary) = collect_summary(&root) else {
                 continue;
             };
             let key = serde_json::to_string(&summary).unwrap_or_default();
@@ -3883,7 +3858,9 @@ pub async fn git_changes_summary(
 ) -> CommandResult<GitChangesSummary> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, collect_summary).await
+    tauri::async_runtime::spawn_blocking(move || collect_summary(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -3895,7 +3872,9 @@ pub async fn git_file_diff(
 ) -> CommandResult<GitFileDiff> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    spawn_shared_git(root, move |root| collect_file_diff(root, &path)).await
+    tauri::async_runtime::spawn_blocking(move || collect_file_diff(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[cfg(test)]
@@ -6534,110 +6513,6 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         git_at(root, &["add", "--", name]);
         git_at(root, &["commit", "--quiet", "-m", message]);
         git_at(root, &["rev-parse", "HEAD"])
-    }
-
-    #[test]
-    fn git_state_preconditions_cover_unborn_attached_and_detached_head() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        git_at(root, &["init", "--quiet", "--initial-branch=main"]);
-        configure(root);
-
-        let unborn = GitStatePrecondition {
-            branch: Some("main".to_owned()),
-            head: None,
-        };
-        ensure_git_state_precondition(root, &unborn).unwrap();
-
-        let head = commit_file(root, "state.txt", "one\n", "first");
-        let attached = GitStatePrecondition {
-            branch: Some("main".to_owned()),
-            head: Some(head.clone()),
-        };
-        ensure_git_state_precondition(root, &attached).unwrap();
-
-        git_at(root, &["switch", "--quiet", "--detach", &head]);
-        let detached = GitStatePrecondition {
-            branch: None,
-            head: Some(head),
-        };
-        ensure_git_state_precondition(root, &detached).unwrap();
-    }
-
-    #[test]
-    fn git_state_precondition_rejects_a_head_changed_after_snapshot() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        git_at(root, &["init", "--quiet", "--initial-branch=main"]);
-        configure(root);
-        let stale_head = commit_file(root, "state.txt", "one\n", "first");
-        let expected = GitStatePrecondition {
-            branch: Some("main".to_owned()),
-            head: Some(stale_head),
-        };
-
-        commit_file(root, "state.txt", "two\n", "second");
-        let error = ensure_git_state_precondition(root, &expected).unwrap_err();
-        assert_eq!(
-            error.context.get("reason").map(String::as_str),
-            Some("head-moved")
-        );
-    }
-
-    #[test]
-    fn queued_operation_checks_the_snapshot_after_acquiring_the_lock() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        git_at(root, &["init", "--quiet", "--initial-branch=main"]);
-        configure(root);
-        let stale_head = commit_file(root, "state.txt", "one\n", "first");
-        let expected = GitStatePrecondition {
-            branch: Some("main".to_owned()),
-            head: Some(stale_head),
-        };
-
-        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let first_root = root.to_path_buf();
-        let first = std::thread::spawn(move || {
-            coordinate_exclusive(&first_root, || {
-                entered_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-                Ok(())
-            })
-            .unwrap();
-        });
-        entered_rx
-            .recv_timeout(std::time::Duration::from_secs(2))
-            .unwrap();
-
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        let queued_root = root.to_path_buf();
-        let queued = std::thread::spawn(move || {
-            let result = coordinate_exclusive(&queued_root, || {
-                ensure_git_state_precondition(&queued_root, &expected)
-            });
-            result_tx.send(result).unwrap();
-        });
-        assert!(
-            result_rx
-                .recv_timeout(std::time::Duration::from_millis(100))
-                .is_err(),
-            "queued operation entered before the current owner released the lock"
-        );
-
-        commit_file(root, "state.txt", "two\n", "external");
-        release_tx.send(()).unwrap();
-        let error = result_rx
-            .recv_timeout(std::time::Duration::from_secs(2))
-            .unwrap()
-            .unwrap_err();
-        assert_eq!(
-            error.context.get("reason").map(String::as_str),
-            Some("head-moved")
-        );
-        first.join().unwrap();
-        queued.join().unwrap();
     }
 
     // «Сервер» — обычный bare-репозиторий: для git это полноценный remote, а
