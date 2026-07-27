@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localizeBackendError, setLocale } from "../i18n";
-import { setGithubUser } from "../github/authState";
 import type {
   GitBranchInfo,
   GitChangesSummary,
@@ -124,11 +123,6 @@ function summary(branch: string, path: string): GitChangesSummary {
   return {
     isRepo: true,
     branch,
-    commitIdentity: {
-      name: "Repository User",
-      email: "repository@example.com",
-      source: "repository",
-    },
     files: [
       {
         path,
@@ -158,7 +152,6 @@ beforeEach(() => {
   mocks.summaries.set("project-b", summary("dev", "from-b.txt"));
   mocks.fetchBranches.mockResolvedValue([]);
   mocks.fetchLog.mockResolvedValue([]);
-  setGithubUser(null);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: mocks.writeClipboard },
@@ -232,61 +225,8 @@ describe("GitChangesView workspace lifecycle", () => {
       expect(mocks.commitAll).toHaveBeenCalledWith(
         "project-a",
         "feat: history controls\n\nAdds local branch management.",
-        undefined,
       ),
     );
-  });
-
-  it("uses a provider identity only after the user selects it", async () => {
-    setGithubUser({
-      login: "denis",
-      avatarUrl: "https://avatars.example/denis",
-      commitIdentity: {
-        name: "Denis Provider",
-        email: "denis@users.noreply.github.com",
-      },
-    });
-    render(<GitChangesView workspaceId="project-a" />);
-
-    expect(screen.getByLabelText("Автор коммита")).toHaveValue("configured");
-    fireEvent.change(screen.getByLabelText("Автор коммита"), {
-      target: { value: "github" },
-    });
-    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
-      target: { value: "provider identity" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
-
-    await waitFor(() =>
-      expect(mocks.commitAll).toHaveBeenCalledWith(
-        "project-a",
-        "provider identity",
-        "github",
-      ),
-    );
-  });
-
-  it("does not fall back to a provider identity automatically", () => {
-    mocks.summaries.set("project-a", {
-      ...summary("main", "from-a.txt"),
-      commitIdentity: undefined,
-    });
-    setGithubUser({
-      login: "denis",
-      avatarUrl: "https://avatars.example/denis",
-      commitIdentity: {
-        name: "Denis Provider",
-        email: "denis@users.noreply.github.com",
-      },
-    });
-    render(<GitChangesView workspaceId="project-a" />);
-
-    expect(screen.getByLabelText("Автор коммита")).toHaveValue("configured");
-    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
-      target: { value: "must not commit" },
-    });
-    expect(screen.getByRole("button", { name: "Коммит" })).toBeDisabled();
-    expect(mocks.commitAll).not.toHaveBeenCalled();
   });
 
   it("ignores an older history response that finishes after a refresh", async () => {

@@ -179,12 +179,6 @@ export const ru = {
   "git.commitDescription": "Описание (необязательно)",
   "git.commitShortcut": "Коммит: Enter в заголовке или ⌘/Ctrl+Enter в описании",
   "git.commitButton": "Коммит",
-  "git.commitIdentity": "Автор коммита",
-  "git.commitIdentityRepository": "Репозиторий: {name} <{email}>",
-  "git.commitIdentityGlobal": "Глобально: {name} <{email}>",
-  "git.commitIdentityGithub": "GitHub @{login}: {name} <{email}>",
-  "git.commitIdentityGitlab": "GitLab @{login}: {name} <{email}>",
-  "git.commitIdentityMissing": "Настройте user.name и user.email в Git",
   "git.copyDiff": "Скопировать diff",
   "git.copied": "Скопировано",
   "git.revert": "Откатить изменения файла",
@@ -595,9 +589,6 @@ export const ru = {
   "error.gitCommitNotYours":
     "Можно менять только коммиты автора из локального git config",
   "error.gitCommitMessage": "Введите корректное сообщение до 4000 символов",
-  "error.gitIdentityMissing":
-    "Нет корректного автора коммита. Настройте user.name и user.email либо вручную выберите профиль провайдера",
-  "error.gitIdentityProvider": "Этот провайдер автора коммита не поддерживается",
 } as const;
 
 export type MessageKey = keyof typeof ru;

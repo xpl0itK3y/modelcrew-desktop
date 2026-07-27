@@ -30,6 +30,7 @@ import {
   fetchFileDiff,
   fetchLog,
   formatRelativeTime,
+  getGitSummary,
   githubCommitUrl,
   gitPull,
   gitPullRebase,
@@ -55,6 +56,7 @@ import {
   type CommitAction,
   type GitBranchInfo,
   type GitChangedFile,
+  type GitChangesSummary,
   type DiffLine,
   type GitCommitFile,
   type GitCommitInfo,
@@ -62,11 +64,6 @@ import {
   type GitRefKind,
   type GitResetMode,
 } from "../git/gitChanges";
-import {
-  getGitPanelViewModel,
-  subscribeGitPanelViewModel,
-} from "../git/gitPanelState";
-import type { GitProvider } from "../git/providerState";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
@@ -3282,17 +3279,15 @@ function GitChangesWorkspaceView(props: {
 }) {
   const { t } = useI18n();
   const { workspaceId, view } = props;
-  const [model, setModel] = useState(() =>
-    getGitPanelViewModel(workspaceId),
+  const [summary, setSummary] = useState<GitChangesSummary | null>(() =>
+    getGitSummary(workspaceId),
   );
-  const summary = model.local;
-  const providerState = model.provider;
 
   useEffect(() => {
     if (!workspaceId) {
       return;
     }
-    return subscribeGitPanelViewModel(workspaceId, setModel);
+    return subscribeGitChanges(workspaceId, setSummary);
   }, [workspaceId]);
 
   // Реальные GitHub-аватарки коммиттеров: тянем карту почта→аватар один раз
@@ -3336,21 +3331,8 @@ function GitChangesWorkspaceView(props: {
   const commitDescription = props.draft.description;
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
-  const [commitIdentity, setCommitIdentity] = useState<
-    "configured" | GitProvider
-  >("configured");
   const commitMessage = joinCommitMessage(commitSubject, commitDescription);
   const commitMessageLength = Array.from(commitMessage).length;
-  const selectedProviderIdentity =
-    commitIdentity === "configured"
-      ? undefined
-      : providerState.commitIdentities.find(
-          (candidate) => candidate.provider === commitIdentity,
-        );
-  const commitIdentityAvailable =
-    commitIdentity === "configured"
-      ? summary?.commitIdentity !== undefined
-      : selectedProviderIdentity !== undefined;
   const updateCommitText = (
     nextSubject: string,
     nextDescription: string,
@@ -3366,22 +3348,13 @@ function GitChangesWorkspaceView(props: {
     }
   };
   const commit = async () => {
-    if (
-      !commitMessage ||
-      commitMessageLength > 4000 ||
-      committing ||
-      !commitIdentityAvailable
-    ) {
+    if (!commitMessage || commitMessageLength > 4000 || committing) {
       return;
     }
     setCommitting(true);
     setCommitError(null);
     try {
-      await commitAll(
-        workspaceId,
-        commitMessage,
-        commitIdentity === "configured" ? undefined : commitIdentity,
-      );
+      await commitAll(workspaceId, commitMessage);
       props.onDraftChange({ subject: "", description: "" });
       void refreshGitChanges(workspaceId);
     } catch (error) {
@@ -3521,55 +3494,12 @@ function GitChangesWorkspaceView(props: {
                       }
                     }}
                   />
-                  <select
-                    className="git-commit-identity"
-                    aria-label={t("git.commitIdentity")}
-                    value={commitIdentity}
-                    disabled={committing}
-                    onChange={(event) =>
-                      setCommitIdentity(
-                        event.target.value as "configured" | GitProvider,
-                      )
-                    }
-                  >
-                    <option value="configured">
-                      {summary.commitIdentity
-                        ? t(
-                            summary.commitIdentity.source === "repository"
-                              ? "git.commitIdentityRepository"
-                              : "git.commitIdentityGlobal",
-                            summary.commitIdentity,
-                          )
-                        : t("git.commitIdentityMissing")}
-                    </option>
-                    {providerState.commitIdentities.map((candidate) => (
-                      <option
-                        key={candidate.provider}
-                        value={candidate.provider}
-                      >
-                        {t(
-                          candidate.provider === "github"
-                            ? "git.commitIdentityGithub"
-                            : "git.commitIdentityGitlab",
-                          {
-                            login: candidate.login,
-                            name: candidate.identity.name,
-                            email: candidate.identity.email,
-                          },
-                        )}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 <button
                   type="button"
                   className="git-commit-button"
                   title={t("git.commitShortcut")}
-                  disabled={
-                    committing ||
-                    commitMessage.length === 0 ||
-                    !commitIdentityAvailable
-                  }
+                  disabled={committing || commitMessage.length === 0}
                   onClick={() => void commit()}
                 >
                   {t("git.commitButton")}

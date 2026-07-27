@@ -5,13 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
-export type GitIdentity = { name: string; email: string };
-
-export type GithubUser = {
-  login: string;
-  avatarUrl: string;
-  commitIdentity?: GitIdentity;
-};
+export type GithubUser = { login: string; avatarUrl: string };
 
 export type DeviceStart = {
   userCode: string;
@@ -50,7 +44,7 @@ export function githubCurrentUser(): Promise<GithubUser | null> {
   if (!isTauri) {
     return Promise.resolve(null);
   }
-  return invoke<GithubUser | null>("github_current_user");
+  return invoke<GithubUser | null>("github_current_user").catch(() => null);
 }
 
 export async function githubLogout(): Promise<void> {

@@ -10,7 +10,7 @@ Scope may be removed or deferred only after an explicit user decision.
 | Stage | Status | Commit | Summary |
 | --- | --- | --- | --- |
 | 1. Baseline and progress infrastructure | complete | `chore: establish git management implementation baseline` | Progress tracking, one verification command, rustfmt baseline, and CI lint gate |
-| 2. Local/provider state and commit identity | complete | `refactor: separate local git and provider state` | Separate snapshots and repository/global/manual identity precedence |
+| 2. Local/provider state and commit identity | pending | `refactor: separate local git and provider state` | Separate snapshots and repository/global/manual identity precedence |
 | 3. Operation coordinator | pending | `feat: coordinate repository operations` | Shared/exclusive repository locks, queue, stale-state checks, managed runner |
 | 4. Progress, cancellation, and watcher | pending | `feat: track and cancel git operations` | Operation events, process cancellation, external changes, hybrid watcher |
 | 5. Repository trust, config, and signing | pending | `feat: add repository trust and git configuration` | Trust policy, executable integration audit, config scopes, signing |
@@ -39,47 +39,6 @@ Scope may be removed or deferred only after an explicit user decision.
   bypasses the new gate; CodeGraph confirmed that runtime changes are limited
   to behavior-equivalent clippy fixes. Manual whitespace-insensitive diff review
   found no unresolved findings.
-
-## Stage 2 Evidence
-
-- Added generation-bearing `LocalGitSnapshot`, independent
-  `ProviderRepositoryState`, and the composed `GitPanelViewModel`.
-- Provider loading, ready, and error state no longer changes or replaces the
-  last local Git snapshot. Account settings consume the provider store instead
-  of issuing a second profile request.
-- New commits resolve a complete repository identity first, then a complete
-  global identity. A cached GitHub identity is available only as an explicit
-  user selection and is revalidated by the backend; it is never selected
-  automatically.
-- Integration coverage verifies the serialized repository identity, generation
-  increments, independent provider errors, IPC arguments, missing local
-  identity behavior, and explicit provider selection.
-- Validation after changes: `npm run verify:stage` passed the production
-  typecheck/build, 320 frontend tests, 264 Rust tests, rustfmt, clippy with
-  warnings denied, and `git diff --check`. The existing credentialed live
-  remote test remains opt-in and ignored.
-- Review after changes: CocoIndex found the GitHub avatar/account paths and a
-  stale provider-profile error path outside the initial panel changes.
-  CodeGraph confirmed the call path
-  `GitChangesWorkspaceView -> commitAll -> git_commit -> commit_all` and showed
-  that `githubCurrentUser` also had an Account settings caller. Review findings
-  fixed before completion: provider failures are no longer collapsed into
-  signed-out state, and an unavailable configured identity cannot visually
-  fall through to a provider identity. The security-focused diff review also
-  removed a direct Git subprocess path from identity resolution so config reads
-  use the shared non-shell Git runner and remain inside the Stage 3 coordinator
-  blast radius.
-
-## Stage 2 Known Limitations
-
-- Provider state represents account authorization only. Repository
-  installation, organization approval, capabilities, protected branches, and
-  GitLab state remain required in Stages 11 and 12.
-- The current changes view still commits all worktree changes. A staged-only
-  commit workflow remains required in Stage 7.
-- Identity configuration and signing management remain required in Stage 5;
-  this stage only reads complete repository or global `user.name`/`user.email`
-  pairs and exposes a manual authenticated-provider override.
 
 ## Known Baseline Limitations
 

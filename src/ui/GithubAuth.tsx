@@ -12,8 +12,7 @@ import {
 } from "../github/auth";
 import { refreshGithubCommitAvatars } from "../git/githubAvatars";
 import {
-  setGithubAuthError,
-  setGithubUser,
+  setGithubSignedIn,
   subscribeGithubAuthRequests,
 } from "../github/authState";
 import { saveNetworkAvatars } from "../terminal/preferences";
@@ -50,20 +49,14 @@ export function GithubAuth() {
 
   useEffect(() => {
     let cancelled = false;
-    void githubCurrentUser()
-      .then((current) => {
-        if (!cancelled) {
-          setUser(current);
-          // На старте: узнаём, вошёл ли пользователь (сохранённая настройка
-          // «Из сети» при этом не трогается — уважаем выбор вернувшегося).
-          setGithubUser(current);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setGithubAuthError("github-current-user");
-        }
-      });
+    void githubCurrentUser().then((current) => {
+      if (!cancelled) {
+        setUser(current);
+        // На старте: узнаём, вошёл ли пользователь (сохранённая настройка
+        // «Из сети» при этом не трогается — уважаем выбор вернувшегося).
+        setGithubSignedIn(current !== null);
+      }
+    });
     return () => {
       cancelled = true;
     };
@@ -124,18 +117,11 @@ export function GithubAuth() {
           return;
         }
         if (status === "authorized") {
-          let current: GithubUser | null;
-          try {
-            current = await githubCurrentUser();
-          } catch {
-            setGithubAuthError("github-current-user");
-            setFlow({ kind: "error" });
-            return;
-          }
+          const current = await githubCurrentUser();
           if (!stopped) {
             setUser(current);
             setFlow({ kind: "idle" });
-            setGithubUser(current);
+            setGithubSignedIn(current !== null);
             // Только что вошли — автоматически включаем аватарки «Из сети».
             if (current) {
               saveNetworkAvatars(true);
@@ -173,7 +159,7 @@ export function GithubAuth() {
     await githubLogout();
     setUser(null);
     // Вышли — сетевые аватарки снова недоступны (в коммитах станут инициалы).
-    setGithubUser(null);
+    setGithubSignedIn(false);
     // Токена больше нет — карту GitHub-аватарок сбрасываем на Gravatar/инициалы.
     refreshGithubCommitAvatars();
   };

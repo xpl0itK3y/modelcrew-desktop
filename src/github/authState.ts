@@ -1,60 +1,19 @@
-// Асинхронное состояние GitHub-аккаунта живёт отдельно от локального Git.
-// GithubAuth остаётся единственным владельцем device flow и обновляет store
-// после загрузки профиля, входа и выхода.
+// Общее состояние «вошёл ли пользователь через GitHub». Нужно аватаркам (сетевые
+// показываем только после входа) и настройкам (кнопка «Из сети» доступна только
+// вошедшим). GithubAuth — единственный, кто это состояние меняет.
 
-import type { GithubUser } from "./auth";
-
-let user: GithubUser | null = null;
-let resolved = false;
-let error: string | null = null;
-let generation = 0;
+let signedIn = false;
 const EVENT = "modelcrew:github-auth";
 
 export function isGithubSignedIn(): boolean {
-  return user !== null;
+  return signedIn;
 }
 
-export function getGithubUser(): GithubUser | null {
-  return user;
-}
-
-export function isGithubAuthResolved(): boolean {
-  return resolved;
-}
-
-export function getGithubAuthGeneration(): number {
-  return generation;
-}
-
-export function getGithubAuthError(): string | null {
-  return error;
-}
-
-export function setGithubUser(value: GithubUser | null): void {
-  const unchanged =
-    resolved &&
-    error === null &&
-    user?.login === value?.login &&
-    user?.avatarUrl === value?.avatarUrl &&
-    user?.commitIdentity?.name === value?.commitIdentity?.name &&
-    user?.commitIdentity?.email === value?.commitIdentity?.email;
-  if (unchanged) {
+export function setGithubSignedIn(value: boolean): void {
+  if (signedIn === value) {
     return;
   }
-  user = value;
-  resolved = true;
-  error = null;
-  generation += 1;
-  window.dispatchEvent(new Event(EVENT));
-}
-
-export function setGithubAuthError(value: string): void {
-  if (resolved && error === value) {
-    return;
-  }
-  resolved = true;
-  error = value;
-  generation += 1;
+  signedIn = value;
   window.dispatchEvent(new Event(EVENT));
 }
 

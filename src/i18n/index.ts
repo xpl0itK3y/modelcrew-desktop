@@ -186,8 +186,6 @@ const gitReasonKeys: Record<string, MessageKey> = {
   merge: "error.gitCommitMerge",
   "not-yours": "error.gitCommitNotYours",
   message: "error.gitCommitMessage",
-  "identity-missing": "error.gitIdentityMissing",
-  "identity-provider": "error.gitIdentityProvider",
 };
 
 export function localizeBackendError(error: unknown): string {

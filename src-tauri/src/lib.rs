@@ -12,7 +12,6 @@ compile_error!(
 mod agent_sessions;
 mod command_error;
 mod git_changes;
-mod git_identity;
 mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
@@ -1001,7 +1000,6 @@ mod tests {
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("git_changes.rs", include_str!("git_changes.rs")),
-        ("git_identity.rs", include_str!("git_identity.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
         ("pty.rs", include_str!("pty.rs")),
