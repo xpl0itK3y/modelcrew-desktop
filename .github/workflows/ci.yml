@@ -77,6 +77,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: stable
+          components: rustfmt, clippy
 
       # Системные библиотеки нужны только Linux: на macOS и Windows вебвью
       # часть операционной системы.
@@ -107,3 +108,11 @@ jobs:
 
       - name: Test Rust backend
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Check Rust formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Lint Rust backend
+        if: runner.os == 'Linux'
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings

@@ -466,16 +466,24 @@ mod tests {
                 prepare_panel_history(&base, &id, &home).unwrap_err(),
                 delete_panel_history(&base, &id).unwrap_err(),
             ] {
-                assert_eq!(error.code, ErrorCode::TerminalSnapshotInvalidId, "id {id:?}");
+                assert_eq!(
+                    error.code,
+                    ErrorCode::TerminalSnapshotInvalidId,
+                    "id {id:?}"
+                );
             }
             // keep-списки prune проверяются до первого удаления.
             assert_eq!(
-                prune_snapshots(&dir, &[id.clone()]).unwrap_err().code,
+                prune_snapshots(&dir, std::slice::from_ref(&id))
+                    .unwrap_err()
+                    .code,
                 ErrorCode::TerminalSnapshotInvalidId,
                 "id {id:?}"
             );
             assert_eq!(
-                prune_panel_history(&base, &[id.clone()]).unwrap_err().code,
+                prune_panel_history(&base, std::slice::from_ref(&id))
+                    .unwrap_err()
+                    .code,
                 ErrorCode::TerminalSnapshotInvalidId,
                 "id {id:?}"
             );
@@ -566,7 +574,11 @@ mod tests {
         let dir = temp_dir("stale-tmp");
         fs::create_dir_all(&dir).unwrap();
         // Оборванная запись оставила .tmp: подхватывать его как снимок нельзя.
-        fs::write(dir.join(format!("panel-1.{SNAPSHOT_EXT}.tmp")), "half-\x1b[").unwrap();
+        fs::write(
+            dir.join(format!("panel-1.{SNAPSHOT_EXT}.tmp")),
+            "half-\x1b[",
+        )
+        .unwrap();
 
         assert_eq!(load_snapshot(&dir, "panel-1").unwrap(), None);
 
