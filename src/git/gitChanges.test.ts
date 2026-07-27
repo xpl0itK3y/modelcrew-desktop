@@ -17,6 +17,7 @@ import {
   publishBranch,
   rebaseOnto,
   authorAvatar,
+  commitAll,
   commitAction,
   createBranch,
   deleteBranch,
@@ -76,6 +77,22 @@ describe("git mutation IPC", () => {
       workspaceId: "ws-4",
       action: "uncommit",
       hash: "abcdef123456",
+    });
+  });
+
+  it("sends a provider identity only when it is explicitly selected", async () => {
+    await commitAll("ws-identity", "configured commit");
+    await commitAll("ws-identity", "provider commit", "github");
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "git_commit", {
+      workspaceId: "ws-identity",
+      message: "configured commit",
+      identityProvider: undefined,
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "git_commit", {
+      workspaceId: "ws-identity",
+      message: "provider commit",
+      identityProvider: "github",
     });
   });
 
@@ -337,6 +354,7 @@ describe("subscribeGitChanges", () => {
       workspaceId: "ws-1",
     });
     expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0].generation).toBe(1);
 
     // Тот же ответ — слушатель молчит; изменение — новое уведомление.
     await vi.advanceTimersByTimeAsync(3_000);
@@ -345,6 +363,7 @@ describe("subscribeGitChanges", () => {
     summary = { ...summary, branch: "dev" };
     await vi.advanceTimersByTimeAsync(3_000);
     expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener.mock.calls[1][0].generation).toBe(2);
 
     unsubscribe();
     mocks.invoke.mockClear();

@@ -180,6 +180,12 @@ export const en: Record<MessageKey, string> = {
   "git.commitDescription": "Description (optional)",
   "git.commitShortcut": "Commit: Enter in the subject or ⌘/Ctrl+Enter in the description",
   "git.commitButton": "Commit",
+  "git.commitIdentity": "Commit identity",
+  "git.commitIdentityRepository": "Repository: {name} <{email}>",
+  "git.commitIdentityGlobal": "Global: {name} <{email}>",
+  "git.commitIdentityGithub": "GitHub @{login}: {name} <{email}>",
+  "git.commitIdentityGitlab": "GitLab @{login}: {name} <{email}>",
+  "git.commitIdentityMissing": "Configure user.name and user.email in Git",
   "git.copyDiff": "Copy diff",
   "git.copied": "Copied",
   "git.revert": "Revert file changes",
@@ -594,4 +600,7 @@ export const en: Record<MessageKey, string> = {
   "error.gitCommitNotYours":
     "Only commits matching the local Git author can be edited",
   "error.gitCommitMessage": "Enter a valid commit message up to 4000 characters",
+  "error.gitIdentityMissing":
+    "No valid commit identity is available. Configure user.name and user.email or manually select a provider identity",
+  "error.gitIdentityProvider": "This commit identity provider is not supported",
 };

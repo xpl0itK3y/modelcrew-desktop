@@ -35,7 +35,16 @@ export type GitChangesSummary = {
   previousBranch?: string;
   ahead?: number;
   behind?: number;
+  commitIdentity?: {
+    name: string;
+    email: string;
+    source: "repository" | "global";
+  };
   files: GitChangedFile[];
+};
+
+export type LocalGitSnapshot = GitChangesSummary & {
+  generation: number;
 };
 
 export type GitFileDiff = {
@@ -56,7 +65,7 @@ const FETCH_INTERVAL_MS = 5 * 60_000;
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
-type Listener = (summary: GitChangesSummary) => void;
+type Listener = (summary: LocalGitSnapshot) => void;
 
 type WatchEntry = {
   listeners: Set<Listener>;
@@ -64,7 +73,8 @@ type WatchEntry = {
   fetchTimer: number | undefined;
   inFlight: boolean;
   lastKey: string | null;
-  last: GitChangesSummary | null;
+  last: LocalGitSnapshot | null;
+  generation: number;
   failed: boolean;
   watched: boolean;
 };
@@ -80,9 +90,14 @@ function publish(entry: WatchEntry, summary: GitChangesSummary): void {
     return;
   }
   entry.lastKey = key;
-  entry.last = summary;
+  entry.generation += 1;
+  const snapshot: LocalGitSnapshot = {
+    ...summary,
+    generation: entry.generation,
+  };
+  entry.last = snapshot;
   for (const listener of entry.listeners) {
-    listener(summary);
+    listener(snapshot);
   }
 }
 
@@ -101,7 +116,7 @@ function ensureEventListener(): void {
   });
 }
 
-export function getGitSummary(workspaceId: string): GitChangesSummary | null {
+export function getGitSummary(workspaceId: string): LocalGitSnapshot | null {
   return watches.get(workspaceId)?.last ?? null;
 }
 
@@ -155,6 +170,7 @@ export function subscribeGitChanges(
       inFlight: false,
       lastKey: null,
       last: null,
+      generation: 0,
       failed: false,
       watched: false,
     };
@@ -219,8 +235,9 @@ export function refreshGitChanges(workspaceId: string): Promise<void> {
 export function commitAll(
   workspaceId: string,
   message: string,
+  identityProvider?: "github" | "gitlab",
 ): Promise<void> {
-  return invoke("git_commit", { workspaceId, message });
+  return invoke("git_commit", { workspaceId, message, identityProvider });
 }
 
 export function revertFile(

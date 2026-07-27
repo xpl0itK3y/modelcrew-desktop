@@ -773,6 +773,24 @@
   resize: vertical;
 }
 
+.git-commit-identity {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 28px 5px 9px;
+  border: 1px solid var(--mc-border);
+  border-radius: 7px;
+  background: var(--mc-surface);
+  color: var(--mc-text);
+  font: inherit;
+  font-size: 11.5px;
+  outline: none;
+  text-overflow: ellipsis;
+}
+
+.git-commit-identity:focus {
+  border-color: color-mix(in srgb, var(--mc-accent) 55%, transparent);
+}
+
 .git-commit-button {
   flex: none;
   align-self: flex-end;

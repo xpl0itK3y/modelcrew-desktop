@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n";
-import { githubCurrentUser, type GithubUser } from "../../github/auth";
+import type { GithubUser } from "../../github/auth";
 import {
+  getGithubUser,
   requestGithubAuth,
   subscribeGithubAuth,
 } from "../../github/authState";
@@ -20,28 +21,16 @@ type AvatarSource = "network" | "initials";
 
 export function AccountTab() {
   const { t } = useI18n();
-  const [user, setUser] = useState<GithubUser | null>(null);
+  const [user, setUser] = useState<GithubUser | null>(() => getGithubUser());
   const [networkAvatars, setNetworkAvatars] = useState(() =>
     loadNetworkAvatars(),
   );
 
-  // Вход и выход выполняет GithubAuth в титлбаре, а сюда о результате приходит
-  // общее событие — перечитываем пользователя по нему.
+  // Вход и выход выполняет GithubAuth в титлбаре. Настройки читают тот же store,
+  // не запускают второй сетевой запрос и не смешивают provider state с UI.
   useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      void githubCurrentUser().then((current) => {
-        if (!cancelled) {
-          setUser(current);
-        }
-      });
-    };
-    refresh();
-    const unsubscribe = subscribeGithubAuth(refresh);
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
+    const refresh = () => setUser(getGithubUser());
+    return subscribeGithubAuth(refresh);
   }, []);
 
   // Настройку могли переключить извне (автовключение при входе) — подхватываем.

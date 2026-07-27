@@ -3,7 +3,10 @@
 // массивом (без шелла). Парсеры вынесены в чистые функции под юнит-тесты.
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
-use crate::github_auth::{github_commit_identity, GithubCommitIdentity};
+use crate::git_identity::{
+    configured_git_identity_from, ConfiguredGitIdentity, GitIdentity, GitIdentitySource,
+};
+use crate::github_auth::github_commit_identity;
 use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -52,6 +55,8 @@ pub struct GitChangesSummary {
     pub ahead: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_identity: Option<ConfiguredGitIdentity>,
     pub files: Vec<GitChangedFile>,
 }
 
@@ -66,6 +71,7 @@ impl GitChangesSummary {
             previous_branch: None,
             ahead: None,
             behind: None,
+            commit_identity: None,
             files: Vec::new(),
         }
     }
@@ -133,6 +139,19 @@ fn run_git_with_env(
             .with_debug(stderr.chars().take(4096).collect::<String>()));
     }
     Ok(output.stdout)
+}
+
+fn configured_git_identity(root: &Path) -> Option<ConfiguredGitIdentity> {
+    configured_git_identity_from(|source, key| {
+        let scope = match source {
+            GitIdentitySource::Repository => "--local",
+            GitIdentitySource::Global => "--global",
+        };
+        run_git(root, &["config", scope, "--get", key])
+            .ok()
+            .map(|output| String::from_utf8_lossy(&output).trim().to_owned())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 // ---------- Парсер `git status --porcelain=v2 --branch -z` ----------
@@ -424,6 +443,7 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
         previous_branch: previous_branch.flatten(),
         ahead: status.ahead,
         behind: status.behind,
+        commit_identity: configured_git_identity(&toplevel),
         files,
     })
 }
@@ -2483,13 +2503,16 @@ pub async fn git_log(
 const MAX_COMMIT_MESSAGE_CHARS: usize = 4000;
 
 pub fn commit_all(root: &Path, message: &str) -> CommandResult<()> {
-    commit_all_with_identity(root, message, None)
+    let identity = configured_git_identity(root).ok_or_else(|| {
+        CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "identity-missing")
+    })?;
+    commit_all_with_identity(root, message, &identity.identity())
 }
 
 fn commit_all_with_identity(
     root: &Path,
     message: &str,
-    identity: Option<&GithubCommitIdentity>,
+    identity: &GitIdentity,
 ) -> CommandResult<()> {
     let message = message.trim();
     if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
@@ -2501,17 +2524,13 @@ fn commit_all_with_identity(
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
     run_git(&toplevel, &["add", "-A"])?;
-    if let Some(identity) = identity {
-        let environment = [
-            ("GIT_AUTHOR_NAME", identity.name.as_str()),
-            ("GIT_AUTHOR_EMAIL", identity.email.as_str()),
-            ("GIT_COMMITTER_NAME", identity.name.as_str()),
-            ("GIT_COMMITTER_EMAIL", identity.email.as_str()),
-        ];
-        run_git_with_env(&toplevel, &["commit", "-m", message], &environment)?;
-    } else {
-        run_git(&toplevel, &["commit", "-m", message])?;
-    }
+    let environment = [
+        ("GIT_AUTHOR_NAME", identity.name.as_str()),
+        ("GIT_AUTHOR_EMAIL", identity.email.as_str()),
+        ("GIT_COMMITTER_NAME", identity.name.as_str()),
+        ("GIT_COMMITTER_EMAIL", identity.email.as_str()),
+    ];
+    run_git_with_env(&toplevel, &["commit", "-m", message], &environment)?;
     Ok(())
 }
 
@@ -2555,12 +2574,23 @@ pub async fn git_commit(
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     message: String,
+    identity_provider: Option<String>,
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    let identity = github_commit_identity(&app);
-    tauri::async_runtime::spawn_blocking(move || match identity.as_ref() {
-        Some(identity) => commit_all_with_identity(&root, &message, Some(identity)),
+    let provider_identity = match identity_provider.as_deref() {
+        None => None,
+        Some("github") => Some(github_commit_identity(&app).ok_or_else(|| {
+            CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "identity-missing")
+        })?),
+        Some(_) => {
+            return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "identity-provider"))
+        }
+    };
+    tauri::async_runtime::spawn_blocking(move || match provider_identity {
+        Some(identity) => commit_all_with_identity(&root, &message, &identity),
         None => commit_all(&root, &message),
     })
     .await
@@ -3980,6 +4010,8 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         };
         git(&["init", "--quiet", "--initial-branch=main"]);
         git(&["config", "core.autocrlf", "false"]);
+        git(&["config", "user.name", "Repository User"]);
+        git(&["config", "user.email", "repository@example.com"]);
         std::fs::write(root.join("tracked.txt"), "one\ntwo\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "init"]);
@@ -3990,6 +4022,14 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let summary = collect_summary(root).unwrap();
         assert!(summary.is_repo);
         assert_eq!(summary.branch.as_deref(), Some("main"));
+        assert_eq!(
+            summary.commit_identity,
+            Some(ConfiguredGitIdentity {
+                name: "Repository User".to_owned(),
+                email: "repository@example.com".to_owned(),
+                source: crate::git_identity::GitIdentitySource::Repository,
+            })
+        );
         assert_eq!(summary.files.len(), 2);
         let fresh = &summary.files[0];
         assert_eq!(
@@ -7751,12 +7791,12 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
         let root = dir.path();
         let git = history_repo(root);
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
-        let identity = GithubCommitIdentity {
+        let identity = GitIdentity {
             name: "octocat".to_owned(),
             email: "1+octocat@users.noreply.github.com".to_owned(),
         };
 
-        commit_all_with_identity(root, "github-authored", Some(&identity)).unwrap();
+        commit_all_with_identity(root, "github-authored", &identity).unwrap();
 
         assert_eq!(
             git_at(root, &["log", "-1", "--format=%an <%ae>|%cn <%ce>"]),

@@ -4,6 +4,7 @@
 // Служит для аватарок и будущих GitHub-функций.
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::git_identity::GitIdentity;
 use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -119,12 +120,8 @@ pub struct GithubUser {
     id: u64,
     login: String,
     avatar_url: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct GithubCommitIdentity {
-    pub(crate) name: String,
-    pub(crate) email: String,
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    commit_identity: Option<GitIdentity>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -141,7 +138,7 @@ impl GithubIdentityCache {
         }
     }
 
-    fn commit_identity(&self) -> Option<GithubCommitIdentity> {
+    fn commit_identity(&self) -> Option<GitIdentity> {
         let login = self.login.trim();
         if self.id == 0
             || login.is_empty()
@@ -152,7 +149,7 @@ impl GithubIdentityCache {
         {
             return None;
         }
-        Some(GithubCommitIdentity {
+        Some(GitIdentity {
             name: login.to_owned(),
             email: format!("{}+{}@users.noreply.github.com", self.id, login),
         })
@@ -173,7 +170,7 @@ fn store_commit_identity(app: &tauri::AppHandle, user: &GithubUser) -> CommandRe
     Ok(())
 }
 
-pub(crate) fn github_commit_identity(app: &tauri::AppHandle) -> Option<GithubCommitIdentity> {
+pub(crate) fn github_commit_identity(app: &tauri::AppHandle) -> Option<GitIdentity> {
     // Identity is active only while the OAuth token is present.
     read_token(app)?;
     let content = std::fs::read(identity_path(app).ok()?).ok()?;
@@ -285,10 +282,11 @@ pub async fn github_current_user(
     if !response.status().is_success() {
         return Ok(None);
     }
-    let user: GithubUser = response
+    let mut user: GithubUser = response
         .json()
         .await
         .map_err(|error| CommandError::new(ErrorCode::GithubRequestFailed).with_debug(error))?;
+    user.commit_identity = GithubIdentityCache::from_user(&user).commit_identity();
     store_commit_identity(&app, &user)?;
     Ok(Some(user))
 }
@@ -573,7 +571,7 @@ mod tests {
         assert!(!json.contains("\"id\""), "numeric id stays on the backend");
         assert_eq!(
             GithubIdentityCache::from_user(&user).commit_identity(),
-            Some(GithubCommitIdentity {
+            Some(GitIdentity {
                 name: "octocat".to_owned(),
                 email: "1+octocat@users.noreply.github.com".to_owned(),
             })
@@ -1083,10 +1081,14 @@ mod tests {
             id: 1,
             login: "octocat".to_owned(),
             avatar_url: "https://avatars.githubusercontent.com/u/1?v=4".to_owned(),
+            commit_identity: Some(GitIdentity {
+                name: "octocat".to_owned(),
+                email: "1+octocat@users.noreply.github.com".to_owned(),
+            }),
         };
         assert_eq!(
             json_keys(&serde_json::to_value(&user).unwrap()),
-            vec!["avatarUrl", "login"]
+            vec!["avatarUrl", "commitIdentity", "login"]
         );
         // Debug печатается в логи/панику — токена в структурах с ним быть тоже
         // не должно (у GithubUser его нет по составу полей).
