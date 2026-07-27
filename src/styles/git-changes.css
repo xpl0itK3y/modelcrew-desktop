@@ -768,7 +768,9 @@
 
 .git-commit-description {
   box-sizing: border-box;
+  flex: none;
   min-height: 48px;
+  max-height: min(320px, 45vh);
   line-height: 1.45;
   resize: vertical;
 }
