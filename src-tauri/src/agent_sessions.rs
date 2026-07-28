@@ -175,6 +175,55 @@ pub fn locate_codex_session(
     best.map(|(_, id)| id)
 }
 
+/// GitHub Copilot CLI: `<home>/session-state/<uuid>/` с историей в
+/// `events.jsonl` и метаданными проекта в `workspace.yaml`.
+pub fn locate_copilot_session(
+    copilot_home: &Path,
+    cwd: &str,
+    since: SystemTime,
+    exclude: &[String],
+) -> Option<String> {
+    let entries = fs::read_dir(copilot_home.join("session-state")).ok()?;
+    let mut best: Option<(Duration, String)> = None;
+
+    for entry in entries.flatten() {
+        let session_dir = entry.path();
+        if !session_dir.is_dir() {
+            continue;
+        }
+        let Some(id) = session_dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !is_session_id(id) || exclude.iter().any(|excluded| excluded == id) {
+            continue;
+        }
+
+        let events = session_dir.join("events.jsonl");
+        let workspace = session_dir.join("workspace.yaml");
+        if !events.is_file() {
+            continue;
+        }
+        let Some(instant) = file_instant(&events).or_else(|| file_instant(&session_dir)) else {
+            continue;
+        };
+        if !within_window(instant, since) {
+            continue;
+        }
+        // Формат метаданных менялся между версиями CLI. Ищем cwd сначала в
+        // выделенном workspace.yaml, затем в заголовке журнала событий.
+        if !file_mentions_cwd(&workspace, cwd) && !file_mentions_cwd(&events, cwd) {
+            continue;
+        }
+
+        let dist = distance(instant, since);
+        if best.as_ref().is_none_or(|(best_dist, _)| dist < *best_dist) {
+            best = Some((dist, id.to_string()));
+        }
+    }
+
+    best.map(|(_, id)| id)
+}
+
 /// OpenCode/Kilo: сессии в SQLite (`<data>/opencode.db`, таблица `session`
 /// с колонками id/directory/time_created). Читаем только на чтение.
 pub fn locate_opencode_session(
@@ -390,7 +439,22 @@ fn file_mentions_cwd(path: &Path, cwd: &str) -> bool {
         return false;
     };
     head.truncate(read);
-    String::from_utf8_lossy(&head).contains(cwd)
+    let head = String::from_utf8_lossy(&head);
+    if head.contains(cwd) {
+        return true;
+    }
+    // В JSON Windows-путь записывается с удвоенными `\`. Сравниваем ещё и
+    // безопасно экранированное представление, иначе точная привязка Copilot
+    // работала бы на Unix, но молча откатывалась к --continue на Windows.
+    serde_json::to_string(cwd)
+        .ok()
+        .and_then(|encoded| {
+            encoded
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .map(str::to_string)
+        })
+        .is_some_and(|encoded| head.contains(&encoded))
 }
 
 fn claude_config_dir(home: &Path) -> PathBuf {
@@ -403,6 +467,12 @@ fn codex_home_dir(home: &Path) -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".codex"))
+}
+
+fn copilot_home_dir(home: &Path) -> PathBuf {
+    std::env::var_os("COPILOT_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".copilot"))
 }
 
 fn xdg_data_home(home: &Path) -> PathBuf {
@@ -470,6 +540,7 @@ pub fn agent_session_locate(
     Ok(match agent.as_str() {
         "claude" => locate_claude_session(&claude_config_dir(&home), &cwd, since, &exclude),
         "codex" => locate_codex_session(&codex_home_dir(&home), &cwd, since, &exclude),
+        "copilot" => locate_copilot_session(&copilot_home_dir(&home), &cwd, since, &exclude),
         "opencode" => opencode_db_candidates(&home)
             .iter()
             .find_map(|db| locate_opencode_session(db, &cwd, since, &exclude)),
@@ -594,6 +665,62 @@ mod tests {
             locate_codex_session(&home, "/tmp/proj", since, &[uuid.into()]),
             None
         );
+    }
+
+    #[test]
+    fn copilot_locator_matches_workspace_and_respects_exclude() {
+        let home = temp_dir("copilot");
+        let sessions = home.join("session-state");
+        let target_id = "3a659d2e-1bb9-4814-8525-cb190c8d6e77";
+        let other_id = "fe576b67-8be6-4d4d-91eb-d987825478c4";
+        let since = SystemTime::now();
+
+        let target = sessions.join(target_id);
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("workspace.yaml"), b"cwd: /tmp/proj\n").unwrap();
+        fs::write(
+            target.join("events.jsonl"),
+            b"{\"type\":\"session.start\"}\n",
+        )
+        .unwrap();
+
+        let other = sessions.join(other_id);
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("workspace.yaml"), b"cwd: /tmp/other\n").unwrap();
+        fs::write(
+            other.join("events.jsonl"),
+            b"{\"type\":\"session.start\"}\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            locate_copilot_session(&home, "/tmp/proj", since, &[]).as_deref(),
+            Some(target_id)
+        );
+        assert_eq!(
+            locate_copilot_session(&home, "/tmp/proj", since, &[target_id.into()]),
+            None
+        );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn copilot_locator_falls_back_to_event_metadata() {
+        let home = temp_dir("copilot-events");
+        let id = "5fd54656-7dbf-4c74-954c-e7c7f49df1dd";
+        let session = home.join("session-state").join(id);
+        fs::create_dir_all(&session).unwrap();
+        fs::write(
+            session.join("events.jsonl"),
+            b"{\"type\":\"session.start\",\"context\":{\"cwd\":\"/tmp/proj\"}}\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            locate_copilot_session(&home, "/tmp/proj", SystemTime::now(), &[]).as_deref(),
+            Some(id)
+        );
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]
@@ -884,6 +1011,25 @@ mod tests {
             "the whole session file was scanned instead of its head"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cwd_matching_accepts_json_escaped_windows_paths() {
+        let dir = temp_dir("windows-cwd");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("events.jsonl");
+        let cwd = r"C:\Users\Denis\project";
+        fs::write(
+            &path,
+            format!(
+                "{{\"context\":{{\"cwd\":{}}}}}\n",
+                serde_json::to_string(cwd).unwrap()
+            ),
+        )
+        .unwrap();
+
+        assert!(file_mentions_cwd(&path, cwd));
+        let _ = fs::remove_dir_all(dir);
     }
 
     // Метаданные сессии — чужой JSON. Поиск cwd ограничен по глубине, иначе
