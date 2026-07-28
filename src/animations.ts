@@ -68,6 +68,21 @@ export function flipGroups(
   }
 }
 
+/** Плавно разворачивает активную панель или возвращает сетку. */
+export function togglePanelMaximized(
+  api: DockviewApi,
+  panel: IDockviewPanel,
+  duration = 260,
+): void {
+  const before = snapshotGroupRects(api);
+  if (panel.api.isMaximized()) {
+    panel.api.exitMaximized();
+  } else {
+    panel.api.maximize();
+  }
+  flipGroups(api, before, duration);
+}
+
 /**
  * «Перелёт» панели при свапе: элемент приподнимается (лёгкое уменьшение
  * + тень), плывёт со старого места на новое и мягко приземляется.

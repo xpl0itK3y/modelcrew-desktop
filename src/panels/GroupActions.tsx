@@ -1,5 +1,6 @@
 import { IDockviewHeaderActionsProps } from "dockview";
 import { appActions } from "../appActions";
+import { togglePanelMaximized } from "../animations";
 import { isMac } from "../constants";
 import { useI18n } from "../i18n";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";
@@ -17,10 +18,8 @@ export function GroupActions(props: IDockviewHeaderActionsProps) {
         title={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
         aria-label={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
         onClick={() => {
-          if (props.containerApi.hasMaximizedGroup()) {
-            props.containerApi.exitMaximizedGroup();
-          } else if (props.activePanel) {
-            props.containerApi.maximizeGroup(props.activePanel);
+          if (props.activePanel) {
+            togglePanelMaximized(props.containerApi, props.activePanel);
           }
         }}
       >

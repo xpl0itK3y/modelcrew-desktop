@@ -5,6 +5,7 @@ import {
   closePanelAnimated,
   flipGroups,
   snapshotGroupRects,
+  togglePanelMaximized,
 } from "../animations";
 import { swapPanels } from "../layoutOps";
 
@@ -248,30 +249,6 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         return;
       }
 
-      // Mod+Alt+плюс/минус — шаговый ресайз активной панели на 5%.
-      if (
-        event.altKey &&
-        (code === "Equal" ||
-          code === "Minus" ||
-          code === "NumpadAdd" ||
-          code === "NumpadSubtract")
-      ) {
-        consume(event);
-        const group = api.activeGroup;
-        if (!group) {
-          return;
-        }
-        const grow = code === "Equal" || code === "NumpadAdd";
-        const factor = grow ? 1.05 : 1 / 1.05;
-        const before = snapshotGroupRects(api);
-        group.api.setSize({
-          width: group.width * factor,
-          height: group.height * factor,
-        });
-        flipGroups(api, before, 150);
-        return;
-      }
-
       if (event.altKey) {
         return;
       }
@@ -283,13 +260,7 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         if (!panel) {
           return;
         }
-        const before = snapshotGroupRects(api);
-        if (panel.api.isMaximized()) {
-          panel.api.exitMaximized();
-        } else {
-          panel.api.maximize();
-        }
-        flipGroups(api, before, 220);
+        togglePanelMaximized(api, panel);
         return;
       }
 

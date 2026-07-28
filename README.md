@@ -127,7 +127,6 @@ itself so notification sounds work out of the box.
 | ⌘⌥&nbsp;+&nbsp;digit | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;digit | Focus panel № |
 | ⌘⌥⇧&nbsp;+&nbsp;digit | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;Shift&nbsp;+&nbsp;digit | Swap the active panel with № |
 | ⌘↩ | Ctrl&nbsp;+&nbsp;Enter | Zoom the panel / restore the layout |
-| ⌘⌥&nbsp;+/− | Ctrl&nbsp;+&nbsp;Alt&nbsp;+/− | Grow / shrink the panel by 5% |
 | ⌘&nbsp;+&nbsp;drag | Ctrl&nbsp;+&nbsp;drag | Drag a terminal anywhere to swap panels |
 
 **Mouse tips**
