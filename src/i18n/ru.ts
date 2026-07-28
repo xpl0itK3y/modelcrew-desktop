@@ -392,6 +392,10 @@ export const ru = {
   "settings.notificationSound": "Звук уведомления",
   "settings.notificationSoundNote":
     "Проигрывается при новом уведомлении. Выбранный звук сразу слышно.",
+  "settings.notificationVolume": "Громкость уведомлений",
+  "settings.notificationVolumeNote":
+    "От 0 до 100%. Настройка сохраняется, а после изменения звук проигрывается для проверки.",
+  "settings.notificationVolumeValue": "{volume}%",
   "settings.notificationSoundSuppressed":
     "Похоже, аудиосистема зависла при прошлой попытке, поэтому звук временно отключён. Выберите «Без звука», а затем нужный звук, чтобы попробовать снова.",
   "settings.previewSound": "Прослушать «{name}»",

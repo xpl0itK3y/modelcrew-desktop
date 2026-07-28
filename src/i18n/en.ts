@@ -393,6 +393,10 @@ export const en: Record<MessageKey, string> = {
   "settings.notificationSound": "Notification sound",
   "settings.notificationSoundNote":
     "Plays when a new notification arrives. The sound you pick plays at once.",
+  "settings.notificationVolume": "Notification volume",
+  "settings.notificationVolumeNote":
+    "From 0 to 100%. The setting is saved, and the sound plays after a change so you can check it.",
+  "settings.notificationVolumeValue": "{volume}%",
   "settings.notificationSoundSuppressed":
     "Audio appeared to hang last time a sound played, so sound is temporarily disabled. Select “Off”, then pick a sound to try again.",
   "settings.previewSound": "Preview “{name}”",

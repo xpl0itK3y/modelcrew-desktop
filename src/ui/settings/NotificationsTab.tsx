@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { type MessageKey, useI18n } from "../../i18n";
 import {
+  MAX_NOTIFICATION_VOLUME,
+  MIN_NOTIFICATION_VOLUME,
   NOTIFICATION_SOUNDS,
   isNotificationSoundSuppressed,
   loadNotificationSound,
+  loadNotificationVolume,
   previewNotificationSound,
   saveNotificationSound,
+  saveNotificationVolume,
   type NotificationSoundId,
 } from "../../sound";
 import {
@@ -39,6 +43,7 @@ export function NotificationsTab() {
   const [sound, setSound] = useState<NotificationSoundId>(() =>
     loadNotificationSound(),
   );
+  const [volume, setVolume] = useState(() => loadNotificationVolume());
   const [soundSuppressed, setSoundSuppressed] = useState(() =>
     isNotificationSoundSuppressed(),
   );
@@ -47,6 +52,16 @@ export function NotificationsTab() {
   );
   const [agentAlertDetail, setAgentAlertDetail] =
     useState<AgentAlertDetailMode>(() => loadAgentAlertDetailMode());
+  const volumePreviewTimer = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (volumePreviewTimer.current !== undefined) {
+        window.clearTimeout(volumePreviewTimer.current);
+      }
+    },
+    [],
+  );
 
   // Вердикт защиты от зависаний (см. sound.ts) перечитывается после каждого
   // воспроизведения — и выбора, и повторного прослушивания. Иначе кнопка
@@ -59,9 +74,31 @@ export function NotificationsTab() {
 
   // Выбор звука сразу его проигрывает — иначе выбирать пришлось бы вслепую.
   const selectSound = (id: NotificationSoundId) => {
+    if (volumePreviewTimer.current !== undefined) {
+      window.clearTimeout(volumePreviewTimer.current);
+      volumePreviewTimer.current = undefined;
+    }
     setSound(id);
     saveNotificationSound(id);
     playSound(id);
+  };
+
+  const selectVolume = (nextVolume: number) => {
+    setVolume(nextVolume);
+    saveNotificationVolume(nextVolume);
+    if (volumePreviewTimer.current !== undefined) {
+      window.clearTimeout(volumePreviewTimer.current);
+    }
+    if (sound === "off" || nextVolume === 0) {
+      volumePreviewTimer.current = undefined;
+      return;
+    }
+    // Во время перетаскивания ползунка не запускаем WAV на каждом пикселе:
+    // короткая пауза даёт одно предпрослушивание с итоговой громкостью.
+    volumePreviewTimer.current = window.setTimeout(() => {
+      volumePreviewTimer.current = undefined;
+      playSound(sound);
+    }, 180);
   };
 
   const soundName = t(soundMessageKeys[sound]);
@@ -107,6 +144,37 @@ export function NotificationsTab() {
               {t("settings.notificationSoundSuppressed")}
             </p>
           ) : undefined
+        }
+      />
+
+      <SettingRow
+        title={t("settings.notificationVolume")}
+        description={t("settings.notificationVolumeNote")}
+        control={
+          <div className="notification-volume-control">
+            <input
+              type="range"
+              className="notification-volume-slider"
+              min={MIN_NOTIFICATION_VOLUME}
+              max={MAX_NOTIFICATION_VOLUME}
+              step={1}
+              value={volume}
+              disabled={sound === "off"}
+              aria-label={t("settings.notificationVolume")}
+              aria-valuetext={t("settings.notificationVolumeValue", {
+                volume,
+              })}
+              style={
+                {
+                  "--notification-volume-progress": `${volume}%`,
+                } as CSSProperties
+              }
+              onChange={(event) => selectVolume(Number(event.target.value))}
+            />
+            <output className="notification-volume-value" aria-live="polite">
+              {t("settings.notificationVolumeValue", { volume })}
+            </output>
+          </div>
         }
       />
 

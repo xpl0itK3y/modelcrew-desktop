@@ -168,6 +168,30 @@ describe("Settings sections", () => {
     ).toBeInTheDocument();
   });
 
+  it("persists notification volume and restores it after reopening Settings", () => {
+    localStorage.removeItem("modelcrew.notificationVolume");
+    const first = renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+
+    const volume = screen.getByRole("slider", {
+      name: "Громкость уведомлений",
+    });
+    expect(volume).toHaveValue("100");
+    expect(screen.getByText("100%")).toBeVisible();
+
+    fireEvent.change(volume, { target: { value: "35" } });
+    expect(volume).toHaveValue("35");
+    expect(screen.getByText("35%")).toBeVisible();
+    expect(localStorage.getItem("modelcrew.notificationVolume")).toBe("35");
+
+    first.unmount();
+    renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+    expect(
+      screen.getByRole("slider", { name: "Громкость уведомлений" }),
+    ).toHaveValue("35");
+  });
+
   it("warns in the notifications section when audio is suppressed after a hang", () => {
     soundSuppressed.mockReturnValue(true);
     renderSettings();
