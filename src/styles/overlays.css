@@ -146,6 +146,17 @@
   background: var(--mc-danger-hover);
 }
 
+.dialog-button.is-primary {
+  border-color: var(--mc-accent-border);
+  background: var(--mc-accent-soft);
+  color: var(--mc-accent);
+}
+
+.dialog-button.is-primary:hover {
+  border-color: var(--mc-accent);
+  background: var(--mc-accent-soft);
+}
+
 .dialog-button:focus-visible {
   outline: 1px solid var(--mc-accent);
   outline-offset: 1px;

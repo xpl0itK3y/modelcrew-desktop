@@ -5,6 +5,7 @@ type ConfirmDialogProps = {
   text: string;
   confirmLabel: string;
   busy?: boolean;
+  tone?: "danger" | "primary";
   // Диалог доигрывает exit-анимацию перед размонтированием.
   closing?: boolean;
   onConfirm: () => void;
@@ -68,7 +69,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
           <button
             ref={confirmRef}
             type="button"
-            className="dialog-button is-danger"
+            className={`dialog-button is-${props.tone ?? "danger"}`}
             disabled={props.busy}
             onClick={props.onConfirm}
           >

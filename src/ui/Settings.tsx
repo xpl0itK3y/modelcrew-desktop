@@ -106,6 +106,12 @@ export function Settings(props: SettingsProps) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        // Внутренняя настройка может открыть собственное подтверждение
+        // (например установку Git Bash). Верхний alertdialog сам обработает
+        // Escape; закрывать вместе с ним и весь экран настроек не надо.
+        if (document.querySelector('[role="alertdialog"][aria-modal="true"]')) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         props.onClose();
