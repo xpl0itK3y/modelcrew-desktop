@@ -9,6 +9,7 @@
   flex-direction: column;
   box-sizing: border-box;
   width: 360px;
+  height: 300px;
   max-width: calc(100vw - 16px);
   max-height: min(420px, calc(100vh - 52px));
   overflow: hidden;
