@@ -1162,6 +1162,10 @@ mod tests {
 
     /// Тело функции верхнего уровня по началу её сигнатуры.
     fn function_body(source: &str, signature_start: &str) -> String {
+        // include_str! читает checkout как есть; Windows Git обычно оставляет
+        // здесь CRLF. Нормализуем только тестовую копию исходника, чтобы
+        // security-проверка тела функции была одинаковой на всех раннерах.
+        let source = source.replace("\r\n", "\n");
         let after = source
             .split_once(signature_start)
             .unwrap_or_else(|| panic!("{signature_start} is gone"))

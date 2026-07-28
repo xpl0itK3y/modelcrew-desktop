@@ -703,14 +703,19 @@ mod tests {
         let since = SystemTime::now();
         touch_with_mtime(&target, since + Duration::from_secs(2));
         touch_with_mtime(&other, since + Duration::from_secs(1));
+        let target_entry = serde_json::json!({
+            "sessionId": target_id,
+            "sessionDir": target.parent().unwrap().to_string_lossy(),
+            "workDir": "/tmp/proj",
+        });
+        let other_entry = serde_json::json!({
+            "sessionId": other_id,
+            "sessionDir": other.parent().unwrap().to_string_lossy(),
+            "workDir": "/tmp/other",
+        });
         fs::write(
             home.join("session_index.jsonl"),
-            format!(
-                "{{\"sessionId\":\"{target_id}\",\"sessionDir\":\"{}\",\"workDir\":\"/tmp/proj\"}}\n\
-                 {{\"sessionId\":\"{other_id}\",\"sessionDir\":\"{}\",\"workDir\":\"/tmp/other\"}}\n",
-                target.parent().unwrap().display(),
-                other.parent().unwrap().display(),
-            ),
+            format!("{target_entry}\n{other_entry}\n"),
         )
         .unwrap();
 
