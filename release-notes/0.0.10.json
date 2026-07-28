@@ -1,0 +1,25 @@
+{
+  "version": "0.0.10",
+  "ru": {
+    "title": "Файлы в терминале и точные уведомления агентов",
+    "summary": "Перетаскивайте файлы и вставляйте изображения в терминал, получайте точные уведомления агентов и используйте GitHub-профиль для новых коммитов.",
+    "highlights": [
+      "Перетаскивайте файлы и папки в терминал — безопасный путь вставится в командную строку",
+      "Вставляйте изображения из буфера: ModelCrew сохранит файл и подставит его путь",
+      "Уведомления различают завершение, вопрос, запрос разрешения, ожидание и ошибку",
+      "Выбирайте краткий или подробный текст уведомлений агентов в настройках",
+      "Коммиты используют GitHub-профиль; добавлена Kimi Code, а сетка меняется сразу"
+    ]
+  },
+  "en": {
+    "title": "Terminal file sharing and smarter agent alerts",
+    "summary": "Drop files or paste images into terminals, receive precise agent alerts, and use your GitHub identity for new commits.",
+    "highlights": [
+      "Drop files and folders into a terminal to insert shell-safe paths",
+      "Paste clipboard images and ModelCrew stores them temporarily before inserting the path",
+      "Alerts distinguish completion, questions, permission requests, waiting, and errors",
+      "Choose brief or detailed agent notification text in Settings",
+      "Commits use your GitHub identity; Kimi Code is supported and grid changes apply immediately"
+    ]
+  }
+}

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.0.10
+
+### Русский
+
+Перетаскивайте файлы и вставляйте изображения в терминал, получайте точные уведомления агентов и используйте GitHub-профиль для новых коммитов.
+
+- Файлы и папки можно перетащить прямо в терминал: путь экранируется для оболочки и вставляется в командную строку
+- Изображение из буфера сохраняется во временный файл PNG, JPEG, GIF или WebP, после чего его путь вставляется в тот же терминал
+- Уведомления отдельно распознают завершение работы, вопрос, запрос разрешения, ожидание ответа и ошибку агента
+- В настройках можно выбрать краткий или подробный текст уведомлений агентов
+- Системное уведомление показывает проект и, в подробном режиме, короткое сообщение агента
+- Новые коммиты из Git-панели используют имя и защищённый noreply-адрес вошедшего GitHub-профиля
+- Добавлена поддержка Kimi Code, устаревшая интеграция Gemini CLI удалена
+- Изменение ориентации терминальной сетки применяется сразу к текущей раскладке
+
+### English
+
+Drop files or paste images into terminals, receive precise agent alerts, and use your GitHub identity for new commits.
+
+- Drop files and folders directly into a terminal to insert a shell-escaped path into its command line
+- Paste a clipboard image to store a temporary PNG, JPEG, GIF, or WebP file and insert its path into the same terminal
+- Alerts distinguish completed work, questions, permission requests, waiting for input, and agent errors
+- Choose brief or detailed agent notification text in Settings
+- System notifications show the project and, in detailed mode, a short message supplied by the agent
+- New commits from the Git panel use the signed-in GitHub profile name and protected noreply address
+- Added Kimi Code support and removed the obsolete Gemini CLI integration
+- Changing the terminal grid orientation applies immediately to the current layout
+
 ## 0.0.9
 
 ### Русский
