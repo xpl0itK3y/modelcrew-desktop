@@ -1,6 +1,12 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useI18n } from "../../i18n";
+import { localizeBackendError, useI18n } from "../../i18n";
+import {
+  getGitBashAvailability,
+  installGitBash,
+  openGitBashDownload,
+  type GitBashAvailability,
+} from "../../gitBash";
 import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
@@ -13,13 +19,35 @@ import {
   saveTerminalHistoryIsolation,
   type GridOrientation,
 } from "../../terminal/preferences";
-import { SettingRow, SettingsPage, SettingsSelect } from "./SettingsControls";
+import { ConfirmDialog } from "../ConfirmDialog";
+import {
+  SettingRow,
+  SettingsButton,
+  SettingsPage,
+  SettingsSelect,
+} from "./SettingsControls";
 
 // Значение «системная оболочка» приходит из App как null, а <select> умеет
 // хранить только строки — пустая строка и есть этот случай.
 const SYSTEM_SHELL = "";
 
-const isTauri = "__TAURI_INTERNALS__" in window;
+const isTauri = () => "__TAURI_INTERNALS__" in window;
+
+type ShellCatalog = {
+  shells?: ShellOption[];
+  gitBash?: GitBashAvailability;
+};
+
+async function loadShellCatalog(): Promise<ShellCatalog> {
+  const [shells, gitBash] = await Promise.allSettled([
+    invoke<ShellOption[]>("list_shells"),
+    getGitBashAvailability(),
+  ]);
+  return {
+    shells: shells.status === "fulfilled" ? shells.value : undefined,
+    gitBash: gitBash.status === "fulfilled" ? gitBash.value : undefined,
+  };
+}
 
 type TerminalTabProps = {
   shell: string | null;
@@ -32,6 +60,14 @@ type TerminalTabProps = {
 export function TerminalTab(props: TerminalTabProps) {
   const { t } = useI18n();
   const [shells, setShells] = useState<ShellOption[]>([]);
+  const [gitBash, setGitBash] = useState<GitBashAvailability | null>(null);
+  const [gitBashConfirm, setGitBashConfirm] = useState(false);
+  const [gitBashInstalling, setGitBashInstalling] = useState(false);
+  const [gitBashChecking, setGitBashChecking] = useState(false);
+  const [gitBashNotice, setGitBashNotice] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
   const [historyIsolated, setHistoryIsolated] = useState(() =>
     loadTerminalHistoryIsolation(),
   );
@@ -46,30 +82,99 @@ export function TerminalTab(props: TerminalTabProps) {
       (MAX_TERMINAL_FONT_SIZE - MIN_TERMINAL_FONT_SIZE)) *
     100;
 
+  const applyShellCatalog = useCallback((catalog: ShellCatalog) => {
+    if (catalog.shells) {
+      setShells(catalog.shells);
+    }
+    if (catalog.gitBash) {
+      setGitBash(catalog.gitBash);
+    }
+  }, []);
+
+  const refreshShellCatalog = useCallback(async () => {
+    setGitBashChecking(true);
+    try {
+      const catalog = await loadShellCatalog();
+      applyShellCatalog(catalog);
+      if (catalog.gitBash?.status === "installed") {
+        setGitBashNotice({
+          tone: "success",
+          text: t("settings.gitBashDetected"),
+        });
+      }
+    } finally {
+      setGitBashChecking(false);
+    }
+  }, [applyShellCatalog, t]);
+
   useEffect(() => {
-    if (!isTauri) {
+    if (!isTauri()) {
       return;
     }
     let cancelled = false;
-    void invoke<ShellOption[]>("list_shells")
-      .then((list) => {
+    void loadShellCatalog()
+      .then((catalog) => {
         if (!cancelled) {
-          setShells(list);
+          applyShellCatalog(catalog);
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyShellCatalog]);
+
+  const confirmGitBashInstall = useCallback(async () => {
+    if (gitBashInstalling) {
+      return;
+    }
+    setGitBashInstalling(true);
+    setGitBashNotice(null);
+    try {
+      const installed = await installGitBash();
+      setShells((current) => [
+        ...current.filter((entry) => entry.id !== installed.id),
+        installed,
+      ]);
+      setGitBash({ status: "installed", shell: installed });
+      setGitBashNotice({
+        tone: "success",
+        text: t("settings.gitBashInstalled"),
+      });
+    } catch (error) {
+      setGitBashNotice({
+        tone: "error",
+        text: localizeBackendError(error),
+      });
+    } finally {
+      setGitBashInstalling(false);
+      setGitBashConfirm(false);
+    }
+  }, [gitBashInstalling, t]);
+
+  const openGitBashWebsite = useCallback(async () => {
+    setGitBashNotice(null);
+    try {
+      await openGitBashDownload();
+    } catch {
+      setGitBashNotice({
+        tone: "error",
+        text: t("settings.gitBashOpenFailed"),
+      });
+    }
+  }, [t]);
+
+  const showGitBashInstaller =
+    gitBash?.status === "installable" || gitBash?.status === "manual";
 
   return (
-    <SettingsPage
-      section="terminal"
-      title={t("settings.tabTerminal")}
-      intro={t("settings.terminalIntro")}
-    >
-      {isTauri && shells.length > 0 && (
+    <>
+      <SettingsPage
+        section="terminal"
+        title={t("settings.tabTerminal")}
+        intro={t("settings.terminalIntro")}
+      >
+      {isTauri() && shells.length > 0 && (
         <SettingRow
           title={t("settings.shell")}
           description={
@@ -105,6 +210,68 @@ export function TerminalTab(props: TerminalTabProps) {
                 props.onSelectShell(value, picked?.label ?? value);
               }}
             />
+          }
+          note={
+            gitBash?.status === "installed" &&
+            gitBashNotice && (
+              <p
+                className={`settings-note is-${gitBashNotice.tone}`}
+                role={gitBashNotice.tone === "error" ? "alert" : "status"}
+              >
+                {gitBashNotice.text}
+              </p>
+            )
+          }
+        />
+      )}
+
+      {isTauri() && showGitBashInstaller && (
+        <SettingRow
+          title={t("settings.gitBash")}
+          description={
+            gitBash.status === "installable"
+              ? t("settings.gitBashInstallNote")
+              : t("settings.gitBashManualNote")
+          }
+          keywords="Git Bash Git for Windows winget bash"
+          control={
+            <div className="settings-control-pair">
+              {gitBash.status === "installable" ? (
+                <SettingsButton
+                  label={
+                    gitBashInstalling
+                      ? t("settings.gitBashInstalling")
+                      : t("settings.gitBashInstall")
+                  }
+                  disabled={gitBashInstalling}
+                  onClick={() => setGitBashConfirm(true)}
+                />
+              ) : (
+                <SettingsButton
+                  label={t("settings.gitBashOpenDownload")}
+                  onClick={() => void openGitBashWebsite()}
+                />
+              )}
+              <SettingsButton
+                label={
+                  gitBashChecking
+                    ? t("settings.gitBashChecking")
+                    : t("settings.gitBashCheckAgain")
+                }
+                disabled={gitBashChecking || gitBashInstalling}
+                onClick={() => void refreshShellCatalog()}
+              />
+            </div>
+          }
+          note={
+            gitBashNotice && (
+              <p
+                className={`settings-note is-${gitBashNotice.tone}`}
+                role={gitBashNotice.tone === "error" ? "alert" : "status"}
+              >
+                {gitBashNotice.text}
+              </p>
+            )
           }
         />
       )}
@@ -204,6 +371,22 @@ export function TerminalTab(props: TerminalTabProps) {
           />
         }
       />
-    </SettingsPage>
+      </SettingsPage>
+
+      {gitBashConfirm && (
+        <ConfirmDialog
+          text={t("settings.gitBashInstallConfirm")}
+          confirmLabel={
+            gitBashInstalling
+              ? t("settings.gitBashInstalling")
+              : t("settings.gitBashInstall")
+          }
+          busy={gitBashInstalling}
+          tone="primary"
+          onConfirm={() => void confirmGitBashInstall()}
+          onCancel={() => setGitBashConfirm(false)}
+        />
+      )}
+    </>
   );
 }

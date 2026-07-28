@@ -148,6 +148,9 @@ const backendErrorKeys: Record<string, MessageKey> = {
   terminal_write_failed: "error.terminalWriteFailed",
   terminal_resize_failed: "error.terminalResizeFailed",
   terminal_kill_failed: "error.terminalKillFailed",
+  git_bash_install_unsupported: "error.gitBashInstallUnsupported",
+  git_bash_installer_unavailable: "error.gitBashInstallerUnavailable",
+  git_bash_install_failed: "error.gitBashInstallFailed",
 };
 
 const gitReasonKeys: Record<string, MessageKey> = {

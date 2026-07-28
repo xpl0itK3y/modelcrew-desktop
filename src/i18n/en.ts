@@ -343,6 +343,24 @@ export const en: Record<MessageKey, string> = {
   "settings.shellRestarted": "Shell changed: restarted {terminals}",
   "settings.shellRestartFailed":
     "Could not restart {failed} of {total} terminals — they are still running in the previous shell",
+  "settings.gitBash": "Git Bash",
+  "settings.gitBashInstallNote":
+    "Adds Bash and Git for Windows. Installation opens in a separate system window and waits for your confirmation.",
+  "settings.gitBashManualNote":
+    "Windows Package Manager is unavailable. Install Git for Windows from the official website, then check for shells again.",
+  "settings.gitBashInstall": "Install",
+  "settings.gitBashInstalling": "Installing…",
+  "settings.gitBashInstallConfirm":
+    "Open the official Git for Windows installer through WinGet? The license, installation progress, and permission prompt will appear in a separate Windows window.",
+  "settings.gitBashOpenDownload": "Open website",
+  "settings.gitBashCheckAgain": "Check again",
+  "settings.gitBashChecking": "Checking…",
+  "settings.gitBashDetected":
+    "Git Bash was found. You can now select it from the shell list.",
+  "settings.gitBashInstalled":
+    "Git Bash is installed. Select it from the shell list.",
+  "settings.gitBashOpenFailed":
+    "Could not open the Git for Windows website.",
   "settings.agentResume": "Agent session resume",
   "settings.agentResumeNote":
     "After the app restarts, a restored terminal resumes the agent's conversation on its own — each panel gets its own chat.",
@@ -539,6 +557,12 @@ export const en: Record<MessageKey, string> = {
   "error.terminalResizeFailed": "Could not resize the terminal",
   "error.terminalKillFailed":
     "Could not stop all terminals before updating",
+  "error.gitBashInstallUnsupported":
+    "Installing Git Bash from the app is only available on Windows",
+  "error.gitBashInstallerUnavailable":
+    "WinGet is unavailable — install Git for Windows from the official website",
+  "error.gitBashInstallFailed":
+    "Git Bash was not installed. Check the system installer window and try again",
   "error.unknown": "An unknown error occurred",
   "error.gitUnavailable": "git was not found — install it to see changes",
   "error.gitNotARepository": "The folder is not a git repository",

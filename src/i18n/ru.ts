@@ -342,6 +342,24 @@ export const ru = {
   "settings.shellRestarted": "Оболочка изменена: перезапущено {terminals}",
   "settings.shellRestartFailed":
     "Не удалось перезапустить {failed} из {total} терминалов — они продолжают работать в прежней оболочке",
+  "settings.gitBash": "Git Bash",
+  "settings.gitBashInstallNote":
+    "Добавляет Bash и Git для Windows. Установка откроется в отдельном системном окне и потребует вашего подтверждения.",
+  "settings.gitBashManualNote":
+    "Windows Package Manager недоступен. Установите Git for Windows с официального сайта, затем проверьте оболочки снова.",
+  "settings.gitBashInstall": "Установить",
+  "settings.gitBashInstalling": "Установка…",
+  "settings.gitBashInstallConfirm":
+    "Открыть официальный установщик Git for Windows через WinGet? Лицензия, ход установки и запрос прав будут показаны в отдельном окне Windows.",
+  "settings.gitBashOpenDownload": "Открыть сайт",
+  "settings.gitBashCheckAgain": "Проверить снова",
+  "settings.gitBashChecking": "Проверка…",
+  "settings.gitBashDetected":
+    "Git Bash найден. Теперь его можно выбрать в списке оболочек.",
+  "settings.gitBashInstalled":
+    "Git Bash установлен. Выберите его в списке оболочек.",
+  "settings.gitBashOpenFailed":
+    "Не удалось открыть сайт Git for Windows.",
   "settings.agentResume": "Возобновление агентов",
   "settings.agentResumeNote":
     "После перезапуска приложения восстановленный терминал сам продолжит диалог агента — каждая панель свой чат.",
@@ -534,6 +552,12 @@ export const ru = {
   "error.terminalResizeFailed": "Не удалось изменить размер терминала",
   "error.terminalKillFailed":
     "Не удалось завершить все терминалы перед обновлением",
+  "error.gitBashInstallUnsupported":
+    "Установка Git Bash из приложения доступна только в Windows",
+  "error.gitBashInstallerUnavailable":
+    "WinGet недоступен — установите Git for Windows с официального сайта",
+  "error.gitBashInstallFailed":
+    "Git Bash не был установлен. Проверьте системное окно установки и повторите попытку",
   "error.unknown": "Произошла неизвестная ошибка",
   "error.gitUnavailable": "git не найден — установите его, чтобы видеть изменения",
   "error.gitNotARepository": "Папка не является git-репозиторием",

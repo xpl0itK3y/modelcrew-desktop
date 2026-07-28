@@ -340,6 +340,14 @@
   color: var(--mc-danger);
 }
 
+.settings-note.is-success {
+  color: var(--mc-accent);
+}
+
+.settings-note.is-error {
+  color: var(--mc-danger);
+}
+
 /* ---------- Переключатели ---------- */
 
 .settings-switch {
