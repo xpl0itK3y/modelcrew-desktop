@@ -4,6 +4,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import {
   discardSnapshot,
   flushSnapshot,
@@ -35,6 +36,11 @@ import {
   loadTerminalHistoryIsolation,
   normalizeTerminalFontSize,
 } from "./preferences";
+import {
+  findTerminalDropTargetAtPoint,
+  pasteClipboardImage,
+  pasteDroppedPaths,
+} from "./fileDrop";
 import "@xterm/xterm/css/xterm.css";
 
 // Инстансы xterm живут вне React: панель при монтировании подключает
@@ -62,6 +68,9 @@ export type TerminalEntry = {
   // дождаться того же pty_create, а не потерять раннее имя оболочки.
   spawnPromise: Promise<void> | null;
   exited: boolean;
+  // Ввод принимается только после успешного создания PTY.
+  inputReady: boolean;
+  pasteListener: (event: ClipboardEvent) => void;
   workspaceId: string | null;
   outputGeneration: number;
   resizeTimer: number | undefined;
@@ -78,6 +87,61 @@ export type TerminalEntry = {
 };
 
 const registry = new Map<string, TerminalEntry>();
+let highlightedFileDropTarget: TerminalEntry | null = null;
+
+function setHighlightedFileDropTarget(entry: TerminalEntry | null): void {
+  if (highlightedFileDropTarget === entry) {
+    return;
+  }
+  highlightedFileDropTarget?.container.classList.remove("is-file-drop-target");
+  highlightedFileDropTarget = entry;
+  highlightedFileDropTarget?.container.classList.add("is-file-drop-target");
+}
+
+function terminalAtDropPosition(
+  event: Extract<DragDropEvent, { type: "enter" | "over" | "drop" }>,
+): TerminalEntry | null {
+  const direct = findTerminalDropTargetAtPoint(registry.values(), {
+    x: event.position.x,
+    y: event.position.y,
+  });
+  if (direct !== null || window.devicePixelRatio === 1) {
+    return direct;
+  }
+
+  // На macOS WebView позиция уже совпадает с viewport; для платформ,
+  // отдающих physical pixels, scaled-вариант остаётся fallback.
+  const logical = event.position.toLogical(window.devicePixelRatio);
+  return findTerminalDropTargetAtPoint(registry.values(), logical);
+}
+
+function handleTerminalDragDrop(event: DragDropEvent): void {
+  if (event.type === "leave") {
+    setHighlightedFileDropTarget(null);
+    return;
+  }
+
+  const target = terminalAtDropPosition(event);
+  if (event.type === "drop") {
+    setHighlightedFileDropTarget(null);
+    if (target !== null) {
+      pasteDroppedPaths(target, event.paths);
+    }
+    return;
+  }
+
+  setHighlightedFileDropTarget(target);
+}
+
+if (isTauri) {
+  void getCurrentWebview()
+    .onDragDropEvent((event) => {
+      handleTerminalDragDrop(event.payload);
+    })
+    .catch(() => {
+      // Drag-and-drop не должен мешать запуску терминалов, если API недоступен.
+    });
+}
 
 // Пользователь вернулся в окно: панели на экране он теперь видит, их
 // сигналы «агент ждёт» сняты. Панели скрытых сессий остаются в счётчике —
@@ -126,6 +190,10 @@ export function getTerminalStatus(id: string): TerminalStatus {
 
 function markExited(entry: TerminalEntry): void {
   entry.exited = true;
+  entry.inputReady = false;
+  if (highlightedFileDropTarget === entry) {
+    setHighlightedFileDropTarget(null);
+  }
   // Оболочки больше нет — ждать некому.
   acknowledgeAgentPanel(entry.alerts, entry.id);
   for (const listener of statusListeners) {
@@ -176,6 +244,8 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     spawned: false,
     spawnPromise: null,
     exited: false,
+    inputReady: false,
+    pasteListener: () => {},
     workspaceId: null,
     outputGeneration: 0,
     resizeTimer: undefined,
@@ -185,6 +255,14 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     resumeTimer: undefined,
     alerts: createAgentAlertTracker(),
   };
+  entry.pasteListener = (event) => {
+    void pasteClipboardImage(entry, event, (bytes) =>
+      invoke<string>("terminal_clipboard_image_save", bytes),
+    ).catch((error) => {
+      console.error("Clipboard image paste failed", error);
+    });
+  };
+  container.addEventListener("paste", entry.pasteListener, true);
   registry.set(id, entry);
   return entry;
 }
@@ -522,6 +600,9 @@ async function spawnTerminal(
     ) {
       rememberAutoTitle(entry.id, title);
     }
+    if (registry.get(entry.id) === entry && !entry.exited) {
+      entry.inputReady = true;
+    }
     maybeResumeAgent(entry, workspaceId);
   } catch (error) {
     markExited(entry);
@@ -538,6 +619,9 @@ export async function destroyTerminal(id: string): Promise<void> {
   if (!entry) {
     return;
   }
+  if (highlightedFileDropTarget === entry) {
+    setHighlightedFileDropTarget(null);
+  }
   registry.delete(id);
   autoTitles.delete(id);
   // Закрытие панели — намеренное: её история больше не восстановится.
@@ -552,6 +636,7 @@ export async function destroyTerminal(id: string): Promise<void> {
     window.clearTimeout(entry.resumeTimer);
   }
   disposeAgentAlertTracker(entry.alerts);
+  entry.container.removeEventListener("paste", entry.pasteListener, true);
   entry.pendingResume = null;
   entry.term.dispose();
   entry.container.remove();
