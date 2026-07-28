@@ -630,10 +630,9 @@ mod tests {
         assert!(resolved.starts_with(root.canonicalize().unwrap()));
         // В сохранённом пути не остаётся сегментов, которые ещё раз пройдут
         // разрешение позже и уведут cwd выше корня.
-        assert!(resolved.components().all(|component| !matches!(
-            component,
-            Component::CurDir | Component::ParentDir
-        )));
+        assert!(resolved
+            .components()
+            .all(|component| !matches!(component, Component::CurDir | Component::ParentDir)));
         let _ = std::fs::remove_dir_all(root);
     }
 

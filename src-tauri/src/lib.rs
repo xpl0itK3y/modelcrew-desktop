@@ -29,12 +29,12 @@ use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_amend_commit, git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch,
     git_commit, git_commit_action, git_commit_file_diff, git_commit_files, git_commit_patch,
-    git_compare_file_diff,
-    git_compare_files, git_create_branch, git_create_tag, git_delete_branch, git_delete_tag,
-    git_drop_commit, git_fetch_upstream, git_file_diff, git_log, git_merge_ref, git_publish_branch,
-    git_pull, git_pull_rebase, git_push, git_read_file, git_rebase_onto, git_rename_branch,
-    git_reset_to_commit, git_reset_to_upstream, git_revert_file, git_reword_commit,
-    git_save_commit_patch, git_squash_commit, git_switch_branch, git_write_file, GitWatchState,
+    git_compare_file_diff, git_compare_files, git_create_branch, git_create_tag, git_delete_branch,
+    git_delete_tag, git_drop_commit, git_fetch_upstream, git_file_diff, git_log, git_merge_ref,
+    git_publish_branch, git_pull, git_pull_rebase, git_push, git_read_file, git_rebase_onto,
+    git_rename_branch, git_reset_to_commit, git_reset_to_upstream, git_revert_file,
+    git_reword_commit, git_save_commit_patch, git_squash_commit, git_switch_branch, git_write_file,
+    GitWatchState,
 };
 use github_auth::{
     github_auth_available, github_commit_avatars, github_commit_url, github_current_user,
@@ -550,17 +550,39 @@ const BADGE_SIZE: usize = 32;
 #[cfg(target_os = "windows")]
 fn badge_glyph(symbol: char) -> [u8; 7] {
     match symbol {
-        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
-        '3' => [0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
-        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
-        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
-        '+' => [0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000],
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ],
+        '3' => [
+            0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+        ],
+        '+' => [
+            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
+        ],
         _ => [0; 7],
     }
 }
@@ -984,7 +1006,10 @@ mod tests {
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
         ("pty.rs", include_str!("pty.rs")),
-        ("terminal_snapshots.rs", include_str!("terminal_snapshots.rs")),
+        (
+            "terminal_snapshots.rs",
+            include_str!("terminal_snapshots.rs"),
+        ),
         ("update_cache.rs", include_str!("update_cache.rs")),
         ("win_proc.rs", include_str!("win_proc.rs")),
         ("workspace_roots.rs", include_str!("workspace_roots.rs")),
@@ -1459,7 +1484,10 @@ mod tests {
             );
         }
 
-        assert_eq!(friendly_name("node", &["node", "/etc/../etc/passwd"]), "passwd");
+        assert_eq!(
+            friendly_name("node", &["node", "/etc/../etc/passwd"]),
+            "passwd"
+        );
         assert_eq!(
             friendly_name("node", &["node", "C:\\Windows\\System32\\cmd.exe"]),
             "cmd.exe"
@@ -1468,7 +1496,10 @@ mod tests {
         // подписи из-за процесса, названного «.js».
         assert_eq!(friendly_name("node", &["node", ".js"]), ".js");
         // Флаг интерпретатора не становится заголовком.
-        assert_eq!(friendly_name("node", &["node", "--inspect=0.0.0.0:9229"]), "node");
+        assert_eq!(
+            friendly_name("node", &["node", "--inspect=0.0.0.0:9229"]),
+            "node"
+        );
         // Многобайтовое имя произвольной длины: режем по символам, не по байтам.
         let huge = format!("/tmp/{}.js", "п".repeat(4096));
         assert_eq!(
@@ -1561,7 +1592,10 @@ mod tests {
         assert!(config["app"].get("withGlobalTauri").is_none());
 
         let csp = security["csp"].as_str().expect("release csp is missing");
-        assert!(!csp.contains('*'), "wildcard source in the release CSP: {csp}");
+        assert!(
+            !csp.contains('*'),
+            "wildcard source in the release CSP: {csp}"
+        );
         assert!(!csp.contains("unsafe-eval"), "{csp}");
 
         // Панель Git рисует имена и содержимое файлов из враждебного
@@ -1614,7 +1648,9 @@ mod tests {
         let updater = &config["plugins"]["updater"];
 
         assert!(
-            updater["pubkey"].as_str().is_some_and(|key| !key.is_empty()),
+            updater["pubkey"]
+                .as_str()
+                .is_some_and(|key| !key.is_empty()),
             "without a pubkey the updater accepts unsigned packages"
         );
         assert!(updater.get("dangerousInsecureTransportProtocol").is_none());
@@ -1703,7 +1739,11 @@ mod dmabuf_tests {
         assert_eq!(dmabuf_choice(None), DmabufChoice::Disable);
         // Явный отказ от обхода: переменную надо убрать, а не оставить «0».
         for value in ["0", "false", "", "  "] {
-            assert_eq!(dmabuf_choice(Some(value)), DmabufChoice::Restore, "{value:?}");
+            assert_eq!(
+                dmabuf_choice(Some(value)),
+                DmabufChoice::Restore,
+                "{value:?}"
+            );
         }
         for value in ["1", "true", "yes"] {
             assert_eq!(dmabuf_choice(Some(value)), DmabufChoice::Keep, "{value:?}");
@@ -1732,7 +1772,8 @@ mod badge_tests {
             let text = badge_text(count);
             assert!(text.len() <= 2, "{count} -> {text:?}");
             assert!(
-                text.chars().all(|symbol| symbol.is_ascii_digit() || symbol == '+'),
+                text.chars()
+                    .all(|symbol| symbol.is_ascii_digit() || symbol == '+'),
                 "{count} -> {text:?}"
             );
         }

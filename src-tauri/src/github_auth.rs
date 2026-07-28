@@ -411,9 +411,8 @@ pub async fn github_commit_url(
         return Ok(None);
     }
     let root = roots.resolve(&workspace_id)?;
-    Ok(github_slug(&root).map(|(owner, repo)| {
-        format!("https://github.com/{owner}/{repo}/commit/{hash}")
-    }))
+    Ok(github_slug(&root)
+        .map(|(owner, repo)| format!("https://github.com/{owner}/{repo}/commit/{hash}")))
 }
 
 // Почта, которой подписаны локальные коммиты этого репо (git config user.email).
@@ -902,7 +901,11 @@ mod tests {
         git(&["config", "core.pager", "definitely-not-a-real-pager"]);
         git(&["config", "core.editor", "definitely-not-a-real-editor"]);
         git(&["config", "core.sshCommand", "definitely-not-a-real-ssh"]);
-        git(&["config", "core.hooksPath", "definitely-not-a-real-hooks-dir"]);
+        git(&[
+            "config",
+            "core.hooksPath",
+            "definitely-not-a-real-hooks-dir",
+        ]);
 
         assert_eq!(
             origin_url(root).as_deref(),
