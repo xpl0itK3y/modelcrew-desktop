@@ -35,7 +35,7 @@ Exec=modelcrew-desktop
 Icon=modelcrew-desktop
 Terminal=false
 Categories=Development;
-StartupWMClass=ModelCrew
+StartupWMClass=modelcrew-desktop
 DESKTOP
 
 # makepkg отказывается работать от root, поэтому упаковываем под обычным
