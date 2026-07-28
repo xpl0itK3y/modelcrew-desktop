@@ -30,6 +30,10 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 
 const DEFAULT_SOUND: NotificationSoundId = "chime";
 const STORAGE_KEY = "modelcrew.notificationSound";
+export const DEFAULT_NOTIFICATION_VOLUME = 100;
+export const MIN_NOTIFICATION_VOLUME = 0;
+export const MAX_NOTIFICATION_VOLUME = 100;
+const VOLUME_STORAGE_KEY = "modelcrew.notificationVolume";
 
 function isSoundId(value: string): value is NotificationSoundId {
   return NOTIFICATION_SOUNDS.some((sound) => sound.id === value);
@@ -57,6 +61,44 @@ export function saveNotificationSound(id: NotificationSoundId): void {
     clearAudioHealth();
   }
   prepareNotificationSound(id);
+}
+
+function normalizeNotificationVolume(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_NOTIFICATION_VOLUME;
+  }
+  return Math.min(
+    MAX_NOTIFICATION_VOLUME,
+    Math.max(MIN_NOTIFICATION_VOLUME, Math.round(value)),
+  );
+}
+
+export function loadNotificationVolume(): number {
+  try {
+    const stored = localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (stored !== null && stored.trim() !== "") {
+      return normalizeNotificationVolume(Number(stored));
+    }
+  } catch {
+    // Ignore storage access failures and fall back to the default.
+  }
+  return DEFAULT_NOTIFICATION_VOLUME;
+}
+
+export function saveNotificationVolume(value: number): void {
+  const volume = normalizeNotificationVolume(value);
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+  } catch {
+    // Non-fatal: the choice just won't persist across restarts.
+  }
+  try {
+    if (element) {
+      element.volume = volume / MAX_NOTIFICATION_VOLUME;
+    }
+  } catch {
+    // A broken media element must not break Settings.
+  }
 }
 
 function fileFor(id: NotificationSoundId): string | null {
@@ -261,6 +303,8 @@ function start(source: string): void {
       element.src = source;
       loadedSource = source;
     }
+    element.volume =
+      loadNotificationVolume() / MAX_NOTIFICATION_VOLUME;
     element.currentTime = 0;
     void element.play().catch(() => {
       // Autoplay can be blocked before the first user gesture; ignore.

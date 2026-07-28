@@ -9,6 +9,7 @@ class FakeAudio {
   src = "";
   currentTime = 12;
   preload = "";
+  volume = 1;
   play = vi.fn(() => playResult);
   pause = vi.fn();
 
@@ -96,6 +97,41 @@ describe("notification sounds", () => {
 
     localStorage.setItem("modelcrew.notificationSound", "unknown");
     expect(loadNotificationSound()).toBe("chime");
+  });
+
+  it("persists notification volume and normalizes invalid values", async () => {
+    const { loadNotificationVolume, saveNotificationVolume } = await import(
+      "./sound"
+    );
+
+    expect(loadNotificationVolume()).toBe(100);
+    saveNotificationVolume(35);
+    expect(loadNotificationVolume()).toBe(35);
+
+    localStorage.setItem("modelcrew.notificationVolume", "120");
+    expect(loadNotificationVolume()).toBe(100);
+    localStorage.setItem("modelcrew.notificationVolume", "-10");
+    expect(loadNotificationVolume()).toBe(0);
+    localStorage.setItem("modelcrew.notificationVolume", "broken");
+    expect(loadNotificationVolume()).toBe(100);
+    localStorage.setItem("modelcrew.notificationVolume", "");
+    expect(loadNotificationVolume()).toBe(100);
+  });
+
+  it("applies saved volume to previews and the reused audio element", async () => {
+    const { previewNotificationSound, saveNotificationVolume } = await import(
+      "./sound"
+    );
+
+    saveNotificationVolume(35);
+    previewNotificationSound("reveal");
+    await settleSource();
+
+    expect(audioInstances).toHaveLength(1);
+    expect(audioInstances[0].volume).toBe(0.35);
+
+    saveNotificationVolume(15);
+    expect(audioInstances[0].volume).toBe(0.15);
   });
 
   it("does not create an audio element when sounds are disabled", async () => {
