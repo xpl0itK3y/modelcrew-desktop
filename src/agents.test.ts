@@ -28,6 +28,7 @@ describe("agent catalog", () => {
   it("matches known agent processes case-insensitively", () => {
     expect(matchAgent("claude")?.agent.id).toBe("claude");
     expect(matchAgent("Codex")?.agent.id).toBe("codex");
+    expect(matchAgent("COPILOT")?.agent.id).toBe("copilot");
     expect(matchAgent(" agy ")?.agent.id).toBe("antigravity");
     expect(matchAgent("kilo")?.agent.id).toBe("kilocode");
     expect(matchAgent("Kimi")?.agent.id).toBe("kimi");
@@ -92,6 +93,11 @@ describe("agent catalog", () => {
     const kimi = getAgentRecord("panel-3")!;
     expect(buildAgentResume(kimi, false)).toBe("kimi --continue");
     expect(buildAgentResume(kimi, true)).toBe("kimi --session");
+
+    rememberAgentProcess("panel-copilot", "copilot");
+    const copilot = getAgentRecord("panel-copilot")!;
+    expect(buildAgentResume(copilot, false)).toBe("copilot --continue");
+    expect(buildAgentResume(copilot, true)).toBe("copilot --resume");
   });
 
   it("falls back to the canonical binary when the stored command is tampered", () => {
@@ -137,6 +143,15 @@ describe("agent catalog", () => {
     bindAgentSession("panel-kimi", "df13800a-7139-4259-8330-6769145fc02e");
     expect(buildAgentResume(getAgentRecord("panel-kimi")!, false)).toBe(
       "kimi --session df13800a-7139-4259-8330-6769145fc02e",
+    );
+
+    rememberAgentProcess("panel-copilot", "copilot");
+    bindAgentSession(
+      "panel-copilot",
+      "3a659d2e-1bb9-4814-8525-cb190c8d6e77",
+    );
+    expect(buildAgentResume(getAgentRecord("panel-copilot")!, false)).toBe(
+      "copilot --resume 3a659d2e-1bb9-4814-8525-cb190c8d6e77",
     );
 
     // Многословные команды и агент без адресного resume.

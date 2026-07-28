@@ -45,6 +45,14 @@ export const AGENTS: AgentDefinition[] = [
     resumeSession: ["resume"],
   },
   {
+    id: "copilot",
+    label: "GitHub Copilot",
+    processNames: ["copilot"],
+    resumeLast: ["--continue"],
+    resumePicker: ["--resume"],
+    resumeSession: ["--resume"],
+  },
+  {
     id: "opencode",
     label: "OpenCode",
     processNames: ["opencode"],
