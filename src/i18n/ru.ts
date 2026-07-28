@@ -6,7 +6,6 @@ export const ru = {
 
   "titlebar.toggleSidebar": "Показать или скрыть боковую панель",
   "titlebar.newTerminal": "Новый терминал в сетку",
-  "titlebar.arrangeGrid": "Выровнять терминалы сеткой",
   "titlebar.gitChanges": "Изменения в проекте",
   "git.panelTitle": "Изменения",
   "git.close": "Закрыть панель изменений",
@@ -377,11 +376,6 @@ export const ru = {
   "terminal.agentCompleted": "{agent} закончил работу",
   "terminal.agentError": "{agent} остановился с ошибкой",
   "terminal.agentProject": "Проект: {project}",
-  "settings.gridOrientation": "Сетка терминалов",
-  "settings.gridColumns": "Колонками",
-  "settings.gridRows": "Строками",
-  "settings.gridOrientationNote":
-    "«Колонками» — граница между верхним и нижним терминалом двигает только свою пару. «Строками» — то же для границы между левым и правым. Сквозной в сетке всегда остаётся другая ось.",
   "settings.sessionRestore": "Восстановление сессий",
   "settings.sessionRestoreAll": "Все сессии проекта",
   "settings.sessionRestoreActive": "Только активная",

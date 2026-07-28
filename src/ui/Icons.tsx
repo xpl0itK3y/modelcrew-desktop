@@ -93,17 +93,6 @@ export function SidebarIcon(props: IconProps) {
   );
 }
 
-export function GridIcon(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <rect x="2" y="2" width="5" height="5" rx="1" />
-      <rect x="9" y="2" width="5" height="5" rx="1" />
-      <rect x="2" y="9" width="5" height="5" rx="1" />
-      <rect x="9" y="9" width="5" height="5" rx="1" />
-    </svg>
-  );
-}
-
 export function PencilIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

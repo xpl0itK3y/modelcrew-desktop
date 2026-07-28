@@ -7,7 +7,6 @@ export const en: Record<MessageKey, string> = {
 
   "titlebar.toggleSidebar": "Show or hide sidebar",
   "titlebar.newTerminal": "Add terminal to grid",
-  "titlebar.arrangeGrid": "Arrange terminals in a grid",
   "titlebar.gitChanges": "Project changes",
   "git.panelTitle": "Changes",
   "git.close": "Close the changes panel",
@@ -378,11 +377,6 @@ export const en: Record<MessageKey, string> = {
   "terminal.agentCompleted": "{agent} finished the turn",
   "terminal.agentError": "{agent} stopped with an error",
   "terminal.agentProject": "Project: {project}",
-  "settings.gridOrientation": "Terminal grid",
-  "settings.gridColumns": "Columns",
-  "settings.gridRows": "Rows",
-  "settings.gridOrientationNote":
-    "Columns: the divider between a terminal and the one below moves only that pair. Rows: the same for left/right pairs. The other axis always stays continuous in a grid.",
   "settings.sessionRestore": "Session restore",
   "settings.sessionRestoreAll": "All project sessions",
   "settings.sessionRestoreActive": "Active session only",

@@ -12,12 +12,9 @@ import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
   loadEagerSessionRestore,
-  loadGridOrientation,
   loadTerminalHistoryIsolation,
   saveEagerSessionRestore,
-  saveGridOrientation,
   saveTerminalHistoryIsolation,
-  type GridOrientation,
 } from "../../terminal/preferences";
 import { ConfirmDialog } from "../ConfirmDialog";
 import {
@@ -73,9 +70,6 @@ export function TerminalTab(props: TerminalTabProps) {
   );
   const [eagerRestore, setEagerRestore] = useState(() =>
     loadEagerSessionRestore(),
-  );
-  const [gridOrientation, setGridOrientation] = useState<GridOrientation>(() =>
-    loadGridOrientation(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -328,25 +322,6 @@ export function TerminalTab(props: TerminalTabProps) {
               const isolated = value === "panel";
               setHistoryIsolated(isolated);
               saveTerminalHistoryIsolation(isolated);
-            }}
-          />
-        }
-      />
-
-      <SettingRow
-        title={t("settings.gridOrientation")}
-        description={t("settings.gridOrientationNote")}
-        control={
-          <SettingsSelect<GridOrientation>
-            label={t("settings.gridOrientation")}
-            value={gridOrientation}
-            options={[
-              { value: "columns", label: t("settings.gridColumns") },
-              { value: "rows", label: t("settings.gridRows") },
-            ]}
-            onChange={(value) => {
-              setGridOrientation(value);
-              saveGridOrientation(value);
             }}
           />
         }

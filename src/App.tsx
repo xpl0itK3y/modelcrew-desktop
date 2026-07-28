@@ -43,7 +43,7 @@ import {
   saveTheme,
 } from "./theme";
 import { closeGroupAnimated } from "./animations";
-import { arrangeEvenGrid, defaultTerminalTitles } from "./layoutOps";
+import { defaultTerminalTitles } from "./layoutOps";
 import { setWorkspaceNameResolver } from "./terminal/agentAlerts";
 import { sessionDisplayName, type Workspace } from "./persist";
 import {
@@ -55,11 +55,8 @@ import {
 import { isMac, WORKSPACE_NAME } from "./constants";
 import { loadShell, saveShell } from "./shell";
 import {
-  loadGridOrientation,
   loadTerminalFontSize,
   saveTerminalFontSize,
-  subscribeGridOrientation,
-  type GridOrientation,
 } from "./terminal/preferences";
 import { useAppUpdater } from "./updater/useAppUpdater";
 import { useNotificationSounds } from "./updater/useNotificationSounds";
@@ -392,34 +389,6 @@ export default function App() {
     });
   }, [activeGitWorkspaceId]);
 
-  // Выравнивание активной сессии в ровную сетку; PTY переживают пересборку.
-  const applyGridOrientation = useCallback(
-    (orientation: GridOrientation) => {
-      const api = apiRef.current;
-      if (!api) {
-        return;
-      }
-      suppressCleanupRef.current = true;
-      try {
-        arrangeEvenGrid(api, orientation);
-      } finally {
-        suppressCleanupRef.current = false;
-      }
-      schedulePersist();
-    },
-    [schedulePersist],
-  );
-
-  // Кнопка использует сохранённую ориентацию, а смена настройки немедленно
-  // перестраивает активную сессию тем же безопасным путём.
-  const arrangeGrid = useCallback(() => {
-    applyGridOrientation(loadGridOrientation());
-  }, [applyGridOrientation]);
-  useEffect(
-    () => subscribeGridOrientation(applyGridOrientation),
-    [applyGridOrientation],
-  );
-
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
@@ -481,7 +450,6 @@ export default function App() {
         }
         onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
-        onArrangeGrid={arrangeGrid}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
         updater={updater}
@@ -530,6 +498,9 @@ export default function App() {
               rightHeaderActionsComponent={GroupActions}
               onReady={onReady}
               theme={dockviewTheme}
+              // Сетка управляется приложением: пользователь может переносить
+              // и максимизировать панели, но не тянуть разделители.
+              locked
               // Дроп-зоны у краёв всей сетки: полноширинная строка/колонка.
               // Полоска узкая нарочно — иначе она перехватывает дропы,
               // которыми пользователь хочет встать РЯДОМ с крайней панелью

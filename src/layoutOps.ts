@@ -99,110 +99,6 @@ export function localizeDefaultPanelTitles(
   };
 }
 
-// Размерность ровной сетки под count панелей: близко к квадрату,
-// колонок не меньше, чем строк (мониторы шире, чем выше).
-export function gridDimensions(count: number): { rows: number; cols: number } {
-  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
-  return { rows: Math.max(1, Math.ceil(count / cols)), cols };
-}
-
-// Ориентация дерева сетки. В дереве-раскладке независимы границы только
-// одной оси: columns — раздельные горизонтальные (терминал можно поднимать
-// не трогая соседей), rows — раздельные вертикальные. Настройка ориентации
-// сразу перестраивает сетку; кнопка повторно выравнивает её.
-export type GridOrientation = "columns" | "rows";
-
-// Перестраивает раскладку активной сессии в ровную сетку. Инстансы xterm
-// живут вне dockview, поэтому пересоздание панелей с теми же id сохраняет
-// PTY, буферы и заголовки; вызывающий обязан подавить cleanup на время.
-export function arrangeEvenGrid(
-  api: DockviewApi,
-  orientation: GridOrientation = "columns",
-): boolean {
-  const panels = api.panels.filter(
-    (panel) => panel.view?.contentComponent === "terminal",
-  );
-  if (panels.length < 2) {
-    return false;
-  }
-  // Порядок чтения: сверху вниз, слева направо — раскладка не «перемешивает»
-  // терминалы, а только выравнивает их.
-  const ordered = [...panels].sort((a, b) => {
-    const rectA = a.group.element.getBoundingClientRect();
-    const rectB = b.group.element.getBoundingClientRect();
-    return rectA.top - rectB.top || rectA.left - rectB.left;
-  });
-  const meta = ordered.map((panel) => ({
-    id: panel.id,
-    title: panel.api.title,
-    params: panel.api.getParameters<Record<string, unknown>>(),
-  }));
-  const { rows, cols } = gridDimensions(meta.length);
-
-  api.closeAllGroups();
-
-  const grid: IDockviewPanel[][] = [];
-  meta.forEach((entry, index) => {
-    const row = Math.floor(index / cols);
-    const col = index % cols;
-    const first = row === 0 && col === 0;
-    // columns: сначала полновысотные колонки, затем деление каждой вниз.
-    // rows: сначала полноширинные строки, затем деление каждой вправо.
-    const position = first
-      ? {}
-      : orientation === "columns"
-        ? row === 0
-          ? { position: { direction: "right" as const } }
-          : {
-              position: {
-                referencePanel: grid[row - 1][col],
-                direction: "below" as const,
-              },
-            }
-        : col === 0
-          ? { position: { direction: "below" as const } }
-          : {
-              position: {
-                referencePanel: grid[row][col - 1],
-                direction: "right" as const,
-              },
-            };
-    const panel = api.addPanel({
-      id: entry.id,
-      component: "terminal",
-      tabComponent: "terminal",
-      title: entry.title ?? translate("terminal.defaultTitle"),
-      params: entry.params,
-      minimumWidth: PANEL_MIN_WIDTH,
-      minimumHeight: PANEL_MIN_HEIGHT,
-      ...position,
-    });
-    (grid[row] ??= [])[col] = panel;
-  });
-
-  // Сплиты делят место пополам неравномерно — приводим к равным долям.
-  const rowHeight = Math.floor(api.height / rows);
-  const colWidth = Math.floor(api.width / cols);
-  if (orientation === "columns") {
-    for (const panel of grid[0]) {
-      panel?.api.setSize({ width: colWidth });
-    }
-    for (const row of grid) {
-      for (const panel of row) {
-        panel?.api.setSize({ height: rowHeight });
-      }
-    }
-  } else {
-    for (const row of grid) {
-      row[0]?.api.setSize({ height: rowHeight });
-      for (const panel of row) {
-        panel?.api.setSize({ width: colWidth });
-      }
-    }
-  }
-  return true;
-}
-
 export function addPanel(
   api: DockviewApi,
   workspaceId: string,
@@ -260,8 +156,8 @@ export function addTerminalAutoGrid(
 
   // Раскладка строится СТРОКАМИ: новая панель встаёт в самую короткую
   // строку, а когда строки заполнены — полноширинной строкой снизу.
-  // У строчного дерева вертикальные разделители соседних строк
-  // независимы: перетаскивание границы в одной строке не двигает другую.
+  // Размеры рассчитывает Dockview; ручное перетаскивание разделителей
+  // отключено на уровне корневой сетки.
   const sorted = [...groups].sort((a, b) => {
     const rectA = a.element.getBoundingClientRect();
     const rectB = b.element.getBoundingClientRect();

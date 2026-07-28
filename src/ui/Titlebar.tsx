@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BellIcon,
   DiffIcon,
-  GridIcon,
   PlusIcon,
   SidebarIcon,
   SlidersIcon,
@@ -35,7 +34,6 @@ type TitlebarProps = {
   gitCounts: { additions: number; deletions: number; files: number } | null;
   onToggleSidebar: () => void;
   onNewTerminal: () => void;
-  onArrangeGrid: () => void;
   onOpenSettings: () => void;
   onOpenGitChanges: () => void;
   updater: AppUpdaterController;
@@ -249,15 +247,6 @@ export function Titlebar(props: TitlebarProps) {
           onClick={props.onNewTerminal}
         >
           <PlusIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          title={t("titlebar.arrangeGrid")}
-          aria-label={t("titlebar.arrangeGrid")}
-          onClick={props.onArrangeGrid}
-        >
-          <GridIcon />
         </button>
         {props.gitCounts && (
           <button

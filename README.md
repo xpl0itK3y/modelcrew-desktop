@@ -38,7 +38,7 @@ driven by mouse and hotkeys, and title themselves after the running program.
 
 | Feature | What it does |
 |---|---|
-| **Fleet grid layout** | New terminals split the grid automatically. Drag the wide grab zones to resize, zoom any panel to full window, or arrange everything into a tidy grid with one titlebar click. |
+| **Fleet grid layout** | New terminals split the grid automatically, while any panel can still be zoomed to the full window. |
 | **Session restore** | Every session of a project comes back alive at launch — terminals reopen with their previous text and each panel resumes **its own** agent conversation, bound precisely per panel. |
 | **Live git panel** | A slide-over showing uncommitted changes in real time as agents edit files: per-file diffs with live counters, a commit box, one-click revert, a branch switcher, and full commit history. |
 | **Agent alerts** | When an out-of-sight agent finishes or waits for your decision, ModelCrew plays a sound, shows a system banner naming the agent and project, and badges the app icon with the count of waiting panels. |
