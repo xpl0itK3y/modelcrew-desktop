@@ -17,11 +17,42 @@ const rect = (width: number, height: number): DOMRect =>
 
 function setup(initiallyMaximized: boolean) {
   let maximized = initiallyMaximized;
-  const animate = vi.fn(() => ({}) as Animation);
+  const animations: Animation[] = [];
+  const animate = vi.fn(
+    (
+      _keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      _options?: number | KeyframeAnimationOptions,
+    ) => {
+      const animation = {
+        cancel: vi.fn(),
+        oncancel: null,
+        onfinish: null,
+      } as unknown as Animation;
+      animations.push(animation);
+      return animation;
+    },
+  );
   const element = {
     animate,
+    style: { opacity: "", zIndex: "" },
     getBoundingClientRect: () =>
       maximized ? rect(1_000, 700) : rect(500, 350),
+  } as unknown as HTMLElement;
+  const backgroundAnimate = vi.fn(
+    (
+      _keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      _options?: number | KeyframeAnimationOptions,
+    ) =>
+      ({
+        cancel: vi.fn(),
+        oncancel: null,
+        onfinish: null,
+      }) as unknown as Animation,
+  );
+  const backgroundElement = {
+    animate: backgroundAnimate,
+    style: { opacity: "", zIndex: "" },
+    getBoundingClientRect: () => rect(500, 350),
   } as unknown as HTMLElement;
   const maximize = vi.fn(() => {
     maximized = true;
@@ -29,7 +60,9 @@ function setup(initiallyMaximized: boolean) {
   const exitMaximized = vi.fn(() => {
     maximized = false;
   });
+  const group = { id: "group-1", element };
   const panel = {
+    group,
     api: {
       isMaximized: () => maximized,
       maximize,
@@ -37,9 +70,19 @@ function setup(initiallyMaximized: boolean) {
     },
   } as unknown as IDockviewPanel;
   const api = {
-    groups: [{ id: "group-1", element }],
+    groups: [group, { id: "group-2", element: backgroundElement }],
   } as unknown as DockviewApi;
-  return { api, panel, animate, maximize, exitMaximized };
+  return {
+    api,
+    panel,
+    animate,
+    animations,
+    backgroundAnimate,
+    element,
+    backgroundElement,
+    maximize,
+    exitMaximized,
+  };
 }
 
 describe("togglePanelMaximized", () => {
@@ -65,13 +108,61 @@ describe("togglePanelMaximized", () => {
     );
   });
 
-  it("uses the same transition when restoring the grid", () => {
+  it("waits for terminal renderers before revealing the restored grid", () => {
+    vi.useFakeTimers();
     const fixture = setup(true);
 
     togglePanelMaximized(fixture.api, fixture.panel);
 
-    expect(fixture.exitMaximized).toHaveBeenCalledOnce();
+    expect(fixture.exitMaximized).not.toHaveBeenCalled();
     expect(fixture.maximize).not.toHaveBeenCalled();
-    expect(fixture.animate).toHaveBeenCalledOnce();
+    expect(fixture.animate).toHaveBeenCalledWith(
+      [{ opacity: 1 }, { opacity: 0 }],
+      {
+        duration: 52,
+        easing: "ease-in",
+        fill: "forwards",
+      },
+    );
+    fixture.animations[0]?.onfinish?.({} as AnimationPlaybackEvent);
+
+    expect(fixture.exitMaximized).toHaveBeenCalledOnce();
+    expect(fixture.element.style.opacity).toBe("0");
+    expect(fixture.backgroundElement.style.opacity).toBe("0");
+    expect(fixture.backgroundAnimate).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(104);
+
+    expect(fixture.animate).toHaveBeenLastCalledWith(
+      [
+        { opacity: 0, transform: "translateY(-4px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      {
+        duration: 104,
+        easing: "cubic-bezier(0.2, 0, 0.13, 1)",
+      },
+    );
+    expect(fixture.backgroundAnimate).toHaveBeenCalledWith(
+      [
+        {
+          opacity: 0,
+          transform: "translateY(8px)",
+        },
+        { opacity: 1, transform: "none" },
+      ],
+      {
+        duration: 104,
+        easing: "cubic-bezier(0.2, 0, 0.13, 1)",
+      },
+    );
+    expect(fixture.element.style.opacity).toBe("");
+    expect(fixture.backgroundElement.style.opacity).toBe("");
+
+    expect(JSON.stringify(fixture.animate.mock.calls)).not.toContain("scale");
+    expect(JSON.stringify(fixture.backgroundAnimate.mock.calls)).not.toContain(
+      "scale",
+    );
+    vi.useRealTimers();
   });
 });

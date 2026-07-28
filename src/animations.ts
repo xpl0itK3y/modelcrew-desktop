@@ -11,6 +11,8 @@ export function reducedMotion(): boolean {
 }
 
 const FLIP_EASING = "cubic-bezier(0.2, 0, 0.13, 1)";
+const RESTORE_EASING = FLIP_EASING;
+const restoringPanels = new WeakSet<IDockviewPanel>();
 
 /** Снимок позиций всех групп перед изменением layout. */
 export function snapshotGroupRects(api: DockviewApi): Map<string, DOMRect> {
@@ -68,19 +70,118 @@ export function flipGroups(
   }
 }
 
+function restoreMaximizedPanel(
+  api: DockviewApi,
+  panel: IDockviewPanel,
+  duration: number,
+): void {
+  if (reducedMotion()) {
+    panel.api.exitMaximized();
+    return;
+  }
+
+  restoringPanels.add(panel);
+
+  const groups = [...api.groups];
+  const previousOpacities = new Map(
+    groups.map((group) => [group.element, group.element.style.opacity]),
+  );
+  const fadeOutDuration = Math.max(1, Math.round(duration * 0.2));
+  const settleDuration = Math.max(1, Math.round(duration * 0.4));
+  const fadeInDuration = Math.max(
+    1,
+    duration - fadeOutDuration - settleDuration,
+  );
+  const fadeOut = panel.group.element.animate(
+    [{ opacity: 1 }, { opacity: 0 }],
+    {
+      duration: fadeOutDuration,
+      easing: "ease-in",
+      fill: "forwards",
+    },
+  );
+  let layoutRestored = false;
+
+  const showRestoredGrid = () => {
+    let pending = groups.length;
+    if (pending === 0) {
+      restoringPanels.delete(panel);
+      return;
+    }
+
+    const releasePanel = () => {
+      pending -= 1;
+      if (pending === 0) {
+        restoringPanels.delete(panel);
+      }
+    };
+
+    for (const group of groups) {
+      const element = group.element;
+      const isActive = group.id === panel.group.id;
+      const animation = element.animate(
+        [
+          {
+            opacity: 0,
+            transform: isActive ? "translateY(-4px)" : "translateY(8px)",
+          },
+          { opacity: 1, transform: "none" },
+        ],
+        {
+          duration: fadeInDuration,
+          easing: RESTORE_EASING,
+        },
+      );
+      element.style.opacity = previousOpacities.get(element) ?? "";
+      let finished = false;
+      const finish = () => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        releasePanel();
+      };
+      animation.onfinish = finish;
+      animation.oncancel = finish;
+      window.setTimeout(finish, fadeInDuration + 80);
+    }
+  };
+
+  const restoreLayout = () => {
+    if (layoutRestored) {
+      return;
+    }
+    layoutRestored = true;
+    fadeOut.cancel();
+    for (const group of groups) {
+      group.element.style.opacity = "0";
+    }
+    panel.api.exitMaximized();
+    window.setTimeout(showRestoredGrid, settleDuration);
+  };
+
+  fadeOut.onfinish = restoreLayout;
+  fadeOut.oncancel = restoreLayout;
+  window.setTimeout(restoreLayout, fadeOutDuration + 80);
+}
+
 /** Плавно разворачивает активную панель или возвращает сетку. */
 export function togglePanelMaximized(
   api: DockviewApi,
   panel: IDockviewPanel,
   duration = 260,
 ): void {
+  if (restoringPanels.has(panel)) {
+    return;
+  }
+
   const before = snapshotGroupRects(api);
   if (panel.api.isMaximized()) {
-    panel.api.exitMaximized();
+    restoreMaximizedPanel(api, panel, duration);
   } else {
     panel.api.maximize();
+    flipGroups(api, before, duration);
   }
-  flipGroups(api, before, duration);
 }
 
 /**
