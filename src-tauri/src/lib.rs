@@ -10,6 +10,7 @@ compile_error!(
 );
 
 mod agent_sessions;
+mod clipboard_images;
 mod command_error;
 mod git_changes;
 mod github_auth;
@@ -23,6 +24,7 @@ mod win_proc;
 mod workspace_roots;
 
 use agent_sessions::agent_session_locate;
+use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
     git_amend_commit, git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch,
@@ -889,6 +891,7 @@ pub fn run() {
             terminal_snapshot_load,
             terminal_snapshot_delete,
             terminal_snapshots_prune,
+            terminal_clipboard_image_save,
             agent_session_locate,
             git_changes_summary,
             git_file_diff,
@@ -975,6 +978,7 @@ mod tests {
     const MODULE_SOURCES: &[(&str, &str)] = &[
         ("lib.rs", LIB_RS),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
+        ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("git_changes.rs", include_str!("git_changes.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),
@@ -1041,6 +1045,7 @@ mod tests {
         "pty_kill_all",
         "pty_resize",
         "pty_write",
+        "terminal_clipboard_image_save",
         "terminal_snapshot_delete",
         "terminal_snapshot_load",
         "terminal_snapshot_save",
