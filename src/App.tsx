@@ -42,7 +42,7 @@ import {
   saveAccent,
   saveTheme,
 } from "./theme";
-import { closeGroupAnimated } from "./animations";
+import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
 import { setWorkspaceNameResolver } from "./terminal/agentAlerts";
 import { sessionDisplayName, type Workspace } from "./persist";
@@ -331,6 +331,7 @@ export default function App() {
   // исходное состояние уже обнулено (например, сессия удалена).
   const settingsPresence = useAnimatedPresence(settingsOpen || null, 160);
   const toastPresence = useAnimatedPresence(toast, 190);
+  const zoomPresence = useAnimatedPresence(zoomed ? true : null, 240);
   const closeGroupPresence = useAnimatedPresence(closeGroupRequest, 160);
   const deleteWorkspacePresence = useAnimatedPresence(
     deleteWorkspaceRequest,
@@ -579,13 +580,21 @@ export default function App() {
           {toastPresence.item}
         </div>
       )}
-      {zoomed && (
+      {zoomPresence && (
         <button
           type="button"
-          className="zoom-indicator"
+          className={`zoom-indicator ${
+            zoomPresence.closing ? "is-closing" : ""
+          }`}
+          disabled={zoomPresence.closing}
           title={t("layout.restore")}
           aria-label={t("layout.restore")}
-          onClick={() => apiRef.current?.exitMaximizedGroup()}
+          onClick={() => {
+            const api = apiRef.current;
+            if (api?.activePanel) {
+              togglePanelMaximized(api, api.activePanel);
+            }
+          }}
         >
           <MaximizeIcon /> {t("layout.terminalExpanded")}
           <span className="zoom-indicator-hint">
