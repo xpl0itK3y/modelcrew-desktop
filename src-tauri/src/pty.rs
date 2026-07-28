@@ -449,11 +449,25 @@ fn default_shell() -> String {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ShellInfo {
     pub id: String,
     pub label: String,
     pub command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(not(windows), allow(dead_code))]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitBashAvailability {
+    Unsupported,
+    Installed { shell: ShellInfo },
+    Installable,
+    Manual,
 }
 
 /// Bash из установки Git for Windows. Искать его только в PATH бесполезно:
@@ -498,6 +512,77 @@ fn windows_git_roots() -> Vec<PathBuf> {
     roots
 }
 
+#[cfg(windows)]
+fn git_bash_shell() -> Option<ShellInfo> {
+    bash_in_git_root(&windows_git_roots()).map(|path| ShellInfo {
+        id: "bash".to_string(),
+        label: "Git Bash".to_string(),
+        command: path.display().to_string(),
+    })
+}
+
+#[cfg(windows)]
+fn command_in_path(command: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+
+    std::env::split_paths(&paths)
+        .map(|dir| dir.join(command))
+        .find(|candidate| candidate.is_file())
+}
+
+pub fn git_bash_availability() -> GitBashAvailability {
+    #[cfg(windows)]
+    {
+        if let Some(shell) = git_bash_shell() {
+            return GitBashAvailability::Installed { shell };
+        }
+        if command_in_path("winget.exe").is_some() {
+            GitBashAvailability::Installable
+        } else {
+            GitBashAvailability::Manual
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        GitBashAvailability::Unsupported
+    }
+}
+
+/// Установка всегда запускается по явному действию пользователя и остаётся
+/// видимой в отдельной консоли. WinGet сам показывает соглашения и UAC; мы не
+/// принимаем их за пользователя и не скачиваем исполняемые файлы напрямую.
+pub fn install_git_bash() -> CommandResult<ShellInfo> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        if let Some(shell) = git_bash_shell() {
+            return Ok(shell);
+        }
+        let winget = command_in_path("winget.exe")
+            .ok_or_else(|| CommandError::new(ErrorCode::GitBashInstallerUnavailable))?;
+        let status = std::process::Command::new(&winget)
+            .args(["install", "--id", "Git.Git", "-e", "--source", "winget"])
+            .creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
+            .status()
+            .map_err(|error| {
+                CommandError::new(ErrorCode::GitBashInstallFailed).with_debug(error)
+            })?;
+        if !status.success() {
+            return Err(CommandError::new(ErrorCode::GitBashInstallFailed)
+                .with_context("exitCode", status.code().unwrap_or(-1)));
+        }
+        git_bash_shell().ok_or_else(|| {
+            CommandError::new(ErrorCode::GitBashInstallFailed)
+                .with_debug("Git Bash was not found after WinGet completed")
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        Err(CommandError::new(ErrorCode::GitBashInstallUnsupported))
+    }
+}
+
 /// Оболочки, реально доступные на этой ОС — фронт покажет только их, чтобы
 /// пользователь не выбрал отсутствующую. Кроссплатформенно: unix и windows
 /// перебирают разные наборы.
@@ -531,16 +616,16 @@ pub fn available_shells() -> Vec<ShellInfo> {
         // Полный путь, а не имя: PATH до него всё равно не доведёт. Если Git
         // не установлен, остаётся обычный поиск — он найдёт bash из WSL или
         // поставленный вручную.
-        let (label, command) = match bash_in_git_root(&windows_git_roots()) {
-            Some(path) => ("Git Bash", path.display().to_string()),
-            None if shell_exists("bash.exe") => ("Bash", "bash.exe".to_string()),
+        let shell = match git_bash_shell() {
+            Some(shell) => shell,
+            None if shell_exists("bash.exe") => ShellInfo {
+                id: "bash".to_string(),
+                label: "Bash".to_string(),
+                command: "bash.exe".to_string(),
+            },
             None => return shells,
         };
-        shells.push(ShellInfo {
-            id: "bash".to_string(),
-            label: label.to_string(),
-            command,
-        });
+        shells.push(shell);
     }
     shells
 }
@@ -1459,6 +1544,25 @@ mod tests {
                 assert!(path.is_file(), "абсолютный путь не файл: {}", shell.command);
             }
         }
+    }
+
+    #[test]
+    fn git_bash_is_resolved_from_a_git_installation_root() {
+        let root = tempfile::tempdir().expect("временная установка Git");
+        let bin = root.path().join("bin");
+        std::fs::create_dir(&bin).expect("bin");
+        let bash = bin.join("bash.exe");
+        std::fs::write(&bash, b"placeholder").expect("bash.exe");
+
+        assert_eq!(bash_in_git_root(&[root.path().to_path_buf()]), Some(bash));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn git_bash_install_flow_is_explicitly_unsupported_off_windows() {
+        assert_eq!(git_bash_availability(), GitBashAvailability::Unsupported);
+        let error = install_git_bash().expect_err("установщик только для Windows");
+        assert_eq!(error.code, ErrorCode::GitBashInstallUnsupported);
     }
 
     /// Процесс обязан стартовать ровно в выданной backend-реестром папке:

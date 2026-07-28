@@ -44,7 +44,7 @@ use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
     LinuxUpdaterState,
 };
-use pty::{PtyManager, ShellInfo, SpawnOptions};
+use pty::{GitBashAvailability, PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Emitter, Manager, RunEvent};
@@ -366,6 +366,20 @@ fn pty_create(
 #[tauri::command]
 fn list_shells() -> Vec<ShellInfo> {
     pty::available_shells()
+}
+
+#[tauri::command]
+fn git_bash_status(window: tauri::WebviewWindow) -> CommandResult<GitBashAvailability> {
+    ensure_main_window(&window)?;
+    Ok(pty::git_bash_availability())
+}
+
+#[tauri::command]
+async fn git_bash_install(window: tauri::WebviewWindow) -> CommandResult<ShellInfo> {
+    ensure_main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(pty::install_git_bash)
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitBashInstallFailed).with_debug(error))?
 }
 
 #[tauri::command]
@@ -905,6 +919,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
+            git_bash_status,
+            git_bash_install,
             pty_write,
             pty_resize,
             pty_kill,
@@ -1022,6 +1038,8 @@ mod tests {
         "app_set_badge",
         "app_set_locale",
         "git_amend_commit",
+        "git_bash_install",
+        "git_bash_status",
         "git_branches",
         "git_changes_summary",
         "git_changes_unwatch",
