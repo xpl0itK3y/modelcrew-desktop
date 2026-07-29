@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { IDockviewHeaderActionsProps } from "dockview";
 import { appActions } from "../appActions";
 import { canMaximizePanel, togglePanelMaximized } from "../animations";
-import { isMac } from "../constants";
+import { platform } from "../constants";
+import { shortcutLabel } from "../hotkeys/shortcuts";
 import { useI18n } from "../i18n";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 
@@ -13,8 +14,8 @@ export function GroupActions(props: IDockviewHeaderActionsProps) {
   // Пока терминал один, разворачивать нечего — кнопку не показываем вовсе,
   // чтобы она не притворялась работающей.
   const [canMaximize, setCanMaximize] = useState(() => canMaximizePanel(api));
-  const maximizeShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
-  const closeShortcut = isMac ? "⌘⇧W" : "Ctrl+Shift+W";
+  const maximizeShortcut = shortcutLabel(["mod", "enter"], platform);
+  const closeShortcut = shortcutLabel(["mod", "shift", "w"], platform);
 
   useEffect(() => {
     const update = () => setCanMaximize(canMaximizePanel(api));

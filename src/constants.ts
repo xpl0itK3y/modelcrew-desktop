@@ -1,3 +1,5 @@
+import { detectPlatform } from "./hotkeys/shortcuts";
+
 // Минимальный размер панели по ТЗ: ~30 колонок × 7 строк терминала.
 export const PANEL_MIN_WIDTH = 240;
 export const PANEL_MIN_HEIGHT = 160;
@@ -7,4 +9,6 @@ export const MAX_TERMINALS = 12;
 
 export const WORKSPACE_NAME = "modelcrew";
 
-export const isMac = navigator.userAgent.includes("Mac");
+// Какая клавиатура перед пользователем: от этого зависят подписи сочетаний.
+export const platform = detectPlatform(navigator.userAgent);
+export const isMac = platform === "mac";

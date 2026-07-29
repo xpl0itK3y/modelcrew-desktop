@@ -234,3 +234,12 @@ export function PuzzleIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function KeyboardIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="3.5" width="13" height="9" rx="1.8" />
+      <path d="M4 6.2h.01M6.5 6.2h.01M9 6.2h.01M11.5 6.2h.01M4 8.6h.01M6.5 8.6h.01M9 8.6h.01M11.5 8.6h.01M5.2 10.8h5.6" />
+    </svg>
+  );
+}

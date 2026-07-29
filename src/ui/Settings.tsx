@@ -15,6 +15,7 @@ import {
   AgentIcon,
   BellIcon,
   CloseIcon,
+  KeyboardIcon,
   NodesIcon,
   PaletteIcon,
   PuzzleIcon,
@@ -25,6 +26,7 @@ import {
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
 import { AgentsTab } from "./settings/AgentsTab";
+import { HotkeysTab } from "./settings/HotkeysTab";
 import { SoonTab } from "./settings/SoonTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
 import { AccountTab } from "./settings/AccountTab";
@@ -62,6 +64,7 @@ const SETTINGS_GROUPS: {
       { id: "agents", label: "settings.tabAgents", Icon: AgentIcon },
       { id: "mcp", label: "settings.tabMcp", Icon: NodesIcon },
       { id: "plugins", label: "settings.tabPlugins", Icon: PuzzleIcon },
+      { id: "hotkeys", label: "settings.tabHotkeys", Icon: KeyboardIcon },
       {
         id: "notifications",
         label: "settings.tabNotifications",
@@ -376,6 +379,17 @@ function SettingsShell(props: ShellProps) {
             title={t("settings.tabPlugins")}
             keywords="плагины расширения plugins extensions"
           />
+        </div>
+
+        <div
+          id={settingsPanelId("hotkeys")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("hotkeys")}
+          hidden={isHidden("hotkeys")}
+          tabIndex={0}
+        >
+          <HotkeysTab />
         </div>
 
         <div

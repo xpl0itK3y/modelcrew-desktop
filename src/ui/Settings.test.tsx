@@ -44,6 +44,7 @@ const SECTION_IDS = [
   "agents",
   "mcp",
   "plugins",
+  "hotkeys",
   "notifications",
   "account",
 ] as const;
@@ -59,6 +60,7 @@ describe("Settings sections", () => {
     const agentsTab = screen.getByRole("tab", { name: "Агенты" });
     const mcpTab = screen.getByRole("tab", { name: "MCP" });
     const pluginsTab = screen.getByRole("tab", { name: "Плагины" });
+    const hotkeysTab = screen.getByRole("tab", { name: "Горячие клавиши" });
     const notificationsTab = screen.getByRole("tab", { name: "Уведомления" });
     const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
@@ -68,6 +70,7 @@ describe("Settings sections", () => {
       [agentsTab, "agents"],
       [mcpTab, "mcp"],
       [pluginsTab, "plugins"],
+      [hotkeysTab, "hotkeys"],
       [notificationsTab, "notifications"],
       [accountTab, "account"],
     ] as const;
@@ -88,6 +91,7 @@ describe("Settings sections", () => {
       agentsTab,
       mcpTab,
       pluginsTab,
+      hotkeysTab,
       notificationsTab,
       accountTab,
     ]) {
@@ -145,6 +149,11 @@ describe("Settings sections", () => {
     expect(screen.getByRole("tab", { name: "Плагины" })).toHaveFocus();
 
     fireEvent.keyDown(screen.getByRole("tab", { name: "Плагины" }), {
+      key: "ArrowDown",
+    });
+    expect(screen.getByRole("tab", { name: "Горячие клавиши" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Горячие клавиши" }), {
       key: "ArrowDown",
     });
     expect(notificationsTab).toHaveFocus();
@@ -383,6 +392,22 @@ describe("Settings search", () => {
     );
   });
 
+  it("lists the shortcuts for the keyboard in front of the user", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "Горячие клавиши" }));
+
+    const panel = screen.getByRole("tabpanel", { name: "Горячие клавиши" });
+    expect(within(panel).getByText("Новый терминал в сетку")).toBeVisible();
+    // В тестовой среде клавиатура не маковская: модификаторы пишутся словами.
+    expect(within(panel).getAllByText("Ctrl").length).toBeGreaterThan(1);
+    expect(within(panel).getByText("Enter")).toBeVisible();
+    expect(within(panel).queryByText("⌘")).toBeNull();
+
+    // Ищут и по самому сочетанию, а не только по описанию.
+    fireEvent.change(searchBox(), { target: { value: "ctrl+shift+w" } });
+    expect(screen.getByText("Закрыть группу с подтверждением")).toBeVisible();
+  });
+
   it("opens the first matching section when the query hides the open one", () => {
     renderSettings();
 
@@ -418,7 +443,7 @@ describe("Settings search", () => {
     fireEvent.change(searchBox(), { target: { value: "подсветк" } });
     fireEvent.change(searchBox(), { target: { value: "" } });
 
-    expect(screen.queryAllByRole("tab")).toHaveLength(7);
+    expect(screen.queryAllByRole("tab")).toHaveLength(8);
     expect(screen.getByText("Тема интерфейса")).toBeInTheDocument();
   });
 
@@ -433,7 +458,7 @@ describe("Settings search", () => {
     fireEvent.click(screen.getByRole("button", { name: "English" }));
 
     expect(searchBox()).toHaveValue("");
-    expect(screen.queryAllByRole("tab")).toHaveLength(7);
+    expect(screen.queryAllByRole("tab")).toHaveLength(8);
     expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
   });
 });

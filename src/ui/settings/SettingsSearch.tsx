@@ -16,6 +16,7 @@ export type SettingsSectionId =
   | "agents"
   | "mcp"
   | "plugins"
+  | "hotkeys"
   | "notifications"
   | "account";
 

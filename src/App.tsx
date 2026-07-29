@@ -52,7 +52,8 @@ import {
   translate,
   useI18n,
 } from "./i18n";
-import { isMac, WORKSPACE_NAME } from "./constants";
+import { platform, WORKSPACE_NAME } from "./constants";
+import { shortcutLabel } from "./hotkeys/shortcuts";
 import { loadShell, saveShell } from "./shell";
 import {
   loadTerminalFontSize,
@@ -598,7 +599,7 @@ export default function App() {
         >
           <MaximizeIcon /> {t("layout.terminalExpanded")}
           <span className="zoom-indicator-hint">
-            <kbd>{isMac ? "⌘↩" : "Ctrl+Enter"}</kbd>{" "}
+            <kbd>{shortcutLabel(["mod", "enter"], platform)}</kbd>{" "}
             {t("layout.restoreShortcut")}
           </span>
         </button>

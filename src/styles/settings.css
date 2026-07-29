@@ -268,6 +268,26 @@
   line-height: 1.5;
 }
 
+/* Клавиши сочетания: каждая своим блоком, как на клавиатуре. */
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-keys kbd {
+  min-width: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-surface-raised);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .settings-row-control {
   display: flex;
   min-width: 0;
