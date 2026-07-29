@@ -3,6 +3,24 @@ const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
 const NETWORK_AVATARS_STORAGE_KEY = "modelcrew.networkAvatars";
 const TERMINAL_SPAWN_MODE_STORAGE_KEY = "modelcrew.terminalSpawnMode";
 
+// Ключи снятых настроек: их больше никто не читает, но у тех, кто их когда-то
+// переключал, значение так и лежит в localStorage. Убираем при старте, чтобы
+// хранилище отражало то, что приложение умеет сегодня.
+const RETIRED_STORAGE_KEYS = [
+  // Жадный подъём скрытых сессий проекта при запуске.
+  "modelcrew.eagerSessionRestore",
+];
+
+export function dropRetiredPreferences(): void {
+  for (const key of RETIRED_STORAGE_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Без localStorage чистить нечего.
+    }
+  }
+}
+
 // Порядок обхода сетки, а не отдельные алгоритмы раскладки: геометрия у всех
 // режимов одна (равные строки, равные ячейки в строке), меняется только то,
 // в какой конец строки встаёт следующий терминал.

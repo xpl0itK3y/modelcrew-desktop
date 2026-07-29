@@ -1,11 +1,49 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_TERMINAL_SPAWN_MODE,
+  dropRetiredPreferences,
   loadAgentAlertDetailMode,
   loadTerminalSpawnMode,
   saveAgentAlertDetailMode,
   saveTerminalSpawnMode,
 } from "./preferences";
+
+describe("retired preferences", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("drops the key of a setting that no longer exists", () => {
+    localStorage.setItem("modelcrew.eagerSessionRestore", "off");
+
+    dropRetiredPreferences();
+
+    expect(localStorage.getItem("modelcrew.eagerSessionRestore")).toBeNull();
+  });
+
+  it("leaves every live preference alone", () => {
+    saveTerminalSpawnMode("snake");
+    saveAgentAlertDetailMode("detailed");
+
+    dropRetiredPreferences();
+
+    expect(loadTerminalSpawnMode()).toBe("snake");
+    expect(loadAgentAlertDetailMode()).toBe("detailed");
+  });
+
+  it("stays quiet when the storage refuses to cooperate", () => {
+    const removeItem = localStorage.removeItem;
+    localStorage.removeItem = () => {
+      throw new Error("storage is locked down");
+    };
+
+    try {
+      expect(() => dropRetiredPreferences()).not.toThrow();
+    } finally {
+      localStorage.removeItem = removeItem;
+    }
+  });
+});
 
 describe("agent alert detail preference", () => {
   beforeEach(() => {
