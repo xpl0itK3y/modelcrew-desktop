@@ -175,11 +175,13 @@ if (isTauri) {
 
 // Пользователь вернулся в окно: панели на экране он теперь видит, их
 // сигналы «агент ждёт» сняты. Панели скрытых сессий остаются в счётчике —
-// до них взгляд ещё не дошёл.
+// до них взгляд ещё не дошёл. Мерка видимости та же, что и при отправке
+// сигнала: панель, придавленная развёрнутым соседом, остаётся в DOM, и
+// снимать с неё внимание нельзя — её как раз не видно.
 if (typeof window !== "undefined") {
   window.addEventListener("focus", () => {
     for (const entry of registry.values()) {
-      if (entry.container.isConnected) {
+      if (isPanelOnScreen(entry.container)) {
         clearAgentAttention(entry.id);
       }
     }
