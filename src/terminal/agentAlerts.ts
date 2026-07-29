@@ -38,7 +38,8 @@ export type AttentionScanState = {
 };
 
 export type TerminalAttentionNotification = {
-  protocol: "osc9" | "osc99" | "osc777";
+  // "hook" — событие пришло от самого агента через его хук, а не из вывода.
+  protocol: "osc9" | "osc99" | "osc777" | "hook";
   title: string;
   body: string;
   types: string[];
@@ -532,12 +533,41 @@ export async function raiseAgentAlert(
   context: AgentAlertContext,
   notification?: TerminalAttentionNotification,
 ): Promise<void> {
-  if (!loadAgentAlertsEnabled()) {
-    return;
-  }
   const record = getAgentRecord(terminalId);
   if (!record) {
     return; // в панели не агент — обычные команды не сигналят
+  }
+  return deliverAgentAlert(
+    terminalId,
+    record.agentId,
+    kind,
+    context,
+    notification,
+  );
+}
+
+// Сигнал пришёл от самого агента через его хук: панель заведомо агентская,
+// даже если watcher ещё не успел записать имя процесса, и тип события с
+// текстом точные — гадать по выводу не нужно.
+export async function raiseAgentHookAlert(
+  terminalId: string,
+  agentId: string,
+  kind: AgentAlertKind,
+  context: AgentAlertContext,
+  notification: TerminalAttentionNotification,
+): Promise<void> {
+  return deliverAgentAlert(terminalId, agentId, kind, context, notification);
+}
+
+async function deliverAgentAlert(
+  terminalId: string,
+  agentId: string,
+  kind: AgentAlertKind,
+  context: AgentAlertContext,
+  notification?: TerminalAttentionNotification,
+): Promise<void> {
+  if (!loadAgentAlertsEnabled()) {
+    return;
   }
   const now = Date.now();
   if (now - (lastAlertAt.get(terminalId) ?? 0) < MIN_ALERT_GAP_MS) {
@@ -559,8 +589,7 @@ export async function raiseAgentAlert(
   emitAttention();
 
   const agent =
-    AGENTS.find((entry) => entry.id === record.agentId)?.label ??
-    record.agentId;
+    AGENTS.find((entry) => entry.id === agentId)?.label ?? agentId;
   const project = context.workspaceId
     ? workspaceNameResolver(context.workspaceId)
     : null;

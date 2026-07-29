@@ -25,10 +25,12 @@ import {
   disposeAgentAlertTracker,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
+  raiseAgentHookAlert,
   setPanelTailResolver,
   trackAgentOutput,
   type AgentAlertTracker,
 } from "./agentAlerts";
+import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
 import {
   extractPanelTail,
   joinWrappedRows,
@@ -147,6 +149,28 @@ if (isTauri) {
     .catch(() => {
       // Drag-and-drop не должен мешать запуску терминалов, если API недоступен.
     });
+
+  // Агент сообщил о себе сам — через свой хук. Это точный сигнал: и тип
+  // события, и текст пришли от него, а не выужены из вывода.
+  void listen<AgentHookEvent>("agent-event", (event) => {
+    const entry = registry.get(event.payload.panelId);
+    const alert = entry ? agentHookAlert(event.payload) : null;
+    if (!entry || !alert) {
+      return;
+    }
+    void raiseAgentHookAlert(
+      entry.id,
+      event.payload.agent,
+      alert.kind,
+      {
+        visible: isPanelOnScreen(entry.container),
+        workspaceId: entry.workspaceId,
+      },
+      alert.notification,
+    );
+  }).catch(() => {
+    // Без канала событий остаётся прежний разбор вывода панели.
+  });
 }
 
 // Пользователь вернулся в окно: панели на экране он теперь видит, их
