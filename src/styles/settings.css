@@ -334,6 +334,14 @@
   cursor: not-allowed;
 }
 
+/* Раздел, которого ещё нет: вместо строк настроек одна честная отметка. */
+.settings-soon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 0;
+}
+
 .settings-note {
   margin: 0;
   color: var(--mc-text-faint);

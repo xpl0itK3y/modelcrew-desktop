@@ -398,15 +398,11 @@ export const ru = {
   "settings.tabAppearance": "Внешний вид",
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",
-  "settings.tabMcp": "MCP и скиллы",
+  "settings.tabMcp": "MCP",
   "settings.mcpIntro":
-    "Инструменты, которыми пользуются агенты в терминалах: серверы MCP и общие наборы навыков. Подключаются один раз и работают во всех панелях проекта.",
-  "settings.mcpServers": "Серверы MCP",
-  "settings.mcpServersNote":
-    "CodeGraph, CocoIndex и любые свои: подключение, включение по проектам и состояние связи. Пока настраиваются в конфигах самих агентов.",
-  "settings.mcpSkills": "Скиллы агентов",
-  "settings.mcpSkillsNote":
-    "Наборы инструкций, которые получают все агенты проекта: правила работы с репозиторием, релизами, стилем кода.",
+    "Серверы MCP, которыми пользуются агенты в терминалах: CodeGraph, CocoIndex и любые свои. Пока они настраиваются в конфигах самих агентов.",
+  "settings.mcpSoonNote":
+    "Подключение серверов, включение по проектам и состояние связи появятся здесь.",
   "settings.tabNotifications": "Уведомления",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Аккаунт",

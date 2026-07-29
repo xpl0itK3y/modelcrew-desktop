@@ -56,7 +56,7 @@ describe("Settings sections", () => {
     const appearanceTab = screen.getByRole("tab", { name: "Внешний вид" });
     const terminalTab = screen.getByRole("tab", { name: "Терминал" });
     const agentsTab = screen.getByRole("tab", { name: "Агенты" });
-    const mcpTab = screen.getByRole("tab", { name: "MCP и скиллы" });
+    const mcpTab = screen.getByRole("tab", { name: "MCP" });
     const notificationsTab = screen.getByRole("tab", { name: "Уведомления" });
     const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
@@ -133,9 +133,9 @@ describe("Settings sections", () => {
     expect(agentsTab).toHaveFocus();
 
     fireEvent.keyDown(agentsTab, { key: "ArrowDown" });
-    expect(screen.getByRole("tab", { name: "MCP и скиллы" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveFocus();
 
-    fireEvent.keyDown(screen.getByRole("tab", { name: "MCP и скиллы" }), {
+    fireEvent.keyDown(screen.getByRole("tab", { name: "MCP" }), {
       key: "ArrowDown",
     });
     expect(notificationsTab).toHaveFocus();
@@ -344,7 +344,7 @@ describe("Settings search", () => {
     // Слово встречается и в разделе про инструменты агентов — там оно тоже
     // должно находиться; разделы без него уходят.
     expect(screen.queryByRole("tab", { name: "Внешний вид" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "MCP и скиллы" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "MCP" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Агенты" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -355,16 +355,17 @@ describe("Settings search", () => {
 
   it("keeps a place for the agent tooling and says it is not there yet", () => {
     renderSettings();
-    fireEvent.click(screen.getByRole("tab", { name: "MCP и скиллы" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
-    const panel = screen.getByRole("tabpanel", { name: "MCP и скиллы" });
-    expect(within(panel).getByText("Серверы MCP")).toBeVisible();
-    expect(within(panel).getByText("Скиллы агентов")).toBeVisible();
-    expect(within(panel).getAllByText("Скоро")).toHaveLength(2);
+    const panel = screen.getByRole("tabpanel", { name: "MCP" });
+    expect(within(panel).getByText("Скоро")).toBeVisible();
+    expect(
+      within(panel).getByText(/Подключение серверов/),
+    ).toBeVisible();
 
     // Раздел ищется и по именам инструментов, которых пока нет в интерфейсе.
     fireEvent.change(searchBox(), { target: { value: "codegraph" } });
-    expect(screen.getByRole("tab", { name: "MCP и скиллы" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute(
       "aria-selected",
       "true",
     );

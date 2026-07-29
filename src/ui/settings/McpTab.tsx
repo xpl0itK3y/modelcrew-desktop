@@ -1,11 +1,11 @@
 import { useI18n } from "../../i18n";
-import { SettingRow, SettingsPage } from "./SettingsControls";
+import { SettingsPage } from "./SettingsControls";
 
-// Раздел-заглушка: инструментов агентов в приложении ещё нет, но место для
-// них уже понятно, и честнее показать план, чем прятать его до готовности.
+// Раздел-заглушка: подключать серверы из приложения ещё нельзя, но место для
+// них уже понятно. Показываем честную отметку и говорим, где настраивать
+// сейчас, — это полезнее пустой страницы.
 export function McpTab() {
   const { t } = useI18n();
-  const soon = <span className="soon-badge">{t("common.soon")}</span>;
 
   return (
     <SettingsPage
@@ -13,19 +13,10 @@ export function McpTab() {
       title={t("settings.tabMcp")}
       intro={t("settings.mcpIntro")}
     >
-      <SettingRow
-        title={t("settings.mcpServers")}
-        description={t("settings.mcpServersNote")}
-        keywords="MCP CodeGraph CocoIndex сервер server"
-        control={soon}
-      />
-
-      <SettingRow
-        title={t("settings.mcpSkills")}
-        description={t("settings.mcpSkillsNote")}
-        keywords="skills скиллы навыки"
-        control={soon}
-      />
+      <div className="settings-soon">
+        <span className="soon-badge">{t("common.soon")}</span>
+        <p className="settings-note">{t("settings.mcpSoonNote")}</p>
+      </div>
     </SettingsPage>
   );
 }
