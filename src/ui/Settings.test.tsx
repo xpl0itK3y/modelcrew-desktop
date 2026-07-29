@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 import { Settings } from "./Settings";
@@ -172,7 +172,9 @@ describe("Settings sections", () => {
     renderSettings();
     fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
 
-    expect(screen.getByText("Бета")).toBeVisible();
+    // Метка есть и в разделе терминала, поэтому ищем внутри этой панели.
+    const panel = screen.getByRole("tabpanel", { name: "Уведомления" });
+    expect(within(panel).getByText("Бета")).toBeVisible();
 
     // Метка попадает в поиск: «бета» показывает обкатываемые настройки.
     fireEvent.change(screen.getByRole("searchbox"), {

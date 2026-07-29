@@ -331,6 +331,7 @@ export function TerminalTab(props: TerminalTabProps) {
       <SettingRow
         title={t("settings.terminalSpawnMode")}
         description={t("settings.terminalSpawnModeNote")}
+        badge={t("common.beta")}
         control={
           <SettingsSelect
             label={t("settings.terminalSpawnMode")}

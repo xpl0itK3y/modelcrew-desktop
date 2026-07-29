@@ -74,6 +74,13 @@ describe("terminal placement setting", () => {
     expect(select).toHaveValue("snake");
     expect(localStorage.getItem("modelcrew.terminalSpawnMode")).toBe("snake");
   });
+
+  it("is marked as beta", () => {
+    // Змейка и «от центра» ещё обкатываются — предупреждаем прямо в строке.
+    renderTerminalTab();
+
+    expect(screen.getByText("Бета")).toBeVisible();
+  });
 });
 
 describe("Git Bash setup", () => {
