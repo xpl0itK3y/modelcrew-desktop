@@ -24,6 +24,7 @@ const EVENT_KINDS: Record<string, PreciseAgentAlertKind> = {
   subagentstop: "completed",
   sessionidle: "completed", // opencode
   permissionasked: "permission", // opencode
+  agentstop: "completed", // copilot
   permissionprompt: "permission", // copilot
   notification: "waiting",
 };

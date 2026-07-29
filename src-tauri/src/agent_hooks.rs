@@ -197,10 +197,87 @@ fn normalize(agent: &str, payload: &Value) -> (String, String) {
 fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
     match agent {
         "claude" => Some(home.join(".claude/settings.json")),
+        "copilot" => Some(home.join(".copilot/hooks/modelcrew.json")),
+        "opencode" => Some(home.join(".config/opencode/plugin/modelcrew-notify.js")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
         // либо у самого CLI уведомлений нет.
         _ => None,
     }
+}
+
+/// Каталог самого агента: он есть, только если агент здесь запускался.
+/// Это не то же, что родитель конфига — у copilot файл лежит на уровень
+/// глубже, и создавать `~/.copilot/hooks` тому, у кого нет `~/.copilot`,
+/// значит заводить конфиг несуществующему CLI.
+fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
+    match agent {
+        "claude" => Some(home.join(".claude")),
+        "copilot" => Some(home.join(".copilot")),
+        "opencode" => Some(home.join(".config/opencode")),
+        _ => None,
+    }
+}
+
+/// Свой отдельный файл у агента, где чужого содержимого не бывает: ставить
+/// его — записать, снимать — удалить. Слияние нужно только там, где мы
+/// вписываемся в общий файл настроек, как у claude.
+fn own_file_body(agent: &str, helper: &Path) -> Option<String> {
+    match agent {
+        // Формат из документации GitHub: version 1 и событие завершения хода.
+        "copilot" => Some(
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "hooks": {
+                    "agentStop": [{
+                        "type": "command",
+                        "bash": hook_command(helper, "copilot"),
+                        "timeoutSec": 5,
+                    }],
+                },
+            }))
+            .ok()?,
+        ),
+        "opencode" => Some(opencode_plugin(helper)),
+        _ => None,
+    }
+}
+
+/// Плагин opencode. Форма обработчика — `event`, а не документированный ключ
+/// `"session.idle"`: тот не вызывается ни разу, проверено на живой сессии.
+/// Хелпер здесь не нужен — плагин уже внутри процесса панели и видит её
+/// окружение, поэтому кладёт событие сам.
+fn opencode_plugin(_helper: &Path) -> String {
+    r#"// Создан ModelCrew. Сообщает приложению, что агент в этой панели затих.
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+export const ModelCrewNotify = async () => ({
+  event: async (arg) => {
+    if (arg?.event?.type !== "session.idle") return;
+    const dir = process.env.MODELCREW_EVENTS_DIR;
+    const panelId = process.env.MODELCREW_PANEL_ID;
+    if (!dir || !panelId) return; // запущен не из панели ModelCrew
+    try {
+      mkdirSync(dir, { recursive: true });
+      // Сначала временный файл, потом переименование: вотчер не должен
+      // прочитать половину.
+      const base = join(dir, `${Date.now()}-${process.pid}`);
+      writeFileSync(
+        `${base}.tmp`,
+        JSON.stringify({
+          agent: "opencode",
+          panelId,
+          payload: { type: "session.idle" },
+        }),
+      );
+      renameSync(`${base}.tmp`, `${base}.json`);
+    } catch {
+      // Уведомление — дополнение; его сбой не должен мешать сессии.
+    }
+  },
+});
+"#
+    .to_string()
 }
 
 /// Команда для конфига агента. Путь к хелперу лежит в «Application Support» —
@@ -376,9 +453,13 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
     let Some(path) = hook_config_path(agent, &home) else {
         return unsupported;
     };
-    let installed = read_json(&path)
-        .map(|settings| claude_hook_installed(&settings, &helper))
-        .unwrap_or(false);
+    let installed = match own_file_body(agent, &helper) {
+        // Устаревшее тело считаем неподключённым — тогда старт его перепишет.
+        Some(body) => std::fs::read_to_string(&path).is_ok_and(|current| current == body),
+        None => read_json(&path)
+            .map(|settings| claude_hook_installed(&settings, &helper))
+            .unwrap_or(false),
+    };
     AgentHookState {
         agent: agent.to_string(),
         supported: true,
@@ -396,6 +477,27 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
     if !helper.exists() {
         write_helper(app);
     }
+    // Свой отдельный файл: чужого в нём нет, поэтому никакого слияния.
+    if let Some(body) = own_file_body(agent, &helper) {
+        if enabled {
+            let current = std::fs::read_to_string(&path).unwrap_or_default();
+            // Тело могло устареть после обновления приложения.
+            if current != body {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|error| format!("{}: {error}", parent.display()))?;
+                }
+                let temp = path.with_extension("modelcrew-tmp");
+                std::fs::write(&temp, &body)
+                    .map_err(|error| format!("{}: {error}", temp.display()))?;
+                std::fs::rename(&temp, &path)
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+            }
+        } else if path.exists() {
+            std::fs::remove_file(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        }
+        return Ok(hook_state(app, agent));
+    }
     let mut settings = read_json(&path)?;
     let changed = if enabled {
         install_claude_hook(&mut settings, &helper)
@@ -410,15 +512,13 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 1] = ["claude"];
+const SUPPORTED_AGENTS: [&str; 3] = ["claude", "copilot", "opencode"];
 
 /// Ставить хук только тем, кто у пользователя действительно есть: наличие
-/// каталога конфига и есть признак, что агент хоть раз запускался. Иначе мы
-/// создавали бы `~/.claude/settings.json` тому, кто Claude в глаза не видел.
+/// каталога агента и есть признак, что он хоть раз запускался. Иначе мы
+/// создавали бы конфиг тому, кто этот CLI в глаза не видел.
 fn agent_is_present(agent: &str, home: &Path) -> bool {
-    hook_config_path(agent, home)
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .is_some_and(|dir| dir.is_dir())
+    agent_home(agent, home).is_some_and(|dir| dir.is_dir())
 }
 
 /// Подключает хук всем поддержанным агентам при старте. Отдельного тумблера
@@ -611,9 +711,59 @@ mod tests {
         );
         // У этих канал либо не подтверждён, либо его нет — молча трогать
         // чужие конфиги на догадках нельзя.
-        for agent in ["codex", "qwen", "kimi", "opencode", "amp"] {
+        for agent in ["codex", "qwen", "kimi", "amp", "aider", "cursor"] {
             assert_eq!(hook_config_path(agent, home), None, "{agent}");
+            assert_eq!(agent_home(agent, home), None, "{agent}");
         }
+    }
+
+    #[test]
+    fn the_opencode_plugin_uses_the_shape_that_actually_fires() {
+        let body = opencode_plugin(&helper());
+
+        // Документированный ключ "session.idle" не вызывается ни разу —
+        // проверено на живой сессии, поэтому обработчик именно `event`.
+        assert!(body.contains("event: async (arg)"), "{body}");
+        assert!(!body.contains(r#""session.idle": async"#), "{body}");
+        assert!(body.contains(r#"arg?.event?.type !== "session.idle""#));
+        // Без окружения панели событие некуда привязать — молча выходим.
+        assert!(body.contains("MODELCREW_PANEL_ID"));
+        assert!(body.contains("MODELCREW_EVENTS_DIR"));
+        // Запись через временный файл: вотчер не должен прочитать половину.
+        assert!(body.contains(".tmp"));
+    }
+
+    #[test]
+    fn the_copilot_hook_file_declares_the_event_that_ends_a_turn() {
+        let body = own_file_body("copilot", &helper()).expect("copilot поддержан");
+        let value: Value = serde_json::from_str(&body).expect("копилотовский файл — json");
+
+        assert_eq!(value["version"], 1);
+        assert_eq!(
+            value["hooks"]["agentStop"][0]["bash"],
+            hook_command(&helper(), "copilot")
+        );
+    }
+
+    #[test]
+    fn agents_with_their_own_file_are_not_merged_into() {
+        // Слияние нужно только там, где мы пишем в общий файл настроек.
+        assert!(own_file_body("claude", &helper()).is_none());
+        assert!(own_file_body("copilot", &helper()).is_some());
+        assert!(own_file_body("opencode", &helper()).is_some());
+    }
+
+    #[test]
+    fn the_copilot_config_lives_deeper_than_the_agent_directory() {
+        let home = Path::new("/home/x");
+
+        // Каталог агента и родитель конфига у copilot разные: заводить
+        // ~/.copilot/hooks тому, у кого нет ~/.copilot, нельзя.
+        assert_eq!(agent_home("copilot", home), Some(PathBuf::from("/home/x/.copilot")));
+        assert_eq!(
+            hook_config_path("copilot", home).unwrap().parent().unwrap(),
+            Path::new("/home/x/.copilot/hooks")
+        );
     }
 
     #[test]
