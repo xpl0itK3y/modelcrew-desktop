@@ -1,6 +1,42 @@
 const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
 const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
 const NETWORK_AVATARS_STORAGE_KEY = "modelcrew.networkAvatars";
+const TERMINAL_SPAWN_MODE_STORAGE_KEY = "modelcrew.terminalSpawnMode";
+
+// Порядок обхода сетки, а не отдельные алгоритмы раскладки: геометрия у всех
+// режимов одна (равные строки, равные ячейки в строке), меняется только то,
+// в какой конец строки встаёт следующий терминал.
+export const TERMINAL_SPAWN_MODES = ["balanced", "snake", "centerOut"] as const;
+
+export type TerminalSpawnMode = (typeof TERMINAL_SPAWN_MODES)[number];
+
+export const DEFAULT_TERMINAL_SPAWN_MODE: TerminalSpawnMode = "balanced";
+
+export function isTerminalSpawnMode(value: unknown): value is TerminalSpawnMode {
+  return (
+    typeof value === "string" &&
+    TERMINAL_SPAWN_MODES.includes(value as TerminalSpawnMode)
+  );
+}
+
+// Определяет только место следующего терминала. Уже сохранённые раскладки
+// остаются как есть и продолжают восстанавливаться через Dockview JSON.
+export function loadTerminalSpawnMode(): TerminalSpawnMode {
+  try {
+    const value = localStorage.getItem(TERMINAL_SPAWN_MODE_STORAGE_KEY);
+    return isTerminalSpawnMode(value) ? value : DEFAULT_TERMINAL_SPAWN_MODE;
+  } catch {
+    return DEFAULT_TERMINAL_SPAWN_MODE;
+  }
+}
+
+export function saveTerminalSpawnMode(mode: TerminalSpawnMode): void {
+  try {
+    localStorage.setItem(TERMINAL_SPAWN_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}
 
 // Аватарки авторов из сети (GitHub/Gravatar). Выкл — офлайн-инициалы.
 // Переключение шлёт событие, чтобы аватарки перерисовались сразу.
