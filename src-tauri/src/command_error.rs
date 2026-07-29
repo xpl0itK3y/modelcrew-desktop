@@ -43,8 +43,6 @@ pub enum ErrorCode {
     TerminalClipboardImageStorageFailed,
     AgentSessionInvalidId,
     AgentSessionLookupFailed,
-    AgentHookUnsupported,
-    AgentHookUpdateFailed,
     UpdaterUnsupportedPlatform,
     UpdaterInvalidVersion,
     UpdaterOperationInProgress,

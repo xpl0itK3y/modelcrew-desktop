@@ -24,7 +24,6 @@ mod update_cache;
 mod win_proc;
 mod workspace_roots;
 
-use agent_hooks::{agent_hook_set, agent_hook_status};
 use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
@@ -978,8 +977,6 @@ pub fn run() {
             workspace_unregister_root,
             app_set_locale,
             app_set_badge,
-            agent_hook_status,
-            agent_hook_set,
             github_auth_available,
             github_device_start,
             github_device_poll,
@@ -1040,8 +1037,6 @@ mod tests {
     // Полный список команд, доступных веб-вью. Снимок, а не вычисление:
     // добавление команды обязано быть отдельной осознанной правкой теста.
     const EXPECTED_COMMANDS: &[&str] = &[
-        "agent_hook_set",
-        "agent_hook_status",
         "agent_session_locate",
         "app_set_badge",
         "app_set_locale",

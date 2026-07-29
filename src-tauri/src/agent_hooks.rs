@@ -14,8 +14,6 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{Emitter, Manager};
 
-use crate::command_error::{CommandError, CommandResult, ErrorCode};
-
 const EVENTS_DIR: &str = "agent-events";
 const HELPER_NAME: &str = "modelcrew-agent-notify.sh";
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
@@ -80,6 +78,7 @@ pub fn install(app: &tauri::AppHandle) {
     }
     crate::pty::set_agent_events_dir(dir.clone());
     write_helper(app);
+    install_known_hooks(app);
     spawn_event_watcher(app.clone(), dir);
 }
 
@@ -410,38 +409,33 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
     Ok(hook_state(app, agent))
 }
 
-/// Состояние подключения по всем агентам, которых знает фронтенд.
-#[tauri::command]
-pub fn agent_hook_status(
-    window: tauri::WebviewWindow,
-    app: tauri::AppHandle,
-    agents: Vec<String>,
-) -> CommandResult<Vec<AgentHookState>> {
-    crate::ensure_main_window(&window)?;
-    Ok(agents
-        .iter()
-        .map(|agent| hook_state(&app, agent))
-        .collect())
+/// Агенты, которым мы умеем прописывать себя.
+const SUPPORTED_AGENTS: [&str; 1] = ["claude"];
+
+/// Ставить хук только тем, кто у пользователя действительно есть: наличие
+/// каталога конфига и есть признак, что агент хоть раз запускался. Иначе мы
+/// создавали бы `~/.claude/settings.json` тому, кто Claude в глаза не видел.
+fn agent_is_present(agent: &str, home: &Path) -> bool {
+    hook_config_path(agent, home)
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .is_some_and(|dir| dir.is_dir())
 }
 
-/// Подключает или снимает хук. Правка чужого конфига — только по явному
-/// действию пользователя, поэтому команда ничего не делает сама по себе.
-#[tauri::command]
-pub fn agent_hook_set(
-    window: tauri::WebviewWindow,
-    app: tauri::AppHandle,
-    agent: String,
-    enabled: bool,
-) -> CommandResult<AgentHookState> {
-    crate::ensure_main_window(&window)?;
-    if hook_config_path(&agent, &home_dir(&app).unwrap_or_default()).is_none() {
-        return Err(CommandError::new(ErrorCode::AgentHookUnsupported).with_context("agent", &agent));
+/// Подключает хук всем поддержанным агентам при старте. Отдельного тумблера
+/// нет намеренно: канал уведомлений — часть работы приложения, а выключатель
+/// у уведомлений агентов уже есть один, общий.
+fn install_known_hooks(app: &tauri::AppHandle) {
+    let Some(home) = home_dir(app) else {
+        return;
+    };
+    for agent in SUPPORTED_AGENTS {
+        if !agent_is_present(agent, &home) {
+            continue;
+        }
+        // Чужой конфиг мог оказаться битым или недоступным — это не повод
+        // ронять запуск: без хука останется разбор вывода панели.
+        let _ = set_hook(app, agent, true);
     }
-    set_hook(&app, &agent, enabled).map_err(|error| {
-        CommandError::new(ErrorCode::AgentHookUpdateFailed)
-            .with_context("agent", &agent)
-            .with_debug(error)
-    })
 }
 
 #[cfg(test)]
@@ -576,6 +570,35 @@ mod tests {
         // Иначе правка молча стёрла бы чужой файл целиком.
         assert!(error.contains("settings"), "в ошибке нет имени файла: {error}");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_agent_the_user_never_ran_is_left_alone() {
+        let home = std::env::temp_dir().join(format!(
+            "modelcrew-empty-home-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+
+        // Каталога ~/.claude нет — значит Claude здесь не запускали, и
+        // создавать ему конфиг мы не имеем права.
+        assert!(!agent_is_present("claude", &home));
+
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        assert!(agent_is_present("claude", &home));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn every_supported_agent_has_somewhere_to_write() {
+        let home = Path::new("/home/x");
+
+        // Список подключаемых и список известных путей обязаны совпадать,
+        // иначе агент попал бы в автоподключение и молча ничего не получил.
+        for agent in SUPPORTED_AGENTS {
+            assert!(hook_config_path(agent, home).is_some(), "{agent}");
+        }
     }
 
     #[test]
