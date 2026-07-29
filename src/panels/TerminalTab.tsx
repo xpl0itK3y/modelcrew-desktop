@@ -6,6 +6,10 @@ import {
   onTerminalStatus,
   type TerminalStatus,
 } from "../terminal/registry";
+import {
+  isAgentPanelWaiting,
+  subscribeAgentAttention,
+} from "../terminal/agentAlerts";
 import { useI18n } from "../i18n";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
@@ -13,6 +17,9 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const [title, setTitle] = useState(props.api.title ?? "");
   const [status, setStatus] = useState<TerminalStatus>(() =>
     getTerminalStatus(props.api.id),
+  );
+  const [waiting, setWaiting] = useState(() =>
+    isAgentPanelWaiting(props.api.id),
   );
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -28,9 +35,15 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
         setStatus(next);
       }
     });
+    // Счётчик из подписки не годится: он мог не измениться, когда одна панель
+    // отпустила внимание, а другая его забрала. Спрашиваем про свою.
+    const attentionUnsubscribe = subscribeAgentAttention(() => {
+      setWaiting(isAgentPanelWaiting(props.api.id));
+    });
     return () => {
       titleDisposable.dispose();
       statusUnsubscribe();
+      attentionUnsubscribe();
     };
   }, [props.api]);
 
@@ -62,21 +75,22 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     }
   };
 
+  // «Ждёт» перекрывает «работает»: агент, которого ждут, по определению жив, а
+  // завершение панели внимание с неё снимает.
+  const dotState = waiting ? "waiting" : status;
+  const dotLabel = waiting
+    ? t("terminal.statusWaiting")
+    : status === "running"
+      ? t("terminal.statusRunning")
+      : t("terminal.statusExited");
+
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
       <span
-        className={`tab-dot is-${status}`}
+        className={`tab-dot is-${dotState}`}
         role="img"
-        title={
-          status === "running"
-            ? t("terminal.statusRunning")
-            : t("terminal.statusExited")
-        }
-        aria-label={
-          status === "running"
-            ? t("terminal.statusRunning")
-            : t("terminal.statusExited")
-        }
+        title={dotLabel}
+        aria-label={dotLabel}
       />
       {editing ? (
         <input

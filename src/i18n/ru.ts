@@ -530,6 +530,7 @@ export const ru = {
   "terminal.defaultTitle": "терминал",
   "terminal.statusRunning": "Терминал работает",
   "terminal.statusExited": "Терминал завершён",
+  "terminal.statusWaiting": "Агент ждёт ответа",
   "terminal.rename": "Переименовать терминал",
   "terminal.shellStartFailed": "Не удалось запустить оболочку: {error}",
   "terminal.workspaceMissing": "панель не связана с проектом",

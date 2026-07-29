@@ -97,6 +97,36 @@
   background: var(--mc-text-faint);
 }
 
+/* Агент в этой панели ждёт ответа. Цвет тот же акцентный, что и у живого
+   терминала, — разницу несут кольцо и пульсация. Кольцо здесь не украшение:
+   при выключенной анимации оно остаётся единственным отличием, а держать
+   такой признак на одном лишь движении нельзя. */
+.tab-dot.is-waiting {
+  background: var(--mc-accent);
+  box-shadow:
+    0 0 0 2px var(--mc-accent-glow),
+    0 0 8px var(--mc-accent);
+  animation: tab-dot-waiting 1.4s ease-in-out infinite;
+}
+
+@keyframes tab-dot-waiting {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-dot.is-waiting {
+    animation: none;
+  }
+}
+
 .tab-title {
   overflow: hidden;
   text-overflow: ellipsis;

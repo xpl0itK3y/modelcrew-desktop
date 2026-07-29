@@ -533,6 +533,7 @@ export const en: Record<MessageKey, string> = {
   "terminal.defaultTitle": "terminal",
   "terminal.statusRunning": "Terminal is running",
   "terminal.statusExited": "Terminal has exited",
+  "terminal.statusWaiting": "The agent is waiting for you",
   "terminal.rename": "Rename terminal",
   "terminal.shellStartFailed": "Could not start shell: {error}",
   "terminal.workspaceMissing": "the panel is not linked to a workspace",

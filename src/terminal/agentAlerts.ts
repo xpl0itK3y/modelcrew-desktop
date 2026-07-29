@@ -262,6 +262,13 @@ export function getAgentAttentionCount(): number {
   return attention.size;
 }
 
+// Ждёт ли ответа именно эта панель. Уведомление приходит одно на всех, а
+// позвать может любая — по этому признаку её шапка ставит точку. Подписка на
+// изменения общая: subscribeAgentAttention зовут при любой правке множества.
+export function isAgentPanelWaiting(id: string): boolean {
+  return attention.has(id);
+}
+
 export function subscribeAgentAttention(
   listener: (count: number) => void,
 ): () => void {
