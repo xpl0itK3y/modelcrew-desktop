@@ -4,6 +4,7 @@ export const ru = {
   "common.close": "Закрыть",
   "common.delete": "Удалить",
   "common.beta": "Бета",
+  "common.soon": "Скоро",
 
   "titlebar.toggleSidebar": "Показать или скрыть боковую панель",
   "titlebar.newTerminal": "Новый терминал в сетку",
@@ -397,6 +398,15 @@ export const ru = {
   "settings.tabAppearance": "Внешний вид",
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",
+  "settings.tabMcp": "MCP и скиллы",
+  "settings.mcpIntro":
+    "Инструменты, которыми пользуются агенты в терминалах: серверы MCP и общие наборы навыков. Подключаются один раз и работают во всех панелях проекта.",
+  "settings.mcpServers": "Серверы MCP",
+  "settings.mcpServersNote":
+    "CodeGraph, CocoIndex и любые свои: подключение, включение по проектам и состояние связи. Пока настраиваются в конфигах самих агентов.",
+  "settings.mcpSkills": "Скиллы агентов",
+  "settings.mcpSkillsNote":
+    "Наборы инструкций, которые получают все агенты проекта: правила работы с репозиторием, релизами, стилем кода.",
   "settings.tabNotifications": "Уведомления",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Аккаунт",

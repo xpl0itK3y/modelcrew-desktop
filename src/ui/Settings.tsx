@@ -16,6 +16,7 @@ import {
   BellIcon,
   CloseIcon,
   PaletteIcon,
+  PluginIcon,
   SearchIcon,
   TerminalGlyphIcon,
   UserIcon,
@@ -23,6 +24,7 @@ import {
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
 import { AgentsTab } from "./settings/AgentsTab";
+import { McpTab } from "./settings/McpTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
 import { AccountTab } from "./settings/AccountTab";
 import {
@@ -57,6 +59,7 @@ const SETTINGS_GROUPS: {
         Icon: TerminalGlyphIcon,
       },
       { id: "agents", label: "settings.tabAgents", Icon: AgentIcon },
+      { id: "mcp", label: "settings.tabMcp", Icon: PluginIcon },
       {
         id: "notifications",
         label: "settings.tabNotifications",
@@ -341,6 +344,17 @@ function SettingsShell(props: ShellProps) {
           tabIndex={0}
         >
           <AgentsTab />
+        </div>
+
+        <div
+          id={settingsPanelId("mcp")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("mcp")}
+          hidden={isHidden("mcp")}
+          tabIndex={0}
+        >
+          <McpTab />
         </div>
 
         <div

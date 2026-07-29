@@ -5,6 +5,7 @@ export const en: Record<MessageKey, string> = {
   "common.close": "Close",
   "common.delete": "Delete",
   "common.beta": "Beta",
+  "common.soon": "Soon",
 
   "titlebar.toggleSidebar": "Show or hide sidebar",
   "titlebar.newTerminal": "Add terminal to grid",
@@ -398,6 +399,15 @@ export const en: Record<MessageKey, string> = {
   "settings.tabAppearance": "Appearance",
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
+  "settings.tabMcp": "MCP and skills",
+  "settings.mcpIntro":
+    "The tooling agents use inside terminals: MCP servers and shared skill sets. Connected once, available in every panel of the project.",
+  "settings.mcpServers": "MCP servers",
+  "settings.mcpServersNote":
+    "CodeGraph, CocoIndex and your own: connection, per-project toggles and link status. For now they are configured in each agent's own config.",
+  "settings.mcpSkills": "Agent skills",
+  "settings.mcpSkillsNote":
+    "Instruction sets every agent of the project receives: repository rules, release process, code style.",
   "settings.tabNotifications": "Notifications",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Account",

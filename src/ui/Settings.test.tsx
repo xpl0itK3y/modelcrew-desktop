@@ -42,6 +42,7 @@ const SECTION_IDS = [
   "appearance",
   "terminal",
   "agents",
+  "mcp",
   "notifications",
   "account",
 ] as const;
@@ -55,6 +56,7 @@ describe("Settings sections", () => {
     const appearanceTab = screen.getByRole("tab", { name: "Внешний вид" });
     const terminalTab = screen.getByRole("tab", { name: "Терминал" });
     const agentsTab = screen.getByRole("tab", { name: "Агенты" });
+    const mcpTab = screen.getByRole("tab", { name: "MCP и скиллы" });
     const notificationsTab = screen.getByRole("tab", { name: "Уведомления" });
     const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
@@ -62,6 +64,7 @@ describe("Settings sections", () => {
       [appearanceTab, "appearance"],
       [terminalTab, "terminal"],
       [agentsTab, "agents"],
+      [mcpTab, "mcp"],
       [notificationsTab, "notifications"],
       [accountTab, "account"],
     ] as const;
@@ -77,7 +80,13 @@ describe("Settings sections", () => {
 
     expect(appearanceTab).toHaveAttribute("aria-selected", "true");
     expect(appearanceTab).toHaveAttribute("tabindex", "0");
-    for (const tab of [terminalTab, agentsTab, notificationsTab, accountTab]) {
+    for (const tab of [
+      terminalTab,
+      agentsTab,
+      mcpTab,
+      notificationsTab,
+      accountTab,
+    ]) {
       expect(tab).toHaveAttribute("tabindex", "-1");
     }
 
@@ -124,6 +133,11 @@ describe("Settings sections", () => {
     expect(agentsTab).toHaveFocus();
 
     fireEvent.keyDown(agentsTab, { key: "ArrowDown" });
+    expect(screen.getByRole("tab", { name: "MCP и скиллы" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "MCP и скиллы" }), {
+      key: "ArrowDown",
+    });
     expect(notificationsTab).toHaveFocus();
 
     // Через границу группы навигации — «Аккаунт» отдельным списком.
@@ -327,13 +341,34 @@ describe("Settings search", () => {
 
     fireEvent.change(searchBox(), { target: { value: "агенты" } });
 
-    expect(screen.queryAllByRole("tab")).toHaveLength(1);
+    // Слово встречается и в разделе про инструменты агентов — там оно тоже
+    // должно находиться; разделы без него уходят.
+    expect(screen.queryByRole("tab", { name: "Внешний вид" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "MCP и скиллы" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Агенты" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     expect(screen.getByText("Возобновление агентов")).toBeInTheDocument();
     expect(screen.getByText("Уведомления от агентов")).toBeInTheDocument();
+  });
+
+  it("keeps a place for the agent tooling and says it is not there yet", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "MCP и скиллы" }));
+
+    const panel = screen.getByRole("tabpanel", { name: "MCP и скиллы" });
+    expect(within(panel).getByText("Серверы MCP")).toBeVisible();
+    expect(within(panel).getByText("Скиллы агентов")).toBeVisible();
+    expect(within(panel).getAllByText("Скоро")).toHaveLength(2);
+
+    // Раздел ищется и по именам инструментов, которых пока нет в интерфейсе.
+    fireEvent.change(searchBox(), { target: { value: "codegraph" } });
+    expect(screen.getByRole("tab", { name: "MCP и скиллы" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("tab", { name: "Внешний вид" })).toBeNull();
   });
 
   it("opens the first matching section when the query hides the open one", () => {
@@ -371,7 +406,7 @@ describe("Settings search", () => {
     fireEvent.change(searchBox(), { target: { value: "подсветк" } });
     fireEvent.change(searchBox(), { target: { value: "" } });
 
-    expect(screen.queryAllByRole("tab")).toHaveLength(5);
+    expect(screen.queryAllByRole("tab")).toHaveLength(6);
     expect(screen.getByText("Тема интерфейса")).toBeInTheDocument();
   });
 
@@ -386,7 +421,7 @@ describe("Settings search", () => {
     fireEvent.click(screen.getByRole("button", { name: "English" }));
 
     expect(searchBox()).toHaveValue("");
-    expect(screen.queryAllByRole("tab")).toHaveLength(5);
+    expect(screen.queryAllByRole("tab")).toHaveLength(6);
     expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
   });
 });
