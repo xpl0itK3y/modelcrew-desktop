@@ -25,9 +25,11 @@ import {
   disposeAgentAlertTracker,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
+  setPanelTailResolver,
   trackAgentOutput,
   type AgentAlertTracker,
 } from "./agentAlerts";
+import { extractPanelTail } from "./panelTail";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
@@ -319,6 +321,27 @@ const RESUME_FALLBACK_MS = 3_000;
 export function isPanelOnScreen(container: HTMLElement): boolean {
   return container.isConnected && container.getBoundingClientRect().height > 0;
 }
+
+// Сколько строк с конца просматривать в поисках последнего сообщения.
+const TAIL_SCAN_ROWS = 40;
+
+// Текст для подробного уведомления, когда агент не прислал своего.
+setPanelTailResolver((terminalId) => {
+  const entry = registry.get(terminalId);
+  if (!entry) {
+    return null;
+  }
+  const buffer = entry.term.buffer.active;
+  const rows: string[] = [];
+  for (
+    let y = buffer.baseY + buffer.cursorY;
+    y >= 0 && rows.length < TAIL_SCAN_ROWS;
+    y -= 1
+  ) {
+    rows.push(buffer.getLine(y)?.translateToString(true) ?? "");
+  }
+  return extractPanelTail(rows.reverse());
+});
 
 function injectPendingResume(entry: TerminalEntry): void {
   const data = entry.pendingResume;

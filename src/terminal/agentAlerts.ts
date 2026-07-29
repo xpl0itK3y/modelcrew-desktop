@@ -326,9 +326,11 @@ const MAX_AGENT_ALERT_DETAIL_CHARS = 200;
 export function formatAgentAlertDetail(
   notification: TerminalAttentionNotification,
 ): string {
-  const normalized = cleanNotificationText(
-    notification.body || notification.title,
-  ).replace(/\s+/g, " ");
+  return formatAlertDetailText(notification.body || notification.title);
+}
+
+function formatAlertDetailText(value: string): string {
+  const normalized = cleanNotificationText(value).replace(/\s+/g, " ");
   const characters = Array.from(normalized);
   if (characters.length <= MAX_AGENT_ALERT_DETAIL_CHARS) {
     return normalized;
@@ -489,6 +491,17 @@ export function setWorkspaceNameResolver(
   workspaceNameResolver = resolver;
 }
 
+// Последние осмысленные строки панели: звонок и тишина своего текста не
+// несут, а «Подробно» без текста ничем не отличается от «Кратко». Источник
+// регистрируется снаружи — реестр терминалов сам импортирует этот модуль.
+let panelTailResolver: (terminalId: string) => string | null = () => null;
+
+export function setPanelTailResolver(
+  resolver: (terminalId: string) => string | null,
+): void {
+  panelTailResolver = resolver;
+}
+
 // Повторные сигналы одной панели не чаще, чем раз в этот интервал.
 const MIN_ALERT_GAP_MS = 15_000;
 const lastAlertAt = new Map<string, number>();
@@ -552,9 +565,11 @@ export async function raiseAgentAlert(
     ? workspaceNameResolver(context.workspaceId)
     : null;
   const detail =
-    notification && loadAgentAlertDetailMode() === "detailed"
-      ? formatAgentAlertDetail(notification)
-      : "";
+    loadAgentAlertDetailMode() !== "detailed"
+      ? ""
+      : notification
+        ? formatAgentAlertDetail(notification)
+        : formatAlertDetailText(panelTailResolver(terminalId) ?? "");
   const body = [
     project ? translate("terminal.agentProject", { project }) : "",
     detail,

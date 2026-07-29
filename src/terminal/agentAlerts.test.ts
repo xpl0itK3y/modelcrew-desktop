@@ -37,6 +37,7 @@ import {
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   scanTerminalAttention,
+  setPanelTailResolver,
   setWorkspaceNameResolver,
   subscribeAgentAttention,
   trackAgentOutput,
@@ -323,8 +324,45 @@ describe("trackAgentOutput", () => {
     localStorage.clear();
     mocks.windowFocused.value = false;
     mocks.record.value = { agentId: "claude", command: "claude" };
+    setPanelTailResolver(() => null);
     clearAgentAttention("panel-1");
     clearAgentAttention("panel-2");
+  });
+
+  it("falls back to the panel tail when the agent sent no text of its own", async () => {
+    // Звонок и тишина сообщения не несут: без запасного источника «Подробно»
+    // ничем не отличалось бы от «Кратко».
+    saveAgentAlertDetailMode("detailed");
+    setWorkspaceNameResolver(() => "ModelCrew");
+    setPanelTailResolver((id) =>
+      id === "tail-panel" ? "Готово: обновил 3 файла" : null,
+    );
+
+    trackAgentOutput(engaged("tail-panel"), "tail-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringContaining("Claude Code"),
+      expect.stringContaining("Готово: обновил 3 файла"),
+    );
+    clearAgentAttention("tail-panel");
+    vi.useRealTimers();
+  });
+
+  it("keeps the brief mode free of the panel tail", async () => {
+    saveAgentAlertDetailMode("brief");
+    setWorkspaceNameResolver(() => "ModelCrew");
+    setPanelTailResolver(() => "Готово: обновил 3 файла");
+
+    trackAgentOutput(engaged("brief-panel"), "brief-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.not.stringContaining("Готово"),
+    );
+    clearAgentAttention("brief-panel");
+    vi.useRealTimers();
   });
 
   it("stays silent for a restored panel the user has not touched", async () => {
