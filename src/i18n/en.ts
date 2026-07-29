@@ -400,6 +400,7 @@ export const en: Record<MessageKey, string> = {
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
   "settings.tabMcp": "MCP",
+  "settings.tabPlugins": "Plugins",
   "settings.tabNotifications": "Notifications",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Account",

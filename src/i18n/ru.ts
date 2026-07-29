@@ -399,6 +399,7 @@ export const ru = {
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",
   "settings.tabMcp": "MCP",
+  "settings.tabPlugins": "Плагины",
   "settings.tabNotifications": "Уведомления",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Аккаунт",

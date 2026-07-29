@@ -206,13 +206,31 @@ export function PlayIcon(props: IconProps) {
   );
 }
 
-export function PluginIcon(props: IconProps) {
+export function NodesIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
       <circle cx="4" cy="4.2" r="1.9" />
       <circle cx="12" cy="4.2" r="1.9" />
       <circle cx="8" cy="12" r="1.9" />
       <path d="M5.9 4.2h4.2M5.4 5.7l1.9 4.7M10.6 5.7 8.7 10.4" />
+    </svg>
+  );
+}
+
+export function PuzzleIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.2" y="2.2" width="5" height="5" rx="1.2" />
+      <rect x="8.8" y="2.2" width="5" height="5" rx="1.2" />
+      <rect x="2.2" y="8.8" width="5" height="5" rx="1.2" />
+      <rect
+        x="8.8"
+        y="8.8"
+        width="5"
+        height="5"
+        rx="1.2"
+        strokeDasharray="2.2 2"
+      />
     </svg>
   );
 }

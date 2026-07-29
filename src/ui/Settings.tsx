@@ -15,8 +15,9 @@ import {
   AgentIcon,
   BellIcon,
   CloseIcon,
+  NodesIcon,
   PaletteIcon,
-  PluginIcon,
+  PuzzleIcon,
   SearchIcon,
   TerminalGlyphIcon,
   UserIcon,
@@ -24,7 +25,7 @@ import {
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
 import { AgentsTab } from "./settings/AgentsTab";
-import { McpTab } from "./settings/McpTab";
+import { SoonTab } from "./settings/SoonTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
 import { AccountTab } from "./settings/AccountTab";
 import {
@@ -59,7 +60,8 @@ const SETTINGS_GROUPS: {
         Icon: TerminalGlyphIcon,
       },
       { id: "agents", label: "settings.tabAgents", Icon: AgentIcon },
-      { id: "mcp", label: "settings.tabMcp", Icon: PluginIcon },
+      { id: "mcp", label: "settings.tabMcp", Icon: NodesIcon },
+      { id: "plugins", label: "settings.tabPlugins", Icon: PuzzleIcon },
       {
         id: "notifications",
         label: "settings.tabNotifications",
@@ -354,7 +356,26 @@ function SettingsShell(props: ShellProps) {
           hidden={isHidden("mcp")}
           tabIndex={0}
         >
-          <McpTab />
+          <SoonTab
+            section="mcp"
+            title={t("settings.tabMcp")}
+            keywords="MCP CodeGraph CocoIndex сервер server"
+          />
+        </div>
+
+        <div
+          id={settingsPanelId("plugins")}
+          className="settings-panel"
+          role="tabpanel"
+          aria-labelledby={settingsTabId("plugins")}
+          hidden={isHidden("plugins")}
+          tabIndex={0}
+        >
+          <SoonTab
+            section="plugins"
+            title={t("settings.tabPlugins")}
+            keywords="плагины расширения plugins extensions"
+          />
         </div>
 
         <div

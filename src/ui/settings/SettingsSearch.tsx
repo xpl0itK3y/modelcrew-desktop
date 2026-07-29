@@ -15,6 +15,7 @@ export type SettingsSectionId =
   | "terminal"
   | "agents"
   | "mcp"
+  | "plugins"
   | "notifications"
   | "account";
 

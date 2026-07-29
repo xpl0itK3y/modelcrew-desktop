@@ -43,6 +43,7 @@ const SECTION_IDS = [
   "terminal",
   "agents",
   "mcp",
+  "plugins",
   "notifications",
   "account",
 ] as const;
@@ -57,6 +58,7 @@ describe("Settings sections", () => {
     const terminalTab = screen.getByRole("tab", { name: "Терминал" });
     const agentsTab = screen.getByRole("tab", { name: "Агенты" });
     const mcpTab = screen.getByRole("tab", { name: "MCP" });
+    const pluginsTab = screen.getByRole("tab", { name: "Плагины" });
     const notificationsTab = screen.getByRole("tab", { name: "Уведомления" });
     const accountTab = screen.getByRole("tab", { name: "GitHub" });
 
@@ -65,6 +67,7 @@ describe("Settings sections", () => {
       [terminalTab, "terminal"],
       [agentsTab, "agents"],
       [mcpTab, "mcp"],
+      [pluginsTab, "plugins"],
       [notificationsTab, "notifications"],
       [accountTab, "account"],
     ] as const;
@@ -84,6 +87,7 @@ describe("Settings sections", () => {
       terminalTab,
       agentsTab,
       mcpTab,
+      pluginsTab,
       notificationsTab,
       accountTab,
     ]) {
@@ -136,6 +140,11 @@ describe("Settings sections", () => {
     expect(screen.getByRole("tab", { name: "MCP" })).toHaveFocus();
 
     fireEvent.keyDown(screen.getByRole("tab", { name: "MCP" }), {
+      key: "ArrowDown",
+    });
+    expect(screen.getByRole("tab", { name: "Плагины" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Плагины" }), {
       key: "ArrowDown",
     });
     expect(notificationsTab).toHaveFocus();
@@ -350,20 +359,28 @@ describe("Settings search", () => {
     expect(screen.getByText("Уведомления от агентов")).toBeInTheDocument();
   });
 
-  it("keeps a place for the agent tooling and says it is not there yet", () => {
+  it("keeps a place for the tooling that is not there yet", () => {
     renderSettings();
-    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
-    const panel = screen.getByRole("tabpanel", { name: "MCP" });
-    expect(within(panel).getByText("Скоро")).toBeVisible();
+    for (const name of ["MCP", "Плагины"]) {
+      fireEvent.click(screen.getByRole("tab", { name }));
+      const panel = screen.getByRole("tabpanel", { name });
+      expect(within(panel).getByText("Скоро")).toBeVisible();
+    }
 
-    // Раздел ищется и по именам инструментов, которых пока нет в интерфейсе.
+    // Разделы ищутся по именам инструментов, которых в интерфейсе пока нет.
     fireEvent.change(searchBox(), { target: { value: "codegraph" } });
     expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     expect(screen.queryByRole("tab", { name: "Внешний вид" })).toBeNull();
+
+    fireEvent.change(searchBox(), { target: { value: "расширения" } });
+    expect(screen.getByRole("tab", { name: "Плагины" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("opens the first matching section when the query hides the open one", () => {
@@ -401,7 +418,7 @@ describe("Settings search", () => {
     fireEvent.change(searchBox(), { target: { value: "подсветк" } });
     fireEvent.change(searchBox(), { target: { value: "" } });
 
-    expect(screen.queryAllByRole("tab")).toHaveLength(6);
+    expect(screen.queryAllByRole("tab")).toHaveLength(7);
     expect(screen.getByText("Тема интерфейса")).toBeInTheDocument();
   });
 
@@ -416,7 +433,7 @@ describe("Settings search", () => {
     fireEvent.click(screen.getByRole("button", { name: "English" }));
 
     expect(searchBox()).toHaveValue("");
-    expect(screen.queryAllByRole("tab")).toHaveLength(6);
+    expect(screen.queryAllByRole("tab")).toHaveLength(7);
     expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
   });
 });
