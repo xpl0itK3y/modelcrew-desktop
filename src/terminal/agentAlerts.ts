@@ -214,8 +214,19 @@ export function scanTerminalAttention(
           if (notification) {
             notifications.push(notification);
           }
-        } else {
+        } else if (code === 0x5d /* ] */) {
+          // Начался следующий OSC — предыдущий оборван, его текст уже не
+          // склеить с новым.
           state.mode = 2;
+          state.osc = "";
+          state.oscOverflow = false;
+        } else {
+          // ESC начал другую последовательность (обычно CSI): OSC оборван.
+          // Оставаться внутри него нельзя — тогда сканер съест следующий BEL
+          // как терминатор, и звонок агента потеряется.
+          state.mode = 0;
+          state.osc = "";
+          state.oscOverflow = false;
         }
         break;
     }

@@ -102,6 +102,32 @@ describe("scanTerminalAttention", () => {
     expect(result.bells).toBe(1);
   });
 
+  it("resyncs when a CSI interrupts an unterminated OSC", () => {
+    // Оборванная гиперссылка (OSC 8 без ST): сканер обязан выйти из OSC на
+    // первой же CSI, иначе он съест следующий звонок агента как терминатор.
+    const opened = scanTerminalAttention(
+      "\x1b]8;;https://example.com",
+      createAttentionScanState(),
+    );
+    expect(opened.state.mode).toBe(2);
+
+    const redrawn = scanTerminalAttention("\x1b[0m text \x1b[1m\r\n", opened.state);
+    expect(redrawn.state.mode).toBe(0);
+
+    expect(scanTerminalAttention("\x07", redrawn.state).bells).toBe(1);
+  });
+
+  it("starts over when a new OSC begins inside an unterminated one", () => {
+    const result = scanTerminalAttention(
+      "\x1b]0;title\x1b]9;Agent waiting\x07",
+      createAttentionScanState(),
+    );
+    expect(result.bells).toBe(0);
+    expect(result.notifications).toEqual([
+      { protocol: "osc9", title: "Agent waiting", body: "", types: [] },
+    ]);
+  });
+
   it("scans binary chunks too", () => {
     const bytes = new Uint8Array([104, 7, 105]).buffer;
     expect(scanTerminalAttention(bytes, createAttentionScanState()).bells).toBe(
