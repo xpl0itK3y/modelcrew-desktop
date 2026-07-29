@@ -82,3 +82,18 @@ body {
   color: var(--mc-text-faint);
   font-size: 12px;
 }
+
+/* Метка «обкатывается»: настройка или раздел ещё в бете. Заметная, но тише
+   заголовка, рядом с которым стоит. */
+.beta-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--mc-accent-border);
+  border-radius: 999px;
+  background: var(--mc-accent-soft);
+  color: var(--mc-accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

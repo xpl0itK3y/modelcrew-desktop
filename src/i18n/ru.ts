@@ -3,6 +3,7 @@ export const ru = {
   "common.cancel": "Отмена",
   "common.close": "Закрыть",
   "common.delete": "Удалить",
+  "common.beta": "Бета",
 
   "titlebar.toggleSidebar": "Показать или скрыть боковую панель",
   "titlebar.newTerminal": "Новый терминал в сетку",
@@ -12,6 +13,8 @@ export const ru = {
   "git.maximize": "Развернуть панель",
   "git.restore": "Свернуть к обычному размеру",
   "git.tabChanges": "Изменения",
+  "git.betaHint":
+    "Работа с гитом ещё обкатывается: проверяйте результат важных операций и держите под рукой обычный git в терминале.",
   "git.tabHistory": "История",
   "git.switchBranch": "Переключить ветку",
   "git.branchCreate": "Новая ветка от HEAD",
@@ -423,7 +426,6 @@ export const ru = {
   "settings.agentAlertDetail": "Содержимое уведомлений агентов",
   "settings.agentAlertDetailNote":
     "Кратко — только статус и проект. Подробно — ещё и сообщение агента, а когда он его не прислал, последние строки панели.",
-  "settings.badgeBeta": "Бета",
   "settings.agentAlertDetailBrief": "Кратко",
   "settings.agentAlertDetailDetailed": "Подробно",
   "settings.soundOff": "Без звука",

@@ -38,7 +38,6 @@
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 8px 8px 0;
 }
@@ -1365,6 +1364,8 @@
 .git-toolbar-right {
   display: flex;
   min-width: 0;
+  /* Прижимает правую группу к краю: между вкладками и ею живёт метка беты. */
+  margin-left: auto;
   align-items: center;
   gap: 8px;
 }

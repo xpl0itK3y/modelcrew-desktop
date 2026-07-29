@@ -49,12 +49,7 @@ type RowProps = {
 };
 
 export function SettingRow(props: RowProps) {
-  const haystack = [
-    props.title,
-    props.description,
-    props.keywords,
-    props.badge,
-  ]
+  const haystack = [props.title, props.description, props.keywords, props.badge]
     .filter(Boolean)
     .join(" ");
   const visible = useSettingsSearchEntry(haystack);
@@ -71,9 +66,7 @@ export function SettingRow(props: RowProps) {
       <div className="settings-row-copy">
         <span className="settings-row-title">
           {props.title}
-          {props.badge && (
-            <span className="settings-row-badge">{props.badge}</span>
-          )}
+          {props.badge && <span className="beta-badge">{props.badge}</span>}
         </span>
         {props.description && (
           <span className="settings-row-description">{props.description}</span>

@@ -182,6 +182,17 @@ function taggableCommit(): GitCommitInfo {
 }
 
 describe("GitChangesView workspace lifecycle", () => {
+  it("says out loud that git support is still in beta", () => {
+    render(<GitChangesView workspaceId="project-a" />);
+
+    const badge = screen.getByText("Бета");
+    expect(badge).toBeVisible();
+    expect(badge).toHaveAttribute(
+      "title",
+      expect.stringContaining("обкатывается"),
+    );
+  });
+
   it("keeps a separate draft per project while preserving the selected tab", () => {
     const view = render(<GitChangesView workspaceId="project-a" />);
 

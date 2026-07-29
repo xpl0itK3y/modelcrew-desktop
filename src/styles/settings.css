@@ -257,20 +257,9 @@
   font-weight: 550;
 }
 
-/* Метка «обкатывается»: заметная, но тише самого заголовка. */
-.settings-row-badge {
+.settings-row-title .beta-badge {
   margin-left: 8px;
-  padding: 1px 6px;
-  border: 1px solid var(--mc-accent-border);
-  border-radius: 999px;
-  background: var(--mc-accent-soft);
-  color: var(--mc-accent);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   vertical-align: 1px;
-  white-space: nowrap;
 }
 
 .settings-row-description {

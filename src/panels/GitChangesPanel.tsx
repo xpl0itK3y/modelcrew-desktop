@@ -3401,6 +3401,10 @@ function GitChangesWorkspaceView(props: {
                 </button>
               ))}
             </div>
+            {/* Работа с гитом ещё обкатывается — честно предупреждаем. */}
+            <span className="beta-badge" title={t("git.betaHint")}>
+              {t("common.beta")}
+            </span>
             <div className="git-toolbar-right">
               <SyncStatus
                 workspaceId={workspaceId}

@@ -4,6 +4,7 @@ export const en: Record<MessageKey, string> = {
   "common.cancel": "Cancel",
   "common.close": "Close",
   "common.delete": "Delete",
+  "common.beta": "Beta",
 
   "titlebar.toggleSidebar": "Show or hide sidebar",
   "titlebar.newTerminal": "Add terminal to grid",
@@ -13,6 +14,8 @@ export const en: Record<MessageKey, string> = {
   "git.maximize": "Expand the panel",
   "git.restore": "Restore the normal size",
   "git.tabChanges": "Changes",
+  "git.betaHint":
+    "Git support is still settling in: double-check the result of important operations and keep plain git in a terminal at hand.",
   "git.tabHistory": "History",
   "git.switchBranch": "Switch branch",
   "git.branchCreate": "New branch from HEAD",
@@ -424,7 +427,6 @@ export const en: Record<MessageKey, string> = {
   "settings.agentAlertDetail": "Agent notification content",
   "settings.agentAlertDetailNote":
     "Brief shows only the status and project. Detailed also includes the agent's message, or the last lines of the panel when the agent sent none.",
-  "settings.badgeBeta": "Beta",
   "settings.agentAlertDetailBrief": "Brief",
   "settings.agentAlertDetailDetailed": "Detailed",
   "settings.soundOff": "Off",
