@@ -435,6 +435,12 @@ export const en: Record<MessageKey, string> = {
   "settings.systemNotifications": "System notifications",
   "settings.systemNotificationsNote":
     "OS-level banner when the window is unfocused: updates and announcements stay visible even with the app minimized.",
+  "settings.systemNotificationsTest": "Test",
+  "settings.systemNotificationsTestTitle": "ModelCrew here",
+  "settings.systemNotificationsTestBody":
+    "Notification test. This is how finished agents and updates will announce themselves.",
+  "settings.systemNotificationsTestSent":
+    "Banner sent. If nothing appeared, notifications from ModelCrew are turned off in your system settings — the app has no way to find that out itself.",
   "settings.agentAlertDetail": "Agent notification content",
   "settings.agentAlertDetailNote":
     "Brief shows only the status and project. Detailed also includes the agent's message, or the last lines of the panel when the agent sent none.",

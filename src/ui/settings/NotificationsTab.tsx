@@ -15,6 +15,7 @@ import {
 import {
   loadSystemNotificationsEnabled,
   saveSystemNotificationsEnabled,
+  sendSystemNotification,
 } from "../../notifications";
 import {
   loadAgentAlertDetailMode,
@@ -24,6 +25,7 @@ import {
 import { PlayIcon } from "../Icons";
 import {
   SettingRow,
+  SettingsButton,
   SettingsPage,
   SettingsSelect,
   SettingsSwitch,
@@ -52,6 +54,7 @@ export function NotificationsTab() {
   );
   const [agentAlertDetail, setAgentAlertDetail] =
     useState<AgentAlertDetailMode>(() => loadAgentAlertDetailMode());
+  const [systemTested, setSystemTested] = useState(false);
   const volumePreviewTimer = useRef<number | undefined>(undefined);
 
   useEffect(
@@ -99,6 +102,17 @@ export function NotificationsTab() {
       volumePreviewTimer.current = undefined;
       playSound(sound);
     }, 180);
+  };
+
+  // Единственный способ узнать, доходят ли баннеры: ни ОС, ни плагин об этом
+  // не докладывают — отправка всегда «успешна». Поэтому кнопка не показывает
+  // результат, а лишь даёт увидеть баннер своими глазами.
+  const sendTestNotification = () => {
+    setSystemTested(true);
+    void sendSystemNotification(
+      t("settings.systemNotificationsTestTitle"),
+      t("settings.systemNotificationsTestBody"),
+    );
   };
 
   const soundName = t(soundMessageKeys[sound]);
@@ -181,15 +195,31 @@ export function NotificationsTab() {
       <SettingRow
         title={t("settings.systemNotifications")}
         description={t("settings.systemNotificationsNote")}
+        keywords={t("settings.systemNotificationsTest")}
         control={
-          <SettingsSwitch
-            label={t("settings.systemNotifications")}
-            checked={systemEnabled}
-            onChange={(enabled) => {
-              setSystemEnabled(enabled);
-              saveSystemNotificationsEnabled(enabled);
-            }}
-          />
+          <div className="settings-control-pair">
+            <SettingsSwitch
+              label={t("settings.systemNotifications")}
+              checked={systemEnabled}
+              onChange={(enabled) => {
+                setSystemEnabled(enabled);
+                setSystemTested(false);
+                saveSystemNotificationsEnabled(enabled);
+              }}
+            />
+            <SettingsButton
+              label={t("settings.systemNotificationsTest")}
+              disabled={!systemEnabled}
+              onClick={sendTestNotification}
+            />
+          </div>
+        }
+        note={
+          systemTested ? (
+            <p className="settings-note" role="status">
+              {t("settings.systemNotificationsTestSent")}
+            </p>
+          ) : undefined
         }
       />
 
