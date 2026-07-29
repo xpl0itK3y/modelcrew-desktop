@@ -86,6 +86,33 @@ function setup(initiallyMaximized: boolean) {
 }
 
 describe("togglePanelMaximized", () => {
+  it("does nothing when the only panel already fills the workspace", () => {
+    const fixture = setup(false);
+    const lonely = {
+      groups: [fixture.api.groups[0]],
+    } as unknown as DockviewApi;
+
+    togglePanelMaximized(lonely, fixture.panel);
+
+    // Иначе dockview считал бы панель развёрнутой, а на экране ничего бы
+    // не изменилось — и индикатор «терминал развёрнут» врал бы.
+    expect(fixture.maximize).not.toHaveBeenCalled();
+    expect(fixture.animate).not.toHaveBeenCalled();
+  });
+
+  it("still restores the last panel left after its neighbours closed", () => {
+    const fixture = setup(true);
+    const lonely = {
+      groups: [fixture.api.groups[0]],
+    } as unknown as DockviewApi;
+
+    togglePanelMaximized(lonely, fixture.panel);
+
+    expect(fixture.exitMaximized).not.toHaveBeenCalled();
+    // Возврат идёт через анимацию: exitMaximized вызовется по её ходу.
+    expect(fixture.animate).toHaveBeenCalled();
+  });
+
   it("animates a panel from its grid cell into the full workspace", () => {
     const fixture = setup(false);
 

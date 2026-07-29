@@ -165,6 +165,11 @@ function restoreMaximizedPanel(
   window.setTimeout(restoreLayout, fadeOutDuration + 80);
 }
 
+/** Единственная панель уже занимает всё — разворачивать нечего. */
+export function canMaximizePanel(api: DockviewApi): boolean {
+  return api.groups.length > 1;
+}
+
 /** Плавно разворачивает активную панель или возвращает сетку. */
 export function togglePanelMaximized(
   api: DockviewApi,
@@ -172,6 +177,11 @@ export function togglePanelMaximized(
   duration = 260,
 ): void {
   if (restoringPanels.has(panel)) {
+    return;
+  }
+  // Иначе dockview пометил бы панель развёрнутой, ничего не изменив: сетка
+  // осталась бы прежней, а индикатор «терминал развёрнут» уже горел бы.
+  if (!panel.api.isMaximized() && !canMaximizePanel(api)) {
     return;
   }
 

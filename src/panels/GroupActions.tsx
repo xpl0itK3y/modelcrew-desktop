@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { IDockviewHeaderActionsProps } from "dockview";
 import { appActions } from "../appActions";
-import { togglePanelMaximized } from "../animations";
+import { canMaximizePanel, togglePanelMaximized } from "../animations";
 import { isMac } from "../constants";
 import { useI18n } from "../i18n";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";
@@ -8,23 +9,44 @@ import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 // Кнопки в шапке группы dockview: развернуть/свернуть и закрыть.
 export function GroupActions(props: IDockviewHeaderActionsProps) {
   const { t } = useI18n();
+  const api = props.containerApi;
+  // Пока терминал один, разворачивать нечего — кнопку не показываем вовсе,
+  // чтобы она не притворялась работающей.
+  const [canMaximize, setCanMaximize] = useState(() => canMaximizePanel(api));
   const maximizeShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
   const closeShortcut = isMac ? "⌘⇧W" : "Ctrl+Shift+W";
+
+  useEffect(() => {
+    const update = () => setCanMaximize(canMaximizePanel(api));
+    update();
+    const disposables = [
+      api.onDidAddGroup(update),
+      api.onDidRemoveGroup(update),
+    ];
+    return () => {
+      for (const disposable of disposables) {
+        disposable.dispose();
+      }
+    };
+  }, [api]);
+
   return (
     <div className="group-actions">
-      <button
-        type="button"
-        className="icon-button"
-        title={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
-        aria-label={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
-        onClick={() => {
-          if (props.activePanel) {
-            togglePanelMaximized(props.containerApi, props.activePanel);
-          }
-        }}
-      >
-        <MaximizeIcon />
-      </button>
+      {canMaximize && (
+        <button
+          type="button"
+          className="icon-button"
+          title={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
+          aria-label={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
+          onClick={() => {
+            if (props.activePanel) {
+              togglePanelMaximized(api, props.activePanel);
+            }
+          }}
+        >
+          <MaximizeIcon />
+        </button>
+      )}
       <button
         type="button"
         className="icon-button"
