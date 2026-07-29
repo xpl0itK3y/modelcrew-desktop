@@ -199,8 +199,29 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
         "claude" => Some(home.join(".claude/settings.json")),
         "copilot" => Some(home.join(".copilot/hooks/modelcrew.json")),
         "opencode" => Some(home.join(".config/opencode/plugin/modelcrew-notify.js")),
+        "grok" => Some(home.join(".grok/config.toml")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
         // либо у самого CLI уведомлений нет.
+        _ => None,
+    }
+}
+
+/// Секция, дописываемая в конец чужого конфига. Пара «маркер, блок»: по
+/// маркеру видно, что секция уже есть — и неважно, наша она или своя.
+/// Настройку, сделанную руками, мы не трогаем.
+fn append_section(agent: &str) -> Option<(&'static str, &'static str)> {
+    match agent {
+        // Схема из самого бинарника grok:
+        //   method = auto|osc9|osc99|osc777|bel|none
+        //   condition = unfocused|always|never
+        // Берём `always`: свой «unfocused» grok считает по терминалу и про
+        // наши панели ничего не знает, а кого и когда тревожить, приложение
+        // решает само — панель на виду при активном окне молчит.
+        "grok" => Some((
+            "[ui.notifications]",
+            "\n# Добавлено ModelCrew: уведомления агента читаются из вывода панели.\n\
+             [ui.notifications]\nmethod = \"osc9\"\ncondition = \"always\"\n",
+        )),
         _ => None,
     }
 }
@@ -214,6 +235,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "claude" => Some(home.join(".claude")),
         "copilot" => Some(home.join(".copilot")),
         "opencode" => Some(home.join(".config/opencode")),
+        "grok" => Some(home.join(".grok")),
         _ => None,
     }
 }
@@ -453,6 +475,15 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
     let Some(path) = hook_config_path(agent, &home) else {
         return unsupported;
     };
+    if let Some((marker, _)) = append_section(agent) {
+        let installed = std::fs::read_to_string(&path).is_ok_and(|body| body.contains(marker));
+        return AgentHookState {
+            agent: agent.to_string(),
+            supported: true,
+            installed,
+            config: path.display().to_string(),
+        };
+    }
     let installed = match own_file_body(agent, &helper) {
         // Устаревшее тело считаем неподключённым — тогда старт его перепишет.
         Some(body) => std::fs::read_to_string(&path).is_ok_and(|current| current == body),
@@ -476,6 +507,22 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
     // Хелпер мог не появиться, если каталог данных был недоступен на старте.
     if !helper.exists() {
         write_helper(app);
+    }
+    // Дописываемая секция в чужом конфиге: трогаем только её и только если
+    // такой секции там ещё нет.
+    if let Some((marker, block)) = append_section(agent) {
+        let current = std::fs::read_to_string(&path).unwrap_or_default();
+        if enabled {
+            if !current.contains(marker) {
+                back_up_once(&path);
+                std::fs::write(&path, format!("{current}{block}"))
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+            }
+        } else if let Some(rest) = current.strip_suffix(block) {
+            // Снимаем только свой блок целиком: правленный руками не наш.
+            std::fs::write(&path, rest).map_err(|error| format!("{}: {error}", path.display()))?;
+        }
+        return Ok(hook_state(app, agent));
     }
     // Свой отдельный файл: чужого в нём нет, поэтому никакого слияния.
     if let Some(body) = own_file_body(agent, &helper) {
@@ -512,7 +559,7 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 3] = ["claude", "copilot", "opencode"];
+const SUPPORTED_AGENTS: [&str; 4] = ["claude", "copilot", "opencode", "grok"];
 
 /// Подключение через окружение панели — самый безопасный вид: ничего не
 /// пишется в чужие файлы и действует только внутри наших терминалов.
@@ -747,6 +794,30 @@ mod tests {
             assert_eq!(hook_config_path(agent, home), None, "{agent}");
             assert_eq!(agent_home(agent, home), None, "{agent}");
         }
+    }
+
+    #[test]
+    fn the_grok_section_asks_for_the_sequence_our_scanner_reads() {
+        let (marker, block) = append_section("grok").expect("grok поддержан");
+
+        assert_eq!(marker, "[ui.notifications]");
+        assert!(block.contains(r#"method = "osc9""#), "{block}");
+        // «unfocused» grok считает по терминалу и про наши панели не знает;
+        // кого тревожить, решает приложение.
+        assert!(block.contains(r#"condition = "always""#), "{block}");
+        assert!(block.contains(marker));
+    }
+
+    #[test]
+    fn a_notifications_section_the_user_wrote_himself_is_not_touched() {
+        let (marker, block) = append_section("grok").unwrap();
+        let mine = format!("[ui]\ntheme = \"dark\"\n\n{marker}\nmethod = \"bel\"\n");
+
+        // Секция есть — значит выбор уже сделан, и он важнее нашего.
+        assert!(mine.contains(marker));
+        // А в пустой конфиг блок дописывается целиком, ничего не затирая.
+        let empty = String::new();
+        assert_eq!(format!("{empty}{block}"), block);
     }
 
     #[test]
