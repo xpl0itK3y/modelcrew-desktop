@@ -31,8 +31,10 @@ export type AttentionScanState = {
   // PTY отдаёт сырые байты. Декодируем поток в UTF-8 до разбора, иначе текст
   // уведомления собирается по байту на символ и кириллица превращается в
   // «Ð°Ð½Ð°Ð»Ð¾Ð³». Декодер потоковый: многобайтовый символ переживает
-  // границу чанка.
-  decoder: TextDecoder;
+  // границу чанка. Поле необязательное и создаётся лениво — состояние живёт
+  // в панели дольше самого модуля (hot reload в dev), и обращение к
+  // несуществующему декодеру глушило бы такой панели все сигналы разом.
+  decoder?: TextDecoder;
 };
 
 export type TerminalAttentionNotification = {
@@ -177,7 +179,9 @@ export function scanTerminalAttention(
   const text =
     typeof data === "string"
       ? data
-      : state.decoder.decode(new Uint8Array(data), { stream: true });
+      : (state.decoder ??= new TextDecoder()).decode(new Uint8Array(data), {
+          stream: true,
+        });
   let bells = 0;
   const notifications: TerminalAttentionNotification[] = [];
   for (let index = 0; index < text.length; index += 1) {

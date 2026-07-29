@@ -158,6 +158,47 @@ describe("scanTerminalAttention", () => {
     expect(result.notifications[0]?.title).toBe("Готово");
   });
 
+  it("survives any chunk split of a realistic stream", () => {
+    // Перерисовка TUI, смена заголовка и само уведомление в одном потоке:
+    // PTY может разрезать его в любом месте, включая середину буквы.
+    const stream =
+      "\x1b[?25l\x1b[2K\x1b[38;5;39m▌\x1b[0m работаю…\r\n" +
+      "\x1b]0;codex — odysseus\x07" +
+      "\x1b]777;notify;Codex;Odysseus — аналог ChatGPT с агентами\x07" +
+      "\x1b[?25h";
+    const bytes = new TextEncoder().encode(stream);
+    const failures: number[] = [];
+
+    for (let cut = 0; cut <= bytes.length; cut += 1) {
+      const state = createAttentionScanState();
+      const first = scanTerminalAttention(bytes.slice(0, cut).buffer, state);
+      const second = scanTerminalAttention(bytes.slice(cut).buffer, state);
+      const found = [...first.notifications, ...second.notifications];
+      if (
+        found.length !== 1 ||
+        found[0].body !== "Odysseus — аналог ChatGPT с агентами"
+      ) {
+        failures.push(cut);
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+
+  it("keeps working with a state that predates the decoder", () => {
+    // Состояние живёт в панели дольше модуля: после hot reload в dev-режиме
+    // сюда приходит объект, собранный прежней версией кода.
+    const stale = createAttentionScanState() as Record<string, unknown>;
+    delete stale.decoder;
+
+    const result = scanTerminalAttention(
+      new TextEncoder().encode("\x1b]9;Готово\x07").buffer,
+      stale as ReturnType<typeof createAttentionScanState>,
+    );
+
+    expect(result.notifications[0]?.title).toBe("Готово");
+  });
+
   it("scans binary chunks too", () => {
     const bytes = new Uint8Array([104, 7, 105]).buffer;
     expect(scanTerminalAttention(bytes, createAttentionScanState()).bells).toBe(
