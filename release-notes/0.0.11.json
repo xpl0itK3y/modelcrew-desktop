@@ -1,0 +1,25 @@
+{
+  "version": "0.0.11",
+  "ru": {
+    "title": "Умнее терминалы и уведомления агентов",
+    "summary": "Добавлены режимы размещения терминалов, событийные уведомления агентов, поддержка Copilot CLI и установка Git Bash на Windows.",
+    "highlights": [
+      "Новые терминалы можно размещать по строкам, змейкой или от центра",
+      "Уведомления агентов показывают ответ и объединяют частые события",
+      "Добавлены обнаружение и восстановление сессий GitHub Copilot CLI",
+      "Git Bash на Windows можно установить из настроек через WinGet",
+      "Добавлены громкость уведомлений, плавный разворот терминала и улучшенный перенос файлов"
+    ]
+  },
+  "en": {
+    "title": "Smarter terminals and agent notifications",
+    "summary": "Added terminal placement modes, event-based agent alerts, Copilot CLI support, and Git Bash setup on Windows.",
+    "highlights": [
+      "Place new terminals by rows, snake order, or from the center",
+      "Agent alerts include response text and collapse frequent events",
+      "GitHub Copilot CLI sessions can be discovered and restored",
+      "Install Git Bash on Windows from settings through WinGet",
+      "Control alert volume and enjoy smoother terminal zoom and file drops"
+    ]
+  }
+}

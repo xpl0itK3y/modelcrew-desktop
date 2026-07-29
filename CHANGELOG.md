@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.0.11
+
+### Русский
+
+Добавлены режимы размещения терминалов, событийные уведомления агентов, поддержка Copilot CLI и установка Git Bash на Windows.
+
+- Новые терминалы можно размещать по строкам, змейкой или от центра
+- Уведомления агентов получают точный текст через backend events и объединяют частые события
+- Уведомления учитывают скрытые за развёрнутой панелью терминалы и восстановленные сессии
+- Добавлены обнаружение и восстановление сессий GitHub Copilot CLI
+- Git Bash на Windows можно установить из настроек через WinGet
+- Громкость уведомлений сохраняется между запусками
+- Разворот терминала и статусная плашка получили плавные анимации, а перенос файлов стал аккуратнее
+- Скрытые сессии больше не запускаются заранее при старте приложения
+- Исправлено сопоставление иконки ModelCrew в Arch Linux и KDE Plasma
+
+### English
+
+Added terminal placement modes, event-based agent alerts, Copilot CLI support, and Git Bash setup on Windows.
+
+- Place new terminals by rows, snake order, or from the center
+- Agent alerts receive precise text through backend events and collapse frequent events
+- Alerts cover terminals hidden behind a maximized panel and restored sessions
+- GitHub Copilot CLI sessions can be discovered and restored
+- Install Git Bash on Windows from settings through WinGet
+- Notification volume persists across application restarts
+- Terminal zoom and its status banner animate smoothly, while file drops look cleaner
+- Hidden sessions no longer start eagerly when the application launches
+- Fixed ModelCrew icon matching on Arch Linux and KDE Plasma
+
 ## 0.0.10
 
 ### Русский
