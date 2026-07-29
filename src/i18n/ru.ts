@@ -389,6 +389,12 @@ export const ru = {
   "settings.terminalFontSize": "Размер шрифта терминала",
   "settings.terminalFontSizeNote": "Размер текста во всех терминалах",
   "settings.terminalFontSizeValue": "{size} px",
+  "settings.terminalSpawnMode": "Порядок добавления терминалов",
+  "settings.terminalSpawnModeNote":
+    "Определяет место следующего терминала. Уже открытые панели и сохранённые раскладки не перестраиваются.",
+  "settings.terminalSpawnBalanced": "По строкам",
+  "settings.terminalSpawnSnake": "Змейкой",
+  "settings.terminalSpawnCenterOut": "От центра",
   "settings.tabAppearance": "Внешний вид",
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",

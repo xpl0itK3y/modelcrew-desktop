@@ -390,6 +390,12 @@ export const en: Record<MessageKey, string> = {
   "settings.terminalFontSize": "Terminal font size",
   "settings.terminalFontSizeNote": "Text size in every terminal",
   "settings.terminalFontSizeValue": "{size} px",
+  "settings.terminalSpawnMode": "New terminal placement",
+  "settings.terminalSpawnModeNote":
+    "Controls where the next terminal appears. Existing panels and saved layouts are not rearranged.",
+  "settings.terminalSpawnBalanced": "Rows",
+  "settings.terminalSpawnSnake": "Snake",
+  "settings.terminalSpawnCenterOut": "Center-out",
   "settings.tabAppearance": "Appearance",
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
