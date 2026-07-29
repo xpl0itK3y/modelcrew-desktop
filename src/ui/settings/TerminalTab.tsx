@@ -11,10 +11,8 @@ import { type ShellOption } from "../../shell";
 import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
-  loadEagerSessionRestore,
   loadTerminalHistoryIsolation,
   loadTerminalSpawnMode,
-  saveEagerSessionRestore,
   saveTerminalHistoryIsolation,
   saveTerminalSpawnMode,
   type TerminalSpawnMode,
@@ -70,9 +68,6 @@ export function TerminalTab(props: TerminalTabProps) {
   } | null>(null);
   const [historyIsolated, setHistoryIsolated] = useState(() =>
     loadTerminalHistoryIsolation(),
-  );
-  const [eagerRestore, setEagerRestore] = useState(() =>
-    loadEagerSessionRestore(),
   );
   const [spawnMode, setSpawnMode] = useState<TerminalSpawnMode>(() =>
     loadTerminalSpawnMode(),
@@ -354,26 +349,6 @@ export function TerminalTab(props: TerminalTabProps) {
             onChange={(value) => {
               setSpawnMode(value);
               saveTerminalSpawnMode(value);
-            }}
-          />
-        }
-      />
-
-      <SettingRow
-        title={t("settings.sessionRestore")}
-        description={t("settings.sessionRestoreNote")}
-        control={
-          <SettingsSelect
-            label={t("settings.sessionRestore")}
-            value={eagerRestore ? "all" : "active"}
-            options={[
-              { value: "all", label: t("settings.sessionRestoreAll") },
-              { value: "active", label: t("settings.sessionRestoreActive") },
-            ]}
-            onChange={(value) => {
-              const eager = value === "all";
-              setEagerRestore(eager);
-              saveEagerSessionRestore(eager);
             }}
           />
         }

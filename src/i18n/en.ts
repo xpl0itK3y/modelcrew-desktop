@@ -380,11 +380,6 @@ export const en: Record<MessageKey, string> = {
   "terminal.agentCompleted": "{agent} finished the turn",
   "terminal.agentError": "{agent} stopped with an error",
   "terminal.agentProject": "Project: {project}",
-  "settings.sessionRestore": "Session restore",
-  "settings.sessionRestoreAll": "All project sessions",
-  "settings.sessionRestoreActive": "Active session only",
-  "settings.sessionRestoreNote":
-    "“All sessions” brings up terminals and agents of the project's hidden sessions right at launch — switching is instant, at the cost of extra memory.",
   "settings.terminalHistory": "Command history",
   "settings.terminalHistoryPerPanel": "Per panel",
   "settings.terminalHistoryShared": "Shared (system default)",

@@ -12,9 +12,7 @@ import {
   destroyTerminal,
   getAutoTitle,
   isManualTitle,
-  prespawnSessionPanels,
 } from "../terminal/registry";
-import { loadEagerSessionRestore } from "../terminal/preferences";
 import { translate, type Locale } from "../i18n";
 import { MAX_TERMINALS } from "../constants";
 import {
@@ -183,50 +181,6 @@ export function useWorkspaces({
     [apiRef, applyAutoTitles, rootErrorsRef, setTerminalCount, suppressCleanupRef],
   );
 
-  // Оживляет скрытые сессии проекта фоном (PTY + снимок + авто-resume
-  // агентов): переключение на них становится мгновенным. Только для
-  // проектов с рабочим корнем и при включённой настройке.
-  const prespawnWorkspaceSessions = useCallback(
-    (workspace: Workspace) => {
-      if (
-        !loadEagerSessionRestore() ||
-        !workspace.folder ||
-        rootErrorsRef.current[workspace.id]
-      ) {
-        return;
-      }
-      for (const session of workspace.sessions) {
-        if (session.id === workspace.activeSessionId) {
-          continue; // активную поднимает dockview
-        }
-        // PTY поднимаем только терминалам: панель git-изменений и другие
-        // будущие типы панелей оболочки не имеют.
-        prespawnSessionPanels(
-          workspace.id,
-          Object.entries(session.layout?.panels ?? {})
-            .filter(
-              ([, panel]) =>
-                (panel.contentComponent ?? "terminal") === "terminal",
-            )
-            .map(([panelId]) => panelId),
-        );
-      }
-    },
-    [rootErrorsRef],
-  );
-
-  // При старте — как только Rust зарегистрировал корни (раньше PTY нельзя).
-  useEffect(() => {
-    if (!rootRegistryReady) {
-      return;
-    }
-    const { list, activeId } = workspacesRef.current;
-    const active = list.find((workspace) => workspace.id === activeId);
-    if (active) {
-      prespawnWorkspaceSessions(active);
-    }
-  }, [rootRegistryReady, prespawnWorkspaceSessions]);
-
   const selectWorkspace = useCallback(
     (id: string) => {
       const current = workspacesRef.current;
@@ -251,9 +205,8 @@ export function useWorkspaces({
       workspacesRef.current = next;
       setWorkspaces(next);
       loadSession(target, session);
-      prespawnWorkspaceSessions(target);
     },
-    [loadSession, prespawnWorkspaceSessions, snapshotActiveSession],
+    [loadSession, snapshotActiveSession],
   );
 
   const selectSession = useCallback(
