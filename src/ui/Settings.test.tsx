@@ -359,9 +359,6 @@ describe("Settings search", () => {
 
     const panel = screen.getByRole("tabpanel", { name: "MCP" });
     expect(within(panel).getByText("Скоро")).toBeVisible();
-    expect(
-      within(panel).getByText(/Подключение серверов/),
-    ).toBeVisible();
 
     // Раздел ищется и по именам инструментов, которых пока нет в интерфейсе.
     fireEvent.change(searchBox(), { target: { value: "codegraph" } });

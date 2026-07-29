@@ -402,8 +402,6 @@ export const en: Record<MessageKey, string> = {
   "settings.tabMcp": "MCP",
   "settings.mcpIntro":
     "The MCP servers agents use inside terminals: CodeGraph, CocoIndex and your own. For now they are configured in each agent's own config.",
-  "settings.mcpSoonNote":
-    "Connecting servers, per-project toggles and link status will live here.",
   "settings.tabNotifications": "Notifications",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Account",

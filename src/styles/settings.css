@@ -334,12 +334,17 @@
   cursor: not-allowed;
 }
 
-/* Раздел, которого ещё нет: вместо строк настроек одна честная отметка. */
+/* Раздел, которого ещё нет: вместо выдуманных строк настроек одно слово. */
 .settings-soon {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 0;
+  display: grid;
+  min-height: 220px;
+  margin: 0;
+  place-items: center;
+  color: var(--mc-text-faint);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .settings-note {

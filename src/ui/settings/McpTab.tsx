@@ -1,9 +1,9 @@
 import { useI18n } from "../../i18n";
 import { SettingsPage } from "./SettingsControls";
 
-// Раздел-заглушка: подключать серверы из приложения ещё нельзя, но место для
-// них уже понятно. Показываем честную отметку и говорим, где настраивать
-// сейчас, — это полезнее пустой страницы.
+// Раздел-заглушка: подключать серверы из приложения ещё нельзя. Вместо
+// придуманных строк настроек — одно слово; что делать сейчас, сказано во
+// вступлении раздела.
 export function McpTab() {
   const { t } = useI18n();
 
@@ -13,10 +13,7 @@ export function McpTab() {
       title={t("settings.tabMcp")}
       intro={t("settings.mcpIntro")}
     >
-      <div className="settings-soon">
-        <span className="soon-badge">{t("common.soon")}</span>
-        <p className="settings-note">{t("settings.mcpSoonNote")}</p>
-      </div>
+      <p className="settings-soon">{t("common.soon")}</p>
     </SettingsPage>
   );
 }
