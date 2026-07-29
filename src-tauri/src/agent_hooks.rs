@@ -200,12 +200,88 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
         "copilot" => Some(home.join(".copilot/hooks/modelcrew.json")),
         "opencode" => Some(home.join(".config/opencode/plugin/modelcrew-notify.js")),
         "grok" => Some(home.join(".grok/config.toml")),
+        "cursor" => Some(home.join(".cursor/hooks.json")),
         // Форк opencode: каталог зависит от того, как его собрали.
         "kilocode" => kilo_home(home).map(|dir| dir.join("plugin/modelcrew-notify.js")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
         // либо у самого CLI уведомлений нет.
         _ => None,
     }
+}
+
+/// Событие конца хода у cursor и запись хука в его формате. Файл общий с
+/// IDE, поэтому вписываемся точечно, как и в настройки claude.
+const CURSOR_EVENT: &str = "stop";
+
+fn cursor_hook_entry(helper: &Path) -> Value {
+    serde_json::json!({
+        // Нагрузку отдаём аргументом: stdin cursor хуку не передаёт, и
+        // хелпер ушёл бы читать терминал и не вернулся.
+        "command": format!("{} '{{\"type\":\"stop\"}}'", hook_command(helper, "cursor")),
+    })
+}
+
+fn cursor_hook_is_ours(entry: &Value, helper: &Path) -> bool {
+    entry
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| command.contains(&helper.display().to_string()))
+}
+
+fn install_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
+    if !settings.is_object() {
+        *settings = Value::Object(Default::default());
+    }
+    let root = settings.as_object_mut().expect("объект гарантирован выше");
+    root.entry("version").or_insert_with(|| Value::from(1));
+    let hooks = root
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if !hooks.is_object() {
+        *hooks = Value::Object(Default::default());
+    }
+    let list = hooks
+        .as_object_mut()
+        .expect("объект гарантирован выше")
+        .entry(CURSOR_EVENT)
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !list.is_array() {
+        *list = Value::Array(Vec::new());
+    }
+    let list = list.as_array_mut().expect("массив гарантирован выше");
+    if list.iter().any(|entry| cursor_hook_is_ours(entry, helper)) {
+        return false;
+    }
+    list.push(cursor_hook_entry(helper));
+    true
+}
+
+fn remove_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
+    let Some(hooks) = settings
+        .as_object_mut()
+        .and_then(|root| root.get_mut("hooks"))
+        .and_then(Value::as_object_mut)
+    else {
+        return false;
+    };
+    let Some(list) = hooks.get_mut(CURSOR_EVENT).and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let before = list.len();
+    list.retain(|entry| !cursor_hook_is_ours(entry, helper));
+    let after = list.len();
+    if after == 0 {
+        hooks.remove(CURSOR_EVENT);
+    }
+    before != after
+}
+
+fn cursor_hook_installed(settings: &Value, helper: &Path) -> bool {
+    settings
+        .get("hooks")
+        .and_then(|hooks| hooks.get(CURSOR_EVENT))
+        .and_then(Value::as_array)
+        .is_some_and(|list| list.iter().any(|entry| cursor_hook_is_ours(entry, helper)))
 }
 
 /// Каталог kilocode: имя зависит от дистрибуции форка, берём существующий.
@@ -248,6 +324,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "copilot" => Some(home.join(".copilot")),
         "opencode" => Some(home.join(".config/opencode")),
         "grok" => Some(home.join(".grok")),
+        "cursor" => Some(home.join(".cursor")),
         "kilocode" => kilo_home(home),
         _ => None,
     }
@@ -504,7 +581,13 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
         // Устаревшее тело считаем неподключённым — тогда старт его перепишет.
         Some(body) => std::fs::read_to_string(&path).is_ok_and(|current| current == body),
         None => read_json(&path)
-            .map(|settings| claude_hook_installed(&settings, &helper))
+            .map(|settings| {
+                if agent == "cursor" {
+                    cursor_hook_installed(&settings, &helper)
+                } else {
+                    claude_hook_installed(&settings, &helper)
+                }
+            })
             .unwrap_or(false),
     };
     AgentHookState {
@@ -562,10 +645,11 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
         return Ok(hook_state(app, agent));
     }
     let mut settings = read_json(&path)?;
-    let changed = if enabled {
-        install_claude_hook(&mut settings, &helper)
-    } else {
-        remove_claude_hook(&mut settings, &helper)
+    let changed = match (agent, enabled) {
+        ("cursor", true) => install_cursor_hook(&mut settings, &helper),
+        ("cursor", false) => remove_cursor_hook(&mut settings, &helper),
+        (_, true) => install_claude_hook(&mut settings, &helper),
+        (_, false) => remove_claude_hook(&mut settings, &helper),
     };
     if changed {
         back_up_once(&path);
@@ -575,7 +659,8 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 5] = ["claude", "copilot", "opencode", "grok", "kilocode"];
+const SUPPORTED_AGENTS: [&str; 6] =
+    ["claude", "copilot", "opencode", "grok", "kilocode", "cursor"];
 
 /// Подключение через окружение панели — самый безопасный вид: ничего не
 /// пишется в чужие файлы и действует только внутри наших терминалов.
@@ -806,7 +891,7 @@ mod tests {
         );
         // У этих канал либо не подтверждён, либо его нет — молча трогать
         // чужие конфиги на догадках нельзя.
-        for agent in ["codex", "qwen", "kimi", "amp", "aider", "cursor"] {
+        for agent in ["codex", "qwen", "kimi", "amp", "aider", "antigravity"] {
             assert_eq!(hook_config_path(agent, home), None, "{agent}");
             assert_eq!(agent_home(agent, home), None, "{agent}");
         }
@@ -828,6 +913,28 @@ mod tests {
         // ничего не будем: agent_is_present это отсечёт.
         assert_eq!(kilo_home(home), Some(PathBuf::from("/home/x/.config/kilo")));
         assert!(!agent_is_present("kilocode", home));
+    }
+
+    #[test]
+    fn the_cursor_hook_lands_in_the_file_shared_with_the_ide() {
+        let mut settings = serde_json::json!({
+            "version": 1,
+            "hooks": { "beforeShellExecution": [{ "command": "./audit.sh" }] }
+        });
+
+        assert!(install_cursor_hook(&mut settings, &helper()));
+
+        // Чужой хук в общем с IDE файле обязан пережить нашу правку.
+        assert_eq!(settings["hooks"]["beforeShellExecution"][0]["command"], "./audit.sh");
+        assert!(cursor_hook_installed(&settings, &helper()));
+        // Нагрузка аргументом: stdin cursor хуку не даёт, и хелпер завис бы.
+        let ours = settings["hooks"]["stop"][0]["command"].as_str().unwrap();
+        assert!(ours.ends_with(r#"'{"type":"stop"}'"#), "{ours}");
+        assert!(!install_cursor_hook(&mut settings, &helper()));
+
+        assert!(remove_cursor_hook(&mut settings, &helper()));
+        assert!(settings["hooks"].get("stop").is_none());
+        assert_eq!(settings["hooks"]["beforeShellExecution"][0]["command"], "./audit.sh");
     }
 
     #[test]
