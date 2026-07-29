@@ -45,6 +45,8 @@ function renderTerminalTab(onSelectShell = vi.fn()) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  setLocale("ru");
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     configurable: true,
     value: {},
@@ -56,6 +58,22 @@ beforeEach(() => {
 afterEach(() => {
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   setLocale("ru");
+});
+
+describe("terminal placement setting", () => {
+  it("defaults to balanced and saves the user's selection", () => {
+    renderTerminalTab();
+
+    const select = screen.getByRole("combobox", {
+      name: "Порядок добавления терминалов",
+    });
+    expect(select).toHaveValue("balanced");
+
+    fireEvent.change(select, { target: { value: "snake" } });
+
+    expect(select).toHaveValue("snake");
+    expect(localStorage.getItem("modelcrew.terminalSpawnMode")).toBe("snake");
+  });
 });
 
 describe("Git Bash setup", () => {

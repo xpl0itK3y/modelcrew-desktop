@@ -13,8 +13,11 @@ import {
   MIN_TERMINAL_FONT_SIZE,
   loadEagerSessionRestore,
   loadTerminalHistoryIsolation,
+  loadTerminalSpawnMode,
   saveEagerSessionRestore,
   saveTerminalHistoryIsolation,
+  saveTerminalSpawnMode,
+  type TerminalSpawnMode,
 } from "../../terminal/preferences";
 import { ConfirmDialog } from "../ConfirmDialog";
 import {
@@ -70,6 +73,9 @@ export function TerminalTab(props: TerminalTabProps) {
   );
   const [eagerRestore, setEagerRestore] = useState(() =>
     loadEagerSessionRestore(),
+  );
+  const [spawnMode, setSpawnMode] = useState<TerminalSpawnMode>(() =>
+    loadTerminalSpawnMode(),
   );
   const fontSizeProgress =
     ((props.terminalFontSize - MIN_TERMINAL_FONT_SIZE) /
@@ -322,6 +328,32 @@ export function TerminalTab(props: TerminalTabProps) {
               const isolated = value === "panel";
               setHistoryIsolated(isolated);
               saveTerminalHistoryIsolation(isolated);
+            }}
+          />
+        }
+      />
+
+      <SettingRow
+        title={t("settings.terminalSpawnMode")}
+        description={t("settings.terminalSpawnModeNote")}
+        control={
+          <SettingsSelect
+            label={t("settings.terminalSpawnMode")}
+            value={spawnMode}
+            options={[
+              {
+                value: "balanced",
+                label: t("settings.terminalSpawnBalanced"),
+              },
+              { value: "snake", label: t("settings.terminalSpawnSnake") },
+              {
+                value: "centerOut",
+                label: t("settings.terminalSpawnCenterOut"),
+              },
+            ]}
+            onChange={(value) => {
+              setSpawnMode(value);
+              saveTerminalSpawnMode(value);
             }}
           />
         }
