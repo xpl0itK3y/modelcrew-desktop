@@ -341,10 +341,7 @@ describe("Settings search", () => {
 
     fireEvent.change(searchBox(), { target: { value: "агенты" } });
 
-    // Слово встречается и в разделе про инструменты агентов — там оно тоже
-    // должно находиться; разделы без него уходят.
-    expect(screen.queryByRole("tab", { name: "Внешний вид" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "Агенты" })).toHaveAttribute(
       "aria-selected",
       "true",

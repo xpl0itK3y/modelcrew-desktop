@@ -10,20 +10,24 @@ import {
 type PageProps = {
   section: SettingsSectionId;
   title: string;
-  intro: string;
+  // У раздела-заглушки вступления нет: заголовка и одного слова достаточно.
+  intro?: string;
+  // Слова, которых нет на странице, но по которым раздел ищут (имена
+  // серверов MCP).
+  keywords?: string;
   children: ReactNode;
 };
 
 export function SettingsPage(props: PageProps) {
   const matched = useSettingsPageEntry(
     props.section,
-    `${props.title} ${props.intro}`,
+    [props.title, props.intro, props.keywords].filter(Boolean).join(" "),
   );
   return (
     <SettingsSectionProvider section={props.section} matched={matched}>
       <div className="settings-page">
         <h2 className="settings-page-title">{props.title}</h2>
-        <p className="settings-page-intro">{props.intro}</p>
+        {props.intro && <p className="settings-page-intro">{props.intro}</p>}
         <div className="settings-rows">{props.children}</div>
       </div>
     </SettingsSectionProvider>

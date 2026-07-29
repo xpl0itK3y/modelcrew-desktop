@@ -399,8 +399,6 @@ export const ru = {
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",
   "settings.tabMcp": "MCP",
-  "settings.mcpIntro":
-    "Серверы MCP, которыми пользуются агенты в терминалах: CodeGraph, CocoIndex и любые свои. Пока они настраиваются в конфигах самих агентов.",
   "settings.tabNotifications": "Уведомления",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Аккаунт",

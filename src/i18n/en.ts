@@ -400,8 +400,6 @@ export const en: Record<MessageKey, string> = {
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
   "settings.tabMcp": "MCP",
-  "settings.mcpIntro":
-    "The MCP servers agents use inside terminals: CodeGraph, CocoIndex and your own. For now they are configured in each agent's own config.",
   "settings.tabNotifications": "Notifications",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Account",
