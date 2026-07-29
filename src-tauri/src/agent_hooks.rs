@@ -14,6 +14,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{Emitter, Manager};
 
+use crate::command_error::{CommandError, CommandResult, ErrorCode};
+
 const EVENTS_DIR: &str = "agent-events";
 const HELPER_NAME: &str = "modelcrew-agent-notify.sh";
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
@@ -406,6 +408,40 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
         write_json_atomically(&path, &settings)?;
     }
     Ok(hook_state(app, agent))
+}
+
+/// Состояние подключения по всем агентам, которых знает фронтенд.
+#[tauri::command]
+pub fn agent_hook_status(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    agents: Vec<String>,
+) -> CommandResult<Vec<AgentHookState>> {
+    crate::ensure_main_window(&window)?;
+    Ok(agents
+        .iter()
+        .map(|agent| hook_state(&app, agent))
+        .collect())
+}
+
+/// Подключает или снимает хук. Правка чужого конфига — только по явному
+/// действию пользователя, поэтому команда ничего не делает сама по себе.
+#[tauri::command]
+pub fn agent_hook_set(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    agent: String,
+    enabled: bool,
+) -> CommandResult<AgentHookState> {
+    crate::ensure_main_window(&window)?;
+    if hook_config_path(&agent, &home_dir(&app).unwrap_or_default()).is_none() {
+        return Err(CommandError::new(ErrorCode::AgentHookUnsupported).with_context("agent", &agent));
+    }
+    set_hook(&app, &agent, enabled).map_err(|error| {
+        CommandError::new(ErrorCode::AgentHookUpdateFailed)
+            .with_context("agent", &agent)
+            .with_debug(error)
+    })
 }
 
 #[cfg(test)]

@@ -372,6 +372,12 @@ export const en: Record<MessageKey, string> = {
   "settings.agentResumeInsert": "Type the command",
   "settings.agentResumeAuto": "Run automatically",
   "settings.agentAlerts": "Agent alerts",
+  "settings.agentHook": "Notifications from {agent}",
+  "settings.agentHookNote":
+    "The agent itself reports that it finished a turn or needs an answer. Without this the app only guesses from panel output: a bell, or a long enough silence.",
+  "settings.agentHookFile": "Edits {file}; a copy from before the change is kept beside it.",
+  "settings.agentHookFailed":
+    "Could not change the agent config — it was left as it was. Check the file permissions and that it is valid JSON.",
   "settings.agentAlertsNote":
     "Sound and a system notification when an out-of-sight agent finishes, asks a question, needs permission, or fails. Structured terminal notifications are classified separately; bell and silence after activity remain fallbacks. Waiting panels are counted on the app icon badge.",
   "terminal.agentWaiting": "{agent} is waiting for your reply",
