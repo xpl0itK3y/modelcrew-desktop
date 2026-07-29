@@ -200,10 +200,22 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
         "copilot" => Some(home.join(".copilot/hooks/modelcrew.json")),
         "opencode" => Some(home.join(".config/opencode/plugin/modelcrew-notify.js")),
         "grok" => Some(home.join(".grok/config.toml")),
+        // Форк opencode: каталог зависит от того, как его собрали.
+        "kilocode" => kilo_home(home).map(|dir| dir.join("plugin/modelcrew-notify.js")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
         // либо у самого CLI уведомлений нет.
         _ => None,
     }
+}
+
+/// Каталог kilocode: имя зависит от дистрибуции форка, берём существующий.
+fn kilo_home(home: &Path) -> Option<PathBuf> {
+    let candidates = [home.join(".config/kilo"), home.join(".config/kilocode")];
+    candidates
+        .iter()
+        .find(|dir| dir.is_dir())
+        .or(candidates.first())
+        .cloned()
 }
 
 /// Секция, дописываемая в конец чужого конфига. Пара «маркер, блок»: по
@@ -236,6 +248,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "copilot" => Some(home.join(".copilot")),
         "opencode" => Some(home.join(".config/opencode")),
         "grok" => Some(home.join(".grok")),
+        "kilocode" => kilo_home(home),
         _ => None,
     }
 }
@@ -259,7 +272,7 @@ fn own_file_body(agent: &str, helper: &Path) -> Option<String> {
             }))
             .ok()?,
         ),
-        "opencode" => Some(opencode_plugin(helper)),
+        "opencode" | "kilocode" => Some(opencode_plugin(agent)),
         _ => None,
     }
 }
@@ -268,8 +281,13 @@ fn own_file_body(agent: &str, helper: &Path) -> Option<String> {
 /// `"session.idle"`: тот не вызывается ни разу, проверено на живой сессии.
 /// Хелпер здесь не нужен — плагин уже внутри процесса панели и видит её
 /// окружение, поэтому кладёт событие сам.
-fn opencode_plugin(_helper: &Path) -> String {
-    r#"// Создан ModelCrew. Сообщает приложению, что агент в этой панели затих.
+fn opencode_plugin(agent: &str) -> String {
+    // Тело — обычная строка с одной подстановкой: JS здесь полон `${...}`, и
+    // отдавать его форматтеру Rust значит драться с ним за каждую скобку.
+    OPENCODE_PLUGIN.replace("__AGENT__", agent)
+}
+
+const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew. Сообщает приложению, что агент в этой панели затих.
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -287,7 +305,7 @@ export const ModelCrewNotify = async () => ({
       writeFileSync(
         `${base}.tmp`,
         JSON.stringify({
-          agent: "opencode",
+          agent: "__AGENT__",
           panelId,
           payload: { type: "session.idle" },
         }),
@@ -298,9 +316,7 @@ export const ModelCrewNotify = async () => ({
     }
   },
 });
-"#
-    .to_string()
-}
+"#;
 
 /// Команда для конфига агента. Путь к хелперу лежит в «Application Support» —
 /// с пробелом, поэтому берётся в кавычки; одинарная кавычка внутри пути
@@ -559,7 +575,7 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 4] = ["claude", "copilot", "opencode", "grok"];
+const SUPPORTED_AGENTS: [&str; 5] = ["claude", "copilot", "opencode", "grok", "kilocode"];
 
 /// Подключение через окружение панели — самый безопасный вид: ничего не
 /// пишется в чужие файлы и действует только внутри наших терминалов.
@@ -797,6 +813,24 @@ mod tests {
     }
 
     #[test]
+    fn a_fork_names_itself_in_the_event_it_writes() {
+        // Иначе панель kilocode подписалась бы как opencode.
+        assert!(opencode_plugin("kilocode").contains(r#"agent: "kilocode""#));
+        assert!(opencode_plugin("opencode").contains(r#"agent: "opencode""#));
+        assert!(!opencode_plugin("kilocode").contains("__AGENT__"));
+    }
+
+    #[test]
+    fn the_kilocode_directory_falls_back_to_a_known_name() {
+        let home = Path::new("/home/x");
+
+        // Ни одного каталога нет — берём первый вариант, но ставить туда
+        // ничего не будем: agent_is_present это отсечёт.
+        assert_eq!(kilo_home(home), Some(PathBuf::from("/home/x/.config/kilo")));
+        assert!(!agent_is_present("kilocode", home));
+    }
+
+    #[test]
     fn the_grok_section_asks_for_the_sequence_our_scanner_reads() {
         let (marker, block) = append_section("grok").expect("grok поддержан");
 
@@ -849,7 +883,7 @@ mod tests {
 
     #[test]
     fn the_opencode_plugin_uses_the_shape_that_actually_fires() {
-        let body = opencode_plugin(&helper());
+        let body = opencode_plugin("opencode");
 
         // Документированный ключ "session.idle" не вызывается ни разу —
         // проверено на живой сессии, поэтому обработчик именно `event`.
