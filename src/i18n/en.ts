@@ -380,6 +380,7 @@ export const en: Record<MessageKey, string> = {
   "terminal.agentCompleted": "{agent} finished the turn",
   "terminal.agentError": "{agent} stopped with an error",
   "terminal.agentProject": "Project: {project}",
+  "terminal.agentsWaitingMore": "{count} more agents are waiting",
   "settings.terminalHistory": "Command history",
   "settings.terminalHistoryPerPanel": "Per panel",
   "settings.terminalHistoryShared": "Shared (system default)",

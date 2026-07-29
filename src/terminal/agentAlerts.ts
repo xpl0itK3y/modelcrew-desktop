@@ -606,8 +606,65 @@ async function deliverAgentAlert(
     .filter(Boolean)
     .join("\n");
   playNotificationSound();
-  void sendSystemNotification(
+  queueAlertBanner(
     translate(alertTranslationKey(kind), { agent }),
     body,
+    [agent, project].filter(Boolean).join(" · "),
   );
 }
+
+// Агенты часто заканчивают кучно: двенадцать панелей — двенадцать баннеров
+// подряд, и разобрать их уже нельзя. Первый показываем сразу, остальные за
+// короткое окно собираем в один общий. Звук трогать не нужно: элемент <audio>
+// один на приложение и сам перематывается, поэтому пачка звучит одним щелчком.
+const ALERT_BURST_MS = 1_500;
+// Больше трёх строк в баннере всё равно не читают — остальные прячем за «…».
+
+type PendingBanner = { title: string; body: string; line: string };
+
+let burst: PendingBanner[] = [];
+let burstTimer: number | undefined;
+
+function queueAlertBanner(title: string, body: string, line: string): void {
+  if (burstTimer !== undefined) {
+    burst.push({ title, body, line });
+    return;
+  }
+  burst = [];
+  burstTimer = window.setTimeout(flushAlertBurst, ALERT_BURST_MS);
+  void sendSystemNotification(title, body);
+}
+
+// Сбрасывает окно схлопывания вместе с накопленным: пачка привязана к
+// текущему прогону, тащить её через перезапуск таймеров незачем.
+export function resetAgentAlertBurst(): void {
+  if (burstTimer !== undefined) {
+    window.clearTimeout(burstTimer);
+    burstTimer = undefined;
+  }
+  burst = [];
+}
+
+function flushAlertBurst(): void {
+  burstTimer = undefined;
+  const pending = burst;
+  burst = [];
+  if (pending.length === 0) {
+    return;
+  }
+  // Один отставший — показываем его как обычно, сводка тут была бы страннее.
+  if (pending.length === 1) {
+    void sendSystemNotification(pending[0].title, pending[0].body);
+    return;
+  }
+  const lines = pending.slice(0, MAX_BURST_LINES).map((item) => item.line);
+  if (pending.length > lines.length) {
+    lines.push("…");
+  }
+  void sendSystemNotification(
+    translate("terminal.agentsWaitingMore", { count: pending.length }),
+    lines.join("\n"),
+  );
+}
+
+const MAX_BURST_LINES = 3;

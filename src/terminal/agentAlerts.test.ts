@@ -36,6 +36,7 @@ import {
   getAgentAttentionCount,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
+  resetAgentAlertBurst,
   scanTerminalAttention,
   setPanelTailResolver,
   setWorkspaceNameResolver,
@@ -325,8 +326,53 @@ describe("trackAgentOutput", () => {
     mocks.windowFocused.value = false;
     mocks.record.value = { agentId: "claude", command: "claude" };
     setPanelTailResolver(() => null);
+    resetAgentAlertBurst();
     clearAgentAttention("panel-1");
     clearAgentAttention("panel-2");
+  });
+
+  it("collapses a burst of agents finishing at once into one extra banner", async () => {
+    setWorkspaceNameResolver(() => "ModelCrew");
+    for (const id of ["burst-1", "burst-2", "burst-3", "burst-4"]) {
+      trackAgentOutput(engaged(id), id, "\x07", () => hidden);
+      await settle();
+    }
+
+    // Первый баннер пришёл сразу, остальные ждут окна.
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(2);
+    expect(mocks.systemNotification).toHaveBeenLastCalledWith(
+      "Ждут ответа ещё 3",
+      "Claude Code · ModelCrew\nClaude Code · ModelCrew\nClaude Code · ModelCrew",
+    );
+
+    for (const id of ["burst-1", "burst-2", "burst-3", "burst-4"]) {
+      clearAgentAttention(id);
+    }
+    vi.useRealTimers();
+  });
+
+  it("shows a single straggler as an ordinary alert", async () => {
+    setWorkspaceNameResolver(() => null);
+    trackAgentOutput(engaged("lone-1"), "lone-1", "\x07", () => hidden);
+    await settle();
+    trackAgentOutput(engaged("lone-2"), "lone-2", "\x07", () => hidden);
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // Сводка из одного была бы страннее самого уведомления.
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(2);
+    expect(mocks.systemNotification).toHaveBeenLastCalledWith(
+      expect.stringContaining("Claude Code"),
+      expect.any(String),
+    );
+    clearAgentAttention("lone-1");
+    clearAgentAttention("lone-2");
+    vi.useRealTimers();
   });
 
   it("falls back to the panel tail when the agent sent no text of its own", async () => {
