@@ -36,6 +36,7 @@ import {
   getAgentAttentionCount,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
+  raiseAgentAlert,
   resetAgentAlertBurst,
   scanTerminalAttention,
   setPanelTailResolver,
@@ -647,6 +648,80 @@ describe("trackAgentOutput", () => {
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(2);
     clearAgentAttention("throttle-panel");
+    vi.useRealTimers();
+  });
+});
+
+describe("alert throttling", () => {
+  const hidden = { visible: false, workspaceId: "ws-1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    localStorage.clear();
+    mocks.windowFocused.value = false;
+    mocks.record.value = { agentId: "claude", command: "claude" };
+    resetAgentAlertBurst();
+  });
+
+  it("lets a more demanding alert through the quiet window", async () => {
+    clearAgentAttention("escalate-panel");
+    void raiseAgentAlert("escalate-panel", "completed", hidden);
+    await settle();
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+
+    // Через три секунды агент упёрся в запрос разрешения: работа встала, и
+    // молчание здесь обходится дороже лишнего баннера.
+    await vi.advanceTimersByTimeAsync(3_000);
+    void raiseAgentAlert("escalate-panel", "permission", hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(2);
+    expect(mocks.systemNotification).toHaveBeenLastCalledWith(
+      expect.stringMatching(/(permission|разреш)/i),
+      expect.any(String),
+    );
+    clearAgentAttention("escalate-panel");
+    vi.useRealTimers();
+  });
+
+  it("keeps a less demanding alert inside the quiet window", async () => {
+    clearAgentAttention("calm-panel");
+    void raiseAgentAlert("calm-panel", "permission", hidden);
+    await settle();
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+
+    // «Закончил» и повтор того же запроса — тот же самый разговор, второй
+    // раз дёргать незачем.
+    await vi.advanceTimersByTimeAsync(3_000);
+    void raiseAgentAlert("calm-panel", "completed", hidden);
+    await settle();
+    void raiseAgentAlert("calm-panel", "permission", hidden);
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+
+    // Окно истекло — снова можно даже с самым тихим сигналом.
+    await vi.advanceTimersByTimeAsync(16_000);
+    void raiseAgentAlert("calm-panel", "idle", hidden);
+    await settle();
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(2);
+    clearAgentAttention("calm-panel");
+    vi.useRealTimers();
+  });
+
+  it("shows one banner when two alerts race for the same panel", async () => {
+    clearAgentAttention("race-panel");
+    // Хук агента и OSC из того же вывода приходят вместе: пока первый сигнал
+    // ждал ответа о фокусе окна, второй успевал пройти ту же проверку.
+    void raiseAgentAlert("race-panel", "completed", hidden);
+    void raiseAgentAlert("race-panel", "completed", hidden);
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    clearAgentAttention("race-panel");
     vi.useRealTimers();
   });
 });

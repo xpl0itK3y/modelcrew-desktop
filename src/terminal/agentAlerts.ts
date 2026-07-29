@@ -322,6 +322,24 @@ export type AgentAlertContext = {
 export type PreciseAgentAlertKind =
   "permission" | "question" | "completed" | "error" | "waiting";
 
+export type AgentAlertKind = PreciseAgentAlertKind | "bell" | "idle";
+
+// Насколько сигнал требователен к пользователю. По этому же порядку из пачки
+// уведомлений одного чанка выбирается главное и решается, стоит ли тревожить
+// повторно: «закончил» после «нужно разрешение» — это тот же разговор, а вот
+// «нужно разрешение» после «закончил» означает, что работа встала. Догадки
+// стоят там же, где точные сигналы, которые они заменяют: звонок — это
+// «ждёт», тишина — «закончил».
+const ALERT_PRIORITY: Record<AgentAlertKind, number> = {
+  error: 5,
+  permission: 4,
+  question: 3,
+  waiting: 2,
+  bell: 2,
+  completed: 1,
+  idle: 1,
+};
+
 const MAX_AGENT_ALERT_DETAIL_CHARS = 200;
 
 export function formatAgentAlertDetail(
@@ -379,20 +397,15 @@ function mostImportantNotification(
   kind: PreciseAgentAlertKind;
   notification: TerminalAttentionNotification;
 } {
-  const priority: Record<PreciseAgentAlertKind, number> = {
-    error: 5,
-    permission: 4,
-    question: 3,
-    waiting: 2,
-    completed: 1,
-  };
   return notifications
     .map((notification) => ({
       kind: classifyTerminalNotification(notification),
       notification,
     }))
     .reduce((selected, candidate) =>
-      priority[candidate.kind] > priority[selected.kind] ? candidate : selected,
+      ALERT_PRIORITY[candidate.kind] > ALERT_PRIORITY[selected.kind]
+        ? candidate
+        : selected,
     );
 }
 
@@ -505,9 +518,25 @@ export function setPanelTailResolver(
 
 // Повторные сигналы одной панели не чаще, чем раз в этот интервал.
 const MIN_ALERT_GAP_MS = 15_000;
-const lastAlertAt = new Map<string, number>();
 
-export type AgentAlertKind = PreciseAgentAlertKind | "bell" | "idle";
+type DeliveredAlert = { at: number; priority: number };
+
+const lastAlert = new Map<string, DeliveredAlert>();
+
+// Внутри окна тишины пропускаем только то, что требовательнее уже показанного:
+// иначе запрос разрешения, пришедший через секунду после «закончил», пропал бы
+// молча, и пользователь ушёл бы от вставшего агента.
+function isAlertThrottled(
+  terminalId: string,
+  kind: AgentAlertKind,
+  now: number,
+): boolean {
+  const previous = lastAlert.get(terminalId);
+  if (!previous || now - previous.at >= MIN_ALERT_GAP_MS) {
+    return false;
+  }
+  return ALERT_PRIORITY[kind] <= previous.priority;
+}
 
 function alertTranslationKey(kind: AgentAlertKind) {
   switch (kind) {
@@ -569,8 +598,9 @@ async function deliverAgentAlert(
   if (!loadAgentAlertsEnabled()) {
     return;
   }
-  const now = Date.now();
-  if (now - (lastAlertAt.get(terminalId) ?? 0) < MIN_ALERT_GAP_MS) {
+  // Ранняя отсечка: заведомо подавленный сигнал не должен даже ходить за
+  // состоянием окна.
+  if (isAlertThrottled(terminalId, kind, Date.now())) {
     return;
   }
   // Пользователь и так смотрит на панель — не спамим.
@@ -584,7 +614,15 @@ async function deliverAgentAlert(
   if (context.visible && windowFocused) {
     return;
   }
-  lastAlertAt.set(terminalId, now);
+  // Проверяем ещё раз и сразу занимаем окно, не разрывая это ожиданием: пока
+  // мы спрашивали про фокус, сигнал той же панели мог дойти до конца, и на
+  // одно событие пришло бы два баннера. Отметку ставим только здесь — сигнал,
+  // смолчавший из-за того, что панель на виду, окна не тратит.
+  const now = Date.now();
+  if (isAlertThrottled(terminalId, kind, now)) {
+    return;
+  }
+  lastAlert.set(terminalId, { at: now, priority: ALERT_PRIORITY[kind] });
   attention.add(terminalId);
   emitAttention();
 
