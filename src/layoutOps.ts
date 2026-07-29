@@ -13,6 +13,7 @@ import {
   PANEL_MIN_WIDTH,
 } from "./constants";
 import type { Workspace } from "./persist";
+import type { TerminalSpawnMode } from "./terminal/preferences";
 
 // Swap позиций двух панелей через сериализованный layout: меняем их id
 // местами в дереве и восстанавливаем. Инстансы xterm живут вне React,
@@ -134,18 +135,162 @@ export function addPanel(
   });
 }
 
-// Новый терминал встаёт в сетку: делим самую большую группу вдоль её
-// длинной стороны. Вкладок нет — один терминал = одна панель, поэтому
-// при упоре в минимумы 240×160 новый терминал не создаём вовсе.
+type PanelDirection = "left" | "right" | "above" | "below";
+
+export type TerminalGridGroup = {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+export type TerminalPlacementPlan = {
+  referenceGroupId?: string;
+  direction: PanelDirection;
+};
+
+type AddTerminalAutoGridOptions = {
+  mode?: TerminalSpawnMode;
+  onBlocked?: (reason: "limit" | "space") => void;
+};
+
+// Разброс по вертикали, в пределах которого группы считаются одной строкой.
+const ROW_TOLERANCE = 30;
+
+// Строки восстанавливаются из пикселей, а не из дерева dockview: после свапов
+// и ручных переносов сетка всё равно читается как строки.
+function splitRows(
+  groups: readonly TerminalGridGroup[],
+): TerminalGridGroup[][] {
+  const sorted = [...groups].sort((a, b) => {
+    if (Math.abs(a.top - b.top) > ROW_TOLERANCE) {
+      return a.top - b.top;
+    }
+    return a.left - b.left;
+  });
+  const rows: TerminalGridGroup[][] = [];
+  let currentTop = Number.NEGATIVE_INFINITY;
+  for (const group of sorted) {
+    if (Math.abs(group.top - currentTop) > ROW_TOLERANCE) {
+      rows.push([]);
+      currentTop = group.top;
+    }
+    rows[rows.length - 1].push(group);
+  }
+  return rows;
+}
+
+type GridShapePlan = { kind: "widen"; rowIndex: number } | { kind: "newRow" };
+
+function rowFitsAnotherCell(row: readonly TerminalGridGroup[]): boolean {
+  const width = row.reduce((total, group) => total + group.width, 0);
+  return width / (row.length + 1) >= PANEL_MIN_WIDTH;
+}
+
+// Форма сетки: расширить строку или завести новую. Размеры считает dockview
+// (Sizing.Distribute — равные строки и равные ячейки внутри строки), поэтому
+// формулы «влезет ли» одни на все режимы, и предел ёмкости у них общий.
+function planGridShape(
+  rows: readonly TerminalGridGroup[][],
+  mode: TerminalSpawnMode,
+): GridShapePlan | null {
+  const total = rows.reduce((count, row) => count + row.length, 0);
+  const targetColumns = Math.ceil(Math.sqrt(total + 1));
+  const gridHeight = rows.reduce((height, row) => height + row[0].height, 0);
+  const newRowFits = gridHeight / (rows.length + 1) >= PANEL_MIN_HEIGHT;
+
+  // Змейка идёт строками подряд: пока нижняя строка не добрала колонок,
+  // следующий терминал остаётся в ней — рядом с предыдущим.
+  const bottom = rows.length - 1;
+  if (
+    mode === "snake" &&
+    rows[bottom].length < targetColumns &&
+    rowFitsAnotherCell(rows[bottom])
+  ) {
+    return { kind: "widen", rowIndex: bottom };
+  }
+
+  let shortest = 0;
+  for (let index = 1; index < rows.length; index += 1) {
+    if (rows[index].length < rows[shortest].length) {
+      shortest = index;
+    }
+  }
+  if (
+    rowFitsAnotherCell(rows[shortest]) &&
+    (rows[shortest].length < targetColumns || !newRowFits)
+  ) {
+    return { kind: "widen", rowIndex: shortest };
+  }
+  return newRowFits ? { kind: "newRow" } : null;
+}
+
+// Строку уже выбрала форма сетки — режим решает только, с какого конца
+// встать. Это и есть вся разница между режимами: terminal index → колонка.
+function planRowEntry(
+  row: readonly TerminalGridGroup[],
+  rowIndex: number,
+  mode: TerminalSpawnMode,
+): TerminalPlacementPlan {
+  const toLeft: TerminalPlacementPlan = {
+    referenceGroupId: row[0].id,
+    direction: "left",
+  };
+  const toRight: TerminalPlacementPlan = {
+    referenceGroupId: row[row.length - 1].id,
+    direction: "right",
+  };
+  if (mode === "snake") {
+    // Чётные строки слева направо, нечётные — справа налево.
+    return rowIndex % 2 === 0 ? toRight : toLeft;
+  }
+  if (mode === "centerOut") {
+    // Стороны чередуются, поэтому первый терминал строки остаётся в середине.
+    return row.length % 2 === 1 ? toLeft : toRight;
+  }
+  return toRight;
+}
+
+function planNewRow(
+  rowCount: number,
+  mode: TerminalSpawnMode,
+): TerminalPlacementPlan {
+  // centerOut растит сетку в обе стороны, чтобы первые терминалы остались по
+  // центру; остальные режимы всегда добавляют строку снизу.
+  return mode === "centerOut" && rowCount % 2 === 1
+    ? { direction: "above" }
+    : { direction: "below" };
+}
+
+export function planTerminalPlacement(
+  groups: readonly TerminalGridGroup[],
+  mode: TerminalSpawnMode,
+): TerminalPlacementPlan | null {
+  if (groups.length === 0) {
+    return null;
+  }
+  const rows = splitRows(groups);
+  const shape = planGridShape(rows, mode);
+  if (!shape) {
+    return null;
+  }
+  return shape.kind === "newRow"
+    ? planNewRow(rows.length, mode)
+    : planRowEntry(rows[shape.rowIndex], shape.rowIndex, mode);
+}
+
+// Вкладок нет — один терминал = одна панель. Режим влияет только на новую
+// панель; существующие и восстановленные раскладки не перестраиваются.
 export function addTerminalAutoGrid(
   api: DockviewApi,
   workspaceId: string,
   sessionId: string,
-  onBlocked?: (reason: "limit" | "space") => void,
+  options: AddTerminalAutoGridOptions = {},
 ) {
   // Жёсткий предел раньше пространственного: 12 терминалов на сессию.
   if (api.panels.length >= MAX_TERMINALS) {
-    onBlocked?.("limit");
+    options.onBlocked?.("limit");
     return;
   }
   const groups = api.groups;
@@ -154,54 +299,35 @@ export function addTerminalAutoGrid(
     return;
   }
 
-  // Раскладка строится СТРОКАМИ: новая панель встаёт в самую короткую
-  // строку, а когда строки заполнены — полноширинной строкой снизу.
-  // Размеры рассчитывает Dockview; ручное перетаскивание разделителей
-  // отключено на уровне корневой сетки.
-  const sorted = [...groups].sort((a, b) => {
-    const rectA = a.element.getBoundingClientRect();
-    const rectB = b.element.getBoundingClientRect();
-    if (Math.abs(rectA.top - rectB.top) > 30) {
-      return rectA.top - rectB.top;
-    }
-    return rectA.left - rectB.left;
+  const geometry = groups.map((group) => {
+    const rect = group.element.getBoundingClientRect();
+    return {
+      id: group.id,
+      left: rect.left,
+      top: rect.top,
+      width: group.width,
+      height: group.height,
+    };
   });
-  const rows: DockviewGroupPanel[][] = [];
-  let currentTop = Number.NEGATIVE_INFINITY;
-  for (const group of sorted) {
-    const top = group.element.getBoundingClientRect().top;
-    if (Math.abs(top - currentTop) > 30) {
-      rows.push([]);
-      currentTop = top;
-    }
-    rows[rows.length - 1].push(group);
+  const plan = planTerminalPlacement(geometry, options.mode ?? "balanced");
+  if (!plan) {
+    options.onBlocked?.("space");
+    return;
   }
-
-  let shortest = rows[0];
-  for (const row of rows) {
-    if (row.length < shortest.length) {
-      shortest = row;
-    }
+  const referenceGroup = plan.referenceGroupId
+    ? groups.find((group) => group.id === plan.referenceGroupId)
+    : undefined;
+  if (plan.referenceGroupId && !referenceGroup) {
+    options.onBlocked?.("space");
+    return;
   }
-  const targetColumns = Math.ceil(Math.sqrt(groups.length + 1));
-  const rowWidth = shortest.reduce((width, group) => width + group.width, 0);
-  const widenFits = rowWidth / (shortest.length + 1) >= PANEL_MIN_WIDTH;
-  const gridHeight = rows.reduce((height, row) => height + row[0].height, 0);
-  const newRowFits = gridHeight / (rows.length + 1) >= PANEL_MIN_HEIGHT;
 
   // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
   const before = snapshotGroupRects(api);
-  if (widenFits && (shortest.length < targetColumns || !newRowFits)) {
-    addPanel(api, workspaceId, sessionId, {
-      group: shortest[shortest.length - 1],
-      direction: "right",
-    });
-  } else if (newRowFits) {
-    addPanel(api, workspaceId, sessionId, { direction: "below" });
-  } else {
-    onBlocked?.("space");
-    return;
-  }
+  addPanel(api, workspaceId, sessionId, {
+    ...(referenceGroup ? { group: referenceGroup } : {}),
+    direction: plan.direction,
+  });
   flipGroups(api, before, 200);
 }
 

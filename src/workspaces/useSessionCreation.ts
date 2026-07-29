@@ -11,6 +11,7 @@ import { appActions } from "../appActions";
 import { localizeBackendError, translate } from "../i18n";
 import { MAX_TERMINALS } from "../constants";
 import { addTerminalAutoGrid } from "../layoutOps";
+import { loadTerminalSpawnMode } from "../terminal/preferences";
 import {
   activeSession,
   createTerminalSession,
@@ -164,13 +165,15 @@ export function useSessionCreation({
         if (!api) {
           return;
         }
-        addTerminalAutoGrid(api, workspaceId, sessionId, (reason) =>
-          showToast(
-            reason === "limit"
-              ? translate("layout.terminalLimit", { max: MAX_TERMINALS })
-              : translate("layout.noSplitSpace"),
-          ),
-        );
+        addTerminalAutoGrid(api, workspaceId, sessionId, {
+          mode: loadTerminalSpawnMode(),
+          onBlocked: (reason) =>
+            showToast(
+              reason === "limit"
+                ? translate("layout.terminalLimit", { max: MAX_TERMINALS })
+                : translate("layout.noSplitSpace"),
+            ),
+        });
       };
       if (!isTauri) {
         addToGrid();
