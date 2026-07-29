@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Вывод копится и уходит во фронт пачками: либо раз в BATCH_WINDOW,
@@ -15,6 +15,14 @@ const BATCH_WINDOW: Duration = Duration::from_millis(8);
 const MAX_BATCH_BYTES: usize = 32 * 1024;
 const READ_BUF_BYTES: usize = 8 * 1024;
 const KILL_ALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Каталог событий агентов: один на процесс, задаётся при старте приложения.
+/// Хук агента запускается внутри панели и берёт путь из окружения.
+static AGENT_EVENTS_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_agent_events_dir(dir: PathBuf) {
+    let _ = AGENT_EVENTS_DIR.set(dir);
+}
 
 pub struct SpawnOptions {
     pub id: String,
@@ -113,6 +121,13 @@ impl PtyManager {
                 .collect::<String>()
                 .to_ascii_lowercase();
             cmd.env("fish_history", format!("mc{fish_name}"));
+        }
+        // Хук агента запускается внутри панели и про неё ничего не знает:
+        // отдаём id панели и каталог событий через окружение, иначе
+        // уведомление некуда привязать.
+        cmd.env("MODELCREW_PANEL_ID", &opts.id);
+        if let Some(events) = AGENT_EVENTS_DIR.get() {
+            cmd.env("MODELCREW_EVENTS_DIR", events);
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.

@@ -9,6 +9,7 @@ compile_error!(
      instead of the embedded frontend — build through `tauri build`"
 );
 
+mod agent_hooks;
 mod agent_sessions;
 mod clipboard_images;
 mod command_error;
@@ -890,6 +891,7 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             spawn_title_watcher(app.handle().clone());
+            agent_hooks::install(app.handle());
             #[cfg(desktop)]
             setup_tray(app)?;
             Ok(())
@@ -1015,6 +1017,7 @@ mod tests {
     // проверок ниже.
     const MODULE_SOURCES: &[(&str, &str)] = &[
         ("lib.rs", LIB_RS),
+        ("agent_hooks.rs", include_str!("agent_hooks.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
