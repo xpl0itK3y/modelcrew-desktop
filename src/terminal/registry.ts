@@ -29,7 +29,11 @@ import {
   trackAgentOutput,
   type AgentAlertTracker,
 } from "./agentAlerts";
-import { extractPanelTail } from "./panelTail";
+import {
+  extractPanelTail,
+  joinWrappedRows,
+  type PanelRow,
+} from "./panelTail";
 import { getAppTheme, loadTheme, type ThemeId } from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
@@ -332,15 +336,21 @@ setPanelTailResolver((terminalId) => {
     return null;
   }
   const buffer = entry.term.buffer.active;
-  const rows: string[] = [];
+  const rows: PanelRow[] = [];
   for (
     let y = buffer.baseY + buffer.cursorY;
     y >= 0 && rows.length < TAIL_SCAN_ROWS;
     y -= 1
   ) {
-    rows.push(buffer.getLine(y)?.translateToString(true) ?? "");
+    const line = buffer.getLine(y);
+    if (!line) {
+      continue;
+    }
+    // Без обрезки хвостовых пробелов: у перенесённой строки они и есть
+    // граница слова, а лишние пробелы схлопнет разбор.
+    rows.push({ text: line.translateToString(false), wrapped: line.isWrapped });
   }
-  return extractPanelTail(rows.reverse());
+  return extractPanelTail(joinWrappedRows(rows.reverse()));
 });
 
 function injectPendingResume(entry: TerminalEntry): void {
