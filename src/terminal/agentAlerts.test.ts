@@ -128,6 +128,36 @@ describe("scanTerminalAttention", () => {
     ]);
   });
 
+  it("decodes UTF-8 text out of the raw PTY bytes", () => {
+    // PTY отдаёт байты: без декодирования кириллица в теле уведомления
+    // рассыпается на «Ð°Ð½Ð°Ð»Ð¾Ð³» — по символу на байт.
+    const bytes = new TextEncoder().encode(
+      "\x1b]777;notify;Codex;Odysseus — аналог ChatGPT с агентами\x07",
+    ).buffer;
+
+    const result = scanTerminalAttention(bytes, createAttentionScanState());
+
+    expect(result.notifications).toEqual([
+      {
+        protocol: "osc777",
+        title: "Codex",
+        body: "Odysseus — аналог ChatGPT с агентами",
+        types: [],
+      },
+    ]);
+  });
+
+  it("keeps a multi-byte character split across chunks", () => {
+    const bytes = new TextEncoder().encode("\x1b]9;Готово\x07");
+    // Разрез приходится на середину первой кириллической буквы.
+    const state = createAttentionScanState();
+    scanTerminalAttention(bytes.slice(0, 5).buffer, state);
+
+    const result = scanTerminalAttention(bytes.slice(5).buffer, state);
+
+    expect(result.notifications[0]?.title).toBe("Готово");
+  });
+
   it("scans binary chunks too", () => {
     const bytes = new Uint8Array([104, 7, 105]).buffer;
     expect(scanTerminalAttention(bytes, createAttentionScanState()).bells).toBe(

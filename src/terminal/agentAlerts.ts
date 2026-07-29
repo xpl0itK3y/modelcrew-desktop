@@ -28,6 +28,11 @@ export type AttentionScanState = {
   osc: string;
   oscOverflow: boolean;
   kitty: Record<string, KittyNotificationDraft>;
+  // PTY отдаёт сырые байты. Декодируем поток в UTF-8 до разбора, иначе текст
+  // уведомления собирается по байту на символ и кириллица превращается в
+  // «Ð°Ð½Ð°Ð»Ð¾Ð³». Декодер потоковый: многобайтовый символ переживает
+  // границу чанка.
+  decoder: TextDecoder;
 };
 
 export type TerminalAttentionNotification = {
@@ -46,6 +51,7 @@ export function createAttentionScanState(): AttentionScanState {
     osc: "",
     oscOverflow: false,
     kitty: {},
+    decoder: new TextDecoder(),
   };
 }
 
@@ -168,12 +174,14 @@ export function scanTerminalAttention(
   notifications: TerminalAttentionNotification[];
   state: AttentionScanState;
 } {
-  const bytes = typeof data === "string" ? null : new Uint8Array(data);
-  const length = bytes ? bytes.length : (data as string).length;
+  const text =
+    typeof data === "string"
+      ? data
+      : state.decoder.decode(new Uint8Array(data), { stream: true });
   let bells = 0;
   const notifications: TerminalAttentionNotification[] = [];
-  for (let index = 0; index < length; index += 1) {
-    const code = bytes ? bytes[index] : (data as string).charCodeAt(index);
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
     switch (state.mode) {
       case 0:
         if (code === 0x1b) {
