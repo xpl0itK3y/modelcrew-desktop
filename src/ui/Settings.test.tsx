@@ -168,6 +168,20 @@ describe("Settings sections", () => {
     ).toBeInTheDocument();
   });
 
+  it("marks the agent notification content row as beta and finds it by that word", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("tab", { name: "Уведомления" }));
+
+    expect(screen.getByText("Бета")).toBeVisible();
+
+    // Метка попадает в поиск: «бета» показывает обкатываемые настройки.
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "бета" },
+    });
+    expect(screen.getByText("Содержимое уведомлений агентов")).toBeVisible();
+    expect(screen.queryByText("Громкость уведомлений")).not.toBeInTheDocument();
+  });
+
   it("persists notification volume and restores it after reopening Settings", () => {
     localStorage.removeItem("modelcrew.notificationVolume");
     const first = renderSettings();

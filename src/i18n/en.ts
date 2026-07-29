@@ -423,7 +423,8 @@ export const en: Record<MessageKey, string> = {
     "OS-level banner when the window is unfocused: updates and announcements stay visible even with the app minimized.",
   "settings.agentAlertDetail": "Agent notification content",
   "settings.agentAlertDetailNote":
-    "Brief shows only the status and project. Detailed also includes a short message supplied by the agent.",
+    "Brief shows only the status and project. Detailed also includes the agent's message, or the last lines of the panel when the agent sent none.",
+  "settings.badgeBeta": "Beta",
   "settings.agentAlertDetailBrief": "Brief",
   "settings.agentAlertDetailDetailed": "Detailed",
   "settings.soundOff": "Off",

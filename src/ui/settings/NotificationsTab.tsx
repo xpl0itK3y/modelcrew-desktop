@@ -196,6 +196,7 @@ export function NotificationsTab() {
       <SettingRow
         title={t("settings.agentAlertDetail")}
         description={t("settings.agentAlertDetailNote")}
+        badge={t("settings.badgeBeta")}
         control={
           <SettingsSelect<AgentAlertDetailMode>
             label={t("settings.agentAlertDetail")}
