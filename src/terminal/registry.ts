@@ -313,6 +313,13 @@ const RESUME_QUIET_MS = 350;
 // Если оболочка молчит или бесконечно шумит — вводим команду принудительно.
 const RESUME_FALLBACK_MS = 3_000;
 
+// Панель, спрятанная развёрнутым соседом, из DOM не уходит: dockview лишь
+// обнуляет её размер. Для уведомлений это «не на виду» — иначе агент в
+// свёрнутой панели молчал бы, пока окно в фокусе.
+export function isPanelOnScreen(container: HTMLElement): boolean {
+  return container.isConnected && container.getBoundingClientRect().height > 0;
+}
+
 function injectPendingResume(entry: TerminalEntry): void {
   const data = entry.pendingResume;
   if (data === null) {
@@ -347,7 +354,7 @@ function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   // Детекция «агент ждёт»: принадлежность панели агенту проверяется в
   // момент сигнала, здесь только дешёвый учёт вывода.
   trackAgentOutput(entry.alerts, entry.id, data, () => ({
-    visible: entry.container.isConnected,
+    visible: isPanelOnScreen(entry.container),
     workspaceId: entry.workspaceId,
   }));
 }

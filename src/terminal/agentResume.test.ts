@@ -25,7 +25,12 @@ vi.mock("@tauri-apps/api/webview", () => ({
 }));
 
 import { rememberAgentProcess } from "../agents";
-import { destroyTerminal, ensureSpawned, getOrCreateTerminal } from "./registry";
+import {
+  destroyTerminal,
+  ensureSpawned,
+  getOrCreateTerminal,
+  isPanelOnScreen,
+} from "./registry";
 
 // У каждого теста свой проект: вторая панель того же агента в той же папке
 // получила бы команду со списком диалогов, а не «продолжить последний».
@@ -61,6 +66,21 @@ describe("auto-resumed agent panels", () => {
 
     expect(entry.pendingResume).toBe("claude --continue\r");
     expect(entry.alerts.engaged).toBe(true);
+  });
+
+  it("counts a panel hidden behind a maximized neighbour as off screen", () => {
+    // dockview не убирает такую панель из DOM, а обнуляет её размер.
+    const container = document.createElement("div");
+    expect(isPanelOnScreen(container)).toBe(false);
+
+    document.body.appendChild(container);
+    container.getBoundingClientRect = () => ({ height: 0 }) as DOMRect;
+    expect(isPanelOnScreen(container)).toBe(false);
+
+    container.getBoundingClientRect = () => ({ height: 320 }) as DOMRect;
+    expect(isPanelOnScreen(container)).toBe(true);
+
+    container.remove();
   });
 
   it("stays untouched when the command is only typed into the prompt", async () => {
