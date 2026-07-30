@@ -1,7 +1,14 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 import { Settings } from "./Settings";
+import { SettingsLazy } from "./SettingsLazy";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => []),
@@ -19,21 +26,21 @@ vi.mock("../sound", async (importOriginal) => {
   };
 });
 
+const settingsProps = {
+  themeId: "midnight",
+  accent: "#4ade80",
+  shell: null,
+  shellBusy: false,
+  terminalFontSize: 14,
+  onSelectTheme: vi.fn(),
+  onSelectAccent: vi.fn(),
+  onSelectShell: vi.fn(),
+  onSelectTerminalFontSize: vi.fn(),
+  onClose: vi.fn(),
+} as const;
+
 function renderSettings() {
-  return render(
-    <Settings
-      themeId="midnight"
-      accent="#4ade80"
-      shell={null}
-      shellBusy={false}
-      terminalFontSize={14}
-      onSelectTheme={vi.fn()}
-      onSelectAccent={vi.fn()}
-      onSelectShell={vi.fn()}
-      onSelectTerminalFontSize={vi.fn()}
-      onClose={vi.fn()}
-    />,
-  );
+  return render(<Settings {...settingsProps} />);
 }
 
 const searchBox = () => screen.getByRole("searchbox");
@@ -460,5 +467,21 @@ describe("Settings search", () => {
     expect(searchBox()).toHaveValue("");
     expect(screen.queryAllByRole("tab")).toHaveLength(8);
     expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
+  });
+
+  // Диалог грузится отдельным чанком, и в приложении он приходит только через
+  // эту обёртку: остальные проверки берут Settings напрямую и подмену импорта
+  // не увидели бы вовсе.
+  it("arrives through the lazy wrapper the app actually renders", async () => {
+    render(<SettingsLazy {...settingsProps} />);
+
+    // До загрузки чанка обёртка рисует пустоту — спиннер поверх терминалов
+    // мелькал бы заметнее самой паузы.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Внешний вид" })).toBeVisible(),
+    );
+    expect(screen.queryAllByRole("tab")).toHaveLength(8);
   });
 });
