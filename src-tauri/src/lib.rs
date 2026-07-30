@@ -13,6 +13,7 @@ mod agent_hooks;
 mod agent_sessions;
 mod clipboard_images;
 mod command_error;
+mod git_branches;
 mod git_changes;
 mod git_history;
 mod github_auth;
@@ -28,13 +29,15 @@ mod workspace_roots;
 use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
+use git_branches::{
+    git_branches, git_commit_action, git_commit_file_diff, git_commit_files, git_create_branch,
+    git_delete_branch, git_fetch_upstream, git_log, git_merge_ref, git_publish_branch, git_pull,
+    git_pull_rebase, git_push, git_rebase_onto, git_rename_branch, git_reset_to_upstream,
+    git_switch_branch,
+};
 use git_changes::{
-    git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_commit_action, git_commit_file_diff, git_commit_files, git_create_branch,
-    git_delete_branch, git_fetch_upstream, git_file_diff, git_log, git_merge_ref,
-    git_publish_branch, git_pull, git_pull_rebase, git_push, git_read_file, git_rebase_onto,
-    git_rename_branch, git_reset_to_upstream, git_revert_file, git_switch_branch, git_write_file,
-    GitWatchState,
+    git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit, git_file_diff,
+    git_read_file, git_revert_file, git_write_file, GitWatchState,
 };
 use git_history::{
     git_amend_commit, git_commit_patch, git_compare_file_diff, git_compare_files, git_create_tag,
@@ -1025,6 +1028,7 @@ mod tests {
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
+        ("git_branches.rs", include_str!("git_branches.rs")),
         ("git_changes.rs", include_str!("git_changes.rs")),
         ("git_history.rs", include_str!("git_history.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),

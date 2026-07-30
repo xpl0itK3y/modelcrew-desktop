@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::git_branches::{validate_branch_name, validate_namespaced_ref, GitCommitFile};
 use crate::git_changes::*;
 use crate::workspace_roots::WorkspaceRoots;
 
