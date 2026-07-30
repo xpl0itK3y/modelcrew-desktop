@@ -1,0 +1,25 @@
+{
+  "version": "0.0.12",
+  "ru": {
+    "title": "Интеграции агентов и ожидающие панели",
+    "summary": "Расширены уведомления агентов: больше CLI подключены через hooks, а ожидающие ответа панели видны в колокольчике и открываются одним нажатием.",
+    "highlights": [
+      "Claude Code, OpenCode, Copilot, Aider, Grok, Kilo Code, Cursor и Antigravity подключены к уведомлениям",
+      "Колокольчик показывает панели, ожидающие ответа, и переводит к выбранному терминалу",
+      "Метка ожидания сохраняется, пока пользователь действительно не ответит в панели",
+      "В настройках появились разделы инструментов агентов, MCP, плагинов и горячих клавиш",
+      "Кнопки терминала всегда доступны, а разворот предлагается только когда он нужен"
+    ]
+  },
+  "en": {
+    "title": "Agent integrations and waiting panels",
+    "summary": "Agent alerts now cover more CLIs, while panels waiting for input appear in the notification center and open with one click.",
+    "highlights": [
+      "Claude Code, OpenCode, Copilot, Aider, Grok, Kilo Code, Cursor, and Antigravity now emit alerts",
+      "The notification center lists panels waiting for input and opens the selected terminal",
+      "Waiting markers remain visible until the user actually responds in the panel",
+      "Settings now include agent tools, MCP, plugins, and keyboard shortcut sections",
+      "Terminal controls stay visible, and maximize appears only when it is useful"
+    ]
+  }
+}

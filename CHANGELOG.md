@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.0.12
+
+### Русский
+
+Расширены уведомления агентов: больше CLI подключены через hooks, а ожидающие ответа панели видны в колокольчике и открываются одним нажатием.
+
+- Claude Code, OpenCode, GitHub Copilot CLI, Aider, Grok, Kilo Code, Cursor Agent и Antigravity подключены к точным hook-уведомлениям
+- Колокольчик показывает панели, ожидающие ответа, вместе с агентом, проектом и сессией
+- Нажатие на ожидающую панель открывает нужный проект, сессию и терминал
+- Метка ожидания сохраняется, пока пользователь действительно не ответит в панели
+- Общий переключатель уведомлений агентов отключает весь поток оповещений
+- В настройках появились разделы инструментов агентов, MCP, плагинов и горячих клавиш
+- Список горячих клавиш адаптируется к клавиатуре пользователя
+- Кнопки терминальной панели остаются видимыми, а разворот предлагается только когда он полезен
+- Удалены устаревшие интеграции Qwen Code и Amp, а уведомления называют фактически запущенного агента
+
+### English
+
+Agent alerts now cover more CLIs, while panels waiting for input appear in the notification center and open with one click.
+
+- Claude Code, OpenCode, GitHub Copilot CLI, Aider, Grok, Kilo Code, Cursor Agent, and Antigravity emit precise hook alerts
+- The notification center lists panels waiting for input with their agent, project, and session
+- Clicking a waiting panel opens the correct project, session, and terminal
+- Waiting markers remain visible until the user actually responds in the panel
+- The master agent-alert switch silences the entire notification flow
+- Settings now include agent tools, MCP, plugins, and keyboard shortcut sections
+- The shortcut reference adapts to the user's keyboard
+- Terminal panel controls stay visible, while maximize appears only when useful
+- Removed obsolete Qwen Code and Amp integrations, and alerts identify the agent that actually ran
+
 ## 0.0.11
 
 ### Русский
