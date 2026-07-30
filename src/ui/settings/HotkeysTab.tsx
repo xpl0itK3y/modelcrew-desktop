@@ -1,4 +1,4 @@
-import { platform } from "../../constants";
+import { platform } from "../../platform";
 import { SHORTCUTS, shortcutKeys, shortcutLabel } from "../../hotkeys/shortcuts";
 import { useI18n } from "../../i18n";
 import { SettingRow, SettingsPage } from "./SettingsControls";

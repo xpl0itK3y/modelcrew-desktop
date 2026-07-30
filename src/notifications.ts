@@ -3,13 +3,13 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { isTauri, platform } from "./platform";
 
 // Системные уведомления ОС (Notification Center / toast / libnotify):
 // дублируют колокольчик, когда окно приложения не в фокусе. Отправка —
 // best-effort: любой сбой (нет разрешения, нет демона на Linux) молча
 // игнорируется и не мешает внутренним уведомлениям.
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 const STORAGE_KEY = "modelcrew.systemNotifications";
 
 // На Linux демон уведомлений не связывает наш app-id с установленным ярлыком,
@@ -18,8 +18,7 @@ const STORAGE_KEY = "modelcrew.systemNotifications";
 // Icon=modelcrew-desktop в .desktop). На macOS/Windows это имя не путь к файлу,
 // поэтому иконку там задаёт система, а не мы.
 const LINUX_NOTIFICATION_ICON = "modelcrew-desktop";
-const isLinux =
-  typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
+const isLinux = platform === "linux";
 
 export function loadSystemNotificationsEnabled(): boolean {
   try {

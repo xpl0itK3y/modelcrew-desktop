@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "../platform";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 
 // Снимки текста терминалов: сериализованный буфер xterm сохраняется на диск
@@ -7,7 +8,6 @@ import type { SerializeAddon } from "@xterm/addon-serialize";
 // интервал плюс немедленно при выходе процесса, перед обновлением и на
 // beforeunload. Потеря ограничена последними секундами даже при kill -9.
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 // Сколько строк скроллбэка попадает в снимок.
 const SNAPSHOT_SCROLLBACK_ROWS = 2000;

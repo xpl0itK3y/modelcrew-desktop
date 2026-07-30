@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { IDockviewHeaderActionsProps } from "dockview";
 import { appActions } from "../appActions";
 import { canMaximizePanel, togglePanelMaximized } from "../animations";
-import { platform } from "../constants";
+import { platform } from "../platform";
 import { shortcutLabel } from "../hotkeys/shortcuts";
 import { useI18n } from "../i18n";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";

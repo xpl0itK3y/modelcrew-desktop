@@ -5,6 +5,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { isTauri } from "../platform";
 import { DockviewApi } from "dockview";
 import { invoke } from "@tauri-apps/api/core";
 import { destroyTerminal } from "../terminal/registry";
@@ -20,7 +21,6 @@ import {
 } from "../persist";
 import type { WorkspaceRootResult } from "./useWorkspaceRoots";
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 type UseWorkspaceCrudOptions = {
   apiRef: RefObject<DockviewApi | null>;

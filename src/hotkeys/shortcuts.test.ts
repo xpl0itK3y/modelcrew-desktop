@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  SHORTCUTS,
-  detectPlatform,
-  shortcutKeys,
-  shortcutLabel,
-} from "./shortcuts";
+import { SHORTCUTS, shortcutKeys, shortcutLabel } from "./shortcuts";
+import { detectPlatform } from "../platform";
 
 describe("detectPlatform", () => {
   it("tells the three keyboards apart", () => {

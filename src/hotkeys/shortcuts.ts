@@ -4,8 +4,8 @@
 // не должны ни в подсказках кнопок, ни в списке настроек.
 
 import type { MessageKey } from "../i18n";
+import type { Platform } from "../platform";
 
-export type Platform = "mac" | "windows" | "linux";
 
 export type ShortcutToken =
   | "mod"
@@ -34,13 +34,6 @@ const SHARED_KEYS: Record<string, string> = {
   arrows: "←↑↓→",
   digits: "1–9",
 };
-
-export function detectPlatform(userAgent: string): Platform {
-  if (/Mac|iPhone|iPad/i.test(userAgent)) {
-    return "mac";
-  }
-  return /Win/i.test(userAgent) ? "windows" : "linux";
-}
 
 /** Подписи клавиш по одной: для отрисовки каждой в своём <kbd>. */
 export function shortcutKeys(

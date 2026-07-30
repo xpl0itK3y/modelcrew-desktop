@@ -1,6 +1,6 @@
 import { IWatermarkPanelProps } from "dockview";
 import { appActions } from "../appActions";
-import { isMac } from "../constants";
+import { isMac } from "../platform";
 import { useI18n } from "../i18n";
 import { FolderIcon, PlusIcon } from "../ui/Icons";
 

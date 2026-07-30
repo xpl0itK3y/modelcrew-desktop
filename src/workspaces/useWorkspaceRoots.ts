@@ -7,11 +7,11 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
+import { isTauri } from "../platform";
 import { invoke } from "@tauri-apps/api/core";
 import { backendErrorReason, localizeBackendError, translate } from "../i18n";
 import type { FolderRuntimeStatus, WorkspacesState } from "../persist";
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 export type WorkspaceRootResult =
   | { status: "cancelled" }

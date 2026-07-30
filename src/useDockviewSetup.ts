@@ -4,6 +4,7 @@ import {
   useRef,
   type MutableRefObject,
 } from "react";
+import { isTauri } from "./platform";
 import { DockviewApi, DockviewReadyEvent } from "dockview";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -106,7 +107,7 @@ export function useDockviewSetup({
         }),
       );
 
-      if ("__TAURI_INTERNALS__" in window) {
+      if (isTauri) {
         void listen<{ id: string; title: string }>(
           "pty-title",
           (titleEvent) => {

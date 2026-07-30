@@ -1,9 +1,9 @@
 // Фронтенд-обёртка над GitHub Device Flow (Rust-команды).
 
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "../platform";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 export type GithubUser = { login: string; avatarUrl: string };
 

@@ -3,6 +3,7 @@
 // build. Selection is persisted per-machine in localStorage, mirroring shell.ts.
 
 import type { NotificationItem } from "./updater/types";
+import { platform } from "./platform";
 import { APP_VERSION } from "./version";
 
 export type NotificationSoundId =
@@ -147,8 +148,7 @@ const AUDIO_HANG_THRESHOLD_MS = 5_000;
 // Заморозить процесс проигрыванием может только Linux/WebKitGTK через
 // GStreamer. На macOS/Windows аудио никогда не блокирует поток, поэтому
 // защита там — чистый минус (ложные срабатывания после жёстких завершений).
-const AUDIO_HANG_PROTECTION =
-  typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
+const AUDIO_HANG_PROTECTION = platform === "linux";
 
 // Distinguishes our own in-flight "pending" marker from one left behind by a
 // process that never lived to confirm it.

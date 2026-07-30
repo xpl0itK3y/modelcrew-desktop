@@ -1,4 +1,5 @@
 import { Terminal } from "@xterm/xterm";
+import { isTauri } from "../platform";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -61,7 +62,6 @@ import "@xterm/xterm/css/xterm.css";
 const RESIZE_DEBOUNCE_MS = 250;
 
 // В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 let currentTerminalTheme = getAppTheme(loadTheme()).terminal;
 let currentTerminalFontSize = loadTerminalFontSize();

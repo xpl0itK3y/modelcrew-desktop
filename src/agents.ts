@@ -8,6 +8,7 @@
 // хранилище не может подсунуть произвольную строку в оболочку.
 
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "./platform";
 
 export type AgentDefinition = {
   id: string;
@@ -437,7 +438,6 @@ export function buildAgentResume(
 // Привязка сессии через Rust-локатор. Файл сессии может появиться с задержкой
 // (после первого сообщения), поэтому несколько попыток с нарастающей паузой.
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 const LOCATE_ATTEMPT_DELAYS_MS = [1_500, 6_000, 20_000];
 
 const pendingBindings = new Set<string>();

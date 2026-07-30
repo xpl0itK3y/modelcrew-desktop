@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isTauri } from "../platform";
 import { useI18n } from "../i18n";
 import { useAnimatedPresence } from "./useAnimatedPresence";
 import {
@@ -23,7 +24,6 @@ type FlowState =
   | { kind: "code"; device: DeviceStart }
   | { kind: "denied" | "expired" | "error" | "unconfigured" };
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 // URL страницы подтверждения с предзаполненным кодом (github.com/login/device
 // принимает user_code параметром), чтобы не вводить его руками.

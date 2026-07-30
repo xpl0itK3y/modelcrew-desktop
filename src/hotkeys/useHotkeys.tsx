@@ -1,6 +1,6 @@
 import { MutableRefObject, useEffect, useRef, useState } from "react";
 import { DockviewApi, DockviewGroupPanel } from "dockview";
-import { isMac } from "../constants";
+import { isMac } from "../platform";
 import {
   closePanelAnimated,
   flipGroups,

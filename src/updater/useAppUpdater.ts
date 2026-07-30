@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isTauri } from "../platform";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -28,7 +29,6 @@ const RETRY_DELAYS_MS = [
   4 * 60 * 60_000,
 ] as const;
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 import {
   installKindFrom,

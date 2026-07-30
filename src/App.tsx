@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isTauri } from "./platform";
 import {
   DockviewApi,
   DockviewGroupPanel,
@@ -59,7 +60,8 @@ import {
   translate,
   useI18n,
 } from "./i18n";
-import { platform, WORKSPACE_NAME } from "./constants";
+import { WORKSPACE_NAME } from "./constants";
+import { platform } from "./platform";
 import { shortcutLabel } from "./hotkeys/shortcuts";
 import { loadShell, saveShell } from "./shell";
 import {
@@ -74,7 +76,6 @@ import "./styles/index.css";
 
 const components = { terminal: TerminalPanel, gitChanges: GitChangesPanel };
 const tabComponents = { terminal: TerminalTab };
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 type SessionDeleteRequest = {
   workspaceId: string;

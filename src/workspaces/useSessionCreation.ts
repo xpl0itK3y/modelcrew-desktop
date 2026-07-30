@@ -5,6 +5,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { isTauri } from "../platform";
 import { DockviewApi } from "dockview";
 import { invoke } from "@tauri-apps/api/core";
 import { appActions } from "../appActions";
@@ -23,7 +24,6 @@ import {
   type WorkspacesState,
 } from "../persist";
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 type UseSessionCreationOptions = {
   apiRef: RefObject<DockviewApi | null>;

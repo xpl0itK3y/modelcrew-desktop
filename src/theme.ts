@@ -1,4 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
+import { isTauri } from "./platform";
 
 export type AccentColor = {
   id:
@@ -547,7 +548,7 @@ export function applyTheme(id: ThemeId): void {
     root.style.setProperty(`--mc-${cssName}`, value);
   }
 
-  if ("__TAURI_INTERNALS__" in window) {
+  if (isTauri) {
     void import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         const currentWindow = getCurrentWindow();

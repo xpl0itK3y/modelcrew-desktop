@@ -17,6 +17,7 @@ import {
   saveTerminalSpawnMode,
   type TerminalSpawnMode,
 } from "../../terminal/preferences";
+import { hasTauri } from "../../platform";
 import { ConfirmDialog } from "../ConfirmDialog";
 import {
   SettingRow,
@@ -29,7 +30,6 @@ import {
 // хранить только строки — пустая строка и есть этот случай.
 const SYSTEM_SHELL = "";
 
-const isTauri = () => "__TAURI_INTERNALS__" in window;
 
 type ShellCatalog = {
   shells?: ShellOption[];
@@ -103,7 +103,7 @@ export function TerminalTab(props: TerminalTabProps) {
   }, [applyShellCatalog, t]);
 
   useEffect(() => {
-    if (!isTauri()) {
+    if (!hasTauri()) {
       return;
     }
     let cancelled = false;
@@ -169,7 +169,7 @@ export function TerminalTab(props: TerminalTabProps) {
         title={t("settings.tabTerminal")}
         intro={t("settings.terminalIntro")}
       >
-      {isTauri() && shells.length > 0 && (
+      {hasTauri() && shells.length > 0 && (
         <SettingRow
           title={t("settings.shell")}
           description={
@@ -220,7 +220,7 @@ export function TerminalTab(props: TerminalTabProps) {
         />
       )}
 
-      {isTauri() && showGitBashInstaller && (
+      {hasTauri() && showGitBashInstaller && (
         <SettingRow
           title={t("settings.gitBash")}
           description={

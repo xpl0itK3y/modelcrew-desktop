@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isMac, isTauri } from "../platform";
 import {
   BellIcon,
   DiffIcon,
@@ -25,7 +26,6 @@ import type {
   UpdateNotification,
 } from "../updater/types";
 
-const isMac = navigator.userAgent.includes("Mac");
 
 type TitlebarProps = {
   workspaceName: string;
@@ -93,7 +93,7 @@ export function Titlebar(props: TitlebarProps) {
   // ждущие ответа. Ноль убирает бейдж.
   const dockBadge = pendingCount + agentAttention;
   useEffect(() => {
-    if (!("__TAURI_INTERNALS__" in window)) {
+    if (!isTauri) {
       return;
     }
     void invoke("app_set_badge", {

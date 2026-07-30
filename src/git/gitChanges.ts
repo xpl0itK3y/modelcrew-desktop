@@ -3,6 +3,7 @@
 // поллинг остаётся страховкой на случай, когда вотчер поднять не удалось.
 
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "../platform";
 import { listen } from "@tauri-apps/api/event";
 
 export type GitFileStatus =
@@ -54,7 +55,6 @@ const ERROR_POLL_INTERVAL_MS = 15_000;
 // показывалось без ручного fetch. Ошибки (офлайн, нет remote) — тихо.
 const FETCH_INTERVAL_MS = 5 * 60_000;
 
-const isTauri = "__TAURI_INTERNALS__" in window;
 
 type Listener = (summary: GitChangesSummary) => void;
 
