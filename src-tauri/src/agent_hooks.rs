@@ -512,8 +512,9 @@ const CLAUDE_EVENTS: [&str; 2] = ["Stop", "Notification"];
 fn read_json(path: &Path) -> Result<Value, String> {
     match std::fs::read_to_string(path) {
         Ok(raw) if raw.trim().is_empty() => Ok(Value::Object(Default::default())),
-        Ok(raw) => serde_json::from_str(&raw)
-            .map_err(|error| format!("{}: {error}", path.display())),
+        Ok(raw) => {
+            serde_json::from_str(&raw).map_err(|error| format!("{}: {error}", path.display()))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(Value::Object(Default::default()))
         }
@@ -524,10 +525,11 @@ fn read_json(path: &Path) -> Result<Value, String> {
 /// Запись без окна, в котором файл уже пуст, а нового содержимого ещё нет:
 /// агент может читать конфиг в любой момент.
 fn write_json_atomically(path: &Path, value: &Value) -> Result<(), String> {
-    let parent = path.parent().ok_or_else(|| "нет родительского каталога".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "нет родительского каталога".to_string())?;
     std::fs::create_dir_all(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
-    let body = serde_json::to_string_pretty(value)
-        .map_err(|error| error.to_string())?;
+    let body = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
     let temp = path.with_extension("modelcrew-tmp");
     std::fs::write(&temp, format!("{body}\n"))
         .map_err(|error| format!("{}: {error}", temp.display()))?;
@@ -685,7 +687,11 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
     }
 }
 
-pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<AgentHookState, String> {
+pub fn set_hook(
+    app: &tauri::AppHandle,
+    agent: &str,
+    enabled: bool,
+) -> Result<AgentHookState, String> {
     let home = home_dir(app).ok_or_else(|| "домашний каталог недоступен".to_string())?;
     let helper = helper_path(app).ok_or_else(|| "каталог приложения недоступен".to_string())?;
     let path =
@@ -768,10 +774,7 @@ pub fn env_hooks(events_dir: &Path) -> Vec<(String, String)> {
     env_hooks_with(events_dir, |name| std::env::var_os(name).is_some())
 }
 
-fn env_hooks_with(
-    events_dir: &Path,
-    already_set: impl Fn(&str) -> bool,
-) -> Vec<(String, String)> {
+fn env_hooks_with(events_dir: &Path, already_set: impl Fn(&str) -> bool) -> Vec<(String, String)> {
     let Some(helper) = events_dir.parent().map(|base| base.join(HELPER_NAME)) else {
         return Vec::new();
     };
@@ -865,7 +868,10 @@ mod tests {
             settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
             "prettier --write"
         );
-        assert_eq!(settings["hooks"]["Stop"][0]["hooks"][0]["command"], "say done");
+        assert_eq!(
+            settings["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "say done"
+        );
         // А наш встал рядом, а не вместо.
         assert_eq!(settings["hooks"]["Stop"].as_array().unwrap().len(), 2);
         assert!(claude_hook_installed(&settings, &helper()));
@@ -880,7 +886,10 @@ mod tests {
         // приложения в конфиге появлялась бы ещё одна копия.
         assert!(!install_claude_hook(&mut settings, &helper()));
         assert_eq!(settings["hooks"]["Stop"].as_array().unwrap().len(), 1);
-        assert_eq!(settings["hooks"]["Notification"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            settings["hooks"]["Notification"].as_array().unwrap().len(),
+            1
+        );
     }
 
     #[test]
@@ -897,7 +906,10 @@ mod tests {
 
         assert!(remove_claude_hook(&mut settings, &helper()));
 
-        assert_eq!(settings["hooks"]["Stop"][0]["hooks"][0]["command"], "say done");
+        assert_eq!(
+            settings["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "say done"
+        );
         assert_eq!(settings["hooks"]["Stop"].as_array().unwrap().len(), 1);
         assert!(!claude_hook_installed(&settings, &helper()));
     }
@@ -944,7 +956,10 @@ mod tests {
         let error = read_json(&path).expect_err("битый конфиг должен быть ошибкой");
 
         // Иначе правка молча стёрла бы чужой файл целиком.
-        assert!(error.contains("settings"), "в ошибке нет имени файла: {error}");
+        assert!(
+            error.contains("settings"),
+            "в ошибке нет имени файла: {error}"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1021,7 +1036,10 @@ mod tests {
         assert!(install_cursor_hook(&mut settings, &helper()));
 
         // Чужой хук в общем с IDE файле обязан пережить нашу правку.
-        assert_eq!(settings["hooks"]["beforeShellExecution"][0]["command"], "./audit.sh");
+        assert_eq!(
+            settings["hooks"]["beforeShellExecution"][0]["command"],
+            "./audit.sh"
+        );
         assert!(cursor_hook_installed(&settings, &helper()));
         // Нагрузка аргументом: stdin cursor хуку не даёт, и хелпер завис бы.
         let ours = settings["hooks"]["stop"][0]["command"].as_str().unwrap();
@@ -1030,7 +1048,10 @@ mod tests {
 
         assert!(remove_cursor_hook(&mut settings, &helper()));
         assert!(settings["hooks"].get("stop").is_none());
-        assert_eq!(settings["hooks"]["beforeShellExecution"][0]["command"], "./audit.sh");
+        assert_eq!(
+            settings["hooks"]["beforeShellExecution"][0]["command"],
+            "./audit.sh"
+        );
     }
 
     #[test]
@@ -1110,8 +1131,9 @@ mod tests {
             .map(|(_, value)| value.clone())
             .expect("команда уведомления должна быть задана");
 
-        assert!(vars.iter().any(|(key, value)| key == "AIDER_NOTIFICATIONS"
-            && value == "true"));
+        assert!(vars
+            .iter()
+            .any(|(key, value)| key == "AIDER_NOTIFICATIONS" && value == "true"));
         assert!(command.contains("/data/mc/modelcrew-agent-notify.sh"));
         // Нагрузка вторым аргументом — иначе хелпер уйдёт читать stdin, а там
         // терминал, и вызов повиснет.
@@ -1170,7 +1192,10 @@ mod tests {
 
         // Каталог агента и родитель конфига у copilot разные: заводить
         // ~/.copilot/hooks тому, у кого нет ~/.copilot, нельзя.
-        assert_eq!(agent_home("copilot", home), Some(PathBuf::from("/home/x/.copilot")));
+        assert_eq!(
+            agent_home("copilot", home),
+            Some(PathBuf::from("/home/x/.copilot"))
+        );
         assert_eq!(
             hook_config_path("copilot", home).unwrap().parent().unwrap(),
             Path::new("/home/x/.copilot/hooks")
