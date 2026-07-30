@@ -174,9 +174,6 @@ export const ru = {
   "git.copyHash": "Скопировать полный хеш",
   "git.commitCoAuthor": "Соавтор:",
   "git.commitDate": "Дата:",
-  "git.refLocal": "Локальная ветка {name} указывает на этот коммит",
-  "git.refRemote": "Ветка на сервере ({name}) указывает на этот коммит",
-  "git.refTag": "Тег {name}",
   "git.commitFiles": "Файлы ({count}):",
   "git.commitPlaceholder": "Заголовок коммита",
   "git.commitDescription": "Описание (необязательно)",
@@ -186,16 +183,6 @@ export const ru = {
   "git.copied": "Скопировано",
   "git.revert": "Откатить изменения файла",
   "git.revertConfirm": "Откатить?",
-  "git.editFile": "Редактировать файл",
-  "git.editSave": "Сохранить",
-  "git.editCancel": "Отмена",
-  "git.editOverwrite": "Перезаписать",
-  "git.editHint": "Esc — отмена, ⌘/Ctrl+S — сохранить",
-  "git.editBinary": "Бинарный файл — редактирование недоступно",
-  "git.editTooLarge": "Файл слишком большой для редактора",
-  "git.editLoadFailed": "Не удалось открыть файл",
-  "git.editFailed": "Не удалось сохранить файл",
-  "git.editConflict": "Файл изменился на диске (возможно, агент). Перезаписать вашей версией?",
   "git.loading": "Читаем изменения…",
   "git.notARepo": "Эта папка не под управлением git",
   "git.clean": "Нет незакоммиченных изменений",
@@ -215,22 +202,10 @@ export const ru = {
   "git.status.renamed": "Переименован",
   "git.status.untracked": "Новый",
   "git.status.conflicted": "Конфликт",
-  "titlebar.notificationsSoon": "Уведомления — скоро",
   "titlebar.notifications": "Уведомления",
   "titlebar.updateReady": "Обновление {version} готово",
-  "titlebar.updatesUnavailable":
-    "Обновления доступны в установленной версии приложения",
   "titlebar.settings": "Настройки",
 
-  "update.title": "Обновления",
-  "update.idleDescription":
-    "ModelCrew проверяет и загружает обновления в фоне.",
-  "update.checkNow": "Проверить обновления",
-  "update.checking": "Проверяем новую версию…",
-  "update.upToDate": "Установлена последняя версия",
-  "update.upToDateDescription":
-    "Новых стабильных обновлений сейчас нет.",
-  "update.checkAgain": "Проверить ещё раз",
   "update.downloading": "Загружаем ModelCrew {version}",
   "update.downloadingDescription":
     "Можно продолжать работать — терминалы не будут закрыты.",
@@ -240,14 +215,12 @@ export const ru = {
   "update.verifying": "Проверяем загруженное обновление",
   "update.verifyingDescription":
     "Проверяем подпись и целостность системного пакета.",
-  "update.version": "Обновление {version} готово",
   "update.readyTitle": "Обновление ModelCrew {version}",
   "update.fallbackSummary":
     "Доступна новая версия ModelCrew. Подробности опубликованы на странице релиза.",
   "update.manualPackageHelp":
     "ModelCrew не смог безопасно определить формат этой установки. Откройте страницу загрузки и выберите подходящий пакет вручную.",
   "update.details": "Подробнее",
-  "update.later": "Позже",
   "update.openDownloads": "Открыть страницу загрузки",
   "update.restartAndInstall": "Перезапустить и обновить",
   "update.confirmTitle": "Перезапустить ModelCrew?",
@@ -272,11 +245,6 @@ export const ru = {
   "update.restarting": "Перезапускаем ModelCrew {version}",
   "update.restartingDescription":
     "Обновление установлено. Сохраняем рабочее состояние и перезапускаем приложение.",
-  "update.errorTitle": "Не удалось обновить ModelCrew",
-  "update.errorCheck": "Не удалось проверить наличие новой версии.",
-  "update.errorDownload": "Не удалось загрузить обновление.",
-  "update.errorInstall": "Не удалось установить загруженное обновление.",
-  "update.retry": "Повторить",
   "update.close": "Закрыть уведомления",
   "update.dismiss": "Скрыть уведомление",
   "update.clearAll": "Очистить",
@@ -337,7 +305,6 @@ export const ru = {
   "settings.shell": "Оболочка",
   "settings.shellDefault": "Системная",
   "settings.shellNote": "Смена перезапустит все работающие терминалы",
-  "settings.selectShell": "Выбрать оболочку «{name}»",
   "settings.confirmShellChange":
     "Сменить оболочку на «{name}» и перезапустить {terminals}? Текущие процессы будут остановлены.",
   "settings.shellRestart": "Перезапустить",
@@ -496,7 +463,6 @@ export const ru = {
   "welcome.panelNumbersShortcut": "номера панелей",
   "welcome.zoomShortcut": "зум",
 
-  "group.splitRight": "Разделить вправо",
   "group.maximizeRestore": "Развернуть или вернуть ({shortcut})",
   "group.close": "Закрыть группу ({shortcut})",
   "layout.noSplitSpace": "Недостаточно места для нового терминала",

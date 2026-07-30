@@ -175,9 +175,6 @@ export const en: Record<MessageKey, string> = {
   "git.copyHash": "Copy the full hash",
   "git.commitCoAuthor": "Co-author:",
   "git.commitDate": "Date:",
-  "git.refLocal": "Local branch {name} points at this commit",
-  "git.refRemote": "Remote branch {name} points at this commit",
-  "git.refTag": "Tag {name}",
   "git.commitFiles": "Files ({count}):",
   "git.commitPlaceholder": "Commit subject",
   "git.commitDescription": "Description (optional)",
@@ -187,16 +184,6 @@ export const en: Record<MessageKey, string> = {
   "git.copied": "Copied",
   "git.revert": "Revert file changes",
   "git.revertConfirm": "Revert?",
-  "git.editFile": "Edit file",
-  "git.editSave": "Save",
-  "git.editCancel": "Cancel",
-  "git.editOverwrite": "Overwrite",
-  "git.editHint": "Esc to cancel, ⌘/Ctrl+S to save",
-  "git.editBinary": "Binary file — editing unavailable",
-  "git.editTooLarge": "File is too large to edit",
-  "git.editLoadFailed": "Could not open the file",
-  "git.editFailed": "Could not save the file",
-  "git.editConflict": "The file changed on disk (maybe an agent). Overwrite with your version?",
   "git.loading": "Reading changes…",
   "git.notARepo": "This folder is not a git repository",
   "git.clean": "No uncommitted changes",
@@ -216,22 +203,10 @@ export const en: Record<MessageKey, string> = {
   "git.status.renamed": "Renamed",
   "git.status.untracked": "New",
   "git.status.conflicted": "Conflict",
-  "titlebar.notificationsSoon": "Notifications — coming soon",
   "titlebar.notifications": "Notifications",
   "titlebar.updateReady": "Update {version} is ready",
-  "titlebar.updatesUnavailable":
-    "Updates are available in the installed application",
   "titlebar.settings": "Settings",
 
-  "update.title": "Updates",
-  "update.idleDescription":
-    "ModelCrew checks for and downloads updates in the background.",
-  "update.checkNow": "Check for updates",
-  "update.checking": "Checking for a new version…",
-  "update.upToDate": "You’re up to date",
-  "update.upToDateDescription":
-    "There are no new stable updates right now.",
-  "update.checkAgain": "Check again",
   "update.downloading": "Downloading ModelCrew {version}",
   "update.downloadingDescription":
     "You can keep working — your terminals will stay open.",
@@ -241,14 +216,12 @@ export const en: Record<MessageKey, string> = {
   "update.verifying": "Verifying the downloaded update",
   "update.verifyingDescription":
     "Checking the system package signature and integrity.",
-  "update.version": "Update {version} is ready",
   "update.readyTitle": "ModelCrew {version} update",
   "update.fallbackSummary":
     "A new ModelCrew version is available. Full details are on the release page.",
   "update.manualPackageHelp":
     "ModelCrew could not safely identify this installation format. Open the downloads page and choose the matching package manually.",
   "update.details": "Details",
-  "update.later": "Later",
   "update.openDownloads": "Open download page",
   "update.restartAndInstall": "Restart and update",
   "update.confirmTitle": "Restart ModelCrew?",
@@ -273,11 +246,6 @@ export const en: Record<MessageKey, string> = {
   "update.restarting": "Restarting ModelCrew {version}",
   "update.restartingDescription":
     "The update is installed. Saving your workspace state and restarting the application.",
-  "update.errorTitle": "ModelCrew could not be updated",
-  "update.errorCheck": "Could not check for a new version.",
-  "update.errorDownload": "Could not download the update.",
-  "update.errorInstall": "Could not install the downloaded update.",
-  "update.retry": "Try again",
   "update.close": "Close update notifications",
   "update.dismiss": "Dismiss notification",
   "update.clearAll": "Clear all",
@@ -338,7 +306,6 @@ export const en: Record<MessageKey, string> = {
   "settings.shell": "Shell",
   "settings.shellDefault": "System default",
   "settings.shellNote": "Changing it restarts all running terminals",
-  "settings.selectShell": "Select the “{name}” shell",
   "settings.confirmShellChange":
     "Switch to “{name}” and restart {terminals}? Current processes will be stopped.",
   "settings.shellRestart": "Restart",
@@ -497,7 +464,6 @@ export const en: Record<MessageKey, string> = {
   "welcome.panelNumbersShortcut": "panel numbers",
   "welcome.zoomShortcut": "zoom",
 
-  "group.splitRight": "Split right",
   "group.maximizeRestore": "Maximize or restore ({shortcut})",
   "group.close": "Close group ({shortcut})",
   "layout.noSplitSpace": "Not enough room for another terminal",
