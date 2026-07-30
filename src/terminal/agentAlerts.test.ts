@@ -145,7 +145,11 @@ describe("trackAgentOutput", () => {
   it("keeps the brief mode free of the panel tail", async () => {
     saveAgentAlertDetailMode("brief");
     setWorkspaceNameResolver(() => "ModelCrew");
-    setPanelTailResolver(() => "Готово: обновил 3 файла");
+    let collected = 0;
+    setPanelTailResolver(() => {
+      collected += 1;
+      return "Готово: обновил 3 файла";
+    });
 
     trackAgentOutput(engaged("brief-panel"), "brief-panel", "\x07", () => hidden);
     await settle();
@@ -154,6 +158,9 @@ describe("trackAgentOutput", () => {
       expect.any(String),
       expect.not.stringContaining("Готово"),
     );
+    // И сам хвост не собирался: за ним стоит проход по буферу панели, который в
+    // кратком режиме уходит в никуда.
+    expect(collected).toBe(0);
     clearAgentAttention("brief-panel");
     vi.useRealTimers();
   });

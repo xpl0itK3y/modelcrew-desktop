@@ -70,7 +70,7 @@ export function announceAgentAlert(params: {
   const detail = selectAlertDetail(
     loadAgentAlertDetailMode(),
     params.notification,
-    panelTailResolver(params.terminalId),
+    () => panelTailResolver(params.terminalId),
   );
   const body = [
     project ? translate("terminal.agentProject", { project }) : "",

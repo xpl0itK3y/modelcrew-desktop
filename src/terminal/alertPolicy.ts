@@ -168,15 +168,19 @@ export function formatAlertDetailText(value: string): string {
 // В подробном берём текст самого агента, а для догадок (звонок, тишина) — его
 // же последние строки панели: сырой вывод терминала в баннер не уходит никогда,
 // только уже очищенный и урезанный текст.
+//
+// Хвост панели передаётся функцией, а не готовой строкой: собрать его — значит
+// пройти сорок строк буфера xterm и разобрать переносы, и делать это на каждый
+// сигнал, чтобы затем выбросить, незачем.
 export function selectAlertDetail(
   mode: AgentAlertDetailMode,
   notification: TerminalAttentionNotification | undefined,
-  panelTail: string | null,
+  getPanelTail: () => string | null,
 ): string {
   if (mode !== "detailed") {
     return "";
   }
   return notification
     ? formatAgentAlertDetail(notification)
-    : formatAlertDetailText(panelTail ?? "");
+    : formatAlertDetailText(getPanelTail() ?? "");
 }

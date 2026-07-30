@@ -185,7 +185,11 @@ describe("the agent text that reaches the banner", () => {
 
   it("says nothing in the brief mode", () => {
     expect(
-      selectAlertDetail("brief", notification({ body: "Approve npm test" }), "tail"),
+      selectAlertDetail(
+        "brief",
+        notification({ body: "Approve npm test" }),
+        () => "tail",
+      ),
     ).toBe("");
   });
 
@@ -194,7 +198,7 @@ describe("the agent text that reaches the banner", () => {
       selectAlertDetail(
         "detailed",
         notification({ body: "Approve npm test" }),
-        "tail",
+        () => "tail",
       ),
     ).toBe("Approve npm test");
   });
@@ -203,11 +207,29 @@ describe("the agent text that reaches the banner", () => {
     // Звонок и тишина сообщения не несут: без запасного источника «Подробно»
     // ничем не отличалось бы от «Кратко».
     expect(
-      selectAlertDetail("detailed", undefined, "Готово: обновил 3 файла"),
+      selectAlertDetail("detailed", undefined, () => "Готово: обновил 3 файла"),
     ).toBe("Готово: обновил 3 файла");
   });
 
   it("adds nothing when there is no text at all", () => {
-    expect(selectAlertDetail("detailed", undefined, null)).toBe("");
+    expect(selectAlertDetail("detailed", undefined, () => null)).toBe("");
+  });
+
+  it("does not collect the panel tail unless it is going to be shown", () => {
+    // Хвост — это проход по буферу xterm и разбор переносов. В кратком режиме и
+    // когда агент прислал свой текст, он не нужен: собирать его, чтобы тут же
+    // выбросить, — работа на каждый сигнал в каждой из двенадцати панелей.
+    let collected = 0;
+    const tail = () => {
+      collected += 1;
+      return "Готово: обновил 3 файла";
+    };
+
+    selectAlertDetail("brief", undefined, tail);
+    selectAlertDetail("detailed", notification({ body: "Approve" }), tail);
+    expect(collected).toBe(0);
+
+    selectAlertDetail("detailed", undefined, tail);
+    expect(collected).toBe(1);
   });
 });
