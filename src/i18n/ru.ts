@@ -435,12 +435,6 @@ export const ru = {
   "settings.systemNotifications": "Системные уведомления",
   "settings.systemNotificationsNote":
     "Баннер на уровне ОС, когда окно не в фокусе: обновления и анонсы видно даже со свёрнутым приложением.",
-  "settings.systemNotificationsTest": "Проверить",
-  "settings.systemNotificationsTestTitle": "ModelCrew на связи",
-  "settings.systemNotificationsTestBody":
-    "Проверка уведомлений. Так будут выглядеть сообщения о готовых агентах и обновлениях.",
-  "settings.systemNotificationsTestSent":
-    "Баннер отправлен. Если он не появился — уведомления от ModelCrew выключены в настройках системы: приложение об этом узнать не может.",
   "settings.agentAlertDetail": "Содержимое уведомлений агентов",
   "settings.agentAlertDetailNote":
     "Кратко — только статус и проект. Подробно — ещё и сообщение агента, а когда он его не прислал, последние строки панели.",
