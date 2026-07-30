@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.0.13
+
+### Русский
+
+Настройки и Git-панель теперь загружаются по требованию, а Git и уведомления агентов разделены на независимо тестируемые модули.
+
+- Настройки и Git-панель вынесены из стартового бандла и загружаются только при первом открытии
+- Клиент Git разделён на модули веток, синхронизации, журнала и истории
+- Интерфейс истории разделён на граф коммитов, детали, действия и сравнение
+- Разбор unified diff, относительное время и аватары авторов получили отдельные тесты
+- Правила уведомлений агентов вынесены в чистый policy-модуль
+- Сканирование терминалов, состояние ожидающих панелей и доставка уведомлений разделены и протестированы
+- Хвост терминала собирается только для системного баннера, который действительно будет показан
+- Устранены оставшиеся предупреждения Clippy в Rust-коде
+
+### English
+
+Settings and the Git panel now load on demand, while Git and agent alerts are split into independently tested modules.
+
+- Settings and the Git panel are removed from the startup bundle and load only when first opened
+- The Git client is split into branch, synchronization, log, and history modules
+- The history interface is split into commit graph, details, actions, and comparison components
+- Unified diff parsing, relative timestamps, and author avatars have dedicated tests
+- Agent alert decisions now live in a pure policy module
+- Terminal scanning, waiting-panel state, and alert delivery are isolated and tested
+- Terminal output is collected only for a system banner that will actually be shown
+- Removed the remaining Clippy warnings from the Rust code
+
 ## 0.0.12
 
 ### Русский

@@ -1,0 +1,25 @@
+{
+  "version": "0.0.13",
+  "ru": {
+    "title": "Быстрый запуск и укрепление Git-панели",
+    "summary": "Настройки и Git-панель теперь загружаются по требованию, а Git и уведомления агентов разделены на независимо тестируемые модули.",
+    "highlights": [
+      "Настройки и Git-панель больше не замедляют первый запуск приложения",
+      "Git-ветки, синхронизация, история и сравнение разделены на независимые модули",
+      "Граф коммитов, детали, действия и сравнение покрыты отдельными тестами",
+      "Правила, доставка и состояние уведомлений агентов проверяются независимо",
+      "Текст терминала читается для системного баннера только когда он действительно показывается"
+    ]
+  },
+  "en": {
+    "title": "Faster startup and a stronger Git panel",
+    "summary": "Settings and the Git panel now load on demand, while Git and agent alerts are split into independently tested modules.",
+    "highlights": [
+      "Settings and the Git panel no longer add work to initial app startup",
+      "Git branches, sync, history, and comparisons are isolated into focused modules",
+      "Commit graph, details, actions, and compare flows now have direct tests",
+      "Agent alert policy, delivery, scanning, and attention state are tested independently",
+      "Terminal output is collected for system banners only when a banner will actually appear"
+    ]
+  }
+}
