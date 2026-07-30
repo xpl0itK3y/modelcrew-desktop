@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -40,9 +40,11 @@ import {
   setPanelTailResolver,
   setWorkspaceNameResolver,
 } from "./alertDelivery";
+import { resetAlertThrottle } from "./alertPolicy";
 import {
   clearAgentAttention,
   getAgentAttentionCount,
+  getWaitingPanelIds,
 } from "./attentionStore";
 import {
   saveAgentAlertDetailMode,
@@ -53,6 +55,20 @@ import {
 async function settle() {
   await vi.advanceTimersByTimeAsync(0);
 }
+
+// Состояние сигналов живёт в модулях, а не в объекте теста: множество ждущих
+// панелей, окно тишины, копящаяся пачка баннеров и подменённые таймеры. Уборка
+// стоит здесь, а не в конце каждого теста, потому что до конца дело доходит не
+// всегда: упавшая проверка выбрасывает исключение, и следующий тест получил бы
+// чужую отметку и фейковые таймеры — одна поломка превращалась в горсть.
+afterEach(() => {
+  for (const id of getWaitingPanelIds()) {
+    clearAgentAttention(id);
+  }
+  resetAgentAlertBurst();
+  resetAlertThrottle();
+  vi.useRealTimers();
+});
 
 describe("trackAgentOutput", () => {
   const hidden = { visible: false, workspaceId: "ws-1" };
@@ -99,7 +115,6 @@ describe("trackAgentOutput", () => {
     for (const id of ["burst-1", "burst-2", "burst-3", "burst-4"]) {
       clearAgentAttention(id);
     }
-    vi.useRealTimers();
   });
 
   it("shows a single straggler as an ordinary alert", async () => {
@@ -117,9 +132,6 @@ describe("trackAgentOutput", () => {
       expect.stringContaining("Claude Code"),
       expect.any(String),
     );
-    clearAgentAttention("lone-1");
-    clearAgentAttention("lone-2");
-    vi.useRealTimers();
   });
 
   it("falls back to the panel tail when the agent sent no text of its own", async () => {
@@ -138,8 +150,6 @@ describe("trackAgentOutput", () => {
       expect.stringContaining("Claude Code"),
       expect.stringContaining("Готово: обновил 3 файла"),
     );
-    clearAgentAttention("tail-panel");
-    vi.useRealTimers();
   });
 
   it("keeps the brief mode free of the panel tail", async () => {
@@ -161,8 +171,6 @@ describe("trackAgentOutput", () => {
     // И сам хвост не собирался: за ним стоит проход по буферу панели, который в
     // кратком режиме уходит в никуда.
     expect(collected).toBe(0);
-    clearAgentAttention("brief-panel");
-    vi.useRealTimers();
   });
 
   it("stays silent for a restored panel the user has not touched", async () => {
@@ -185,8 +193,6 @@ describe("trackAgentOutput", () => {
     trackAgentOutput(restored, "restored-panel", "\x07", () => hidden);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
-    clearAgentAttention("restored-panel");
-    vi.useRealTimers();
   });
 
   it("rings immediately on a terminal bell and marks attention", async () => {
@@ -208,7 +214,6 @@ describe("trackAgentOutput", () => {
     // Ответ пользователя гасит сигнал.
     acknowledgeAgentPanel(tracker, "bell-panel");
     expect(getAgentAttentionCount()).toBe(0);
-    vi.useRealTimers();
   });
 
   it("uses a precise permission notification and cancels idle fallback", async () => {
@@ -229,8 +234,6 @@ describe("trackAgentOutput", () => {
 
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
-    clearAgentAttention("permission-panel");
-    vi.useRealTimers();
   });
 
   it("adds the agent message only in detailed mode", async () => {
@@ -249,8 +252,6 @@ describe("trackAgentOutput", () => {
       expect.stringMatching(/Claude Code.*(permission|разреш)/i),
       expect.stringMatching(/(?:Проект|Project): ModelCrew\nApprove npm test/),
     );
-    clearAgentAttention("detailed-panel");
-    vi.useRealTimers();
   });
 
   it("cleans and caps the detailed message in the system banner", async () => {
@@ -272,8 +273,6 @@ describe("trackAgentOutput", () => {
     expect(detail).not.toContain("\x01");
     expect(detail).not.toContain("\n");
     expect(detail.endsWith("...")).toBe(true);
-    clearAgentAttention("sanitized-detail-panel");
-    vi.useRealTimers();
   });
 
   it("never exposes raw terminal output for fallback bells", async () => {
@@ -292,8 +291,6 @@ describe("trackAgentOutput", () => {
       expect.stringContaining("Claude Code"),
       expect.not.stringContaining("secret terminal output"),
     );
-    clearAgentAttention("detailed-bell-panel");
-    vi.useRealTimers();
   });
 
   it("accepts precise completion after spawn mute without requiring keyboard input", async () => {
@@ -313,8 +310,6 @@ describe("trackAgentOutput", () => {
       expect.any(String),
     );
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
-    clearAgentAttention("precise-restored-panel");
-    vi.useRealTimers();
   });
 
   it("fires an idle alert only after enough output and full silence", async () => {
@@ -340,8 +335,6 @@ describe("trackAgentOutput", () => {
     await vi.advanceTimersByTimeAsync(600);
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
     expect(getAgentAttentionCount()).toBe(1);
-    clearAgentAttention("idle-panel");
-    vi.useRealTimers();
   });
 
   it("stays silent right after spawn, for plain shells and when watched", async () => {
@@ -383,8 +376,6 @@ describe("trackAgentOutput", () => {
     trackAgentOutput(watched, "watch-panel", "\x07", () => hidden);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
-    clearAgentAttention("watch-panel");
-    vi.useRealTimers();
   });
 
   it("throttles repeated bells from the same panel", async () => {
@@ -400,8 +391,6 @@ describe("trackAgentOutput", () => {
     trackAgentOutput(tracker, "throttle-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(2);
-    clearAgentAttention("throttle-panel");
-    vi.useRealTimers();
   });
 });
 
@@ -414,11 +403,9 @@ describe("the master switch for agent alerts", () => {
     localStorage.clear();
     mocks.windowFocused.value = false;
     mocks.record.value = { agentId: "claude", command: "claude" };
-    resetAgentAlertBurst();
   });
 
   it("silences the sound, the banner and the badge together", async () => {
-    clearAgentAttention("muted-panel");
     saveAgentAlertsEnabled(false);
 
     void raiseAgentAlert("muted-panel", "permission", hidden);
@@ -429,11 +416,9 @@ describe("the master switch for agent alerts", () => {
     expect(mocks.systemNotification).not.toHaveBeenCalled();
     // Счётчик тоже молчит: бейдж на иконке — такое же уведомление.
     expect(getAgentAttentionCount()).toBe(0);
-    vi.useRealTimers();
   });
 
   it("silences a hook the agent sent about itself, not only panel output", async () => {
-    clearAgentAttention("muted-hook-panel");
     saveAgentAlertsEnabled(false);
 
     // Точный сигнал идёт другим путём и мимо этой проверки не должен пройти.
@@ -448,11 +433,9 @@ describe("the master switch for agent alerts", () => {
 
     expect(mocks.systemNotification).not.toHaveBeenCalled();
     expect(getAgentAttentionCount()).toBe(0);
-    vi.useRealTimers();
   });
 
   it("starts working again the moment it is switched back on", async () => {
-    clearAgentAttention("unmuted-panel");
     saveAgentAlertsEnabled(false);
     void raiseAgentAlert("unmuted-panel", "permission", hidden);
     await settle();
@@ -466,8 +449,6 @@ describe("the master switch for agent alerts", () => {
     // не действовало бы ещё пятнадцать секунд.
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
     expect(getAgentAttentionCount()).toBe(1);
-    clearAgentAttention("unmuted-panel");
-    vi.useRealTimers();
   });
 });
 
@@ -480,11 +461,9 @@ describe("alert throttling", () => {
     localStorage.clear();
     mocks.windowFocused.value = false;
     mocks.record.value = { agentId: "claude", command: "claude" };
-    resetAgentAlertBurst();
   });
 
   it("lets a more demanding alert through the quiet window", async () => {
-    clearAgentAttention("escalate-panel");
     void raiseAgentAlert("escalate-panel", "completed", hidden);
     await settle();
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
@@ -500,12 +479,9 @@ describe("alert throttling", () => {
       expect.stringMatching(/(permission|разреш)/i),
       expect.any(String),
     );
-    clearAgentAttention("escalate-panel");
-    vi.useRealTimers();
   });
 
   it("keeps a less demanding alert inside the quiet window", async () => {
-    clearAgentAttention("calm-panel");
     void raiseAgentAlert("calm-panel", "permission", hidden);
     await settle();
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
@@ -525,12 +501,9 @@ describe("alert throttling", () => {
     void raiseAgentAlert("calm-panel", "idle", hidden);
     await settle();
     expect(mocks.systemNotification).toHaveBeenCalledTimes(2);
-    clearAgentAttention("calm-panel");
-    vi.useRealTimers();
   });
 
   it("shows one banner when two alerts race for the same panel", async () => {
-    clearAgentAttention("race-panel");
     // Хук агента и OSC из того же вывода приходят вместе: пока первый сигнал
     // ждал ответа о фокусе окна, второй успевал пройти ту же проверку.
     void raiseAgentAlert("race-panel", "completed", hidden);
@@ -540,7 +513,5 @@ describe("alert throttling", () => {
 
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
-    clearAgentAttention("race-panel");
-    vi.useRealTimers();
   });
 });
