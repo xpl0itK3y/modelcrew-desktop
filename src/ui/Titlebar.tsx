@@ -15,6 +15,7 @@ import {
   subscribeAgentAttention,
 } from "../terminal/agentAlerts";
 import { UpdatePopover } from "../updater/UpdatePopover";
+import type { WaitingPanel } from "../terminal/waitingPanels";
 import {
   loadReadNotificationIds,
   markNotificationIdsRead,
@@ -37,6 +38,9 @@ type TitlebarProps = {
   onOpenSettings: () => void;
   onOpenGitChanges: () => void;
   updater: AppUpdaterController;
+  // Панели, где агент ждёт ответа, и переход к одной из них.
+  waiting: readonly WaitingPanel[];
+  onRevealPanel: (panelId: string) => void;
 };
 
 // /Users/denis/github/proj → ~/github/proj
@@ -321,6 +325,8 @@ export function Titlebar(props: TitlebarProps) {
               onOpenRelease={() => void props.updater.openRelease()}
               onDismiss={(id) => props.updater.dismissNotification(id)}
               onClose={() => closeNotifications()}
+              waiting={props.waiting}
+              onReveal={props.onRevealPanel}
             />
           )}
           <span

@@ -181,3 +181,65 @@
   background: var(--mc-hover);
   color: var(--mc-text-bright);
 }
+
+/* Строка «агент ждёт» в центре уведомлений: переход прямо в панель.
+   Системный баннер нажатие не отдаёт — на десктопе у плагина уведомлений
+   обработчиков нет, — но щелчок по нему поднимает окно, и остаётся один шаг. */
+.waiting-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: 10px;
+  background: var(--mc-surface-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.waiting-panel-row:hover {
+  background: var(--mc-hover);
+  border-color: var(--mc-accent-border);
+}
+
+/* Та же пульсирующая точка, что в шапке панели: один признак — один вид. */
+.waiting-panel-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mc-accent);
+  box-shadow:
+    0 0 0 2px var(--mc-accent-glow),
+    0 0 8px var(--mc-accent);
+  animation: tab-dot-waiting 1.4s ease-in-out infinite;
+}
+
+.waiting-panel-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.waiting-panel-title,
+.waiting-panel-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waiting-panel-where {
+  color: var(--mc-text-faint);
+  font-size: 11.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waiting-panel-dot {
+    animation: none;
+  }
+}

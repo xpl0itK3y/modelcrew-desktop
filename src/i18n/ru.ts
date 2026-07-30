@@ -283,6 +283,7 @@ export const ru = {
   "update.resize": "Потяните, чтобы изменить высоту",
   "update.notificationsTitle": "Уведомления",
   "update.refreshingNotifications": "Обновляем уведомления…",
+  "update.waitingPanel": "Агент ждёт ответа",
   "update.empty": "Пока нет уведомлений",
   "update.versionLabel": "ModelCrew {version}",
   "update.downloadRetry":

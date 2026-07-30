@@ -284,6 +284,7 @@ export const en: Record<MessageKey, string> = {
   "update.resize": "Drag to resize",
   "update.notificationsTitle": "Notifications",
   "update.refreshingNotifications": "Refreshing notifications…",
+  "update.waitingPanel": "The agent is waiting for you",
   "update.empty": "No notifications yet",
   "update.versionLabel": "ModelCrew {version}",
   "update.downloadRetry":

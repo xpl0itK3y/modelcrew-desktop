@@ -55,6 +55,8 @@ function titlebar(updater: AppUpdaterController) {
       workspaceFolder="/Users/denis/github/modelcrew-desktop"
       sidebarVisible
       gitCounts={{ additions: 12, deletions: 3, files: 2 }}
+      waiting={[]}
+      onRevealPanel={vi.fn()}
       onToggleSidebar={vi.fn()}
       onNewTerminal={vi.fn()}
       onOpenSettings={vi.fn()}

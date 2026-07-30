@@ -246,6 +246,30 @@ export function useWorkspaces({
     [loadSession, snapshotActiveSession],
   );
 
+  // Перейти к панели по её id — из списка ожидающих в колокольчике. Панель
+  // может лежать в скрытой сессии, поэтому сначала ищем её по сохранённым
+  // раскладкам и переключаемся туда, и только потом делаем активной.
+  const revealPanel = useCallback(
+    (panelId: string) => {
+      const current = workspacesRef.current;
+      for (const workspace of current.list) {
+        for (const session of workspace.sessions) {
+          if (!session.layout?.panels?.[panelId]) {
+            continue;
+          }
+          // Активную сессию переключать не нужно: её панели уже в dockview, а
+          // её раскладка в persist может быть старше живой.
+          if (!isActiveSession(current, workspace.id, session.id)) {
+            selectSession(workspace.id, session.id);
+          }
+          break;
+        }
+      }
+      apiRef.current?.getPanel(panelId)?.api.setActive();
+    },
+    [apiRef, selectSession],
+  );
+
   const creation = useSessionCreation({
     apiRef,
     workspacesRef,
@@ -351,6 +375,7 @@ export function useWorkspaces({
     applyAutoTitles,
     selectWorkspace,
     selectSession,
+    revealPanel,
     sessionPanelCount,
     workspacePanelCount,
     ...creation,

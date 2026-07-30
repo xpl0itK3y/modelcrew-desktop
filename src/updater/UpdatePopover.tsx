@@ -9,6 +9,7 @@ import {
 import { useI18n } from "../i18n";
 import { BellIcon, CloseIcon } from "../ui/Icons";
 import type { AppUpdaterController, UpdateNotification } from "./types";
+import type { WaitingPanel } from "../terminal/waitingPanels";
 
 type NotificationCenterState = AppUpdaterController["center"];
 
@@ -21,6 +22,10 @@ type UpdatePopoverProps = {
   // Скрыть уведомление (доступно только для анонсов, не для обновлений).
   onDismiss: (id: string) => void;
   onClose: () => void;
+  // Панели, где агент ждёт ответа. Баннер сказал, что его ждут, но не куда
+  // идти: отсюда переходим прямо в панель.
+  waiting: readonly WaitingPanel[];
+  onReveal: (panelId: string) => void;
 };
 
 const POPOVER_HEIGHT_KEY = "modelcrew.notificationHeight";
@@ -225,7 +230,9 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
     }, [confirmingInstall]);
 
     const showInitialLoading =
-      props.center.items.length === 0 && props.center.sync === "initial";
+      props.center.items.length === 0 &&
+      props.waiting.length === 0 &&
+      props.center.sync === "initial";
     // «Очистить» скрывает все анонсы разом; обновления остаются.
     const dismissibleIds = props.center.items
       .filter((item) => item.kind === "announcement")
@@ -295,7 +302,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
                 {t("update.refreshingNotifications")}
               </span>
             </div>
-          ) : props.center.items.length === 0 ? (
+          ) : props.center.items.length === 0 && props.waiting.length === 0 ? (
             <div className="update-empty-state" role="status">
               <span className="update-empty-icon" aria-hidden="true">
                 <BellIcon />
@@ -304,6 +311,28 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
             </div>
           ) : (
             <div className="update-notification-list">
+              {props.waiting.map((panel) => (
+                <button
+                  key={panel.panelId}
+                  type="button"
+                  className="waiting-panel-row"
+                  onClick={() => {
+                    props.onReveal(panel.panelId);
+                    props.onClose();
+                  }}
+                >
+                  <span className="waiting-panel-dot" aria-hidden="true" />
+                  <span className="waiting-panel-text">
+                    <span className="waiting-panel-title">
+                      {[panel.agent, panel.title].filter(Boolean).join(" · ") ||
+                        t("update.waitingPanel")}
+                    </span>
+                    <span className="waiting-panel-where">
+                      {[panel.project, panel.session].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                </button>
+              ))}
               {props.center.items.map((item, index) => {
                 const titleId = `update-notification-${index}-title`;
                 const arriving = arrivedIdsRef.current.has(item.id)

@@ -33,8 +33,9 @@ function renderPopover(center: NotificationCenterState) {
     onOpenRelease: vi.fn(),
     onDismiss: vi.fn(),
     onClose: vi.fn(),
+    onReveal: vi.fn(),
   };
-  render(<UpdatePopover center={center} {...callbacks} />);
+  render(<UpdatePopover center={center} waiting={[]} {...callbacks} />);
   return callbacks;
 }
 
@@ -47,10 +48,12 @@ describe("UpdatePopover", () => {
       onOpenRelease: vi.fn(),
       onDismiss: vi.fn(),
       onClose: vi.fn(),
+      onReveal: vi.fn(),
     };
     const { rerender } = render(
       <UpdatePopover
         center={{ sync: "initial", items: [] }}
+        waiting={[]}
         {...callbacks}
       />,
     );
@@ -61,6 +64,7 @@ describe("UpdatePopover", () => {
     rerender(
       <UpdatePopover
         center={{ sync: "settled", items: [] }}
+        waiting={[]}
         {...callbacks}
       />,
     );
@@ -368,5 +372,42 @@ describe("UpdatePopover", () => {
     expect(
       screen.getByText("Waiting for system authorization"),
     ).toBeInTheDocument();
+  });
+
+  it("lists a waiting agent panel and goes to it on click", () => {
+    const callbacks = {
+      onInstall: vi.fn(),
+      onOpenRelease: vi.fn(),
+      onDismiss: vi.fn(),
+      onClose: vi.fn(),
+      onReveal: vi.fn(),
+    };
+    render(
+      <UpdatePopover
+        center={{ sync: "settled", items: [] }}
+        waiting={[
+          {
+            panelId: "panel-7",
+            agent: "Claude Code",
+            title: "claude",
+            project: "modelcrew",
+            session: "amber-lynx",
+          },
+        ]}
+        {...callbacks}
+      />,
+    );
+
+    // Пустого состояния быть не должно: ждущая панель — это уведомление.
+    expect(screen.queryByText("Пока нет уведомлений")).not.toBeInTheDocument();
+    const row = screen.getByRole("button", { name: /Claude Code/u });
+    expect(row).toHaveTextContent("modelcrew");
+    expect(row).toHaveTextContent("amber-lynx");
+
+    fireEvent.click(row);
+
+    expect(callbacks.onReveal).toHaveBeenCalledWith("panel-7");
+    // Поповер закрывается сам: пользователь уже в панели.
+    expect(callbacks.onClose).toHaveBeenCalled();
   });
 });

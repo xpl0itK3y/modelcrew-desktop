@@ -44,7 +44,14 @@ import {
 } from "./theme";
 import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
-import { setWorkspaceNameResolver } from "./terminal/agentAlerts";
+import {
+  setWorkspaceNameResolver,
+  subscribeAgentAttention,
+} from "./terminal/agentAlerts";
+import {
+  describeWaitingPanels,
+  type WaitingPanel,
+} from "./terminal/waitingPanels";
 import { sessionDisplayName, type Workspace } from "./persist";
 import {
   formatTerminalCount,
@@ -140,6 +147,7 @@ export default function App() {
     applyAutoTitles,
     selectWorkspace,
     selectSession,
+    revealPanel,
     sessionPanelCount,
     workspacePanelCount,
     createSession,
@@ -306,6 +314,22 @@ export default function App() {
     setZoomed,
   });
 
+  // Состав ожидающих панелей живёт вне React: пересобираем список на каждое
+  // изменение множества, а не по счётчику — он мог не измениться, когда одна
+  // панель отпустила внимание, а другая его забрала.
+  const [waitingPanels, setWaitingPanels] = useState<WaitingPanel[]>([]);
+  useEffect(
+    () =>
+      subscribeAgentAttention(() => {
+        setWaitingPanels(
+          describeWaitingPanels(workspacesRef.current.list, (index) =>
+            t("session.defaultName", { index }),
+          ),
+        );
+      }),
+    [workspacesRef, t],
+  );
+
   const badges = useHotkeys({
     getApi: () => apiRef.current,
     newTerminal,
@@ -455,6 +479,8 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
         updater={updater}
+        waiting={waitingPanels}
+        onRevealPanel={revealPanel}
       />
       <div className="app-body">
         <div className="sidebar-rail" aria-hidden={!sidebarVisible}>

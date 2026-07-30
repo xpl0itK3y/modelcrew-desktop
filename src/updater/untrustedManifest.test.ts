@@ -369,6 +369,8 @@ describe("rendering untrusted notification content", () => {
       onOpenRelease: vi.fn(),
       onDismiss: vi.fn(),
       onClose: vi.fn(),
+      waiting: [],
+      onReveal: vi.fn(),
     };
     render(createElement(UpdatePopover, { center, ...callbacks }));
     return callbacks;
