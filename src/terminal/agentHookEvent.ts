@@ -1,11 +1,11 @@
 // Событие от хука агента → сигнал панели. Бэкенд уже привёл полезную
 // нагрузку к паре «тип события, текст»; здесь остаётся понять, что это было.
 
+import type { TerminalAttentionNotification } from "./attentionScanner";
 import {
   classifyTerminalNotification,
   type PreciseAgentAlertKind,
-  type TerminalAttentionNotification,
-} from "./agentAlerts";
+} from "./alertPolicy";
 
 export type AgentHookEvent = {
   panelId: string;

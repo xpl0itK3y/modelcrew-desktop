@@ -9,7 +9,7 @@ import {
 import {
   isAgentPanelWaiting,
   subscribeAgentAttention,
-} from "../terminal/agentAlerts";
+} from "../terminal/attentionStore";
 import { useI18n } from "../i18n";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {

@@ -21,16 +21,16 @@ import {
 } from "../agents";
 import {
   acknowledgeAgentPanel,
-  clearAgentAttention,
   createAgentAlertTracker,
   disposeAgentAlertTracker,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   raiseAgentHookAlert,
-  setPanelTailResolver,
   trackAgentOutput,
   type AgentAlertTracker,
 } from "./agentAlerts";
+import { setPanelTailResolver } from "./alertDelivery";
+import { clearAgentAttention } from "./attentionStore";
 import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
 import {
   extractPanelTail,

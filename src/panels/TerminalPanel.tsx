@@ -8,7 +8,7 @@ import {
   getOrCreateTerminal,
   isManualTitle,
 } from "../terminal/registry";
-import { clearAgentAttention } from "../terminal/agentAlerts";
+import { clearAgentAttention } from "../terminal/attentionStore";
 
 export { destroyTerminal };
 

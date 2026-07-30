@@ -48,10 +48,8 @@ import {
 } from "./theme";
 import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
-import {
-  setWorkspaceNameResolver,
-  subscribeAgentAttention,
-} from "./terminal/agentAlerts";
+import { setWorkspaceNameResolver } from "./terminal/alertDelivery";
+import { subscribeAgentAttention } from "./terminal/attentionStore";
 import {
   describeWaitingPanels,
   type WaitingPanel,

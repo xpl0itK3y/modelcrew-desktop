@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   getAgentAttentionCount,
   subscribeAgentAttention,
-} from "../terminal/agentAlerts";
+} from "../terminal/attentionStore";
 import { UpdatePopover } from "../updater/UpdatePopover";
 import type { WaitingPanel } from "../terminal/waitingPanels";
 import {
