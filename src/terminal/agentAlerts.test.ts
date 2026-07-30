@@ -37,6 +37,7 @@ import {
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   raiseAgentAlert,
+  raiseAgentHookAlert,
   resetAgentAlertBurst,
   scanTerminalAttention,
   setPanelTailResolver,
@@ -44,7 +45,10 @@ import {
   subscribeAgentAttention,
   trackAgentOutput,
 } from "./agentAlerts";
-import { saveAgentAlertDetailMode } from "./preferences";
+import {
+  saveAgentAlertDetailMode,
+  saveAgentAlertsEnabled,
+} from "./preferences";
 
 // Ожидание микрозадач: raiseAgentAlert асинхронно спрашивает фокус окна.
 async function settle() {
@@ -648,6 +652,72 @@ describe("trackAgentOutput", () => {
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(2);
     clearAgentAttention("throttle-panel");
+    vi.useRealTimers();
+  });
+});
+
+describe("the master switch for agent alerts", () => {
+  const hidden = { visible: false, workspaceId: "ws-1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    localStorage.clear();
+    mocks.windowFocused.value = false;
+    mocks.record.value = { agentId: "claude", command: "claude" };
+    resetAgentAlertBurst();
+  });
+
+  it("silences the sound, the banner and the badge together", async () => {
+    clearAgentAttention("muted-panel");
+    saveAgentAlertsEnabled(false);
+
+    void raiseAgentAlert("muted-panel", "permission", hidden);
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocks.playSound).not.toHaveBeenCalled();
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+    // Счётчик тоже молчит: бейдж на иконке — такое же уведомление.
+    expect(getAgentAttentionCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("silences a hook the agent sent about itself, not only panel output", async () => {
+    clearAgentAttention("muted-hook-panel");
+    saveAgentAlertsEnabled(false);
+
+    // Точный сигнал идёт другим путём и мимо этой проверки не должен пройти.
+    void raiseAgentHookAlert("muted-hook-panel", "claude", "completed", hidden, {
+      protocol: "hook",
+      title: "",
+      body: "готово",
+      types: ["Stop"],
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+    expect(getAgentAttentionCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("starts working again the moment it is switched back on", async () => {
+    clearAgentAttention("unmuted-panel");
+    saveAgentAlertsEnabled(false);
+    void raiseAgentAlert("unmuted-panel", "permission", hidden);
+    await settle();
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+
+    saveAgentAlertsEnabled(true);
+    void raiseAgentAlert("unmuted-panel", "permission", hidden);
+    await settle();
+
+    // Выключенный сигнал не должен был занять окно тишины: иначе включение
+    // не действовало бы ещё пятнадцать секунд.
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(getAgentAttentionCount()).toBe(1);
+    clearAgentAttention("unmuted-panel");
     vi.useRealTimers();
   });
 });
