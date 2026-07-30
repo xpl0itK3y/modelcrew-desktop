@@ -209,6 +209,42 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Настройки уведомлений grok. Взято из его же документации, которую он
+/// кладёт рядом с собой (`~/.grok/docs/user-guide/05-configuration.md`).
+///
+/// Оба «по умолчанию» здесь пришлось перебить, и по одной причине: в матрице
+/// поддержки терминалов наш стоит как «Unknown» — протокол BEL и отслеживания
+/// фокуса нет. Поэтому `auto` выбрал бы звонок вместо последовательности, а
+/// `unfocused` и `only_unfocused` не срабатывали бы никогда: фокус, которого
+/// не видно, всегда считается активным. Кого и когда тревожить, приложение
+/// решает само — панель на виду при активном окне молчит.
+///
+/// Каналов сразу два: последовательность несёт текст сообщения, хук — точный
+/// тип события. Дубли схлопывает окно тишины: сигнал того же веса от одной
+/// панели второй раз не проходит.
+const GROK_SECTION: &str = "\n\
+    # Добавлено ModelCrew: уведомления агента читаются из вывода панели.\n\
+    [ui.notifications]\n\
+    method = \"osc9\"\n\
+    condition = \"always\"\n\
+    \n\
+    [[ui.notifications.hooks]]\n\
+    # Только тип события: $GROK_MESSAGE — произвольный текст, и внутри JSON\n\
+    # он мог бы разъехаться на первой же кавычке.\n\
+    command = \"__COMMAND__\"\n\
+    events = [\"turn_complete\", \"approval_required\", \"agent_error\"]\n\
+    only_unfocused = false\n\
+    timeout_secs = 10\n";
+
+fn grok_section(helper: &Path) -> String {
+    // Кавычки внутри TOML-строки экранируются, иначе значение обрывается.
+    let command = format!(
+        "{} '{{\\\"type\\\":\\\"$GROK_EVENT\\\"}}'",
+        hook_command(helper, "grok").replace('"', "\\\"")
+    );
+    GROK_SECTION.replace("__COMMAND__", &command)
+}
+
 /// Событие конца хода у cursor и запись хука в его формате. Файл общий с
 /// IDE, поэтому вписываемся точечно, как и в настройки claude.
 const CURSOR_EVENT: &str = "stop";
@@ -297,7 +333,7 @@ fn kilo_home(home: &Path) -> Option<PathBuf> {
 /// Секция, дописываемая в конец чужого конфига. Пара «маркер, блок»: по
 /// маркеру видно, что секция уже есть — и неважно, наша она или своя.
 /// Настройку, сделанную руками, мы не трогаем.
-fn append_section(agent: &str) -> Option<(&'static str, &'static str)> {
+fn append_section(agent: &str, helper: &Path) -> Option<(&'static str, String)> {
     match agent {
         // Схема из самого бинарника grok:
         //   method = auto|osc9|osc99|osc777|bel|none
@@ -305,11 +341,7 @@ fn append_section(agent: &str) -> Option<(&'static str, &'static str)> {
         // Берём `always`: свой «unfocused» grok считает по терминалу и про
         // наши панели ничего не знает, а кого и когда тревожить, приложение
         // решает само — панель на виду при активном окне молчит.
-        "grok" => Some((
-            "[ui.notifications]",
-            "\n# Добавлено ModelCrew: уведомления агента читаются из вывода панели.\n\
-             [ui.notifications]\nmethod = \"osc9\"\ncondition = \"always\"\n",
-        )),
+        "grok" => Some(("[ui.notifications]", grok_section(helper))),
         _ => None,
     }
 }
@@ -568,7 +600,7 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
     let Some(path) = hook_config_path(agent, &home) else {
         return unsupported;
     };
-    if let Some((marker, _)) = append_section(agent) {
+    if let Some((marker, _)) = append_section(agent, &helper) {
         let installed = std::fs::read_to_string(&path).is_ok_and(|body| body.contains(marker));
         return AgentHookState {
             agent: agent.to_string(),
@@ -609,7 +641,7 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
     }
     // Дописываемая секция в чужом конфиге: трогаем только её и только если
     // такой секции там ещё нет.
-    if let Some((marker, block)) = append_section(agent) {
+    if let Some((marker, block)) = append_section(agent, &helper) {
         let current = std::fs::read_to_string(&path).unwrap_or_default();
         if enabled {
             if !current.contains(marker) {
@@ -617,7 +649,7 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
                 std::fs::write(&path, format!("{current}{block}"))
                     .map_err(|error| format!("{}: {error}", path.display()))?;
             }
-        } else if let Some(rest) = current.strip_suffix(block) {
+        } else if let Some(rest) = current.strip_suffix(block.as_str()) {
             // Снимаем только свой блок целиком: правленный руками не наш.
             std::fs::write(&path, rest).map_err(|error| format!("{}: {error}", path.display()))?;
         }
@@ -939,7 +971,7 @@ mod tests {
 
     #[test]
     fn the_grok_section_asks_for_the_sequence_our_scanner_reads() {
-        let (marker, block) = append_section("grok").expect("grok поддержан");
+        let (marker, block) = append_section("grok", &helper()).expect("grok поддержан");
 
         assert_eq!(marker, "[ui.notifications]");
         assert!(block.contains(r#"method = "osc9""#), "{block}");
@@ -951,7 +983,7 @@ mod tests {
 
     #[test]
     fn a_notifications_section_the_user_wrote_himself_is_not_touched() {
-        let (marker, block) = append_section("grok").unwrap();
+        let (marker, block) = append_section("grok", &helper()).unwrap();
         let mine = format!("[ui]\ntheme = \"dark\"\n\n{marker}\nmethod = \"bel\"\n");
 
         // Секция есть — значит выбор уже сделан, и он важнее нашего.

@@ -158,9 +158,13 @@ if (isTauri) {
     if (!entry || !alert) {
       return;
     }
+    // Имя из события — это имя того конфига, где нашёлся хук, а не того, кто
+    // его вызвал: grok по умолчанию читает и настройки claude, и hooks.json
+    // курсора, поэтому подписался бы чужим именем. Панель знает своего агента
+    // по foreground-процессу — на него и полагаемся, пока он известен.
     void raiseAgentHookAlert(
       entry.id,
-      event.payload.agent,
+      getAgentRecord(entry.id)?.agentId ?? event.payload.agent,
       alert.kind,
       {
         visible: isPanelOnScreen(entry.container),
