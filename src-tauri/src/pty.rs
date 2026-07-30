@@ -306,7 +306,7 @@ impl PtyManager {
                 session
                     .master
                     .process_group_leader()
-                    .map(|pid| (id.clone(), pid as i32))
+                    .map(|pid| (id.clone(), pid))
             })
             .collect()
     }

@@ -486,7 +486,7 @@ mod tests {
         let error = roots.resolve("workspace-unknown").unwrap_err();
         assert_eq!(error.code, ErrorCode::WorkspaceRootNotRegistered);
         assert_eq!(error.context["workspaceId"], "workspace-unknown");
-        assert!(error.context.get("path").is_none());
+        assert!(!error.context.contains_key("path"));
 
         roots.bind("workspace", &path).unwrap();
         roots.unbind("workspace").unwrap();
@@ -498,7 +498,7 @@ mod tests {
         roots.retain_only(&[]).unwrap();
         let error = roots.resolve("workspace").unwrap_err();
         assert_eq!(error.code, ErrorCode::WorkspaceRootNotRegistered);
-        assert!(error.context.get("path").is_none());
+        assert!(!error.context.contains_key("path"));
 
         roots.unbind("workspace").unwrap();
         assert!(roots.resolve("workspace").is_err());

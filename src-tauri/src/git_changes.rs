@@ -758,10 +758,10 @@ pub fn is_relevant_event_path(repo_root: &Path, path: &Path) -> bool {
     if first != ".git" {
         return true;
     }
-    match components.next().as_deref() {
-        Some("index") | Some("HEAD") | Some("refs") => true,
-        _ => false,
-    }
+    matches!(
+        components.next().as_deref(),
+        Some("index" | "HEAD" | "refs")
+    )
 }
 
 struct GitWatchHandle {
@@ -809,35 +809,31 @@ fn spawn_watch(
 
     std::thread::spawn(move || {
         let mut last_key: Option<String> = None;
-        loop {
-            match event_receiver.recv() {
-                Ok(()) => {
-                    // Тихое окно: серия событий (npm install, генерация кода)
-                    // схлопывается в один прогон git status.
-                    while event_receiver
-                        .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
-                        .is_ok()
-                    {}
-                    let Ok(summary) = collect_summary(&root) else {
-                        continue;
-                    };
-                    let key = serde_json::to_string(&summary).unwrap_or_default();
-                    if last_key.as_deref() == Some(key.as_str()) {
-                        continue;
-                    }
-                    last_key = Some(key);
-                    use tauri::Emitter;
-                    let _ = app.emit(
-                        "git-changes",
-                        GitChangesEvent {
-                            workspace_id: &workspace_id,
-                            summary: &summary,
-                        },
-                    );
-                }
-                // Вотчер удалён (unwatch/выход) — отправитель закрыт.
-                Err(_) => break,
+        // Ошибка приёма означает, что вотчер удалён (unwatch/выход) и
+        // отправитель закрыт: поток заканчивается вместе с ним.
+        while event_receiver.recv().is_ok() {
+            // Тихое окно: серия событий (npm install, генерация кода)
+            // схлопывается в один прогон git status.
+            while event_receiver
+                .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
+                .is_ok()
+            {}
+            let Ok(summary) = collect_summary(&root) else {
+                continue;
+            };
+            let key = serde_json::to_string(&summary).unwrap_or_default();
+            if last_key.as_deref() == Some(key.as_str()) {
+                continue;
             }
+            last_key = Some(key);
+            use tauri::Emitter;
+            let _ = app.emit(
+                "git-changes",
+                GitChangesEvent {
+                    workspace_id: &workspace_id,
+                    summary: &summary,
+                },
+            );
         }
     });
 

@@ -321,6 +321,11 @@ fn spawn_title_watcher(app: tauri::AppHandle) {
     });
 }
 
+// Аргументы приходят от веб-вью по одному: четыре первых Tauri подставляет
+// сам, остальные — параметры вызова. Свернуть их в структуру значит поменять
+// контракт IPC ради тишины линтера, а сигнатуру команды всё равно сторожит
+// отдельный тест.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn pty_create(
     window: tauri::WebviewWindow,
@@ -1178,7 +1183,7 @@ mod tests {
                     cursor += 1;
                 }
                 commands.push(IpcCommand {
-                    module: *module,
+                    module,
                     name,
                     signature,
                     body,

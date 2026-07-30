@@ -474,12 +474,16 @@ mod tests {
             }
             // keep-списки prune проверяются до первого удаления.
             assert_eq!(
-                prune_snapshots(&dir, &[id.clone()]).unwrap_err().code,
+                prune_snapshots(&dir, std::slice::from_ref(&id))
+                    .unwrap_err()
+                    .code,
                 ErrorCode::TerminalSnapshotInvalidId,
                 "id {id:?}"
             );
             assert_eq!(
-                prune_panel_history(&base, &[id.clone()]).unwrap_err().code,
+                prune_panel_history(&base, std::slice::from_ref(&id))
+                    .unwrap_err()
+                    .code,
                 ErrorCode::TerminalSnapshotInvalidId,
                 "id {id:?}"
             );
