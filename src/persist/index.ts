@@ -9,6 +9,7 @@ import {
   type Workspace,
   type WorkspacesState,
 } from "./model";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import {
   dedupeWorkspacesByFolder,
   migrateWorkspaceV1,
@@ -21,7 +22,6 @@ export * from "./model";
 
 type PersistedStateV3 = WorkspacesState & { version: 3 };
 
-const STORAGE_KEY = "modelcrew.workspaces";
 
 // Есть ли в хранилище сохранённое состояние — даже если загрузить его не
 // удалось. Позволяет отличить настоящий первый запуск от сорванного чтения
@@ -29,7 +29,7 @@ const STORAGE_KEY = "modelcrew.workspaces";
 // случае записывать поверх данных пустое состояние нельзя.
 export function hasPersistedWorkspacesState(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) !== null;
+    return readSetting(KEYS.workspaces) !== null;
   } catch {
     // Хранилище недоступно целиком — данные могут существовать.
     return true;
@@ -38,7 +38,7 @@ export function hasPersistedWorkspacesState(): boolean {
 
 export function loadWorkspacesState(): WorkspacesState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readSetting(KEYS.workspaces);
     if (!raw) {
       return null;
     }
@@ -115,8 +115,8 @@ export function saveWorkspacesState(state: WorkspacesState): void {
         };
       }),
     };
-    localStorage.setItem(
-      STORAGE_KEY,
+    writeSetting(
+      KEYS.workspaces,
       JSON.stringify({ version: 3, ...normalized } satisfies PersistedStateV3),
     );
   } catch {

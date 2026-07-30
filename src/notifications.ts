@@ -3,6 +3,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { KEYS, readSetting, writeSetting } from "./settings/storage";
 import { isTauri, platform } from "./platform";
 
 // Системные уведомления ОС (Notification Center / toast / libnotify):
@@ -10,7 +11,6 @@ import { isTauri, platform } from "./platform";
 // best-effort: любой сбой (нет разрешения, нет демона на Linux) молча
 // игнорируется и не мешает внутренним уведомлениям.
 
-const STORAGE_KEY = "modelcrew.systemNotifications";
 
 // На Linux демон уведомлений не связывает наш app-id с установленным ярлыком,
 // поэтому баннер приходит без иконки приложения. Указываем её имя явно — оно
@@ -22,7 +22,7 @@ const isLinux = platform === "linux";
 
 export function loadSystemNotificationsEnabled(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) !== "off";
+    return readSetting(KEYS.systemNotifications) !== "off";
   } catch {
     return true;
   }
@@ -30,7 +30,7 @@ export function loadSystemNotificationsEnabled(): boolean {
 
 export function saveSystemNotificationsEnabled(enabled: boolean): void {
   try {
-    localStorage.setItem(STORAGE_KEY, enabled ? "on" : "off");
+    writeSetting(KEYS.systemNotifications, enabled ? "on" : "off");
   } catch {
     // Non-fatal: выбор не переживёт перезапуск.
   }

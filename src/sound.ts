@@ -3,6 +3,7 @@
 // build. Selection is persisted per-machine in localStorage, mirroring shell.ts.
 
 import type { NotificationItem } from "./updater/types";
+import { KEYS, readSetting, writeSetting, removeSetting } from "./settings/storage";
 import { platform } from "./platform";
 import { APP_VERSION } from "./version";
 
@@ -30,11 +31,9 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 ];
 
 const DEFAULT_SOUND: NotificationSoundId = "chime";
-const STORAGE_KEY = "modelcrew.notificationSound";
 export const DEFAULT_NOTIFICATION_VOLUME = 100;
 export const MIN_NOTIFICATION_VOLUME = 0;
 export const MAX_NOTIFICATION_VOLUME = 100;
-const VOLUME_STORAGE_KEY = "modelcrew.notificationVolume";
 
 function isSoundId(value: string): value is NotificationSoundId {
   return NOTIFICATION_SOUNDS.some((sound) => sound.id === value);
@@ -42,7 +41,7 @@ function isSoundId(value: string): value is NotificationSoundId {
 
 export function loadNotificationSound(): NotificationSoundId {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = readSetting(KEYS.notificationSound);
     if (stored && isSoundId(stored)) return stored;
   } catch {
     // Ignore storage access failures and fall back to the default.
@@ -52,7 +51,7 @@ export function loadNotificationSound(): NotificationSoundId {
 
 export function saveNotificationSound(id: NotificationSoundId): void {
   try {
-    localStorage.setItem(STORAGE_KEY, id);
+    writeSetting(KEYS.notificationSound, id);
   } catch {
     // Non-fatal: the choice just won't persist across restarts.
   }
@@ -76,7 +75,7 @@ function normalizeNotificationVolume(value: number): number {
 
 export function loadNotificationVolume(): number {
   try {
-    const stored = localStorage.getItem(VOLUME_STORAGE_KEY);
+    const stored = readSetting(KEYS.notificationVolume);
     if (stored !== null && stored.trim() !== "") {
       return normalizeNotificationVolume(Number(stored));
     }
@@ -89,7 +88,7 @@ export function loadNotificationVolume(): number {
 export function saveNotificationVolume(value: number): void {
   const volume = normalizeNotificationVolume(value);
   try {
-    localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+    writeSetting(KEYS.notificationVolume, String(volume));
   } catch {
     // Non-fatal: the choice just won't persist across restarts.
   }
@@ -142,7 +141,6 @@ export function selectUnseenNotificationSoundIds(
 // GStreamer), so a different app version re-arms playback automatically.
 // Selecting the "off" sound clears the marker as an explicit manual retry.
 
-const HEALTH_KEY = "modelcrew.audioHealth";
 const AUDIO_HANG_THRESHOLD_MS = 5_000;
 
 // Заморозить процесс проигрыванием может только Linux/WebKitGTK через
@@ -168,7 +166,7 @@ type AudioHealth = {
 
 function readAudioHealth(): AudioHealth | null {
   try {
-    const raw = localStorage.getItem(HEALTH_KEY);
+    const raw = readSetting(KEYS.audioHealth);
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<AudioHealth> | null;
     if (
@@ -194,8 +192,8 @@ function readAudioHealth(): AudioHealth | null {
 
 function writeAudioHealth(status: AudioHealth["status"]): void {
   try {
-    localStorage.setItem(
-      HEALTH_KEY,
+    writeSetting(
+      KEYS.audioHealth,
       JSON.stringify({ status, version: APP_VERSION, session: SESSION_ID }),
     );
   } catch {
@@ -205,7 +203,7 @@ function writeAudioHealth(status: AudioHealth["status"]): void {
 
 function clearAudioHealth(): void {
   try {
-    localStorage.removeItem(HEALTH_KEY);
+    removeSetting(KEYS.audioHealth);
   } catch {
     // Non-fatal.
   }

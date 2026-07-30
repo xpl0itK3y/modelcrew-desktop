@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import { ru, type MessageKey } from "./ru";
 import { en } from "./en";
 
@@ -6,7 +7,6 @@ export type { MessageKey } from "./ru";
 
 export type Locale = "ru" | "en";
 
-const LOCALE_STORAGE_KEY = "modelcrew.locale";
 const DEFAULT_LOCALE: Locale = "ru";
 const catalogs: Record<Locale, Record<MessageKey, string>> = { ru, en };
 
@@ -19,7 +19,7 @@ function isLocale(value: unknown): value is Locale {
 
 export function loadLocale(): Locale {
   try {
-    const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
+    const stored = readSetting(KEYS.locale);
     return isLocale(stored) ? stored : DEFAULT_LOCALE;
   } catch {
     return DEFAULT_LOCALE;
@@ -46,7 +46,7 @@ export function setLocale(locale: Locale): void {
     return;
   }
   try {
-    localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+    writeSetting(KEYS.locale, locale);
   } catch {
     // Без localStorage язык применяется только до закрытия приложения.
   }

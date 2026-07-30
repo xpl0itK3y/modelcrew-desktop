@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import { useI18n } from "../i18n";
 import { BellIcon, CloseIcon } from "../ui/Icons";
 import type { AppUpdaterController, UpdateNotification } from "./types";
@@ -28,7 +29,6 @@ type UpdatePopoverProps = {
   onReveal: (panelId: string) => void;
 };
 
-const POPOVER_HEIGHT_KEY = "modelcrew.notificationHeight";
 const MIN_POPOVER_HEIGHT = 220;
 // Bottom margin kept between the stretched popover and the window edge.
 const POPOVER_BOTTOM_GAP = 12;
@@ -39,7 +39,7 @@ const DISMISS_STAGGER_MS = 45;
 
 function loadPopoverHeight(): number | null {
   try {
-    const raw = localStorage.getItem(POPOVER_HEIGHT_KEY);
+    const raw = readSetting(KEYS.notificationHeight);
     const value = raw ? Number(raw) : NaN;
     return Number.isFinite(value) && value >= MIN_POPOVER_HEIGHT ? value : null;
   } catch {
@@ -193,7 +193,7 @@ export const UpdatePopover = forwardRef<HTMLDivElement, UpdatePopoverProps>(
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         try {
-          localStorage.setItem(POPOVER_HEIGHT_KEY, String(Math.round(current)));
+          writeSetting(KEYS.notificationHeight, String(Math.round(current)));
         } catch {
           // Non-fatal: the size just won't persist across restarts.
         }

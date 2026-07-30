@@ -1,4 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
+import { KEYS, readSetting, writeSetting } from "./settings/storage";
 import { isTauri } from "./platform";
 
 export type AccentColor = {
@@ -518,8 +519,6 @@ export const APP_THEMES: readonly AppTheme[] = [
   },
 ] as const;
 
-const ACCENT_STORAGE_KEY = "modelcrew.accent";
-const THEME_STORAGE_KEY = "modelcrew.theme";
 const DEFAULT_ACCENT = ACCENT_COLORS[0].value;
 export const DEFAULT_THEME_ID: ThemeId = "midnight";
 
@@ -529,7 +528,7 @@ export function getAppTheme(id: ThemeId): AppTheme {
 
 export function loadTheme(): ThemeId {
   try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    const stored = readSetting(KEYS.theme);
     return APP_THEMES.some((theme) => theme.id === stored)
       ? (stored as ThemeId)
       : DEFAULT_THEME_ID;
@@ -563,7 +562,7 @@ export function applyTheme(id: ThemeId): void {
 
 export function saveTheme(id: ThemeId): void {
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, id);
+    writeSetting(KEYS.theme, id);
   } catch {
     // Без localStorage тема применяется только до закрытия приложения.
   }
@@ -572,7 +571,7 @@ export function saveTheme(id: ThemeId): void {
 
 export function loadAccent(): string {
   try {
-    return localStorage.getItem(ACCENT_STORAGE_KEY) ?? DEFAULT_ACCENT;
+    return readSetting(KEYS.accent) ?? DEFAULT_ACCENT;
   } catch {
     return DEFAULT_ACCENT;
   }
@@ -584,7 +583,7 @@ export function applyAccent(color: string): void {
 
 export function saveAccent(color: string): void {
   try {
-    localStorage.setItem(ACCENT_STORAGE_KEY, color);
+    writeSetting(KEYS.accent, color);
   } catch {
     // Без localStorage цвет применяется только до закрытия приложения.
   }

@@ -8,6 +8,7 @@
 // хранилище не может подсунуть произвольную строку в оболочку.
 
 import { invoke } from "@tauri-apps/api/core";
+import { KEYS, readSetting, writeSetting } from "./settings/storage";
 import { isTauri } from "./platform";
 
 export type AgentDefinition = {
@@ -113,12 +114,11 @@ export const AGENTS: AgentDefinition[] = [
 
 export type AgentResumeMode = "off" | "insert" | "auto";
 
-const RESUME_MODE_STORAGE_KEY = "modelcrew.agentResumeMode";
 const DEFAULT_RESUME_MODE: AgentResumeMode = "auto";
 
 export function loadAgentResumeMode(): AgentResumeMode {
   try {
-    const raw = localStorage.getItem(RESUME_MODE_STORAGE_KEY);
+    const raw = readSetting(KEYS.agentResumeMode);
     if (raw === "off" || raw === "insert" || raw === "auto") {
       return raw;
     }
@@ -130,7 +130,7 @@ export function loadAgentResumeMode(): AgentResumeMode {
 
 export function saveAgentResumeMode(mode: AgentResumeMode): void {
   try {
-    localStorage.setItem(RESUME_MODE_STORAGE_KEY, mode);
+    writeSetting(KEYS.agentResumeMode, mode);
   } catch {
     // Non-fatal: выбор не переживёт перезапуск.
   }
@@ -166,11 +166,10 @@ type AgentRecord = {
 // Буквы/цифры/дефис/подчёркивание: uuid (claude, codex, agy) и ses_… (opencode).
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
-const RECORDS_STORAGE_KEY = "modelcrew.terminalAgents";
 
 function loadRecords(): Record<string, AgentRecord> {
   try {
-    const raw = localStorage.getItem(RECORDS_STORAGE_KEY);
+    const raw = readSetting(KEYS.terminalAgents);
     if (!raw) {
       return {};
     }
@@ -212,7 +211,7 @@ function loadRecords(): Record<string, AgentRecord> {
 
 function saveRecords(records: Record<string, AgentRecord>): void {
   try {
-    localStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(records));
+    writeSetting(KEYS.terminalAgents, JSON.stringify(records));
   } catch {
     // Non-fatal: возобновление просто не сработает после рестарта.
   }

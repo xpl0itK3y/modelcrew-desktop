@@ -1,23 +1,16 @@
-const TERMINAL_FONT_SIZE_STORAGE_KEY = "modelcrew.terminalFontSize";
-const HISTORY_ISOLATION_STORAGE_KEY = "modelcrew.terminalHistoryIsolated";
-const NETWORK_AVATARS_STORAGE_KEY = "modelcrew.networkAvatars";
-const TERMINAL_SPAWN_MODE_STORAGE_KEY = "modelcrew.terminalSpawnMode";
+import {
+  KEYS,
+  RETIRED_KEYS,
+  readSetting,
+  removeSetting,
+  writeSetting,
+} from "../settings/storage";
 
-// Ключи снятых настроек: их больше никто не читает, но у тех, кто их когда-то
-// переключал, значение так и лежит в localStorage. Убираем при старте, чтобы
-// хранилище отражало то, что приложение умеет сегодня.
-const RETIRED_STORAGE_KEYS = [
-  // Жадный подъём скрытых сессий проекта при запуске.
-  "modelcrew.eagerSessionRestore",
-];
-
+// У тех, кто когда-то переключал снятую настройку, значение так и лежит в
+// хранилище. Убираем при старте, чтобы оно не всплыло при возврате функции.
 export function dropRetiredPreferences(): void {
-  for (const key of RETIRED_STORAGE_KEYS) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // Без localStorage чистить нечего.
-    }
+  for (const key of RETIRED_KEYS) {
+    removeSetting(key);
   }
 }
 
@@ -30,7 +23,9 @@ export type TerminalSpawnMode = (typeof TERMINAL_SPAWN_MODES)[number];
 
 export const DEFAULT_TERMINAL_SPAWN_MODE: TerminalSpawnMode = "balanced";
 
-export function isTerminalSpawnMode(value: unknown): value is TerminalSpawnMode {
+export function isTerminalSpawnMode(
+  value: unknown,
+): value is TerminalSpawnMode {
   return (
     typeof value === "string" &&
     TERMINAL_SPAWN_MODES.includes(value as TerminalSpawnMode)
@@ -41,7 +36,7 @@ export function isTerminalSpawnMode(value: unknown): value is TerminalSpawnMode 
 // остаются как есть и продолжают восстанавливаться через Dockview JSON.
 export function loadTerminalSpawnMode(): TerminalSpawnMode {
   try {
-    const value = localStorage.getItem(TERMINAL_SPAWN_MODE_STORAGE_KEY);
+    const value = readSetting(KEYS.terminalSpawnMode);
     return isTerminalSpawnMode(value) ? value : DEFAULT_TERMINAL_SPAWN_MODE;
   } catch {
     return DEFAULT_TERMINAL_SPAWN_MODE;
@@ -50,7 +45,7 @@ export function loadTerminalSpawnMode(): TerminalSpawnMode {
 
 export function saveTerminalSpawnMode(mode: TerminalSpawnMode): void {
   try {
-    localStorage.setItem(TERMINAL_SPAWN_MODE_STORAGE_KEY, mode);
+    writeSetting(KEYS.terminalSpawnMode, mode);
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }
@@ -60,7 +55,7 @@ export function saveTerminalSpawnMode(mode: TerminalSpawnMode): void {
 // Переключение шлёт событие, чтобы аватарки перерисовались сразу.
 export function loadNetworkAvatars(): boolean {
   try {
-    return localStorage.getItem(NETWORK_AVATARS_STORAGE_KEY) !== "off";
+    return readSetting(KEYS.networkAvatars) !== "off";
   } catch {
     return true;
   }
@@ -68,20 +63,17 @@ export function loadNetworkAvatars(): boolean {
 
 export function saveNetworkAvatars(enabled: boolean): void {
   try {
-    localStorage.setItem(NETWORK_AVATARS_STORAGE_KEY, enabled ? "on" : "off");
+    writeSetting(KEYS.networkAvatars, enabled ? "on" : "off");
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }
   window.dispatchEvent(new Event("modelcrew:network-avatars"));
 }
 
-const AGENT_ALERTS_STORAGE_KEY = "modelcrew.agentAlerts";
-const AGENT_ALERT_DETAIL_STORAGE_KEY = "modelcrew.agentAlertDetail";
-
 // Уведомления «агент закончил/ждёт ответа» для панелей вне поля зрения.
 export function loadAgentAlertsEnabled(): boolean {
   try {
-    return localStorage.getItem(AGENT_ALERTS_STORAGE_KEY) !== "off";
+    return readSetting(KEYS.agentAlerts) !== "off";
   } catch {
     return true;
   }
@@ -89,7 +81,7 @@ export function loadAgentAlertsEnabled(): boolean {
 
 export function saveAgentAlertsEnabled(enabled: boolean): void {
   try {
-    localStorage.setItem(AGENT_ALERTS_STORAGE_KEY, enabled ? "on" : "off");
+    writeSetting(KEYS.agentAlerts, enabled ? "on" : "off");
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }
@@ -99,7 +91,7 @@ export type AgentAlertDetailMode = "brief" | "detailed";
 
 export function loadAgentAlertDetailMode(): AgentAlertDetailMode {
   try {
-    return localStorage.getItem(AGENT_ALERT_DETAIL_STORAGE_KEY) === "detailed"
+    return readSetting(KEYS.agentAlertDetail) === "detailed"
       ? "detailed"
       : "brief";
   } catch {
@@ -109,7 +101,7 @@ export function loadAgentAlertDetailMode(): AgentAlertDetailMode {
 
 export function saveAgentAlertDetailMode(mode: AgentAlertDetailMode): void {
   try {
-    localStorage.setItem(AGENT_ALERT_DETAIL_STORAGE_KEY, mode);
+    writeSetting(KEYS.agentAlertDetail, mode);
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }
@@ -119,7 +111,7 @@ export function saveAgentAlertDetailMode(mode: AgentAlertDetailMode): void {
 // именно этой панели и переживает перезапуск). false — общесистемная история.
 export function loadTerminalHistoryIsolation(): boolean {
   try {
-    return localStorage.getItem(HISTORY_ISOLATION_STORAGE_KEY) !== "off";
+    return readSetting(KEYS.terminalHistoryIsolated) !== "off";
   } catch {
     return true;
   }
@@ -127,10 +119,7 @@ export function loadTerminalHistoryIsolation(): boolean {
 
 export function saveTerminalHistoryIsolation(isolated: boolean): void {
   try {
-    localStorage.setItem(
-      HISTORY_ISOLATION_STORAGE_KEY,
-      isolated ? "on" : "off",
-    );
+    writeSetting(KEYS.terminalHistoryIsolated, isolated ? "on" : "off");
   } catch {
     // Без localStorage значение действует только до закрытия приложения.
   }
@@ -152,7 +141,7 @@ export function normalizeTerminalFontSize(size: number): number {
 
 export function loadTerminalFontSize(): number {
   try {
-    const raw = localStorage.getItem(TERMINAL_FONT_SIZE_STORAGE_KEY);
+    const raw = readSetting(KEYS.terminalFontSize);
     if (raw === null || raw.trim() === "") {
       return DEFAULT_TERMINAL_FONT_SIZE;
     }
@@ -167,8 +156,8 @@ export function loadTerminalFontSize(): number {
 
 export function saveTerminalFontSize(size: number): void {
   try {
-    localStorage.setItem(
-      TERMINAL_FONT_SIZE_STORAGE_KEY,
+    writeSetting(
+      KEYS.terminalFontSize,
       String(normalizeTerminalFontSize(size)),
     );
   } catch {

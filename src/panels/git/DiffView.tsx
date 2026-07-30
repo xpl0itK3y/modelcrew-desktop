@@ -3,6 +3,7 @@
 // запоминается, поэтому выбор живёт здесь же.
 
 import { useMemo } from "react";
+import { KEYS, readSetting, writeSetting } from "../../settings/storage";
 import { useI18n } from "../../i18n";
 import {
   changedRange,
@@ -19,11 +20,10 @@ import {
 // настройки.
 export type DiffView = "unified" | "split";
 
-const DIFF_VIEW_KEY = "modelcrew.diffView";
 
 export function loadDiffView(): DiffView {
   try {
-    return localStorage.getItem(DIFF_VIEW_KEY) === "unified"
+    return readSetting(KEYS.diffView) === "unified"
       ? "unified"
       : "split";
   } catch {
@@ -33,7 +33,7 @@ export function loadDiffView(): DiffView {
 
 export function saveDiffView(view: DiffView): void {
   try {
-    localStorage.setItem(DIFF_VIEW_KEY, view);
+    writeSetting(KEYS.diffView, view);
   } catch {
     // Не сохранилось — выбор просто не доедет до следующего запуска.
   }

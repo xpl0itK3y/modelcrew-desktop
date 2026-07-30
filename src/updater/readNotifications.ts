@@ -1,5 +1,5 @@
-export const READ_NOTIFICATIONS_STORAGE_KEY =
-  "modelcrew.notifications.readIds.v1";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
+export const READ_NOTIFICATIONS_STORAGE_KEY = KEYS.readNotifications;
 
 const MAX_READ_NOTIFICATION_IDS = 100;
 
@@ -24,7 +24,7 @@ function normalizeReadIds(ids: readonly string[]): string[] {
 
 export function loadReadNotificationIds(): string[] {
   try {
-    const value = localStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY);
+    const value = readSetting(READ_NOTIFICATIONS_STORAGE_KEY);
     if (!value) {
       return [];
     }
@@ -44,7 +44,7 @@ export function markNotificationIdsRead(
 ): string[] {
   const nextIds = normalizeReadIds([...currentIds, ...visibleIds]);
   try {
-    localStorage.setItem(READ_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(nextIds));
+    writeSetting(READ_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(nextIds));
   } catch {
     // Read state remains valid for the current session when storage is unavailable.
   }
@@ -53,12 +53,11 @@ export function markNotificationIdsRead(
 
 // Скрытые пользователем уведомления (анонсы). Хранятся так же, как read-ids:
 // повторная доставка того же анонса не должна воскресить скрытую карточку.
-export const DISMISSED_NOTIFICATIONS_STORAGE_KEY =
-  "modelcrew.notifications.dismissedIds.v1";
+export const DISMISSED_NOTIFICATIONS_STORAGE_KEY = KEYS.dismissedNotifications;
 
 export function loadDismissedNotificationIds(): string[] {
   try {
-    const value = localStorage.getItem(DISMISSED_NOTIFICATIONS_STORAGE_KEY);
+    const value = readSetting(DISMISSED_NOTIFICATIONS_STORAGE_KEY);
     if (!value) {
       return [];
     }
@@ -80,7 +79,7 @@ export function markNotificationIdsDismissed(
 ): string[] {
   const nextIds = normalizeReadIds([...currentIds, ...dismissedIds]);
   try {
-    localStorage.setItem(
+    writeSetting(
       DISMISSED_NOTIFICATIONS_STORAGE_KEY,
       JSON.stringify(nextIds),
     );
