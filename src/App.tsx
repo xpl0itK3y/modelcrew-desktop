@@ -9,7 +9,10 @@ import {
 import "dockview/dist/styles/dockview.css";
 import { invoke } from "@tauri-apps/api/core";
 import { TerminalPanel } from "./panels/TerminalPanel";
-import { GitChangesPanel, GitChangesView } from "./panels/GitChangesPanel";
+import {
+  GitChangesPanelLazy,
+  GitChangesViewLazy,
+} from "./panels/git/GitPanelLazy";
 import {
   aggregateCounts,
   subscribeGitChanges,
@@ -30,7 +33,7 @@ import { pruneAgentRecords } from "./agents";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { Settings } from "./ui/Settings";
+import { SettingsLazy } from "./ui/SettingsLazy";
 import { CloseIcon, MaximizeIcon } from "./ui/Icons";
 import { useAnimatedPresence } from "./ui/useAnimatedPresence";
 import { AppActionsProvider, type AppActions } from "./ui/AppActions";
@@ -74,7 +77,10 @@ import { useWorkspaces } from "./workspaces/useWorkspaces";
 import { useDockviewSetup } from "./useDockviewSetup";
 import "./styles/index.css";
 
-const components = { terminal: TerminalPanel, gitChanges: GitChangesPanel };
+const components = {
+  terminal: TerminalPanel,
+  gitChanges: GitChangesPanelLazy,
+};
 const tabComponents = { terminal: TerminalTab };
 
 type SessionDeleteRequest = {
@@ -603,7 +609,7 @@ export default function App() {
                   <CloseIcon />
                 </button>
               </div>
-              <GitChangesView workspaceId={renderedGitDrawerWorkspaceId} />
+              <GitChangesViewLazy workspaceId={renderedGitDrawerWorkspaceId} />
             </aside>
           )}
         </main>
@@ -710,7 +716,7 @@ export default function App() {
         />
       )}
       {settingsPresence && (
-        <Settings
+        <SettingsLazy
           closing={settingsPresence.closing}
           themeId={themeId}
           accent={accent}

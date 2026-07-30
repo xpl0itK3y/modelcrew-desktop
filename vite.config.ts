@@ -17,6 +17,19 @@ export default defineConfig(async () => ({
     __APP_VERSION__: JSON.stringify(appVersion),
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        // Тяжёлые зависимости — своими чанками: терминал и сетка панелей
+        // вместе весят больше всего нашего кода, а меняются раз в релиз.
+        manualChunks: {
+          xterm: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-serialize", "@xterm/addon-webgl"],
+          dockview: ["dockview"],
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
