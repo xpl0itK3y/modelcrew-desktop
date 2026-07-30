@@ -4,10 +4,7 @@
 use super::*;
 use crate::git_branches::*;
 use crate::git_changes::test_support::*;
-use crate::git_changes::*;
-use crate::git_history::*;
 use std::process::Command;
-use tempfile::tempdir;
 
 #[test]
 fn rewords_a_local_commit_and_preserves_descendants() {
@@ -503,9 +500,9 @@ fn full_local_history_workflow_next_to_published_commits() {
         .iter()
         .map(|commit| (commit.subject.as_str(), commit.editable))
         .collect();
-    assert_eq!(editable["third"], true);
-    assert_eq!(editable["second"], true);
-    assert_eq!(editable["published"], false, "коммит уже на сервере");
+    assert!(editable["third"]);
+    assert!(editable["second"]);
+    assert!(!editable["published"], "коммит уже на сервере");
     assert_eq!(
         reword_commit(root, &published, "rewritten")
             .unwrap_err()

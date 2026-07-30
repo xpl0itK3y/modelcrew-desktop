@@ -2,12 +2,9 @@
 //! журнал коммитов, fetch/pull/push, слияние, перенос, публикация.
 
 use super::*;
-use crate::git_branches::*;
 use crate::git_changes::test_support::*;
-use crate::git_changes::*;
 use crate::git_history::*;
 use std::process::Command;
-use tempfile::tempdir;
 
 #[test]
 fn splits_co_authors_from_the_body() {

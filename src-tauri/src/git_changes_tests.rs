@@ -4,10 +4,8 @@
 use super::*;
 use crate::git_branches::*;
 use crate::git_changes::test_support::*;
-use crate::git_changes::*;
 use crate::git_history::*;
 use std::process::Command;
-use tempfile::tempdir;
 
 #[test]
 fn parses_branch_and_counts_from_porcelain() {
@@ -57,7 +55,10 @@ u UU N... 100644 100644 100644 100644 a b c conflicted.rs\0\
 
 #[test]
 fn parses_numstat_with_binary_and_rename() {
-    let raw = b"12\t3\tsrc/app.ts\0-\t-\tlogo.png\05\t0\t\0old.rs\0new.rs\0";
+    // Разделитель перед записью переименования пишем как \x00: следом идёт
+    // цифра, и в форме \0 это читается как восьмеричный escape, которого в
+    // Rust нет.
+    let raw = b"12\t3\tsrc/app.ts\0-\t-\tlogo.png\x005\t0\t\0old.rs\0new.rs\0";
     assert_eq!(
         parse_numstat(raw),
         vec![
