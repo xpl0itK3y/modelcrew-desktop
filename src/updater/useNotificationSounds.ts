@@ -10,16 +10,27 @@ import { sendSystemNotification } from "../notifications";
 import { loadReadNotificationIds } from "./readNotifications";
 import type { NotificationItem } from "./types";
 
-// Баннер уровня ОС шлём только когда окно не в фокусе: в фокусе пользователю
-// хватает бейджа и звука, дублировать системным всплытием — спам.
-async function notifyInBackground(item: NotificationItem): Promise<void> {
-  try {
-    if (await getCurrentWindow().isFocused()) {
+// Скачанное обновление — единственное уведомление, которое показывается всегда.
+// Оно означает «дистрибутив уже на диске, осталось решить: ставить сейчас или
+// потом», и решение это принимают один раз. Карточка в колокольчике за
+// терминалами теряется, а пропущенное «готово» оставляет пользователя на старой
+// версии, хотя новая скачана и ждёт.
+function announcedEvenInForeground(item: NotificationItem): boolean {
+  return item.kind === "update" && item.phase === "ready";
+}
+
+// Остальным баннер уровня ОС нужен, только когда окно не в фокусе: всплытие
+// поверх приложения, которое пользователь и так видит, — спам.
+async function notifyUser(item: NotificationItem): Promise<void> {
+  if (!announcedEvenInForeground(item)) {
+    try {
+      if (await getCurrentWindow().isFocused()) {
+        return;
+      }
+    } catch {
+      // Веб-превью или ранний старт: статус фокуса неизвестен — не шлём.
       return;
     }
-  } catch {
-    // Веб-превью или ранний старт: статус фокуса неизвестен — не шлём.
-    return;
   }
   await sendSystemNotification(item.title, item.summary ?? "");
 }
@@ -55,7 +66,7 @@ export function useNotificationSounds(items: readonly NotificationItem[]) {
     const newestId = unseenIds[unseenIds.length - 1];
     const newest = items.find((item) => item.id === newestId);
     if (newest) {
-      void notifyInBackground(newest);
+      void notifyUser(newest);
     }
   }, [handledIds, items]);
 }
