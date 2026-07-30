@@ -2074,3 +2074,8 @@ pub async fn git_publish_branch(
     .await
     .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
+
+// Проверки вертикали лежат рядом, отдельным файлом: их вдвое больше кода.
+#[cfg(test)]
+#[path = "git_branches_tests.rs"]
+mod tests;

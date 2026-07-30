@@ -917,6 +917,12 @@ pub async fn git_file_diff(
 // Тесты вынесены в отдельный файл: их вчетверо больше кода, и в общем файле
 // они прятали и ядро, и границы вертикалей. Модуль остаётся дочерним для
 // git_changes, поэтому `use super::*` внутри работает как раньше.
+// Общая оснастка проверок: сборка репозиториев и запуск git. Нужна всем трём
+// наборам, поэтому объявлена здесь и доступна как crate::git_changes::test_support.
+#[cfg(test)]
+#[path = "git_test_support.rs"]
+pub(crate) mod test_support;
+
 #[cfg(test)]
 #[path = "git_changes_tests.rs"]
 mod tests;

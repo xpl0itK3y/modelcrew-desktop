@@ -895,3 +895,8 @@ pub async fn git_drop_commit(
         .await
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
+
+// Проверки вертикали лежат рядом, отдельным файлом: их вдвое больше кода.
+#[cfg(test)]
+#[path = "git_history_tests.rs"]
+mod tests;
