@@ -1,0 +1,159 @@
+// Правка истории: действия над коммитом из меню, сообщение коммита, amend,
+// squash/fixup, удаление и сброс, сравнение двух состояний, теги и патчи.
+//
+// Почти каждая команда переписывает прошлое, поэтому получает ожидаемый HEAD:
+// панель подтверждает то состояние, которое показала пользователю.
+
+import { invoke } from "@tauri-apps/api/core";
+import type { GitFileDiff } from "./gitChanges";
+import type { GitCommitFile } from "./gitLog";
+
+// Действия над коммитом истории: checkout (отделить HEAD), branch (создать
+// ветку от коммита), cherryPick (применить поверх текущей), revert (отменить
+// коммит новым), uncommit (снять локальный HEAD, сохранив изменения). Ошибки
+// git поднимаются наверх и показываются в панели.
+export type CommitAction =
+  | "checkout"
+  | "branch"
+  | "cherryPick"
+  | "revert"
+  | "uncommit";
+
+export function commitAction(
+  workspaceId: string,
+  action: CommitAction,
+  hash: string,
+  name?: string,
+): Promise<void> {
+  return invoke("git_commit_action", {
+    workspaceId,
+    action,
+    hash,
+    ...(name === undefined ? {} : { name }),
+  });
+}
+
+// Переписать сообщение локального коммита. Бэкенд разрешает только не
+// запушенные свои не-merge коммиты; иначе — ошибка.
+export function rewordCommit(
+  workspaceId: string,
+  hash: string,
+  message: string,
+): Promise<void> {
+  return invoke("git_reword_commit", { workspaceId, hash, message });
+}
+
+// Правка локальной истории. Каждая команда получает вершину ветки, которую
+// пользователь видел в панели: если её успели сдвинуть, бэкенд откажет вместо
+// того, чтобы переписать чужой коммит.
+export function amendCommit(
+  workspaceId: string,
+  expectedHead: string,
+  message?: string,
+): Promise<void> {
+  return invoke("git_amend_commit", { workspaceId, expectedHead, message });
+}
+
+// soft — двигает только ветку, mixed — ещё и индекс, hard — и файлы на диске.
+export type GitResetMode = "soft" | "mixed" | "hard";
+
+export function resetToCommit(
+  workspaceId: string,
+  hash: string,
+  mode: GitResetMode,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_reset_to_commit", {
+    workspaceId,
+    hash,
+    mode,
+    expectedHead,
+  });
+}
+
+// squash объединяет оба сообщения, fixup оставляет сообщение родителя.
+export type GitSquashMode = "squash" | "fixup";
+
+export function squashCommit(
+  workspaceId: string,
+  hash: string,
+  mode: GitSquashMode,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_squash_commit", {
+    workspaceId,
+    hash,
+    mode,
+    expectedHead,
+  });
+}
+
+export function dropCommit(
+  workspaceId: string,
+  hash: string,
+  expectedHead: string,
+): Promise<void> {
+  return invoke("git_drop_commit", { workspaceId, hash, expectedHead });
+}
+
+// Сравнение двух состояний. `to` не задан — сравниваем с рабочей папкой.
+export function compareFiles(
+  workspaceId: string,
+  from: string,
+  to?: string,
+): Promise<GitCommitFile[]> {
+  return invoke<GitCommitFile[]>("git_compare_files", {
+    workspaceId,
+    from,
+    to,
+  });
+}
+
+export function compareFileDiff(
+  workspaceId: string,
+  from: string,
+  path: string,
+  to?: string,
+): Promise<GitFileDiff> {
+  return invoke<GitFileDiff>("git_compare_file_diff", {
+    workspaceId,
+    from,
+    to,
+    path,
+  });
+}
+
+// Локальные теги. Тег на сервере не трогаем: это уже общий репозиторий.
+export function createTag(
+  workspaceId: string,
+  name: string,
+  hash: string,
+  message?: string,
+): Promise<void> {
+  return invoke("git_create_tag", { workspaceId, name, hash, message });
+}
+
+export function deleteTag(workspaceId: string, name: string): Promise<void> {
+  return invoke("git_delete_tag", { workspaceId, name });
+}
+
+// Патч коммита в формате `git format-patch` — его принимает `git am`.
+export function commitPatch(
+  workspaceId: string,
+  hash: string,
+): Promise<string> {
+  return invoke<string>("git_commit_patch", { workspaceId, hash });
+}
+
+// false означает, что диалог сохранения закрыли без выбора файла.
+export function saveCommitPatch(
+  workspaceId: string,
+  hash: string,
+  fileName: string,
+): Promise<boolean> {
+  return invoke<boolean>("git_save_commit_patch", {
+    workspaceId,
+    hash,
+    fileName,
+  });
+}

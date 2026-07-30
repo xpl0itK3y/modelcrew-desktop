@@ -5,13 +5,8 @@
 import { useMemo } from "react";
 import { KEYS, readSetting, writeSetting } from "../../settings/storage";
 import { useI18n } from "../../i18n";
-import {
-  changedRange,
-  pairDiffLines,
-  parseUnifiedDiff,
-  type DiffLine,
-  type GitFileDiff,
-} from "../../git/gitChanges";
+import { type GitFileDiff } from "../../git/gitChanges";
+import { changedRange, pairDiffLines, parseUnifiedDiff, type DiffLine } from "../../git/unifiedDiff";
 
 // ---------- Просмотр diff-а только для чтения ----------
 

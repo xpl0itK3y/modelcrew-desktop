@@ -1,22 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../../i18n";
-import {
-  createBranch,
-  deleteBranch,
-  fetchBranches,
-  gitPull,
-  gitPullRebase,
-  gitPush,
-  gitResetToUpstream,
-  mergeRef,
-  publishBranch,
-  rebaseOnto,
-  refreshGitChanges,
-  renameBranch,
-  switchBranch,
-  formatRelativeTime,
-  type GitBranchInfo,
-} from "../../git/gitChanges";
+import { refreshGitChanges } from "../../git/gitChanges";
+import { createBranch, deleteBranch, fetchBranches, mergeRef, rebaseOnto, renameBranch, switchBranch, type GitBranchInfo } from "../../git/gitBranches";
+import { gitPull, gitPullRebase, gitPush, gitResetToUpstream, publishBranch } from "../../git/gitSync";
+import { formatRelativeTime } from "../../git/relativeTime";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 
 // Ветки и синхронизация с сервером: переключатель веток, публикация,

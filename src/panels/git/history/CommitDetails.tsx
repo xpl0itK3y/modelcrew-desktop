@@ -4,13 +4,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useI18n } from "../../../i18n";
-import {
-  commitFileDiff,
-  fetchCommitFiles,
-  type GitCommitFile,
-  type GitCommitInfo,
-  type GitFileDiff,
-} from "../../../git/gitChanges";
+import { type GitFileDiff } from "../../../git/gitChanges";
+import { commitFileDiff, fetchCommitFiles, type GitCommitFile, type GitCommitInfo } from "../../../git/gitLog";
 import {
   DiffBody,
   DiffViewToggle,

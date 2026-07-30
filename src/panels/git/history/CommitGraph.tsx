@@ -4,11 +4,9 @@
 
 import { Fragment, useMemo } from "react";
 import { useI18n } from "../../../i18n";
-import {
-  formatRelativeTime,
-  type GitCommitInfo,
-  type GitRefKind,
-} from "../../../git/gitChanges";
+import { type GitRefKind } from "../../../git/gitBranches";
+import { type GitCommitInfo } from "../../../git/gitLog";
+import { formatRelativeTime } from "../../../git/relativeTime";
 import { computeCommitGraph } from "../../../git/commitGraph";
 import {
   GRAPH_COLORS,

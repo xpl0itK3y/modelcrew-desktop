@@ -4,14 +4,9 @@
 
 import { useEffect, useState } from "react";
 import { localizeBackendError, useI18n } from "../../../i18n";
-import {
-  compareFileDiff,
-  compareFiles,
-  rewordCommit,
-  type GitCommitFile,
-  type GitCommitInfo,
-  type GitFileDiff,
-} from "../../../git/gitChanges";
+import { type GitFileDiff } from "../../../git/gitChanges";
+import { type GitCommitFile, type GitCommitInfo } from "../../../git/gitLog";
+import { compareFileDiff, compareFiles, rewordCommit } from "../../../git/gitHistory";
 import {
   DiffBody,
   DiffViewToggle,

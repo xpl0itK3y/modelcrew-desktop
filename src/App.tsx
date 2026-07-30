@@ -13,11 +13,8 @@ import {
   GitChangesPanelLazy,
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
-import {
-  aggregateCounts,
-  subscribeGitChanges,
-  type GitChangesSummary,
-} from "./git/gitChanges";
+import { subscribeGitChanges, type GitChangesSummary } from "./git/gitChanges";
+import { aggregateCounts } from "./git/unifiedDiff";
 import { TerminalTab } from "./panels/TerminalTab";
 import { GroupActions } from "./panels/GroupActions";
 import { Welcome } from "./panels/Welcome";

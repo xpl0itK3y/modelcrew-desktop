@@ -11,22 +11,9 @@ import {
 } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { localizeBackendError, useI18n } from "../../../i18n";
-import {
-  amendCommit,
-  commitAction,
-  commitPatch,
-  createTag,
-  deleteTag,
-  dropCommit,
-  githubCommitUrl,
-  refreshGitChanges,
-  resetToCommit,
-  saveCommitPatch,
-  squashCommit,
-  type CommitAction,
-  type GitCommitInfo,
-  type GitResetMode,
-} from "../../../git/gitChanges";
+import { refreshGitChanges } from "../../../git/gitChanges";
+import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
+import { amendCommit, commitAction, commitPatch, createTag, deleteTag, dropCommit, resetToCommit, saveCommitPatch, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
 
 export function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;

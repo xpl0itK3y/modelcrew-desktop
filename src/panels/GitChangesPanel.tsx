@@ -6,20 +6,8 @@ import {
 } from "react";
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
-import {
-  commitAll,
-  fetchFileDiff,
-  getGitSummary,
-  parseUnifiedDiff,
-  readRepoFile,
-  refreshGitChanges,
-  revertFile,
-  subscribeGitChanges,
-  writeRepoFile,
-  type GitChangedFile,
-  type GitChangesSummary,
-  type GitFileDiff,
-} from "../git/gitChanges";
+import { commitAll, fetchFileDiff, getGitSummary, readRepoFile, refreshGitChanges, revertFile, subscribeGitChanges, type GitChangedFile, type GitChangesSummary, type GitFileDiff, writeRepoFile } from "../git/gitChanges";
+import { parseUnifiedDiff } from "../git/unifiedDiff";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import {
   BranchSwitcher,

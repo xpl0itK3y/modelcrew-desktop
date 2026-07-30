@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../../i18n";
-import {
-  fetchLog,
-  formatRelativeTime,
-  refreshGitChanges,
-  subscribeGitChanges,
-  switchBranch,
-  type GitCommitInfo,
-  type GitRefKind,
-} from "../../git/gitChanges";
+import { refreshGitChanges, subscribeGitChanges } from "../../git/gitChanges";
+import { switchBranch, type GitRefKind } from "../../git/gitBranches";
+import { fetchLog, type GitCommitInfo } from "../../git/gitLog";
+import { formatRelativeTime } from "../../git/relativeTime";
 import { useAnimatedPresence } from "../../ui/useAnimatedPresence";
 
 // История коммитов: список и граф, раскрытая карточка коммита, меню действий

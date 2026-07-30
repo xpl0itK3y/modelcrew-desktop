@@ -2,7 +2,7 @@
 // Показывается и в строке графа, и в раскрытой карточке, и в шапке сравнения.
 
 import { useEffect, useState } from "react";
-import { authorAvatar, resolveAvatarUrl } from "../../../git/gitChanges";
+import { authorAvatar, resolveAvatarUrl } from "../../../git/authorAvatars";
 import {
   githubAvatarForEmail,
   subscribeGithubAvatars,

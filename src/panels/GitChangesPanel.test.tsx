@@ -1,11 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localizeBackendError, setLocale } from "../i18n";
-import type {
-  GitBranchInfo,
-  GitChangesSummary,
-  GitCommitInfo,
-} from "../git/gitChanges";
+import type { GitChangesSummary } from "../git/gitChanges";
+import type { GitBranchInfo } from "../git/gitBranches";
+import type { GitCommitInfo } from "../git/gitLog";
 
 const mocks = vi.hoisted(() => ({
   summaries: new Map<string, GitChangesSummary>(),
@@ -78,36 +76,52 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
       },
     ),
     commitAll: mocks.commitAll,
-    createBranch: mocks.createBranch,
-    renameBranch: mocks.renameBranch,
-    deleteBranch: mocks.deleteBranch,
-    switchBranch: mocks.switchBranch,
-    gitPull: mocks.gitPull,
-    gitPush: mocks.gitPush,
-    gitPullRebase: mocks.gitPullRebase,
-    gitResetToUpstream: mocks.gitResetToUpstream,
-    rewordCommit: mocks.rewordCommit,
-    amendCommit: mocks.amendCommit,
-    squashCommit: mocks.squashCommit,
-    dropCommit: mocks.dropCommit,
-    resetToCommit: mocks.resetToCommit,
-    createTag: mocks.createTag,
-    deleteTag: mocks.deleteTag,
-    commitPatch: mocks.commitPatch,
-    saveCommitPatch: mocks.saveCommitPatch,
-    githubCommitUrl: mocks.githubCommitUrl,
-    mergeRef: mocks.mergeRef,
-    rebaseOnto: mocks.rebaseOnto,
-    publishBranch: mocks.publishBranch,
-    compareFiles: mocks.compareFiles,
-    compareFileDiff: mocks.compareFileDiff,
-    fetchCommitFiles: mocks.fetchCommitFiles,
-    commitFileDiff: mocks.commitFileDiff,
-    fetchBranches: mocks.fetchBranches,
-    fetchLog: mocks.fetchLog,
     refreshGitChanges: mocks.refreshGitChanges,
   };
 });
+
+vi.mock("../git/gitBranches", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../git/gitBranches")>()),
+  fetchBranches: mocks.fetchBranches,
+  createBranch: mocks.createBranch,
+  renameBranch: mocks.renameBranch,
+  deleteBranch: mocks.deleteBranch,
+  switchBranch: mocks.switchBranch,
+  mergeRef: mocks.mergeRef,
+  rebaseOnto: mocks.rebaseOnto,
+}));
+
+vi.mock("../git/gitSync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../git/gitSync")>()),
+  gitPull: mocks.gitPull,
+  gitPush: mocks.gitPush,
+  gitPullRebase: mocks.gitPullRebase,
+  gitResetToUpstream: mocks.gitResetToUpstream,
+  publishBranch: mocks.publishBranch,
+}));
+
+vi.mock("../git/gitLog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../git/gitLog")>()),
+  fetchLog: mocks.fetchLog,
+  fetchCommitFiles: mocks.fetchCommitFiles,
+  commitFileDiff: mocks.commitFileDiff,
+  githubCommitUrl: mocks.githubCommitUrl,
+}));
+
+vi.mock("../git/gitHistory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../git/gitHistory")>()),
+  rewordCommit: mocks.rewordCommit,
+  amendCommit: mocks.amendCommit,
+  squashCommit: mocks.squashCommit,
+  dropCommit: mocks.dropCommit,
+  resetToCommit: mocks.resetToCommit,
+  createTag: mocks.createTag,
+  deleteTag: mocks.deleteTag,
+  commitPatch: mocks.commitPatch,
+  saveCommitPatch: mocks.saveCommitPatch,
+  compareFiles: mocks.compareFiles,
+  compareFileDiff: mocks.compareFileDiff,
+}));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
 
