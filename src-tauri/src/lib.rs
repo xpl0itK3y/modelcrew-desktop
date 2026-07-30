@@ -14,6 +14,7 @@ mod agent_sessions;
 mod clipboard_images;
 mod command_error;
 mod git_changes;
+mod git_history;
 mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
@@ -28,14 +29,17 @@ use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use git_changes::{
-    git_amend_commit, git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch,
-    git_commit, git_commit_action, git_commit_file_diff, git_commit_files, git_commit_patch,
-    git_compare_file_diff, git_compare_files, git_create_branch, git_create_tag, git_delete_branch,
-    git_delete_tag, git_drop_commit, git_fetch_upstream, git_file_diff, git_log, git_merge_ref,
+    git_branches, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
+    git_commit_action, git_commit_file_diff, git_commit_files, git_create_branch,
+    git_delete_branch, git_fetch_upstream, git_file_diff, git_log, git_merge_ref,
     git_publish_branch, git_pull, git_pull_rebase, git_push, git_read_file, git_rebase_onto,
-    git_rename_branch, git_reset_to_commit, git_reset_to_upstream, git_revert_file,
-    git_reword_commit, git_save_commit_patch, git_squash_commit, git_switch_branch, git_write_file,
+    git_rename_branch, git_reset_to_upstream, git_revert_file, git_switch_branch, git_write_file,
     GitWatchState,
+};
+use git_history::{
+    git_amend_commit, git_commit_patch, git_compare_file_diff, git_compare_files, git_create_tag,
+    git_delete_tag, git_drop_commit, git_reset_to_commit, git_reword_commit, git_save_commit_patch,
+    git_squash_commit,
 };
 use github_auth::{
     github_auth_available, github_commit_avatars, github_commit_url, github_current_user,
@@ -1022,6 +1026,7 @@ mod tests {
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("git_changes.rs", include_str!("git_changes.rs")),
+        ("git_history.rs", include_str!("git_history.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
         ("pty.rs", include_str!("pty.rs")),
