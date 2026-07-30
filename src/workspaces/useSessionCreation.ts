@@ -8,7 +8,6 @@ import {
 import { isTauri } from "../platform";
 import { DockviewApi } from "dockview";
 import { invoke } from "@tauri-apps/api/core";
-import { appActions } from "../appActions";
 import { localizeBackendError, translate } from "../i18n";
 import { MAX_TERMINALS } from "../constants";
 import { addTerminalAutoGrid } from "../layoutOps";
@@ -33,6 +32,8 @@ type UseSessionCreationOptions = {
   rootRegistryReady: boolean;
   markRootUnavailable: (workspaceId: string, error: unknown) => void;
   showToast: (text: string) => void;
+  // Нет папки или она отвалилась — предлагаем выбрать проект.
+  requestCreateWorkspace: () => void;
   snapshotActiveSession: (
     list: Workspace[],
     activeId: string | null,
@@ -52,6 +53,7 @@ export function useSessionCreation({
   rootRegistryReady,
   markRootUnavailable,
   showToast,
+  requestCreateWorkspace,
   snapshotActiveSession,
   selectWorkspace,
   selectSession,
@@ -103,7 +105,7 @@ export function useSessionCreation({
         return;
       }
       if (!workspace.folder || rootErrorsRef.current[workspaceId]) {
-        appActions.requestCreateWorkspace();
+        requestCreateWorkspace();
         return;
       }
       if (!rootRegistryReady) {
@@ -122,7 +124,7 @@ export function useSessionCreation({
           markRootUnavailable(workspaceId, error);
           showToast(localizeBackendError(error));
           if (workspacesRef.current.activeId === workspaceId) {
-            appActions.requestCreateWorkspace();
+            requestCreateWorkspace();
           }
         });
     },
@@ -130,6 +132,7 @@ export function useSessionCreation({
       createSessionAfterValidation,
       markRootUnavailable,
       rootErrorsRef,
+      requestCreateWorkspace,
       rootRegistryReady,
       selectWorkspace,
       showToast,
@@ -149,7 +152,7 @@ export function useSessionCreation({
         !isActiveSession(current, workspaceId, sessionId)
       ) {
         if (workspace && (!workspace.folder || rootErrorsRef.current[workspaceId])) {
-          appActions.requestCreateWorkspace();
+          requestCreateWorkspace();
         }
         return;
       }
@@ -185,13 +188,14 @@ export function useSessionCreation({
           markRootUnavailable(workspaceId, error);
           showToast(localizeBackendError(error));
           if (isActiveSession(workspacesRef.current, workspaceId, sessionId)) {
-            appActions.requestCreateWorkspace();
+            requestCreateWorkspace();
           }
         });
     },
     [
       apiRef,
       markRootUnavailable,
+      requestCreateWorkspace,
       rootErrorsRef,
       rootRegistryReady,
       selectSession,
@@ -205,7 +209,7 @@ export function useSessionCreation({
     const workspace = list.find((item) => item.id === activeId);
     const session = workspace ? activeSession(workspace) : undefined;
     if (!workspace || !session) {
-      appActions.requestCreateWorkspace();
+      requestCreateWorkspace();
       return;
     }
     newTerminalForSession(workspace.id, session.id);

@@ -33,7 +33,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Settings } from "./ui/Settings";
 import { CloseIcon, MaximizeIcon } from "./ui/Icons";
 import { useAnimatedPresence } from "./ui/useAnimatedPresence";
-import { appActions } from "./appActions";
+import { AppActionsProvider, type AppActions } from "./ui/AppActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { useCmdDrag } from "./hotkeys/useCmdDrag";
 import {
@@ -151,6 +151,7 @@ export default function App() {
     revealPanel,
     sessionPanelCount,
     workspacePanelCount,
+    hasActiveWorkspace,
     createSession,
     newTerminal,
     newTerminalForSession,
@@ -344,13 +345,19 @@ export default function App() {
     suppressCleanupRef,
   });
 
-  // Machine-поля appActions вешает useWorkspaces; за App — только UI-запросы.
-  useEffect(() => {
-    appActions.requestCloseGroup = setCloseGroupRequest;
-    return () => {
-      appActions.requestCloseGroup = () => {};
-    };
-  }, []);
+  // Действия для панелей dockview: ватермарк и шапка группы получают их
+  // контекстом, а не через изменяемый модульный объект.
+  const appActions = useMemo<AppActions>(
+    () => ({
+      hasActiveWorkspace,
+      requestCreateWorkspace: () => {
+        void createWorkspace();
+      },
+      requestNewTerminal: newTerminal,
+      requestCloseGroup: setCloseGroupRequest,
+    }),
+    [createWorkspace, hasActiveWorkspace, newTerminal],
+  );
 
   // Оверлеи (настройки, диалоги, тост) доигрывают exit-анимацию после
   // закрытия; presence хранит последние данные для текста, даже если
@@ -520,25 +527,27 @@ export default function App() {
         </div>
         <main className="dock-area">
           {rootRegistryReady ? (
-            <DockviewReact
-              components={components}
-              tabComponents={tabComponents}
-              watermarkComponent={Welcome}
-              rightHeaderActionsComponent={GroupActions}
-              onReady={onReady}
-              theme={dockviewTheme}
-              // Сетка управляется приложением: пользователь может переносить
-              // и максимизировать панели, но не тянуть разделители.
-              locked
-              // Дроп-зоны у краёв всей сетки: полноширинная строка/колонка.
-              // Полоска узкая нарочно — иначе она перехватывает дропы,
-              // которыми пользователь хочет встать РЯДОМ с крайней панелью
-              // (это делается через половинки самой панели).
-              dndEdges={{
-                activationSize: { type: "pixels", value: 16 },
-                size: { type: "pixels", value: 48 },
-              }}
-            />
+            <AppActionsProvider actions={appActions}>
+              <DockviewReact
+                components={components}
+                tabComponents={tabComponents}
+                watermarkComponent={Welcome}
+                rightHeaderActionsComponent={GroupActions}
+                onReady={onReady}
+                theme={dockviewTheme}
+                // Сетка управляется приложением: пользователь может переносить
+                // и максимизировать панели, но не тянуть разделители.
+                locked
+                // Дроп-зоны у краёв всей сетки: полноширинная строка/колонка.
+                // Полоска узкая нарочно — иначе она перехватывает дропы,
+                // которыми пользователь хочет встать РЯДОМ с крайней панелью
+                // (это делается через половинки самой панели).
+                dndEdges={{
+                  activationSize: { type: "pixels", value: 16 },
+                  size: { type: "pixels", value: 48 },
+                }}
+              />
+            </AppActionsProvider>
           ) : (
             <div className="workspace-loading">{t("workspace.checking")}</div>
           )}

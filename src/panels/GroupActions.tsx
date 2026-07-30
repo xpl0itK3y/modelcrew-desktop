@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { IDockviewHeaderActionsProps } from "dockview";
-import { appActions } from "../appActions";
+import { useAppActions } from "../ui/AppActions";
 import { canMaximizePanel, togglePanelMaximized } from "../animations";
 import { platform } from "../platform";
 import { shortcutLabel } from "../hotkeys/shortcuts";
@@ -10,6 +10,7 @@ import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 // Кнопки в шапке группы dockview: развернуть/свернуть и закрыть.
 export function GroupActions(props: IDockviewHeaderActionsProps) {
   const { t } = useI18n();
+  const actions = useAppActions();
   const api = props.containerApi;
   // Пока терминал один, разворачивать нечего — кнопку не показываем вовсе,
   // чтобы она не притворялась работающей.
@@ -53,7 +54,7 @@ export function GroupActions(props: IDockviewHeaderActionsProps) {
         className="icon-button"
         title={t("group.close", { shortcut: closeShortcut })}
         aria-label={t("group.close", { shortcut: closeShortcut })}
-        onClick={() => appActions.requestCloseGroup(props.group)}
+        onClick={() => actions.requestCloseGroup(props.group)}
       >
         <CloseIcon />
       </button>

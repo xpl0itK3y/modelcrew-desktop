@@ -1,5 +1,5 @@
 import { IWatermarkPanelProps } from "dockview";
-import { appActions } from "../appActions";
+import { useAppActions } from "../ui/AppActions";
 import { isMac } from "../platform";
 import { useI18n } from "../i18n";
 import { FolderIcon, PlusIcon } from "../ui/Icons";
@@ -7,11 +7,12 @@ import { FolderIcon, PlusIcon } from "../ui/Icons";
 // Watermark dockview: онбординг без проекта или пустая сессия без терминалов.
 export function Welcome(_props: IWatermarkPanelProps) {
   const { t } = useI18n();
+  const actions = useAppActions();
   const newTerminalShortcut = isMac ? "⌘T" : "Ctrl+T";
   const panelNumbersShortcut = isMac ? "⌘⌥" : "Ctrl+Alt";
   const zoomShortcut = isMac ? "⌘↩" : "Ctrl+Enter";
   // Первый запуск (воркспейса нет) — онбординг через выбор папки проекта.
-  if (!appActions.hasActiveWorkspace()) {
+  if (!actions.hasActiveWorkspace()) {
     return (
       <div className="welcome">
         <div className="welcome-badge">MODELCREW</div>
@@ -20,7 +21,7 @@ export function Welcome(_props: IWatermarkPanelProps) {
         <button
           type="button"
           className="welcome-button"
-          onClick={() => appActions.requestCreateWorkspace()}
+          onClick={() => actions.requestCreateWorkspace()}
         >
           <FolderIcon /> {t("welcome.openProject")}
         </button>
@@ -41,7 +42,7 @@ export function Welcome(_props: IWatermarkPanelProps) {
       <button
         type="button"
         className="welcome-button"
-        onClick={() => appActions.requestNewTerminal()}
+        onClick={() => actions.requestNewTerminal()}
       >
         <PlusIcon /> {t("welcome.newTerminal")}
       </button>

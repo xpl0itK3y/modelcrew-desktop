@@ -7,14 +7,12 @@ import {
   type RefObject,
 } from "react";
 import { DockviewApi } from "dockview";
-import { appActions } from "../appActions";
 import {
   destroyTerminal,
   getAutoTitle,
   isManualTitle,
 } from "../terminal/registry";
 import { translate, type Locale } from "../i18n";
-import { MAX_TERMINALS } from "../constants";
 import {
   addPanel,
   localizeDefaultPanelTitles,
@@ -270,20 +268,6 @@ export function useWorkspaces({
     [apiRef, selectSession],
   );
 
-  const creation = useSessionCreation({
-    apiRef,
-    workspacesRef,
-    setWorkspaces,
-    rootErrorsRef,
-    rootRegistryReady,
-    markRootUnavailable,
-    showToast,
-    snapshotActiveSession,
-    selectWorkspace,
-    selectSession,
-    loadSession,
-  });
-
   const crud = useWorkspaceCrud({
     apiRef,
     workspacesRef,
@@ -295,6 +279,21 @@ export function useWorkspaces({
     locale,
     snapshotActiveSession,
     selectWorkspace,
+    loadSession,
+  });
+
+  const creation = useSessionCreation({
+    apiRef,
+    workspacesRef,
+    setWorkspaces,
+    rootErrorsRef,
+    rootRegistryReady,
+    markRootUnavailable,
+    showToast,
+    requestCreateWorkspace: crud.createWorkspace,
+    snapshotActiveSession,
+    selectWorkspace,
+    selectSession,
     loadSession,
   });
 
@@ -329,39 +328,16 @@ export function useWorkspaces({
     [sessionPanelCount],
   );
 
-  // Глобальные экшены (welcome-экран, хоткеи, watermark) смотрят на живое
-  // состояние машины через appActions; UI-поля (requestCloseGroup) вешает App.
-  useEffect(() => {
-    appActions.getActiveWorkspaceId = () => workspacesRef.current.activeId;
-    appActions.getActiveSessionId = () => {
-      const { list, activeId } = workspacesRef.current;
-      return list.find((workspace) => workspace.id === activeId)
-        ?.activeSessionId ?? null;
-    };
-    appActions.hasActiveWorkspace = () => {
-      const { list, activeId } = workspacesRef.current;
-      const active = list.find((workspace) => workspace.id === activeId);
-      return Boolean(
-        active?.folder && activeId && !rootErrorsRef.current[activeId],
-      );
-    };
-    appActions.requestCreateWorkspace = () => {
-      void crud.createWorkspace();
-    };
-    appActions.requestNewTerminal = creation.newTerminal;
-    appActions.notifyNoSpace = () => showToast(translate("layout.noSplitSpace"));
-    appActions.notifyLimit = () =>
-      showToast(translate("layout.terminalLimit", { max: MAX_TERMINALS }));
-    return () => {
-      appActions.getActiveWorkspaceId = () => null;
-      appActions.getActiveSessionId = () => null;
-      appActions.hasActiveWorkspace = () => false;
-      appActions.requestCreateWorkspace = () => {};
-      appActions.requestNewTerminal = () => {};
-      appActions.notifyNoSpace = () => {};
-      appActions.notifyLimit = () => {};
-    };
-  }, [creation.newTerminal, crud.createWorkspace, rootErrorsRef, showToast]);
+  // Есть ли проект, в котором можно открыть терминал: ватермарк без папки
+  // предлагает сначала её выбрать. Живое состояние читаем из ref, поэтому
+  // функция стабильна и не тянет за собой перерисовки.
+  const hasActiveWorkspace = useCallback(() => {
+    const { list, activeId } = workspacesRef.current;
+    const active = list.find((workspace) => workspace.id === activeId);
+    return Boolean(
+      active?.folder && activeId && !rootErrorsRef.current[activeId],
+    );
+  }, [rootErrorsRef, workspacesRef]);
 
   return {
     workspaces,
@@ -378,6 +354,7 @@ export function useWorkspaces({
     revealPanel,
     sessionPanelCount,
     workspacePanelCount,
+    hasActiveWorkspace,
     ...creation,
     ...crud,
   };
