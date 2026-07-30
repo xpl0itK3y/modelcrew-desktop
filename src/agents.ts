@@ -93,28 +93,12 @@ export const AGENTS: AgentDefinition[] = [
     resumeSession: ["--resume"],
   },
   {
-    id: "qwen",
-    label: "Qwen Code",
-    processNames: ["qwen"],
-    resumeLast: ["--continue"],
-    resumePicker: ["--resume"],
-    resumeSession: ["--resume"],
-  },
-  {
     id: "aider",
     label: "Aider",
     processNames: ["aider"],
     // У aider одна история на репозиторий, адресных сессий нет.
     resumeLast: ["--restore-chat-history"],
     resumePicker: ["--restore-chat-history"],
-  },
-  {
-    id: "amp",
-    label: "Amp",
-    processNames: ["amp"],
-    resumeLast: ["threads", "continue"],
-    resumePicker: ["threads", "continue"],
-    resumeSession: ["threads", "continue"],
   },
   {
     id: "antigravity",

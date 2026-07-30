@@ -1,7 +1,7 @@
 //! Уведомления от самих агентов, а не по косвенным признакам вывода.
 //!
 //! CLI умеют звать внешнюю программу, когда закончили ход или просят
-//! разрешения: у codex это `notify` в config.toml, у claude/copilot/grok/qwen —
+//! разрешения: у codex это `notify` в config.toml, у claude/copilot/grok —
 //! hooks. Такой хук запускается внутри панели, поэтому знает её id из
 //! окружения (см. `pty::set_agent_events_dir`) и просто кладёт событие файлом.
 //! Приложение забирает файлы и шлёт их во фронт — без сокетов и портов, и
@@ -175,7 +175,7 @@ fn normalize(agent: &str, payload: &Value) -> (String, String) {
                 text(payload, &["error"]),
             )
         }
-        // claude/copilot/grok/qwen: {"hook_event_name":"Stop","message":"…"}
+        // claude/copilot/grok: {"hook_event_name":"Stop","message":"…"}
         _ => (
             text(
                 payload,
@@ -987,7 +987,7 @@ mod tests {
         );
         // У этих канал либо не подтверждён, либо его нет — молча трогать
         // чужие конфиги на догадках нельзя.
-        for agent in ["codex", "qwen", "kimi", "amp", "aider"] {
+        for agent in ["codex", "kimi", "aider"] {
             assert_eq!(hook_config_path(agent, home), None, "{agent}");
             assert_eq!(agent_home(agent, home), None, "{agent}");
         }

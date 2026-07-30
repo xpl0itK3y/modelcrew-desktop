@@ -61,8 +61,7 @@ CLIs are recognized:
 <div align="center">
 
 `Claude Code` · `Codex` · `GitHub Copilot` · `OpenCode` · `Kilo Code` ·
-`Kimi Code` · `Grok` · `Cursor` · `Qwen Code` · `Aider` · `Amp` ·
-`Antigravity`
+`Kimi Code` · `Grok` · `Cursor` · `Aider` · `Antigravity`
 
 </div>
 

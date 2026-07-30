@@ -34,9 +34,11 @@ describe("agent catalog", () => {
     expect(matchAgent("Kimi")?.agent.id).toBe("kimi");
     expect(matchAgent("grok")?.agent.id).toBe("grok");
     expect(matchAgent("cursor-agent")?.agent.id).toBe("cursor");
-    expect(matchAgent("qwen")?.agent.id).toBe("qwen");
     expect(matchAgent("aider")?.agent.id).toBe("aider");
-    expect(matchAgent("amp")?.agent.id).toBe("amp");
+    // Снятые с поддержки опознаваться не должны: половинчатая поддержка хуже
+    // отсутствия — панель считалась бы агентской, а канала у неё нет.
+    expect(matchAgent("qwen")).toBeNull();
+    expect(matchAgent("amp")).toBeNull();
     expect(matchAgent("zsh")).toBeNull();
     expect(matchAgent("vim")).toBeNull();
     expect(AGENTS.find((agent) => agent.id === "kimi")?.label).toBe(
@@ -156,8 +158,11 @@ describe("agent catalog", () => {
 
     // Многословные команды и агент без адресного resume.
     expect(
-      buildAgentResume({ agentId: "amp", command: "amp", sessionId: "T-1" }, false),
-    ).toBe("amp threads continue T-1");
+      buildAgentResume(
+        { agentId: "codex", command: "codex", sessionId: "T-1" },
+        false,
+      ),
+    ).toBe("codex resume T-1");
     expect(
       buildAgentResume(
         { agentId: "aider", command: "aider", sessionId: "ignored" },
