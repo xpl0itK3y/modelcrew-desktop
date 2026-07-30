@@ -1124,7 +1124,8 @@ mod tests {
 
     #[test]
     fn aider_is_wired_through_the_environment_with_its_payload_supplied() {
-        let vars = env_hooks(Path::new("/data/mc/agent-events"));
+        let events_dir = Path::new("/data/mc/agent-events");
+        let vars = env_hooks(events_dir);
         let command = vars
             .iter()
             .find(|(key, _)| key == "AIDER_NOTIFICATIONS_COMMAND")
@@ -1134,7 +1135,11 @@ mod tests {
         assert!(vars
             .iter()
             .any(|(key, value)| key == "AIDER_NOTIFICATIONS" && value == "true"));
-        assert!(command.contains("/data/mc/modelcrew-agent-notify.sh"));
+        let helper = events_dir.parent().unwrap().join(HELPER_NAME);
+        assert!(
+            command.contains(helper.to_string_lossy().as_ref()),
+            "{command}"
+        );
         // Нагрузка вторым аргументом — иначе хелпер уйдёт читать stdin, а там
         // терминал, и вызов повиснет.
         assert!(command.ends_with(r#"'{"type":"waiting"}'"#), "{command}");
