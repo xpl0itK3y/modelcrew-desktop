@@ -163,6 +163,18 @@ fn normalize(agent: &str, payload: &Value) -> (String, String) {
             text(payload, &["type"]),
             text(payload, &["last-assistant-message"]),
         ),
+        // Stop у antigravity имени события не несёт: там причина останова и
+        // отдельное поле ошибки. Приводим к тем же словам, что и у остальных.
+        "antigravity" => {
+            let failed = !text(payload, &["error"]).is_empty()
+                || text(payload, &["terminationReason"])
+                    .to_ascii_lowercase()
+                    .contains("error");
+            (
+                if failed { "error" } else { "Stop" }.to_string(),
+                text(payload, &["error"]),
+            )
+        }
         // claude/copilot/grok/qwen: {"hook_event_name":"Stop","message":"…"}
         _ => (
             text(
@@ -201,12 +213,52 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
         "opencode" => Some(home.join(".config/opencode/plugin/modelcrew-notify.js")),
         "grok" => Some(home.join(".grok/config.toml")),
         "cursor" => Some(home.join(".cursor/hooks.json")),
+        // Общий файл кастомизаций: глобальные лежат в ~/.gemini/config,
+        // а не рядом с самим CLI.
+        "antigravity" => Some(home.join(".gemini/config/hooks.json")),
         // Форк opencode: каталог зависит от того, как его собрали.
         "kilocode" => kilo_home(home).map(|dir| dir.join("plugin/modelcrew-notify.js")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
         // либо у самого CLI уведомлений нет.
         _ => None,
     }
+}
+
+/// Имя нашего блока в общем файле кастомизаций antigravity: там верхний
+/// уровень — карта имён, а не список событий, поэтому чужие имена рядом.
+const ANTIGRAVITY_KEY: &str = "modelcrew";
+
+/// Обработчики у него кладутся **прямо** в массив события. Обёртка
+/// `{matcher, hooks:[…]}`, как у claude, считается ошибкой — и роняет разбор
+/// всего файла, а не только своей записи: «invalid hook … command hook must
+/// specify 'command'» в его логе, и ни один хук больше не работает.
+fn antigravity_block(helper: &Path) -> Value {
+    serde_json::json!({
+        "Stop": [{ "type": "command", "command": hook_command(helper, "antigravity") }],
+    })
+}
+
+fn install_antigravity_hook(settings: &mut Value, helper: &Path) -> bool {
+    if !settings.is_object() {
+        *settings = Value::Object(Default::default());
+    }
+    let root = settings.as_object_mut().expect("объект гарантирован выше");
+    let block = antigravity_block(helper);
+    if root.get(ANTIGRAVITY_KEY) == Some(&block) {
+        return false;
+    }
+    root.insert(ANTIGRAVITY_KEY.to_string(), block);
+    true
+}
+
+fn remove_antigravity_hook(settings: &mut Value, _helper: &Path) -> bool {
+    settings
+        .as_object_mut()
+        .is_some_and(|root| root.remove(ANTIGRAVITY_KEY).is_some())
+}
+
+fn antigravity_hook_installed(settings: &Value, helper: &Path) -> bool {
+    settings.get(ANTIGRAVITY_KEY) == Some(&antigravity_block(helper))
 }
 
 /// Настройки уведомлений grok. Взято из его же документации, которую он
@@ -357,6 +409,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "opencode" => Some(home.join(".config/opencode")),
         "grok" => Some(home.join(".grok")),
         "cursor" => Some(home.join(".cursor")),
+        "antigravity" => Some(home.join(".gemini")),
         "kilocode" => kilo_home(home),
         _ => None,
     }
@@ -616,6 +669,8 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
             .map(|settings| {
                 if agent == "cursor" {
                     cursor_hook_installed(&settings, &helper)
+                } else if agent == "antigravity" {
+                    antigravity_hook_installed(&settings, &helper)
                 } else {
                     claude_hook_installed(&settings, &helper)
                 }
@@ -680,6 +735,8 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
     let changed = match (agent, enabled) {
         ("cursor", true) => install_cursor_hook(&mut settings, &helper),
         ("cursor", false) => remove_cursor_hook(&mut settings, &helper),
+        ("antigravity", true) => install_antigravity_hook(&mut settings, &helper),
+        ("antigravity", false) => remove_antigravity_hook(&mut settings, &helper),
         (_, true) => install_claude_hook(&mut settings, &helper),
         (_, false) => remove_claude_hook(&mut settings, &helper),
     };
@@ -691,8 +748,15 @@ pub fn set_hook(app: &tauri::AppHandle, agent: &str, enabled: bool) -> Result<Ag
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 6] =
-    ["claude", "copilot", "opencode", "grok", "kilocode", "cursor"];
+const SUPPORTED_AGENTS: [&str; 7] = [
+    "claude",
+    "copilot",
+    "opencode",
+    "grok",
+    "kilocode",
+    "cursor",
+    "antigravity",
+];
 
 /// Подключение через окружение панели — самый безопасный вид: ничего не
 /// пишется в чужие файлы и действует только внутри наших терминалов.
@@ -923,7 +987,7 @@ mod tests {
         );
         // У этих канал либо не подтверждён, либо его нет — молча трогать
         // чужие конфиги на догадках нельзя.
-        for agent in ["codex", "qwen", "kimi", "amp", "aider", "antigravity"] {
+        for agent in ["codex", "qwen", "kimi", "amp", "aider"] {
             assert_eq!(hook_config_path(agent, home), None, "{agent}");
             assert_eq!(agent_home(agent, home), None, "{agent}");
         }
@@ -967,6 +1031,50 @@ mod tests {
         assert!(remove_cursor_hook(&mut settings, &helper()));
         assert!(settings["hooks"].get("stop").is_none());
         assert_eq!(settings["hooks"]["beforeShellExecution"][0]["command"], "./audit.sh");
+    }
+
+    #[test]
+    fn the_antigravity_block_keeps_handlers_unwrapped() {
+        let mut settings = serde_json::json!({
+            "lint-checker": {
+                "PostToolUse": [{ "matcher": "run_command", "hooks": [{ "command": "./lint.sh" }] }]
+            }
+        });
+
+        assert!(install_antigravity_hook(&mut settings, &helper()));
+
+        // Чужое имя рядом переживает правку: верхний уровень тут — карта имён.
+        assert!(settings.get("lint-checker").is_some());
+        // Обработчик лежит прямо в массиве события. Обёртка {matcher, hooks}
+        // для antigravity — ошибка разбора, и роняет весь файл, а не запись.
+        let ours = &settings[ANTIGRAVITY_KEY]["Stop"][0];
+        assert!(ours.get("command").is_some(), "{ours}");
+        assert!(ours.get("hooks").is_none(), "{ours}");
+        assert!(antigravity_hook_installed(&settings, &helper()));
+        assert!(!install_antigravity_hook(&mut settings, &helper()));
+
+        assert!(remove_antigravity_hook(&mut settings, &helper()));
+        assert!(settings.get(ANTIGRAVITY_KEY).is_none());
+        assert!(settings.get("lint-checker").is_some());
+    }
+
+    #[test]
+    fn an_antigravity_stop_reads_as_a_finished_turn() {
+        let done = parse_event(
+            r#"{"agent":"antigravity","panelId":"p","payload":{
+                "terminationReason":"NO_TOOL_CALL","fullyIdle":true,"error":""}}"#,
+        )
+        .expect("Stop должен разбираться");
+        // Имени события в нагрузке нет — сводим к слову, которое знает фронт.
+        assert_eq!(done.event, "Stop");
+
+        let failed = parse_event(
+            r#"{"agent":"antigravity","panelId":"p","payload":{
+                "terminationReason":"error","error":"кончился лимит"}}"#,
+        )
+        .unwrap();
+        assert_eq!(failed.event, "error");
+        assert_eq!(failed.message, "кончился лимит");
     }
 
     #[test]
