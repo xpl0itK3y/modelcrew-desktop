@@ -9,11 +9,9 @@ vi.mock("../terminal/registry", () => ({
   onTerminalStatus: () => () => {},
 }));
 
-import {
-  clearAgentAttention,
-  raiseAgentAlert,
-  resetAgentAlertBurst,
-} from "../terminal/agentAlerts";
+import { raiseAgentAlert } from "../terminal/agentAlerts";
+import { resetAgentAlertBurst } from "../terminal/alertDelivery";
+import { clearAgentAttention } from "../terminal/attentionStore";
 import { rememberAgentProcess } from "../agents";
 import { TerminalTab } from "./TerminalTab";
 

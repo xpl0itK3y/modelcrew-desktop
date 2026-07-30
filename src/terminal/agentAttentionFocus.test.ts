@@ -32,13 +32,13 @@ vi.mock("../notifications", () => ({
 }));
 
 import { rememberAgentProcess } from "../agents";
+import { raiseAgentAlert } from "./agentAlerts";
+import { resetAgentAlertBurst } from "./alertDelivery";
 import {
   clearAgentAttention,
   getAgentAttentionCount,
   isAgentPanelWaiting,
-  raiseAgentAlert,
-  resetAgentAlertBurst,
-} from "./agentAlerts";
+} from "./attentionStore";
 import { destroyTerminal, getOrCreateTerminal } from "./registry";
 
 const used: string[] = [];

@@ -19,11 +19,11 @@ import { getAgentRecord, rememberAgentProcess } from "../agents";
 import {
   AGENT_IDLE_MIN_BYTES,
   AGENT_IDLE_QUIET_MS,
-  clearAgentAttention,
   createAgentAlertTracker,
   markAgentPanelEngaged,
   trackAgentOutput,
 } from "./agentAlerts";
+import { clearAgentAttention } from "./attentionStore";
 
 describe("title watcher to agent alert integration", () => {
   beforeEach(() => {

@@ -36,7 +36,8 @@ vi.mock("../notifications", () => ({
 }));
 
 import { rememberAgentProcess } from "../agents";
-import { clearAgentAttention, resetAgentAlertBurst } from "./agentAlerts";
+import { resetAgentAlertBurst } from "./alertDelivery";
+import { clearAgentAttention } from "./attentionStore";
 import { destroyTerminal, getOrCreateTerminal } from "./registry";
 import { setLocale } from "../i18n";
 
