@@ -5,6 +5,7 @@ use super::*;
 use crate::git_branches::*;
 use crate::git_changes::test_support::*;
 use crate::git_history::*;
+use crate::git_log::*;
 use std::process::Command;
 
 #[test]

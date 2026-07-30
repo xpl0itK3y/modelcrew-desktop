@@ -1,9 +1,12 @@
 //! Проверки правки истории: сообщение коммита, uncommit/amend/squash/fixup,
-//! удаление и сброс, сравнение состояний, теги и патчи.
+//! удаление и сброс, сравнение состояний, теги и патчи, действия над коммитом
+//! из меню панели.
 
 use super::*;
 use crate::git_branches::*;
 use crate::git_changes::test_support::*;
+use crate::git_log::*;
+use crate::git_sync::*;
 use std::process::Command;
 
 #[test]
@@ -826,4 +829,306 @@ fn mode_arguments_cannot_become_git_options() {
         std::fs::read_to_string(root.join("a.txt")).unwrap(),
         "one\ntwo\n"
     );
+}
+
+#[test]
+fn commit_actions_in_a_real_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["config", "core.autocrlf", "false"]);
+    git(&["config", "user.name", "t"]);
+    git(&["config", "user.email", "t@t"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "first"]);
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "second"]);
+
+    let log = list_log_unfiltered(root, 10, false).unwrap();
+    let second = log[0].hash.clone();
+    let first = log[1].hash.clone();
+
+    // Некорректные ввод отклоняются до запуска git.
+    assert!(commit_action(root, "checkout", "nope", None).is_err());
+    assert!(commit_action(root, "unknown", &second, None).is_err());
+    assert!(commit_action(root, "branch", &second, Some("bad name")).is_err());
+
+    // Ветка от первого коммита: создаётся и становится текущей.
+    commit_action(root, "branch", &first, Some("from-first")).unwrap();
+    let branches = list_branches(root).unwrap();
+    assert_eq!(
+        branches.iter().find(|b| b.is_current).unwrap().name,
+        "from-first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one\n",
+        "новая ветка стоит на первом коммите"
+    );
+
+    // Cherry-pick второго коммита поверх ветки от первого.
+    commit_action(root, "cherryPick", &second, None).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one\ntwo\n",
+        "cherry-pick принёс изменение второго коммита"
+    );
+
+    // Revert последнего коммита откатывает содержимое новым коммитом.
+    let tip = list_log_unfiltered(root, 1, false).unwrap()[0].hash.clone();
+    commit_action(root, "revert", &tip, None).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one\n",
+        "revert вернул содержимое к состоянию до коммита"
+    );
+
+    // Checkout на коммит отделяет HEAD — текущей ветки нет.
+    commit_action(root, "checkout", &first, None).unwrap();
+    assert_eq!(collect_summary(root).unwrap().branch, None);
+}
+
+#[test]
+fn commit_actions_do_not_dwim_a_full_hash_as_a_branch_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        output.stdout
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["config", "core.autocrlf", "false"]);
+    git(&["commit", "--quiet", "--allow-empty", "-m", "first"]);
+    let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+    assert_eq!(first.len(), 40, "регрессия проверяет полный SHA-1 hash");
+    git(&["commit", "--quiet", "--allow-empty", "-m", "second"]);
+    let second = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+
+    // Такое имя ref допустимо, но оно указывает на другой коммит. Git
+    // switch без предварительного resolve мог бы выбрать эту ветку.
+    git(&["branch", &first, &second]);
+    assert_eq!(
+        local_branch_tip(root, &first).as_deref(),
+        Some(second.as_str())
+    );
+
+    commit_action(root, "checkout", &first, None).unwrap();
+    assert_eq!(collect_summary(root).unwrap().branch, None);
+    assert_eq!(
+        String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+        first
+    );
+
+    commit_action(root, "branch", &first, Some("from-exact-hash")).unwrap();
+    assert_eq!(
+        collect_summary(root).unwrap().branch.as_deref(),
+        Some("from-exact-hash")
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+        first
+    );
+}
+
+#[test]
+fn uncommit_moves_local_head_and_preserves_worktree() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+        output.stdout
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["config", "core.autocrlf", "false"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "first"]);
+    let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+    std::fs::write(root.join("b.txt"), "committed\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "second"]);
+    let second = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+    assert!(list_log_unfiltered(root, 1, false).unwrap()[0].local_only);
+
+    // Незакоммиченная правка поверх второго коммита тоже должна сохраниться.
+    std::fs::write(root.join("a.txt"), "one\ntwo\nworking\n").unwrap();
+    commit_action(root, "uncommit", &second, None).unwrap();
+
+    let head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+    assert_eq!(head, first);
+    assert_eq!(
+        collect_summary(root).unwrap().branch.as_deref(),
+        Some("main")
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one\ntwo\nworking\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "committed\n"
+    );
+    assert!(!collect_summary(root).unwrap().files.is_empty());
+    let cached = Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .current_dir(root)
+        .status()
+        .unwrap();
+    assert!(
+        !cached.success(),
+        "атомарный soft-uncommit оставляет изменения подготовленными"
+    );
+    let stale_error = commit_action(root, "uncommit", &second, None).unwrap_err();
+    assert_eq!(
+        stale_error.context.get("reason").map(String::as_str),
+        Some("head-moved")
+    );
+}
+
+#[test]
+fn preserves_conflicting_cherry_pick_and_revert_for_explicit_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+        output.stdout
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["config", "core.autocrlf", "false"]);
+    std::fs::write(root.join("a.txt"), "base\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "base"]);
+
+    git(&["checkout", "--quiet", "-b", "feature"]);
+    std::fs::write(root.join("a.txt"), "feature\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "feature"]);
+    let feature = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+
+    git(&["checkout", "--quiet", "main"]);
+    std::fs::write(root.join("a.txt"), "main\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "main"]);
+    let main_head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+
+    // Чужую незавершённую операцию не abort-им: новый action только
+    // отказывает, оставляя владельцу возможность continue/abort.
+    let preexisting = Command::new("git")
+        .args(["cherry-pick", &feature])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!preexisting.status.success());
+    assert!(root.join(".git/CHERRY_PICK_HEAD").exists());
+    assert!(commit_action(root, "revert", &feature, None).is_err());
+    assert!(commit_action(root, "uncommit", &main_head, None).is_err());
+    assert!(reword_commit(root, &main_head, "renamed main").is_err());
+    assert!(pull_rebase(root, "main", &main_head).is_err());
+    assert_eq!(
+        String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+        main_head
+    );
+    assert!(root.join(".git/CHERRY_PICK_HEAD").exists());
+    git(&["cherry-pick", "--abort"]);
+
+    assert!(commit_action(root, "cherryPick", &feature, None).is_err());
+    assert!(root.join(".git/CHERRY_PICK_HEAD").exists());
+    assert_eq!(
+        String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+        main_head
+    );
+    git(&["cherry-pick", "--abort"]);
+    assert!(collect_summary(root).unwrap().files.is_empty());
+
+    assert!(commit_action(root, "revert", &feature, None).is_err());
+    assert!(root.join(".git/REVERT_HEAD").exists());
+    assert_eq!(
+        String::from_utf8_lossy(&git(&["rev-parse", "HEAD"])).trim(),
+        main_head
+    );
+    git(&["revert", "--abort"]);
+    assert!(collect_summary(root).unwrap().files.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "main\n"
+    );
+}
+
+#[test]
+fn points_back_to_the_branch_left_behind_by_a_detached_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "first"]);
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+    git(&["commit", "--quiet", "-am", "second"]);
+    assert!(collect_summary(root).unwrap().previous_branch.is_none());
+
+    let first = String::from_utf8_lossy(&git(&["rev-parse", "HEAD~1"]))
+        .trim()
+        .to_owned();
+    commit_action(root, "checkout", &first, None).unwrap();
+
+    let summary = collect_summary(root).unwrap();
+    assert!(summary.branch.is_none());
+    assert_eq!(summary.previous_branch.as_deref(), Some("main"));
 }

@@ -1,5 +1,6 @@
 //! Правка локальной истории: сообщение коммита, uncommit/amend/squash/fixup,
-//! удаление и сброс, сравнение двух состояний, теги и патчи.
+//! удаление и сброс, сравнение двух состояний, теги и патчи, а также действия
+//! над коммитом из меню панели (переход, ветка отсюда, cherry-pick, revert).
 //!
 //! Вертикаль отделена от статусов, диффов и веток: у неё своя цена ошибки —
 //! эти операции перезаписывают историю, поэтому каждая сначала проверяет, что
@@ -8,8 +9,12 @@
 use std::path::Path;
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
-use crate::git_branches::{validate_branch_name, validate_namespaced_ref, GitCommitFile};
+use crate::git_branches::{
+    ensure_no_pending_branch_cleanup, local_branch_exists, validate_branch_name,
+    validate_namespaced_ref,
+};
 use crate::git_changes::*;
+use crate::git_log::GitCommitFile;
 use crate::workspace_roots::WorkspaceRoots;
 
 // ---------- Редактирование сообщения локального коммита ----------
@@ -896,6 +901,147 @@ pub async fn git_drop_commit(
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
+// ---------- Действия над коммитом из меню истории ----------
+
+fn uncommit_head(root: &Path, hash: &str) -> CommandResult<()> {
+    if repository_operation_in_progress(root)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    // Detached HEAD не подходит: reset должен передвигать именно локальную
+    // ветку, а не оставлять изменения без именованной точки восстановления.
+    let head_ref = run_git(root, &["symbolic-ref", "--quiet", "HEAD"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())
+        .map_err(|_| {
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "detached")
+        })?;
+
+    let head = run_git(root, &["rev-parse", "--verify", "HEAD"])
+        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if head != hash {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+        );
+    }
+
+    // Суффикс заставляет Git трактовать 40 hex именно как object id даже при
+    // наличии плохо названной refs/heads/<40-hex>.
+    let commit = format!("{hash}^{{commit}}");
+    let meta = read_commit_meta(root, &commit)?;
+    if meta.parents.len() != 1 {
+        return Err(
+            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "parent-count")
+        );
+    }
+    if on_any_remote(root, &commit)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "pushed"));
+    }
+
+    // CAS передвигает именно локальную ветку и не может затереть коммит,
+    // созданный терминалом между проверками. Индекс намеренно не трогаем:
+    // это атомарный эквивалент reset --soft, а отдельный mixed-reset индекса
+    // создал бы гонку с параллельным commit/add в терминале.
+    let parent = &meta.parents[0];
+    run_git(
+        root,
+        &[
+            "update-ref",
+            "-m",
+            "modelcrew: undo local commit",
+            &head_ref,
+            parent,
+            &head,
+        ],
+    )
+    .map_err(|_| {
+        CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "head-moved")
+    })?;
+    Ok(())
+}
+
+fn run_history_action(root: &Path, args: &[&str]) -> CommandResult<()> {
+    // Не вмешиваемся в операцию, начатую терминалом или другим Git-клиентом.
+    if repository_operation_in_progress(root)? {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-in-progress"));
+    }
+    // При конфликте сохраняем стандартное состояние Git. Автоматический
+    // abort без owner-token небезопасен: параллельный клиент мог начать свою
+    // операцию между проверкой выше и вызовом команды.
+    run_git(root, args).map(|_| ())
+}
+
+// Действие над конкретным коммитом истории. Все варианты — стандартные
+// операции git, которые пользователь осознанно запускает из меню; ошибки
+// (грязное дерево, конфликт cherry-pick/revert) поднимаются наверх. Конфликт
+// сохраняется как штатная незавершённая операция Git для явного continue/abort.
+//   checkout   — перейти на коммит (HEAD отделяется);
+//   branch     — создать ветку `name` от коммита и переключиться на неё;
+//   cherryPick — применить коммит поверх текущей ветки;
+//   revert     — создать коммит, отменяющий данный;
+//   uncommit   — убрать локальный HEAD-коммит, сохранив изменения в дереве.
+pub fn commit_action(
+    root: &Path,
+    action: &str,
+    hash: &str,
+    name: Option<&str>,
+) -> CommandResult<()> {
+    if !is_safe_hash(hash) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let resolved = run_git(
+        &toplevel,
+        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
+    )
+    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
+    if !is_safe_hash(&resolved) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
+    }
+    // Не передаём голый 40-hex последующим porcelain-командам: Git допускает
+    // ref с таким именем и некоторые команды выберут ref вместо object id.
+    let resolved_commit = format!("{resolved}^{{commit}}");
+    match action {
+        "checkout" => run_git(&toplevel, &["switch", "--detach", &resolved_commit]).map(|_| ()),
+        "branch" => {
+            let Some(name) = name else {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("branch", name.unwrap_or_default()));
+            };
+            validate_branch_name(&toplevel, name)?;
+            if local_branch_exists(&toplevel, name) {
+                return Err(CommandError::new(ErrorCode::GitCommandFailed)
+                    .with_context("reason", "branch-exists")
+                    .with_context("branch", name));
+            }
+            ensure_no_pending_branch_cleanup(&toplevel, name)?;
+            run_git(&toplevel, &["switch", "-c", name, &resolved_commit]).map(|_| ())
+        }
+        "cherryPick" => run_history_action(&toplevel, &["cherry-pick", &resolved_commit]),
+        "revert" => run_history_action(&toplevel, &["revert", "--no-edit", &resolved_commit]),
+        "uncommit" => uncommit_head(&toplevel, &resolved),
+        other => Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("action", other)),
+    }
+}
+#[tauri::command]
+pub async fn git_commit_action(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    action: String,
+    hash: String,
+    name: Option<String>,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        commit_action(&root, &action, &hash, name.as_deref())
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
 // Проверки вертикали лежат рядом, отдельным файлом: их вдвое больше кода.
 #[cfg(test)]
 #[path = "git_history_tests.rs"]

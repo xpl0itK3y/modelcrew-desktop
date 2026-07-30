@@ -1,14 +1,15 @@
 //! Общая оснастка тестов git: сборка репозиториев, запуск git и выборки
-//! из сводки. Нужна всем трём наборам проверок, поэтому живёт отдельно.
+//! из сводки. Нужна всем наборам проверок, поэтому живёт отдельно.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::git_branches::{
-    create_branch, fetch_upstream, list_log_unfiltered, publish_branch, pull_rebase, pull_upstream,
-    push_upstream, reset_to_upstream,
-};
+use crate::git_branches::create_branch;
 use crate::git_changes::{collect_summary, GitChangedFile, GitChangesSummary};
+use crate::git_log::list_log_unfiltered;
+use crate::git_sync::{
+    fetch_upstream, publish_branch, pull_rebase, pull_upstream, push_upstream, reset_to_upstream,
+};
 
 pub(crate) fn by_path_in<'s>(summary: &'s GitChangesSummary, path: &str) -> &'s GitChangedFile {
     summary
