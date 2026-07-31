@@ -25,10 +25,11 @@
   --dv-background-color: transparent;
 }
 
-/* Плотная сетка: тонкие рамки, лёгкое скругление; активная — розовая рамка */
+/* Плотная сетка: тонкие рамки, острые углы; активная — рамка акцентом */
 .dockview-theme-modelcrew .dv-groupview {
-  /* Радиус как у карточек в панели изменений — единый вид. */
-  border-radius: 8px;
+  /* Углы прямые: панели стыкуются вплотную, и скругление оставляло бы между
+     ними просветы фона на каждом стыке. */
+  border-radius: 0;
   overflow: hidden;
   border: 1px solid var(--mc-panel-border);
   box-sizing: border-box;
@@ -70,7 +71,8 @@
 .dockview-theme-modelcrew .dv-drop-target-selection {
   animation: drop-pulse 900ms ease-in-out infinite;
   border: 1px solid var(--mc-accent);
-  border-radius: 8px;
+  /* Повторяет форму панели, на место которой встанет перетаскиваемая. */
+  border-radius: 0;
 }
 
 @keyframes drop-pulse {
