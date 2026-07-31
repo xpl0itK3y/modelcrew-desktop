@@ -32,6 +32,7 @@ import {
 import { setPanelTailResolver } from "./alertDelivery";
 import { clearAgentAttention } from "./attentionStore";
 import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
+import { isMouseReport } from "./terminalInput";
 import {
   extractPanelTail,
   joinWrappedRows,
@@ -637,6 +638,16 @@ async function spawnTerminal(
   const output = createLiveOutputChannel(entry, generation);
 
   entry.term.onData((data) => {
+    // Движение мыши над панелью работой не считается: агент включил трекинг,
+    // и терминал шлёт координаты на каждый сдвиг курсора. Иначе сигнал «агент
+    // ждёт» гас бы от того, что мышь прошла мимо панели по пути к другой.
+    // Нажатие снимает сигнал само — отдельным слушателем pointerdown.
+    if (isMouseReport(data)) {
+      if (!entry.exited) {
+        void invoke("pty_write", { id: entry.id, data }).catch(() => {});
+      }
+      return;
+    }
     // Пользователь работает с панелью: сигнал «ждёт» снят, отсчёт заново,
     // и с этого момента её сигналы вообще имеют смысл.
     markAgentPanelEngaged(entry.alerts, entry.id);
