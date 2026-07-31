@@ -206,7 +206,8 @@
   border-color: var(--mc-accent-border);
 }
 
-/* Та же пульсирующая точка, что в шапке панели: один признак — один вид. */
+/* Та же мигающая точка, что в шапке панели: один признак — один вид, включая
+   период мигания. */
 .waiting-panel-dot {
   flex: none;
   width: 7px;
@@ -216,7 +217,7 @@
   box-shadow:
     0 0 0 2px var(--mc-accent-glow),
     0 0 8px var(--mc-accent);
-  animation: tab-dot-waiting 1.4s ease-in-out infinite;
+  animation: tab-dot-waiting 1.1s ease-in-out infinite;
 }
 
 .waiting-panel-text {
