@@ -8,7 +8,6 @@ import {
   getOrCreateTerminal,
   isManualTitle,
 } from "../terminal/registry";
-import { clearAgentAttention } from "../terminal/attentionStore";
 
 export { destroyTerminal };
 
@@ -26,8 +25,6 @@ export function TerminalPanel(
     const entry = getOrCreateTerminal(props.api.id);
     let mounted = true;
     host.appendChild(entry.container);
-    // Панель на экране — сигнал «агент ждёт» для неё снят.
-    clearAgentAttention(entry.id);
     fitTerminal(entry);
     // Панель знает только владельца. Фактический cwd разрешает Rust-реестр,
     // поэтому восстановленные панели одного воркспейса не могут разъехаться.
@@ -69,6 +66,9 @@ export function TerminalPanel(
     });
     observer.observe(host);
 
+    // Отметку «агент ждёт» здесь не трогаем: её снимает нажатие на панель
+    // (слушатель в registry). Раньше она гасла при монтировании — то есть от
+    // самого появления панели на экране, и пользователь не успевал её увидеть.
     const activeDisposable = props.api.onDidActiveChange((event) => {
       if (event.isActive) {
         entry.term.focus();

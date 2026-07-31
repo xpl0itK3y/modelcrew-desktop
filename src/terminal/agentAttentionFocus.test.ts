@@ -38,8 +38,13 @@ import {
   clearAgentAttention,
   getAgentAttentionCount,
   isAgentPanelWaiting,
+  markAgentPanelWaiting,
 } from "./attentionStore";
-import { destroyTerminal, getOrCreateTerminal } from "./registry";
+import {
+  destroyTerminal,
+  ensureSpawned,
+  getOrCreateTerminal,
+} from "./registry";
 
 const used: string[] = [];
 
@@ -82,6 +87,59 @@ afterEach(async () => {
   }
   resetAgentAlertBurst();
   document.body.innerHTML = "";
+});
+
+describe("what takes the mark off a panel", () => {
+  it("waits for a press, not for the pointer passing over", async () => {
+    const entry = mountPanel("press-panel", 400);
+    await callFor("press-panel");
+    expect(isAgentPanelWaiting("press-panel")).toBe(true);
+
+    // Фокус приходит в панель и сам по себе: dockview делает группу активной,
+    // когда её содержимое получает фокус, а восстановление раскладки
+    // фокусирует активную панель. Отметка это пережить обязана.
+    focusInside(entry);
+    expect(isAgentPanelWaiting("press-panel")).toBe(true);
+
+    entry.container.dispatchEvent(
+      new Event("pointerdown", { bubbles: true }),
+    );
+
+    expect(isAgentPanelWaiting("press-panel")).toBe(false);
+  });
+
+  it("does not count mouse motion over the panel as work", async () => {
+    // TUI-агенты включают трекинг мыши, и координаты курсора приходят в PTY
+    // тем же каналом, что и клавиатура. Считать их работой значит гасить
+    // сигнал от того, что мышь прошла над панелью по пути к другой.
+    mocks.invoke.mockImplementation(async (command: string) =>
+      command === "pty_create" ? { title: "zsh" } : null,
+    );
+    const entry = mountPanel("motion-panel", 400);
+    await ensureSpawned(entry, "ws-motion");
+    markAgentPanelWaiting("motion-panel");
+
+    entry.term.input("\x1b[<35;12;30M", false);
+    expect(isAgentPanelWaiting("motion-panel")).toBe(true);
+
+    // Набор текста — работа: сигнал снят.
+    entry.term.input("y", true);
+    expect(isAgentPanelWaiting("motion-panel")).toBe(false);
+  });
+
+  it("takes the mark off only the panel that was pressed", async () => {
+    const first = mountPanel("pressed-panel", 400);
+    mountPanel("untouched-panel", 400);
+    await callFor("pressed-panel");
+    await callFor("untouched-panel");
+
+    first.container.dispatchEvent(
+      new Event("pointerdown", { bubbles: true }),
+    );
+
+    expect(isAgentPanelWaiting("pressed-panel")).toBe(false);
+    expect(isAgentPanelWaiting("untouched-panel")).toBe(true);
+  });
 });
 
 describe("window focus and pending agent panels", () => {

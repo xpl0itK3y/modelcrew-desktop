@@ -307,6 +307,16 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     });
   };
   container.addEventListener("paste", entry.pasteListener, true);
+  // Сигнал «агент ждёт» снимает нажатие на панель — именно нажатие, а не
+  // наведение и не приход фокуса со стороны. Фокус в панель попадает и сам:
+  // dockview делает группу активной, когда её содержимое получает фокус, а
+  // восстановление раскладки фокусирует активную панель. Гасить отметку по
+  // такому фокусу значит терять её от одного движения мыши мимо панели.
+  container.addEventListener(
+    "pointerdown",
+    () => clearAgentAttention(entry.id),
+    true,
+  );
   registry.set(id, entry);
   return entry;
 }
