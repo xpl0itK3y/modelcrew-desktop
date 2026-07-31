@@ -9,6 +9,7 @@ import {
   isShellProcess,
   loadAgentResumeMode,
   matchAgent,
+  panelProcessLabel,
   pruneAgentRecords,
   rememberAgentProcess,
   retryAgentSessionBinding,
@@ -334,6 +335,21 @@ describe("agent catalog", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("recognises the name the kimi binary gives itself", () => {
+    // Запускают его как `kimi`, а в списке процессов он значится kimi-code —
+    // и панель после перезапуска сама собой меняла подпись.
+    expect(matchAgent("kimi-code")?.agent.id).toBe("kimi");
+    expect(panelProcessLabel("kimi-code")).toBe("kimi");
+    expect(panelProcessLabel("claude")).toBe("claude");
+    expect(panelProcessLabel("vim")).toBe("vim");
+
+    // Команда для resume — та, которой агента запускают: `kimi-code` в PATH нет.
+    rememberAgentProcess("panel-kimi-alias", "kimi-code");
+    expect(buildAgentResume(getAgentRecord("panel-kimi-alias")!, false)).toBe(
+      "kimi --continue",
+    );
   });
 
   it("persists the resume mode and defaults to auto", () => {

@@ -16,8 +16,13 @@ export type AgentDefinition = {
   // Человекочитаемое имя для настроек.
   label: string;
   // Имена foreground-процессов, по которым агент распознаётся (watcher
-  // заголовков уже отдаёт их, например "codex" или "claude").
+  // заголовков уже отдаёт их, например "codex" или "claude"). Первое из них —
+  // команда запуска: из неё собирается resume.
   processNames: string[];
+  // Имена, под которыми агент значится в списке процессов, но которыми его не
+  // запускают: бинарь kimi переименовывает себя в kimi-code, а `kimi-code` в
+  // PATH нет. Годятся только для опознания — команда берётся из processNames.
+  aliasNames?: string[];
   // Аргументы «продолжить последний диалог этой папки».
   resumeLast: string[];
   // Аргументы «показать список диалогов» — для второй и последующих панелей
@@ -74,6 +79,7 @@ export const AGENTS: AgentDefinition[] = [
     id: "kimi",
     label: "Kimi Code",
     processNames: ["kimi"],
+    aliasNames: ["kimi-code"],
     resumeLast: ["--continue"],
     resumePicker: ["--session"],
     resumeSession: ["--session"],
@@ -144,8 +150,20 @@ export function matchAgent(
     if (agent.processNames.includes(name)) {
       return { agent, command: name };
     }
+    // Опознали по самоназванию процесса: командой оно быть не может, поэтому
+    // возвращаем ту, которой агента запускают.
+    if (agent.aliasNames?.includes(name)) {
+      return { agent, command: agent.processNames[0] };
+    }
   }
   return null;
+}
+
+// Подпись панели по имени процесса. Самоназвание бинаря заменяем на команду
+// запуска: иначе панель, созданная как «kimi», после перезапуска сама собой
+// переименовывалась в «kimi-code».
+export function panelProcessLabel(processName: string): string {
+  return matchAgent(processName)?.command ?? processName;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +183,6 @@ type AgentRecord = {
 
 // Буквы/цифры/дефис/подчёркивание: uuid (claude, codex, agy) и ses_… (opencode).
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-
 
 function loadRecords(): Record<string, AgentRecord> {
   try {
