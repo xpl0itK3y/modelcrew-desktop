@@ -168,6 +168,7 @@ if (isTauri) {
       alert.kind,
       {
         visible: isPanelOnScreen(entry.container),
+        focused: isPanelFocused(entry.container),
         workspaceId: entry.workspaceId,
       },
       alert.notification,
@@ -362,6 +363,14 @@ export function isPanelOnScreen(container: HTMLElement): boolean {
   return container.isConnected && container.getBoundingClientRect().height > 0;
 }
 
+// Ввод сейчас в этой панели. У xterm фокус держит его собственная textarea
+// внутри контейнера, поэтому спрашиваем не про сам контейнер, а про то, лежит
+// ли активный элемент внутри него.
+export function isPanelFocused(container: HTMLElement): boolean {
+  const active = document.activeElement;
+  return active !== null && container.contains(active);
+}
+
 // Сколько строк с конца просматривать в поисках последнего сообщения.
 const TAIL_SCAN_ROWS = 40;
 
@@ -424,6 +433,7 @@ function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
   // момент сигнала, здесь только дешёвый учёт вывода.
   trackAgentOutput(entry.alerts, entry.id, data, () => ({
     visible: isPanelOnScreen(entry.container),
+    focused: isPanelFocused(entry.container),
     workspaceId: entry.workspaceId,
   }));
 }

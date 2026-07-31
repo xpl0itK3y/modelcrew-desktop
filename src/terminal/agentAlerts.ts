@@ -15,7 +15,7 @@ import {
   type TerminalAttentionNotification,
 } from "./attentionScanner";
 import {
-  isPanelWatched,
+  isPanelInUse,
   recordDeliveredAlert,
   selectMostImportantNotification,
   shouldThrottleAlert,
@@ -187,11 +187,6 @@ async function deliverAgentAlert(
   if (!loadAgentAlertsEnabled()) {
     return;
   }
-  // Ранняя отсечка: заведомо подавленный сигнал не должен даже ходить за
-  // состоянием окна.
-  if (shouldThrottleAlert(terminalId, kind, Date.now())) {
-    return;
-  }
   let windowFocused = false;
   try {
     windowFocused = await getCurrentWindow().isFocused();
@@ -199,18 +194,26 @@ async function deliverAgentAlert(
     // Веб-превью: фокус неизвестен, уведомление не шлём.
     return;
   }
-  if (isPanelWatched(context, windowFocused)) {
+
+  // Молчим ровно в одном случае — пользователь работает прямо в этой панели.
+  // Всё остальное зовёт: и панель в скрытой сессии, и соседняя на том же
+  // экране. Она может быть видна краем глаза, но смотрят не на неё.
+  if (isPanelInUse(context, windowFocused)) {
     return;
   }
-  // Проверяем ещё раз и сразу занимаем окно, не разрывая это ожиданием: пока
-  // мы спрашивали про фокус, сигнал той же панели мог дойти до конца, и на
-  // одно событие пришло бы два баннера. Отметку ставим только здесь — сигнал,
-  // смолчавший из-за того, что панель на виду, окна не тратит.
+
+  // Отметку ставим до окна тишины: мигающая точка в шапке и счётчик на
+  // колокольчике не мешают работе и гаснут не по таймеру, а когда панель
+  // выберут. Окно тишины — только про баннеры.
+  markAgentPanelWaiting(terminalId);
+
+  // Проверяем окно тишины и сразу занимаем его, не разрывая это ожиданием:
+  // пока мы спрашивали про фокус, сигнал той же панели мог дойти до конца, и
+  // на одно событие пришло бы два баннера.
   const now = Date.now();
   if (shouldThrottleAlert(terminalId, kind, now)) {
     return;
   }
   recordDeliveredAlert(terminalId, kind, now);
-  markAgentPanelWaiting(terminalId);
   announceAgentAlert({ terminalId, agentId, kind, context, notification });
 }

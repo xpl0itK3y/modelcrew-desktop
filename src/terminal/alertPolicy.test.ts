@@ -10,7 +10,7 @@ import {
   classifyTerminalNotification,
   formatAgentAlertDetail,
   formatAlertDetailText,
-  isPanelWatched,
+  isPanelInUse,
   recordDeliveredAlert,
   resetAlertThrottle,
   selectAlertDetail,
@@ -105,12 +105,35 @@ describe("selectMostImportantNotification", () => {
   });
 });
 
-describe("isPanelWatched", () => {
-  it("counts only a visible panel in a focused window as watched", () => {
-    expect(isPanelWatched({ visible: true, workspaceId: "ws" }, true)).toBe(true);
-    // Панель в скрытой сессии зовёт даже при активном окне: её не видно.
-    expect(isPanelWatched({ visible: false, workspaceId: "ws" }, true)).toBe(false);
-    expect(isPanelWatched({ visible: true, workspaceId: "ws" }, false)).toBe(false);
+describe("isPanelInUse", () => {
+  it("counts only the panel the user is working in", () => {
+    expect(isPanelInUse({ visible: true, focused: true, workspaceId: "ws" }, true)).toBe(
+      true,
+    );
+  });
+
+  it("does not count a neighbour just because it is on screen", () => {
+    // Панелей на экране дюжина, работают в одной. Считать «видно» за «смотрит»
+    // означало бы гасить сигнал одиннадцати панелей разом.
+    expect(
+      isPanelInUse({ visible: true, focused: false, workspaceId: "ws" }, true),
+    ).toBe(false);
+  });
+
+  it("does not count a panel squeezed to nothing that still holds the caret", () => {
+    // Придавленная развёрнутым соседом панель каретку не отдаёт, но её не
+    // видно — значит, в ней не работают.
+    expect(
+      isPanelInUse({ visible: false, focused: true, workspaceId: "ws" }, true),
+    ).toBe(false);
+  });
+
+  it("does not count a panel whose window is away", () => {
+    // Фокус ввода внутри окна остаётся за панелью и когда окно ушло на второй
+    // план: пользователя там нет ни в одной.
+    expect(
+      isPanelInUse({ visible: true, focused: true, workspaceId: "ws" }, false),
+    ).toBe(false);
   });
 });
 

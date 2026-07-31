@@ -72,6 +72,8 @@ export function announceAgentAlert(params: {
     params.notification,
     () => panelTailResolver(params.terminalId),
   );
+  // Имя панели сюда не идёт: искать её глазами всё равно по мигающей точке в
+  // шапке, а баннер и так занят агентом, проектом и текстом самого агента.
   const body = [
     project ? translate("terminal.agentProject", { project }) : "",
     detail,

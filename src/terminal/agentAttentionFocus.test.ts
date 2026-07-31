@@ -64,7 +64,7 @@ function focusInside(entry: { container: HTMLElement }) {
 }
 
 async function callFor(id: string) {
-  await raiseAgentAlert(id, "permission", { visible: true, workspaceId: "ws-1" });
+  await raiseAgentAlert(id, "permission", { visible: true, focused: true, workspaceId: "ws-1" });
 }
 
 beforeEach(() => {

@@ -45,6 +45,7 @@ import {
   clearAgentAttention,
   getAgentAttentionCount,
   getWaitingPanelIds,
+  isAgentPanelWaiting,
 } from "./attentionStore";
 import {
   saveAgentAlertDetailMode,
@@ -71,8 +72,8 @@ afterEach(() => {
 });
 
 describe("trackAgentOutput", () => {
-  const hidden = { visible: false, workspaceId: "ws-1" };
-  const shown = { visible: true, workspaceId: "ws-1" };
+  const hidden = { visible: false, focused: false, workspaceId: "ws-1" };
+  const shown = { visible: true, focused: true, workspaceId: "ws-1" };
 
   // Панель, с которой пользователь уже работал: только для таких сигналы
   // вообще имеют смысл.
@@ -89,9 +90,6 @@ describe("trackAgentOutput", () => {
     mocks.windowFocused.value = false;
     mocks.record.value = { agentId: "claude", command: "claude" };
     setPanelTailResolver(() => null);
-    resetAgentAlertBurst();
-    clearAgentAttention("panel-1");
-    clearAgentAttention("panel-2");
   });
 
   it("collapses a burst of agents finishing at once into one extra banner", async () => {
@@ -214,6 +212,63 @@ describe("trackAgentOutput", () => {
     // Ответ пользователя гасит сигнал.
     acknowledgeAgentPanel(tracker, "bell-panel");
     expect(getAgentAttentionCount()).toBe(0);
+  });
+
+  it("calls from a neighbour panel the user is not working in", async () => {
+    // Панель на виду, но работают в соседней. «Видно» не значит «смотрят»: в
+    // сетке из двенадцати панель попадает в поле зрения и остаётся незамеченной,
+    // поэтому зовёт полным набором — баннером, звуком и точкой в шапке.
+    mocks.windowFocused.value = true;
+    const beside = { visible: true, focused: false, workspaceId: "ws-1" };
+
+    trackAgentOutput(engaged("beside-panel"), "beside-panel", "\x07", () => beside);
+    await settle();
+
+    expect(isAgentPanelWaiting("beside-panel")).toBe(true);
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls from a panel squeezed to nothing even with the caret in it", async () => {
+    // Развёрнутый сосед придавил панель до нулевой высоты: каретка ещё в ней,
+    // но увидеть там ничего нельзя.
+    mocks.windowFocused.value = true;
+    const buried = { visible: false, focused: true, workspaceId: "ws-1" };
+
+    trackAgentOutput(engaged("buried-panel"), "buried-panel", "\x07", () => buried);
+    await settle();
+
+    expect(isAgentPanelWaiting("buried-panel")).toBe(true);
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays silent for the panel the user is typing in", async () => {
+    mocks.windowFocused.value = true;
+    const here = { visible: true, focused: true, workspaceId: "ws-1" };
+
+    trackAgentOutput(engaged("here-panel"), "here-panel", "\x07", () => here);
+    await settle();
+
+    // Пользователь уже здесь — звать некуда.
+    expect(isAgentPanelWaiting("here-panel")).toBe(false);
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps marking a panel whose banner the quiet window swallowed", async () => {
+    // Окно тишины — про баннеры. Отметку оно гасить не должно: иначе панель,
+    // позвавшая дважды подряд, теряет точку после того, как её сняли.
+    const tracker = engaged("quiet-panel");
+    trackAgentOutput(tracker, "quiet-panel", "\x07", () => hidden);
+    await settle();
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+
+    clearAgentAttention("quiet-panel");
+    trackAgentOutput(tracker, "quiet-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(isAgentPanelWaiting("quiet-panel")).toBe(true);
+    // Второго баннера при этом нет — интервал между ними ещё не вышел.
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
   });
 
   it("uses a precise permission notification and cancels idle fallback", async () => {
@@ -395,7 +450,7 @@ describe("trackAgentOutput", () => {
 });
 
 describe("the master switch for agent alerts", () => {
-  const hidden = { visible: false, workspaceId: "ws-1" };
+  const hidden = { visible: false, focused: false, workspaceId: "ws-1" };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -453,7 +508,7 @@ describe("the master switch for agent alerts", () => {
 });
 
 describe("alert throttling", () => {
-  const hidden = { visible: false, workspaceId: "ws-1" };
+  const hidden = { visible: false, focused: false, workspaceId: "ws-1" };
 
   beforeEach(() => {
     vi.clearAllMocks();

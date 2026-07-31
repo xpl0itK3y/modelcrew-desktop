@@ -54,7 +54,7 @@ describe("title watcher to agent alert integration", () => {
       tracker,
       terminalId,
       "ordinary shell output\n".repeat(AGENT_IDLE_MIN_BYTES),
-      () => ({ visible: false, workspaceId: "workspace-1" }),
+      () => ({ visible: false, focused: false, workspaceId: "workspace-1" }),
     );
     await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1);
 

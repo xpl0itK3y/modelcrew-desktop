@@ -56,7 +56,7 @@ function dot() {
 async function alert(id: string) {
   await act(async () => {
     await raiseAgentAlert(id, "permission", {
-      visible: false,
+      visible: false, focused: false,
       workspaceId: "ws-1",
     });
   });
