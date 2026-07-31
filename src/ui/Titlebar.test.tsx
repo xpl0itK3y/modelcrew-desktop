@@ -7,6 +7,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
+import {
+  clearAgentAttention,
+  getWaitingPanelIds,
+  markAgentPanelWaiting,
+} from "../terminal/attentionStore";
 import { READ_NOTIFICATIONS_STORAGE_KEY } from "../updater/readNotifications";
 import type {
   AnnouncementNotification,
@@ -66,9 +71,45 @@ function titlebar(updater: AppUpdaterController) {
   );
 }
 
-afterEach(() => setLocale("ru"));
+afterEach(() => {
+  setLocale("ru");
+  for (const id of getWaitingPanelIds()) {
+    clearAgentAttention(id);
+  }
+});
 
 describe("Titlebar notification center", () => {
+  it("counts the waiting agents on the bell, not only on the dock icon", () => {
+    // Ждущие панели стоят первыми же строками в самом центре уведомлений, а
+    // счётчик их не видел: колокольчик молчал, пока агент ждал ответа.
+    markAgentPanelWaiting("panel-1");
+    markAgentPanelWaiting("panel-2");
+
+    render(titlebar(controller({ sync: "settled", items: [] })));
+
+    expect(document.querySelector(".notification-badge")).toHaveTextContent("2");
+  });
+
+  it("adds the waiting agents to the updates already counted", () => {
+    markAgentPanelWaiting("panel-1");
+
+    render(titlebar(controller({ sync: "settled", items: [readyUpdate] })));
+
+    expect(document.querySelector(".notification-badge")).toHaveTextContent("2");
+  });
+
+  it("drops the count as soon as the user answers the panel", async () => {
+    markAgentPanelWaiting("panel-1");
+    render(titlebar(controller({ sync: "settled", items: [] })));
+    expect(document.querySelector(".notification-badge")).toHaveTextContent("1");
+
+    clearAgentAttention("panel-1");
+
+    await waitFor(() =>
+      expect(document.querySelector(".notification-badge")).not.toBeInTheDocument(),
+    );
+  });
+
   it("is always active and checks immediately when opened", () => {
     const updater = controller({ sync: "settled", items: [] });
     render(titlebar(updater));
