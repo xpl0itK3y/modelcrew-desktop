@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.0.14
+
+### Русский
+
+Агентские сессии точнее привязываются к терминалам и сохраняются до закрытия панели, а ожидающие агенты и готовые обновления стали заметнее.
+
+- Сессия агента повторно привязывается после первого реального сообщения
+- Последний разговор панели сохраняется даже после выхода агента в оболочку
+- Сохранённая сессия удаляется вместе с панелью и не передаётся другому агенту
+- Колокольчик и значок приложения показывают число ожидающих агентов
+- Уведомления приходят от всех панелей, кроме той, где пользователь сейчас работает
+- Движения и клики мыши в терминале не считаются текстовым вводом
+- Метка ожидания снимается только после реального ввода в нужной панели
+- Готовое обновление всегда показывает системный баннер
+- Активная панель получила более заметный акцент, а индикатор ожидания теперь мигает
+- Панели получили прямые углы для более цельной терминальной сетки
+- Панель Kimi называется по команде запуска, а не по внутреннему имени процесса
+
+### English
+
+Agent sessions bind to terminals more reliably and persist until panels close, while waiting agents and ready updates are easier to notice.
+
+- Agent sessions retry binding after the first real message
+- A panel remembers its last conversation even after the agent exits to the shell
+- Remembered sessions are removed with their panel and never handed to another agent
+- The bell and app icon show how many agent panels are waiting
+- Alerts arrive from every panel except the one currently in use
+- Terminal mouse reports no longer count as typed input
+- A waiting marker clears only after real input reaches that panel
+- A ready update always shows a system banner
+- The active panel has a stronger accent, while waiting indicators now blink
+- Panels use square corners for a more cohesive terminal grid
+- Kimi panels use the launch command instead of the process's internal name
+
 ## 0.0.13
 
 ### Русский

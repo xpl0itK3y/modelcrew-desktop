@@ -1,0 +1,25 @@
+{
+  "version": "0.0.14",
+  "ru": {
+    "title": "Надёжные сессии агентов и заметные уведомления",
+    "summary": "Агентские сессии точнее привязываются к терминалам и сохраняются до закрытия панели, а ожидающие агенты и готовые обновления стали заметнее.",
+    "highlights": [
+      "Сессия агента повторно привязывается после первого реального сообщения",
+      "Последний разговор панели сохраняется даже после выхода агента в оболочку",
+      "Колокольчик и значок приложения показывают число ожидающих агентов",
+      "Уведомления приходят от всех панелей, кроме той, где пользователь сейчас работает",
+      "Готовое обновление всегда показывает системный баннер, а ожидающие панели мигают"
+    ]
+  },
+  "en": {
+    "title": "Reliable agent sessions and clearer notifications",
+    "summary": "Agent sessions bind to terminals more reliably and persist until panels close, while waiting agents and ready updates are easier to notice.",
+    "highlights": [
+      "Agent sessions retry binding after the first real message",
+      "A panel remembers its last conversation even after the agent exits to the shell",
+      "The bell and app icon show how many agent panels are waiting",
+      "Alerts arrive from every panel except the one currently in use",
+      "A ready update always shows a system banner, while waiting panels blink"
+    ]
+  }
+}
