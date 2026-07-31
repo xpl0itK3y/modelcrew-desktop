@@ -11,6 +11,7 @@ import {
   matchAgent,
   pruneAgentRecords,
   rememberAgentProcess,
+  retryAgentSessionBinding,
   saveAgentResumeMode,
   scheduleAgentSessionBinding,
 } from "./agents";
@@ -271,6 +272,65 @@ describe("agent catalog", () => {
       await vi.advanceTimersByTimeAsync(7_000);
 
       expect(getAgentRecord("panel-1")!.sessionId).toBe("late-id");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("binds the session when the user writes long after the panel opened", async () => {
+    vi.useFakeTimers();
+    try {
+      rememberAgentProcess("panel-late", "codex");
+      // Пользователь открыл панель, почитал код и написал через минуту: пока
+      // сообщения не было, файла сессии не существует, и все попытки после
+      // запуска уходят впустую.
+      invokeMock.mockResolvedValue(null);
+      scheduleAgentSessionBinding("panel-late", "/tmp/proj");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(getAgentRecord("panel-late")!.sessionId).toBeUndefined();
+
+      // Первое сообщение создало файл — привязка обязана состояться, иначе
+      // после перезапуска панель откроет список диалогов вместо своего.
+      invokeMock.mockResolvedValue("session-after-first-message");
+      retryAgentSessionBinding("panel-late");
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(getAgentRecord("panel-late")!.sessionId).toBe(
+        "session-after-first-message",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("costs nothing for a panel that is already bound", async () => {
+    vi.useFakeTimers();
+    try {
+      rememberAgentProcess("panel-bound", "codex");
+      bindAgentSession("panel-bound", "already-bound");
+      invokeMock.mockClear();
+
+      retryAgentSessionBinding("panel-bound");
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      // Ввод в такую панель идёт постоянно — ходить за локатором на каждую
+      // букву было бы расточительно.
+      expect(invokeMock).not.toHaveBeenCalled();
+      expect(getAgentRecord("panel-bound")!.sessionId).toBe("already-bound");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays quiet for a panel without an agent", async () => {
+    vi.useFakeTimers();
+    try {
+      invokeMock.mockClear();
+
+      retryAgentSessionBinding("panel-plain-shell");
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(invokeMock).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

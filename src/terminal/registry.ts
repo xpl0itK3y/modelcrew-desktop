@@ -18,6 +18,7 @@ import {
   discardAgentRecord,
   getAgentRecord,
   loadAgentResumeMode,
+  retryAgentSessionBinding,
 } from "../agents";
 import {
   acknowledgeAgentPanel,
@@ -661,6 +662,9 @@ async function spawnTerminal(
     // Пользователь работает с панелью: сигнал «ждёт» снят, отсчёт заново,
     // и с этого момента её сигналы вообще имеют смысл.
     markAgentPanelEngaged(entry.alerts, entry.id);
+    // Первое сообщение агенту создаёт файл его сессии — самый момент, чтобы
+    // привязать её к панели, если при запуске файла ещё не было.
+    retryAgentSessionBinding(entry.id);
     if (!entry.exited) {
       void invoke("pty_write", { id: entry.id, data }).catch(() => {});
     }

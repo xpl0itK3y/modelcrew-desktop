@@ -308,6 +308,7 @@ export function rememberAgentProcess(
 
 export function discardAgentRecord(terminalId: string): void {
   agentMisses.delete(terminalId);
+  bindingRoots.delete(terminalId);
   const records = loadRecords();
   if (records[terminalId]) {
     delete records[terminalId];
@@ -441,6 +442,10 @@ const LOCATE_ATTEMPT_DELAYS_MS = [1_500, 6_000, 20_000];
 
 const pendingBindings = new Set<string>();
 
+// Папка проекта панели: нужна, чтобы повторить поиск сессии позже, когда
+// пользователь наконец напишет агенту.
+const bindingRoots = new Map<string, string>();
+
 async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
   const record = getAgentRecord(terminalId);
   if (!record || record.sessionId) {
@@ -466,15 +471,12 @@ async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
   return false;
 }
 
-// Зовётся watcher'ом при обнаружении агента в панели.
-export function scheduleAgentSessionBinding(
-  terminalId: string,
-  cwd: string,
-): void {
+function startBinding(terminalId: string, cwd: string): void {
   if (!isTauri || pendingBindings.has(terminalId)) {
     return;
   }
   pendingBindings.add(terminalId);
+  bindingRoots.set(terminalId, cwd);
   let attempt = 0;
   const tryLocate = () => {
     void locateOnce(terminalId, cwd).then((done) => {
@@ -487,4 +489,34 @@ export function scheduleAgentSessionBinding(
     });
   };
   window.setTimeout(tryLocate, LOCATE_ATTEMPT_DELAYS_MS[0]);
+}
+
+// Зовётся watcher'ом при обнаружении агента в панели.
+export function scheduleAgentSessionBinding(
+  terminalId: string,
+  cwd: string,
+): void {
+  startBinding(terminalId, cwd);
+}
+
+// Пользователь написал в панель с агентом. Файл сессии агент создаёт с первым
+// сообщением, а попытки после запуска панели укладываются в полминуты: открыл
+// панель, почитал код, написал через минуту — и привязки уже нет. Молча: без
+// id панель после перезапуска откроет не свой диалог, а список диалогов, и
+// найти в нём нужный сможет только сам пользователь.
+//
+// Поэтому каждый ввод — повод попробовать снова. Стоит это проверки записи: у
+// привязанной панели и у панели без агента функция выходит сразу.
+export function retryAgentSessionBinding(terminalId: string): void {
+  if (pendingBindings.has(terminalId)) {
+    return;
+  }
+  const record = getAgentRecord(terminalId);
+  if (!record || record.sessionId) {
+    return;
+  }
+  const cwd = bindingRoots.get(terminalId);
+  if (cwd) {
+    startBinding(terminalId, cwd);
+  }
 }
