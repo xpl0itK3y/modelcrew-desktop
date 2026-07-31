@@ -12,6 +12,7 @@ import {
   panelProcessLabel,
   pruneAgentRecords,
   rememberAgentProcess,
+  rememberedSessionId,
   retryAgentSessionBinding,
   saveAgentResumeMode,
   scheduleAgentSessionBinding,
@@ -350,6 +351,46 @@ describe("agent catalog", () => {
     expect(buildAgentResume(getAgentRecord("panel-kimi-alias")!, false)).toBe(
       "kimi --continue",
     );
+  });
+
+  it("keeps the session id after the agent quits to the shell", () => {
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "session-kept");
+
+    // Вышли из агента в оболочку: запись стёрта, но диалог панели никуда не
+    // делся — и в следующий раз она должна открыть именно его.
+    rememberAgentProcess("panel-1", "zsh");
+    expect(getAgentRecord("panel-1")).toBeNull();
+
+    expect(rememberedSessionId("panel-1", "codex")).toBe("session-kept");
+    // Другой агент в той же панели чужую сессию не получает.
+    expect(rememberedSessionId("panel-1", "claude")).toBeUndefined();
+  });
+
+  it("does not hand a remembered session to a panel that already lost it", () => {
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "shared-session");
+    rememberAgentProcess("panel-1", "zsh");
+
+    // Тот же диалог успела занять другая панель: вести туда вторую нельзя.
+    rememberAgentProcess("panel-2", "codex");
+    bindAgentSession("panel-2", "shared-session");
+
+    expect(rememberedSessionId("panel-1", "codex")).toBeUndefined();
+  });
+
+  it("forgets the remembered session together with the panel", () => {
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "session-gone");
+    rememberAgentProcess("panel-2", "codex");
+    bindAgentSession("panel-2", "session-stays");
+
+    discardAgentRecord("panel-1");
+    expect(rememberedSessionId("panel-1", "codex")).toBeUndefined();
+    expect(rememberedSessionId("panel-2", "codex")).toBe("session-stays");
+
+    pruneAgentRecords([]);
+    expect(rememberedSessionId("panel-2", "codex")).toBeUndefined();
   });
 
   it("persists the resume mode and defaults to auto", () => {

@@ -18,6 +18,7 @@ import {
   discardAgentRecord,
   getAgentRecord,
   loadAgentResumeMode,
+  rememberedSessionId,
   retryAgentSessionBinding,
 } from "../agents";
 import {
@@ -585,7 +586,16 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
   const key = `${workspaceId}:${record.agentId}`;
   const picker = resumedAgentKeys.has(key);
   resumedAgentKeys.add(key);
-  const line = buildAgentResume(record, picker);
+  // Свежей привязки может не быть: агент успел выйти в оболочку до закрытия
+  // приложения, и запись пересоздалась уже без id. Тогда берём последнюю
+  // известную сессию этой панели — она вернее и «последнего чата папки»,
+  // и списка диалогов.
+  const line = buildAgentResume(
+    record.sessionId
+      ? record
+      : { ...record, sessionId: rememberedSessionId(entry.id, record.agentId) },
+    picker,
+  );
   if (!line) {
     return;
   }

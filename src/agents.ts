@@ -184,6 +184,74 @@ type AgentRecord = {
 // Буквы/цифры/дефис/подчёркивание: uuid (claude, codex, agy) и ses_… (opencode).
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
+// ---------------------------------------------------------------------------
+// Последняя известная сессия панели. Отдельно от записи об агенте, потому что
+// та живёт только пока агент — foreground-процесс: вышел в оболочку (Ctrl-D,
+// /exit) — и запись стёрта вместе с найденным id. Здесь id остаётся до
+// закрытия самой панели и служит запасным ответом на вопрос «какой диалог
+// продолжать», когда свежей привязки нет.
+
+type RememberedSession = { agentId: string; sessionId: string };
+
+function loadSessions(): Record<string, RememberedSession> {
+  try {
+    const raw = readSetting(KEYS.agentSessions);
+    if (!raw) {
+      return {};
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const sessions: Record<string, RememberedSession> = {};
+    for (const [id, value] of Object.entries(parsed)) {
+      if (value === null || typeof value !== "object") {
+        continue;
+      }
+      const candidate = value as RememberedSession;
+      // Подделанное хранилище не должно попасть в команду оболочки.
+      if (
+        typeof candidate.agentId === "string" &&
+        typeof candidate.sessionId === "string" &&
+        SESSION_ID_PATTERN.test(candidate.sessionId)
+      ) {
+        sessions[id] = {
+          agentId: candidate.agentId,
+          sessionId: candidate.sessionId,
+        };
+      }
+    }
+    return sessions;
+  } catch {
+    return {};
+  }
+}
+
+function saveSessions(sessions: Record<string, RememberedSession>): void {
+  try {
+    writeSetting(KEYS.agentSessions, JSON.stringify(sessions));
+  } catch {
+    // Non-fatal: останется прежний поиск сессии локатором.
+  }
+}
+
+// Запасной id для панели: тот же агент, последняя известная его сессия. Если
+// этот диалог уже занят другой панелью, запасной вариант отпадает — две панели
+// в одном чате мешали бы друг другу.
+export function rememberedSessionId(
+  terminalId: string,
+  agentId: string,
+): string | undefined {
+  const stored = loadSessions()[terminalId];
+  if (stored?.agentId !== agentId) {
+    return undefined;
+  }
+  return boundAgentSessionIds(agentId, terminalId).includes(stored.sessionId)
+    ? undefined
+    : stored.sessionId;
+}
+
+
 function loadRecords(): Record<string, AgentRecord> {
   try {
     const raw = readSetting(KEYS.terminalAgents);
@@ -326,6 +394,11 @@ export function rememberAgentProcess(
 export function discardAgentRecord(terminalId: string): void {
   agentMisses.delete(terminalId);
   bindingRoots.delete(terminalId);
+  const sessions = loadSessions();
+  if (sessions[terminalId]) {
+    delete sessions[terminalId];
+    saveSessions(sessions);
+  }
   const records = loadRecords();
   if (records[terminalId]) {
     delete records[terminalId];
@@ -335,6 +408,18 @@ export function discardAgentRecord(terminalId: string): void {
 
 export function pruneAgentRecords(keepIds: string[]): void {
   const keep = new Set(keepIds);
+  // Долговечные сессии живут ровно столько же, сколько сами панели.
+  const sessions = loadSessions();
+  let sessionsChanged = false;
+  for (const id of Object.keys(sessions)) {
+    if (!keep.has(id)) {
+      delete sessions[id];
+      sessionsChanged = true;
+    }
+  }
+  if (sessionsChanged) {
+    saveSessions(sessions);
+  }
   const records = loadRecords();
   let changed = false;
   for (const id of Object.keys(records)) {
@@ -401,6 +486,9 @@ export function bindAgentSession(
   }
   records[terminalId] = { ...record, sessionId };
   saveRecords(records);
+  const sessions = loadSessions();
+  sessions[terminalId] = { agentId: record.agentId, sessionId };
+  saveSessions(sessions);
   return true;
 }
 

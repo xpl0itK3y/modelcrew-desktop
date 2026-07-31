@@ -23,6 +23,7 @@ export const KEYS = {
   agentAlertDetail: "modelcrew.agentAlertDetail",
   agentResumeMode: "modelcrew.agentResumeMode",
   terminalAgents: "modelcrew.terminalAgents",
+  agentSessions: "modelcrew.agentSessions",
 
   notificationSound: "modelcrew.notificationSound",
   notificationVolume: "modelcrew.notificationVolume",
