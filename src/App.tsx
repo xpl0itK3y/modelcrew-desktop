@@ -45,6 +45,7 @@ import {
 } from "./theme";
 import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
+import { watchPanelClaims } from "./crew/claimPolling";
 import { setWorkspaceNameResolver } from "./terminal/alertDelivery";
 import { subscribeAgentAttention } from "./terminal/attentionStore";
 import {
@@ -409,6 +410,12 @@ export default function App() {
   } | null>(null);
   const activeGitWorkspaceId =
     rootRegistryReady && activeWorkspace?.folder ? activeWorkspace.id : null;
+  // Кто из панелей проекта какие файлы держит — для подписи в шапке панели.
+  useEffect(
+    () => watchPanelClaims(activeGitWorkspaceId),
+    [activeGitWorkspaceId],
+  );
+
   // Эффект подписки выполняется после render: сводку предыдущего проекта
   // нельзя показывать даже на этот промежуточный кадр.
   const gitSummary =
