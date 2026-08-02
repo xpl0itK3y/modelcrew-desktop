@@ -698,6 +698,24 @@ fn claude_hook_entry(helper: &Path) -> Value {
     })
 }
 
+/// Отдельный файл с заявкой на файлы — для агентов, у которых хук перед
+/// вызовом инструмента умеет запрещать вызов, но канал уведомлений идёт
+/// другим путём. Свой файл: чужого содержимого в нём не бывает.
+fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
+    match agent {
+        // Глобальные хуки грока доверены всегда — в отличие от проектных,
+        // которым нужен явный `/hooks-trust`. Формат он принимает тот же, что
+        // у claude, и сам переводит имена инструментов в свои.
+        "grok" => Some(home.join(".grok/hooks/modelcrew.json")),
+        _ => None,
+    }
+}
+
+fn claim_file_body(helper: &Path) -> String {
+    let body = serde_json::json!({ "hooks": { "PreToolUse": [claude_claim_entry(helper)] } });
+    serde_json::to_string_pretty(&body).unwrap_or_default() + "\n"
+}
+
 fn claude_claim_entry(helper: &Path) -> Value {
     serde_json::json!({
         // Только инструменты записи. Заявка при чтении заперла бы соседу
@@ -864,6 +882,21 @@ pub fn set_hook(
     // Хелпер мог не появиться, если каталог данных был недоступен на старте.
     if !helper.exists() {
         write_helper(app);
+    }
+    // Заявка на файлы живёт своим файлом и снимается вместе с каналом
+    // уведомлений: это одна настройка для пользователя.
+    if let Some(claims) = claim_file(agent, &home) {
+        if enabled {
+            let body = claim_file_body(&helper);
+            if std::fs::read_to_string(&claims).unwrap_or_default() != body {
+                if let Some(parent) = claims.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&claims, body);
+            }
+        } else {
+            let _ = std::fs::remove_file(&claims);
+        }
     }
     // Дописываемая секция в чужом конфиге: трогаем только её и только если
     // такой секции там ещё нет.
@@ -1083,6 +1116,43 @@ mod tests {
         );
         // Заявка без панели привязать некуда.
         assert!(parse_claim_request(r#"{"kind":"claim","file":"/a"}"#).is_none());
+    }
+
+    #[test]
+    fn gives_grok_the_same_claim_hook_in_its_own_file() {
+        // Грок принимает формат claude и сам переводит имена инструментов в
+        // свои, поэтому запись одна на двоих.
+        let body = claim_file_body(&helper());
+        let parsed: Value = serde_json::from_str(&body).expect("валидный JSON");
+
+        assert_eq!(
+            parsed["hooks"]["PreToolUse"][0]["matcher"],
+            "Edit|Write|MultiEdit"
+        );
+        assert!(parsed["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("--claim"));
+    }
+
+    #[test]
+    fn puts_the_claim_file_only_where_hooks_are_trusted_without_asking() {
+        let home = Path::new("/Users/x");
+
+        // Глобальные хуки грока доверены всегда; проектные потребовали бы
+        // явного согласия, поэтому туда не пишем.
+        assert_eq!(
+            claim_file("grok", home),
+            Some(home.join(".grok/hooks/modelcrew.json"))
+        );
+        // У claude заявка идёт в общий settings.json вместе с остальными
+        // хуками — отдельный файл ему не нужен.
+        assert_eq!(claim_file("claude", home), None);
+        // Остальным пока нечего дать: у codex хуки приходят плагинами с
+        // доверием, у прочих канал не подтверждён.
+        for agent in ["codex", "cursor", "opencode", "kimi", "antigravity"] {
+            assert_eq!(claim_file(agent, home), None, "агент {agent}");
+        }
     }
 
     #[test]
