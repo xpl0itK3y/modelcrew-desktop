@@ -65,6 +65,10 @@
 
 .dockview-theme-modelcrew .dv-tabs-and-actions-container {
   border-bottom: 1px solid var(--mc-border);
+  /* Точка отсчёта для подписи «что правит»: она смотрит на ширину шапки, а
+     не окна — в сетке из двенадцати панелей это разные величины. Ширина
+     шапки задаётся группой, поэтому containment здесь безопасен. */
+  container-type: inline-size;
 }
 
 /* Drop-зона при перетаскивании: мягкий пульс рамки */
@@ -192,6 +196,63 @@
 .dv-groupview:hover .group-actions,
 .dv-groupview.dv-active-group .group-actions {
   opacity: 1;
+}
+
+/* Что панель правит прямо сейчас — между вкладкой и кнопками. Растёт влево в
+   пустое место шапки, кнопки при этом не сдвигаются. */
+.panel-claim {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Без этого длинный путь распирает шапку и выталкивает кнопки. */
+  min-width: 0;
+  margin-right: 4px;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+  line-height: 1;
+  /* Подпись сама по себе не приглушается вместе с кнопками: у неактивной
+     панели она как раз и нужна — там работает сосед. */
+  opacity: 1;
+}
+
+.panel-claim-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-claim-glyph {
+  flex: none;
+}
+
+.panel-claim-rest {
+  flex: none;
+  opacity: 0.7;
+}
+
+/* Агент упёрся в занятый файл и ушёл работать в другие: это не рядовое
+   состояние, его видно акцентом. */
+.panel-claim.is-waiting {
+  color: var(--mc-accent);
+}
+
+/* Файл держателя нужен соседу — точка рядом с именем. */
+.panel-claim-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mc-accent);
+  box-shadow: 0 0 6px var(--mc-accent-glow);
+}
+
+/* В узкой панели от подписи остаётся значок с подсказкой: лучше так, чем
+   выдавить кнопки за край. */
+@container (max-width: 320px) {
+  .panel-claim-file,
+  .panel-claim-rest {
+    display: none;
+  }
 }
 
 /* ---------- Терминальная панель ---------- */
