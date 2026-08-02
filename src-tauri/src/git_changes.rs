@@ -102,7 +102,7 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> CommandResult<Vec<u8>> {
     run_git_with_env(root, args, &[])
 }
 
-fn run_git_with_env(
+pub(crate) fn run_git_with_env(
     root: &Path,
     args: &[&str],
     environment: &[(&str, &str)],

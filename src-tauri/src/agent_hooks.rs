@@ -183,6 +183,11 @@ fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
                 if payload.event.eq_ignore_ascii_case("stop") {
                     app.state::<crate::crew::CrewRegistry>()
                         .release_panel(&payload.panel_id);
+                    // Снимок дерева ровно в этот момент: заявки держатся на
+                    // хуках, а они есть не у всех агентов, и запись через
+                    // оболочку проходит мимо них у всех. Снимок делает
+                    // затирание обратимым, чего заявка не умеет.
+                    snapshot_after_turn(&app, &payload.panel_id);
                 }
                 let _ = app.emit_to("main", "agent-event", payload);
             }
@@ -258,6 +263,21 @@ fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> Option<crat
         crate::crew::ClaimOutcome::Held(holder) => Some(holder),
         _ => None,
     }
+}
+
+/// Снимок панели после хода. Ошибку глушим: снимок — страховка, и её сбой не
+/// должен всплывать поверх работы. Дорогое здесь только `git add -A`, поэтому
+/// зовём один раз на ход, а не на каждую правку.
+fn snapshot_after_turn(app: &tauri::AppHandle, panel_id: &str) {
+    let Some(root) = app.state::<crate::pty::PtyManager>().session_root(panel_id) else {
+        return;
+    };
+    let panel_id = panel_id.to_string();
+    // Большой репозиторий может собираться заметное время: держать на этом
+    // поток вотчера нельзя, он же разбирает события остальных панелей.
+    std::thread::spawn(move || {
+        let _ = crate::panel_snapshots::snapshot_panel(&root, &panel_id);
+    });
 }
 
 fn json_string(value: &str) -> String {

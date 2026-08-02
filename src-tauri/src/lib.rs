@@ -22,6 +22,7 @@ mod git_sync;
 mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
+mod panel_snapshots;
 mod pty;
 mod terminal_snapshots;
 mod update_cache;
@@ -1050,6 +1051,7 @@ mod tests {
         ("git_sync.rs", include_str!("git_sync.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
+        ("panel_snapshots.rs", include_str!("panel_snapshots.rs")),
         ("pty.rs", include_str!("pty.rs")),
         (
             "terminal_snapshots.rs",
