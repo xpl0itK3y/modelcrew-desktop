@@ -13,6 +13,7 @@
 //! никого нет.
 
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -48,6 +49,28 @@ pub enum ClaimOutcome {
     Rejected,
 }
 
+/// Файл крупнее этого не сверяем: чтение целиком на каждую правку обошлось бы
+/// дороже пользы, а исходники такого размера — редкость.
+const MAX_HASHED_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Отпечаток содержимого файла. Сравнивается только внутри одного запуска —
+/// реестр на диск не пишется, поэтому устойчивость между версиями не нужна.
+pub fn content_digest(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Отпечаток файла на диске. `None` — файла нет или он слишком велик: в обоих
+/// случаях сверять нечего и правку надо пропустить.
+pub fn file_digest(path: &std::path::Path) -> Option<u64> {
+    let size = std::fs::metadata(path).ok()?.len();
+    if size > MAX_HASHED_BYTES {
+        return None;
+    }
+    Some(content_digest(&std::fs::read(path).ok()?))
+}
+
 #[derive(Default)]
 pub struct CrewRegistry {
     // Проект → путь → заявка. Ключ по проекту, а не глобальный: у панелей
@@ -56,6 +79,11 @@ pub struct CrewRegistry {
     // Проект → путь → панели, которым файл нужен и которые получили отказ.
     // Нужно, чтобы держатель видел, что его ждут.
     waiting: Mutex<HashMap<String, HashMap<String, Vec<String>>>>,
+    // Каким панель видела файл, когда его читала: (проект, панель, путь) →
+    // отпечаток. Замок держит файл только на время хода, а опасен промежуток
+    // «прочитал → подумал → записал»: за это время сосед мог записать своё, и
+    // правка ляжет поверх чужой работы, ничего не заметив.
+    reads: Mutex<HashMap<(String, String, String), u64>>,
 }
 
 impl CrewRegistry {
@@ -107,6 +135,57 @@ impl CrewRegistry {
         ClaimOutcome::Granted
     }
 
+    /// Панель прочитала файл — запоминаем, каким она его видела. Заявку при
+    /// этом не берём: агент осматривает десятки файлов, и заявка на каждый
+    /// заперла бы соседу полпроекта.
+    pub fn note_read(&self, workspace_id: &str, panel_id: &str, path: &str, digest: u64) {
+        if !is_safe_repo_path(path) {
+            return;
+        }
+        self.reads.lock().unwrap().insert(
+            (
+                workspace_id.to_string(),
+                panel_id.to_string(),
+                path.to_string(),
+            ),
+            digest,
+        );
+    }
+
+    /// Изменился ли файл с тех пор, как эта панель его читала.
+    ///
+    /// `false`, если панель его не читала: правка вслепую — не наше дело, её
+    /// закрывает заявка. Проверяем только то, что панель видела своими
+    /// глазами и на что могла опереться.
+    pub fn read_is_stale(
+        &self,
+        workspace_id: &str,
+        panel_id: &str,
+        path: &str,
+        current: u64,
+    ) -> bool {
+        let key = (
+            workspace_id.to_string(),
+            panel_id.to_string(),
+            path.to_string(),
+        );
+        self.reads
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|seen| *seen != current)
+    }
+
+    /// Панель получила добро на запись — прочитанное больше не актуально: она
+    /// сама сейчас изменит файл, и её следующая правка опирается уже на своё.
+    pub fn forget_read(&self, workspace_id: &str, panel_id: &str, path: &str) {
+        self.reads.lock().unwrap().remove(&(
+            workspace_id.to_string(),
+            panel_id.to_string(),
+            path.to_string(),
+        ));
+    }
+
     /// Отпустить всё, что держит панель: конец хода, смерть панели, закрытие.
     pub fn release_panel(&self, panel_id: &str) {
         let mut claims = self.claims.lock().unwrap();
@@ -121,6 +200,12 @@ impl CrewRegistry {
             }
             project.retain(|_, panels| !panels.is_empty());
         }
+        drop(waiting);
+        // Прочитанное панелью тоже устарело: следующий ход начнётся заново.
+        self.reads
+            .lock()
+            .unwrap()
+            .retain(|(_, panel, _), _| panel != panel_id);
     }
 
     /// Действующие заявки проекта. Протухшие снимаются на месте — так реестр
@@ -346,6 +431,111 @@ mod tests {
             );
         }
         assert!(crew.list(WS, 1_000).is_empty());
+    }
+
+    #[test]
+    fn catches_a_write_built_on_a_stale_read() {
+        let crew = registry();
+        // Панель прочитала файл и ушла думать.
+        crew.note_read(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("было".as_bytes()),
+        );
+
+        // За это время сосед записал своё.
+        assert!(crew.read_is_stale(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("стало".as_bytes())
+        ));
+        // Файл не тронут — правка опирается на то, что панель и видела.
+        assert!(!crew.read_is_stale(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("было".as_bytes())
+        ));
+    }
+
+    #[test]
+    fn says_nothing_about_a_file_the_panel_never_read() {
+        let crew = registry();
+
+        // Правка вслепую — не дело этой проверки: её закрывает заявка.
+        // Сверять можно только то, что панель видела своими глазами.
+        assert!(!crew.read_is_stale(WS, "panel-a", "src/app.ts", 42));
+    }
+
+    #[test]
+    fn keeps_the_reads_of_panels_apart() {
+        let crew = registry();
+        crew.note_read(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("было".as_bytes()),
+        );
+
+        // Чужое чтение к этой панели отношения не имеет.
+        assert!(!crew.read_is_stale(
+            WS,
+            "panel-b",
+            "src/app.ts",
+            content_digest("стало".as_bytes())
+        ));
+    }
+
+    #[test]
+    fn stops_checking_once_the_panel_wrote_the_file_itself() {
+        let crew = registry();
+        crew.note_read(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("было".as_bytes()),
+        );
+
+        crew.forget_read(WS, "panel-a", "src/app.ts");
+
+        // Панель сама изменила файл: её следующая правка опирается на своё же,
+        // и отказ здесь означал бы «перечитай то, что ты только что написал».
+        assert!(!crew.read_is_stale(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("стало".as_bytes())
+        ));
+    }
+
+    #[test]
+    fn forgets_what_a_gone_panel_had_read() {
+        let crew = registry();
+        crew.note_read(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("было".as_bytes()),
+        );
+
+        crew.release_panel("panel-a");
+
+        assert!(!crew.read_is_stale(
+            WS,
+            "panel-a",
+            "src/app.ts",
+            content_digest("стало".as_bytes())
+        ));
+    }
+
+    #[test]
+    fn ignores_a_read_of_a_path_outside_the_project() {
+        let crew = registry();
+        crew.note_read(WS, "panel-a", "../secrets.env", 1);
+
+        assert!(!crew.read_is_stale(WS, "panel-a", "../secrets.env", 2));
     }
 
     #[test]

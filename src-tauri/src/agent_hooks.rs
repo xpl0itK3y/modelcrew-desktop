@@ -36,10 +36,11 @@ if [ "$1" = "--claim" ]; then
   payload="$(cat)"
   file=$(printf '%s' "$payload" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
   [ -z "$file" ] && exit 0
+  tool=$(printf '%s' "$payload" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
   mkdir -p "$dir" || exit 0
   id="claim-$(date +%s)-$$"
-  printf '{"kind":"claim","panelId":"%s","file":"%s"}' \
-    "$MODELCREW_PANEL_ID" "$file" > "$dir/$id.tmp" || exit 0
+  printf '{"kind":"claim","panelId":"%s","file":"%s","tool":"%s"}' \
+    "$MODELCREW_PANEL_ID" "$file" "$tool" > "$dir/$id.tmp" || exit 0
   mv "$dir/$id.tmp" "$dir/$id.json" || exit 0
   i=0
   while [ $i -lt 20 ]; do
@@ -47,6 +48,12 @@ if [ "$1" = "--claim" ]; then
       answer="$(cat "$dir/$id.res")"
       rm -f "$dir/$id.res"
       case "$answer" in
+        *'"stale"'*)
+          printf 'Файл изменился с тех пор, как ты его прочитал: в нём успел ' >&2
+          printf 'поработать другой агент. Перечитай файл и примени правку ' >&2
+          printf 'заново, иначе его работа будет затёрта.\n' >&2
+          exit 2
+          ;;
         *'"deny"'*)
           task=$(printf '%s' "$answer" | sed -n 's/.*"task":"\([^"]*\)".*/\1/p')
           printf 'Файл сейчас правит другой агент этого проекта' >&2
@@ -197,8 +204,10 @@ fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
 
 struct ClaimRequest {
     panel_id: String,
-    /// Абсолютный путь файла, который агент собирается править.
+    /// Абсолютный путь файла, который агент собирается читать или править.
     file: String,
+    /// Имя инструмента агента: по нему отличаем чтение от записи.
+    tool: String,
 }
 
 fn parse_claim_request(raw: &str) -> Option<ClaimRequest> {
@@ -211,7 +220,11 @@ fn parse_claim_request(raw: &str) -> Option<ClaimRequest> {
     if panel_id.is_empty() || file.is_empty() {
         return None;
     }
-    Some(ClaimRequest { panel_id, file })
+    Some(ClaimRequest {
+        panel_id,
+        file,
+        tool: text(&value, &["tool"]),
+    })
 }
 
 /// Ответ хуку: кладём решение рядом с запросом, хелпер его подхватит.
@@ -220,48 +233,82 @@ fn parse_claim_request(raw: &str) -> Option<ClaimRequest> {
 /// случаях — пропускаем: слой согласования не должен останавливать работу
 /// из-за того, что панель не нашлась или путь не разобрался.
 fn answer_claim(app: &tauri::AppHandle, request_path: &Path, request: ClaimRequest) {
-    let answer = claim_answer(claim_decision(app, &request).as_ref());
+    let answer = claim_answer(&claim_decision(app, &request));
     let answer_path = request_path.with_extension("res");
     let _ = std::fs::write(&answer_path, answer);
 }
 
 /// Ответ в том виде, в каком его читает шелл-хелпер. Формат — часть договора
 /// с ним: хелпер ищет в строке `"deny"` и вытаскивает `task` регуляркой.
-fn claim_answer(holder: Option<&crate::crew::Claim>) -> String {
-    match holder {
-        Some(holder) => format!(
-            "{{\"decision\":\"deny\",\"holder\":{},\"task\":{}}}",
+fn claim_answer(verdict: &ClaimVerdict) -> String {
+    match verdict {
+        ClaimVerdict::Held(holder) => format!(
+            "{{\"decision\":\"deny\",\"reason\":\"held\",\"holder\":{},\"task\":{}}}",
             json_string(&holder.panel_id),
             json_string(holder.task.as_deref().unwrap_or_default())
         ),
-        None => "{\"decision\":\"allow\"}".to_string(),
+        ClaimVerdict::Stale => "{\"decision\":\"deny\",\"reason\":\"stale\"}".to_string(),
+        ClaimVerdict::Allow => "{\"decision\":\"allow\"}".to_string(),
     }
 }
 
-fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> Option<crate::crew::Claim> {
-    let root = app
+/// Инструменты чтения: заявку не берут, но то, каким панель увидела файл,
+/// запоминают — на этом держится проверка устаревшего чтения.
+fn is_read_tool(tool: &str) -> bool {
+    tool.eq_ignore_ascii_case("read") || tool.eq_ignore_ascii_case("notebookread")
+}
+
+enum ClaimVerdict {
+    Allow,
+    /// Файл держит другая панель.
+    Held(crate::crew::Claim),
+    /// Файл изменился с тех пор, как эта панель его читала.
+    Stale,
+}
+
+fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> ClaimVerdict {
+    let Some(root) = app
         .state::<crate::pty::PtyManager>()
-        .session_root(&request.panel_id)?;
+        .session_root(&request.panel_id)
+    else {
+        return ClaimVerdict::Allow;
+    };
     // Путь от агента приходит абсолютным: заявки считаются от корня проекта,
     // иначе один файл выглядел бы разными путями из разных панелей.
-    let relative = Path::new(&request.file)
-        .strip_prefix(&root)
-        .ok()?
-        .to_string_lossy()
-        .replace('\\', "/");
+    let Ok(relative) = Path::new(&request.file).strip_prefix(&root) else {
+        return ClaimVerdict::Allow;
+    };
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    let workspace = root.to_string_lossy().to_string();
+    let crew = app.state::<crate::crew::CrewRegistry>();
+
+    if is_read_tool(&request.tool) {
+        if let Some(digest) = crate::crew::file_digest(Path::new(&request.file)) {
+            crew.note_read(&workspace, &request.panel_id, &relative, digest);
+        }
+        return ClaimVerdict::Allow;
+    }
+
+    // Правка поверх устаревшего чтения — та самая молчаливая потеря: панель
+    // прочитала файл, ушла думать, а сосед за это время записал своё.
+    if let Some(digest) = crate::crew::file_digest(Path::new(&request.file)) {
+        if crew.read_is_stale(&workspace, &request.panel_id, &relative, digest) {
+            return ClaimVerdict::Stale;
+        }
+    }
+
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_millis() as u64)
         .unwrap_or_default();
-    match app.state::<crate::crew::CrewRegistry>().claim(
-        &root.to_string_lossy(),
-        &request.panel_id,
-        &relative,
-        None,
-        now_ms,
-    ) {
-        crate::crew::ClaimOutcome::Held(holder) => Some(holder),
-        _ => None,
+    match crew.claim(&workspace, &request.panel_id, &relative, None, now_ms) {
+        crate::crew::ClaimOutcome::Held(holder) => ClaimVerdict::Held(holder),
+        _ => {
+            // Панель сама сейчас изменит файл: прочитанное больше не годится
+            // как основа для сверки её же следующей правки.
+            crew.forget_read(&workspace, &request.panel_id, &relative);
+            ClaimVerdict::Allow
+        }
     }
 }
 
@@ -738,9 +785,10 @@ fn claim_file_body(helper: &Path) -> String {
 
 fn claude_claim_entry(helper: &Path) -> Value {
     serde_json::json!({
-        // Только инструменты записи. Заявка при чтении заперла бы соседу
-        // полпроекта, стоит агенту осмотреться в тридцати файлах.
-        "matcher": "Edit|Write|MultiEdit",
+        // Чтение тоже проходит через хук — но заявки не берёт, только
+        // запоминает, каким панель увидела файл. Без этого не поймать
+        // правку, построенную на устаревшем чтении.
+        "matcher": "Edit|Write|MultiEdit|Read|NotebookEdit",
         "hooks": [{ "type": "command", "command": hook_claim_command(helper) }],
     })
 }
@@ -1100,9 +1148,12 @@ mod tests {
         // Хелпер — шелл-скрипт: он ищет в ответе подстроку "deny" и достаёт
         // task регуляркой. Смена формы здесь ломает его молча, поэтому она
         // закреплена тестом.
-        assert_eq!(claim_answer(None), r#"{"decision":"allow"}"#);
+        assert_eq!(
+            claim_answer(&ClaimVerdict::Allow),
+            r#"{"decision":"allow"}"#
+        );
 
-        let held = claim_answer(Some(&crate::crew::Claim {
+        let held = claim_answer(&ClaimVerdict::Held(crate::crew::Claim {
             path: "src/app.ts".into(),
             panel_id: "panel-3".into(),
             task: Some("правит модель".into()),
@@ -1111,8 +1162,15 @@ mod tests {
         assert!(held.contains(r#""deny""#));
         assert!(held.contains(r#""task":"правит модель""#));
 
+        // Причины отказа разные, и хелпер говорит агенту разное: занятый файл
+        // — «возьмись за другой», устаревшее чтение — «перечитай этот».
+        let stale = claim_answer(&ClaimVerdict::Stale);
+        assert!(stale.contains(r#""deny""#));
+        assert!(stale.contains(r#""stale""#));
+        assert!(!held.contains(r#""stale""#));
+
         // Кавычка в тексте задачи не должна разваливать ответ.
-        let tricky = claim_answer(Some(&crate::crew::Claim {
+        let tricky = claim_answer(&ClaimVerdict::Held(crate::crew::Claim {
             path: "src/app.ts".into(),
             panel_id: "panel-3".into(),
             task: Some("правит \"модель\"".into()),
@@ -1122,13 +1180,26 @@ mod tests {
     }
 
     #[test]
+    fn tells_reading_tools_from_writing_ones() {
+        // Чтение проходит через хук, но заявку не берёт: осмотр тридцати
+        // файлов запер бы соседу полпроекта.
+        assert!(is_read_tool("Read"));
+        assert!(is_read_tool("read"));
+        assert!(is_read_tool("NotebookRead"));
+        for writing in ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"] {
+            assert!(!is_read_tool(writing), "инструмент {writing}");
+        }
+    }
+
+    #[test]
     fn reads_a_claim_request_and_ignores_a_plain_event() {
         let request = parse_claim_request(
-            r#"{"kind":"claim","panelId":"panel-1","file":"/proj/src/app.ts"}"#,
+            r#"{"kind":"claim","panelId":"panel-1","file":"/proj/src/app.ts","tool":"Edit"}"#,
         )
         .expect("заявка должна разобраться");
         assert_eq!(request.panel_id, "panel-1");
         assert_eq!(request.file, "/proj/src/app.ts");
+        assert_eq!(request.tool, "Edit");
 
         // Обычное событие хука ответа не ждёт — путать их нельзя.
         assert!(
@@ -1147,7 +1218,7 @@ mod tests {
 
         assert_eq!(
             parsed["hooks"]["PreToolUse"][0]["matcher"],
-            "Edit|Write|MultiEdit"
+            "Edit|Write|MultiEdit|Read|NotebookEdit"
         );
         assert!(parsed["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
             .as_str()
@@ -1183,7 +1254,7 @@ mod tests {
         let entry = &settings["hooks"]["PreToolUse"][0];
         // Чтение не заявляем: агент осматривает десятки файлов, и заявка на
         // каждый заперла бы соседу полпроекта.
-        assert_eq!(entry["matcher"], "Edit|Write|MultiEdit");
+        assert_eq!(entry["matcher"], "Edit|Write|MultiEdit|Read|NotebookEdit");
         assert_eq!(
             entry["hooks"][0]["command"],
             "'/Users/x/Library/Application Support/mc/modelcrew-agent-notify.sh' --claim"
