@@ -15,8 +15,11 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::command_error::CommandResult;
-use crate::git_changes::{repo_toplevel, run_git, run_git_with_env};
+use serde::Serialize;
+
+use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::git_changes::{is_safe_repo_path, repo_toplevel, run_git, run_git_with_env};
+use crate::workspace_roots::WorkspaceRoots;
 
 /// Автор снимков. Настройки пользователя может не быть вовсе, а `commit-tree`
 /// без личности не работает — подставляем свою и не трогаем чужую.
@@ -99,6 +102,135 @@ fn build_snapshot(
     }
     run_git(toplevel, &["update-ref", &reference, &commit])?;
     Ok(Some(commit))
+}
+
+/// Снимок в виде, пригодном для показа.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelSnapshotView {
+    pub panel_id: String,
+    pub commit: String,
+    pub epoch_ms: i64,
+    /// Что этот ход изменил: разница с предыдущим снимком этой же панели, а
+    /// для первого — с текущим состоянием ветки.
+    pub files: Vec<String>,
+}
+
+/// Все снимки проекта, свежие сверху.
+pub fn list_panel_snapshots(root: &Path) -> CommandResult<Vec<PanelSnapshotView>> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Ok(Vec::new());
+    };
+    let raw = run_git(
+        &toplevel,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)",
+            "refs/modelcrew/panels/",
+        ],
+    )?;
+    let mut snapshots = Vec::new();
+    for line in String::from_utf8_lossy(&raw).lines() {
+        let mut fields = line.split('\t');
+        let (Some(reference), Some(commit), Some(when)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let Some(panel_id) = reference.rsplit('/').next() else {
+            continue;
+        };
+        snapshots.push(PanelSnapshotView {
+            panel_id: panel_id.to_string(),
+            files: snapshot_files(&toplevel, commit),
+            commit: commit.to_string(),
+            epoch_ms: when.parse::<i64>().unwrap_or_default() * 1_000,
+        });
+    }
+    // Свежие сверху: человек ищет то, что только что затёрли. У времени
+    // коммита секундная точность, а два хода нередко заканчиваются в одну
+    // секунду — доупорядочиваем по панели, иначе список прыгал бы при каждом
+    // обновлении.
+    snapshots.sort_by(|a, b| {
+        b.epoch_ms
+            .cmp(&a.epoch_ms)
+            .then_with(|| a.panel_id.cmp(&b.panel_id))
+    });
+    Ok(snapshots)
+}
+
+/// Что изменил этот ход. У первого снимка панели предшественника нет —
+/// сравниваем с текущей веткой, иначе показали бы всё дерево целиком.
+fn snapshot_files(toplevel: &Path, commit: &str) -> Vec<String> {
+    let base = if run_git(
+        toplevel,
+        &["rev-parse", "--verify", "--quiet", &format!("{commit}^")],
+    )
+    .is_ok()
+    {
+        format!("{commit}^")
+    } else if run_git(toplevel, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok() {
+        "HEAD".to_string()
+    } else {
+        return Vec::new();
+    };
+    run_git(toplevel, &["diff", "--name-only", &base, commit])
+        .map(|raw| {
+            String::from_utf8_lossy(&raw)
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Возвращает файл из снимка в рабочее дерево. Ровно один файл: восстановить
+/// весь снимок значило бы затереть работу, которая шла после него.
+pub fn restore_from_snapshot(root: &Path, panel_id: &str, path: &str) -> CommandResult<()> {
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    let reference = snapshot_ref(panel_id);
+    let body = run_git(&toplevel, &["show", &format!("{reference}:{path}")])?;
+    let target = toplevel.join(path);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    }
+    std::fs::write(&target, body)
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn panel_snapshots(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<Vec<PanelSnapshotView>> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || list_panel_snapshots(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn panel_snapshot_restore(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    panel_id: String,
+    path: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || restore_from_snapshot(&root, &panel_id, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 /// Свой индекс на панель: два хода в соседних панелях могут закончиться

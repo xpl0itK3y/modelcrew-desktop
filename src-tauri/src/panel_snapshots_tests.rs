@@ -209,3 +209,112 @@ fn keeps_the_panels_apart() {
         "от второй\n"
     );
 }
+
+#[test]
+fn lists_what_each_turn_changed_newest_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = repo(root);
+    std::fs::write(root.join("app.ts"), "1\n").unwrap();
+    std::fs::write(root.join("other.ts"), "1\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "init"]);
+
+    std::fs::write(root.join("app.ts"), "от первой\n").unwrap();
+    snapshot_panel(root, "panel-a").unwrap();
+    std::fs::write(root.join("other.ts"), "от второй\n").unwrap();
+    snapshot_panel(root, "panel-b").unwrap();
+
+    let list = list_panel_snapshots(root).unwrap();
+    assert_eq!(list.len(), 2);
+    // Показываем, что изменил этот ход, а не всё дерево.
+    let files = |panel: &str| {
+        list.iter()
+            .find(|item| item.panel_id == panel)
+            .map(|item| item.files.clone())
+            .unwrap_or_default()
+    };
+    // У первого снимка панели предшественника нет, поэтому сравнение идёт с
+    // веткой — и туда попадает всё несохранённое, включая правку соседа.
+    // Точный список «что сделал этот ход» появляется со второго снимка.
+    assert_eq!(files("panel-a"), vec!["app.ts".to_string()]);
+    assert_eq!(
+        files("panel-b"),
+        vec!["app.ts".to_string(), "other.ts".to_string()]
+    );
+
+    // Второй ход той же панели показывает уже ровно свою работу.
+    std::fs::write(root.join("third.ts"), "ещё\n").unwrap();
+    snapshot_panel(root, "panel-b").unwrap();
+    let list = list_panel_snapshots(root).unwrap();
+    let second = list
+        .iter()
+        .find(|item| item.panel_id == "panel-b")
+        .expect("снимок panel-b");
+    assert_eq!(second.files, vec!["third.ts".to_string()]);
+    // Оба хода закончились в одну секунду: порядок при этом обязан быть
+    // устойчивым, иначе список прыгает при каждом обновлении.
+    assert_eq!(
+        list_panel_snapshots(root)
+            .unwrap()
+            .iter()
+            .map(|item| item.panel_id.clone())
+            .collect::<Vec<_>>(),
+        list.iter()
+            .map(|item| item.panel_id.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn brings_one_file_back_without_touching_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = repo(root);
+    std::fs::write(root.join("app.ts"), "1\n").unwrap();
+    std::fs::write(root.join("other.ts"), "1\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "init"]);
+
+    std::fs::write(root.join("app.ts"), "работа первого\n").unwrap();
+    snapshot_panel(root, "panel-a").unwrap();
+    // Сосед затёр файл и заодно поработал в другом.
+    std::fs::write(root.join("app.ts"), "затёрто\n").unwrap();
+    std::fs::write(root.join("other.ts"), "работа второго\n").unwrap();
+
+    restore_from_snapshot(root, "panel-a", "app.ts").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("app.ts")).unwrap(),
+        "работа первого\n"
+    );
+    // Возвращаем ровно один файл: восстановление снимка целиком затёрло бы
+    // работу, которая шла после него.
+    assert_eq!(
+        std::fs::read_to_string(root.join("other.ts")).unwrap(),
+        "работа второго\n"
+    );
+}
+
+#[test]
+fn refuses_a_path_that_leaves_the_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = repo(root);
+    std::fs::write(root.join("app.ts"), "1\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "init"]);
+    snapshot_panel(root, "panel-a").unwrap();
+
+    // Путь приходит из интерфейса, но проверять его всё равно надо здесь.
+    for hostile in ["../outside.txt", "/etc/passwd", ""] {
+        assert!(restore_from_snapshot(root, "panel-a", hostile).is_err());
+    }
+}
+
+#[test]
+fn has_nothing_to_list_outside_a_repository() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert!(list_panel_snapshots(dir.path()).unwrap().is_empty());
+}

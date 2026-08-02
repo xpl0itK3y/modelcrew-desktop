@@ -60,6 +60,7 @@ use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
     LinuxUpdaterState,
 };
+use panel_snapshots::{panel_snapshot_restore, panel_snapshots};
 use pty::{GitBashAvailability, PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -955,6 +956,8 @@ pub fn run() {
             terminal_clipboard_image_save,
             agent_session_locate,
             crew_claims,
+            panel_snapshots,
+            panel_snapshot_restore,
             git_changes_summary,
             git_file_diff,
             git_changes_watch,
@@ -1115,6 +1118,8 @@ mod tests {
         "github_device_start",
         "github_logout",
         "list_shells",
+        "panel_snapshot_restore",
+        "panel_snapshots",
         "pty_create",
         "pty_kill",
         "pty_kill_all",
