@@ -215,17 +215,22 @@ fn parse_claim_request(raw: &str) -> Option<ClaimRequest> {
 /// случаях — пропускаем: слой согласования не должен останавливать работу
 /// из-за того, что панель не нашлась или путь не разобрался.
 fn answer_claim(app: &tauri::AppHandle, request_path: &Path, request: ClaimRequest) {
-    let decision = claim_decision(app, &request);
-    let answer = match &decision {
+    let answer = claim_answer(claim_decision(app, &request).as_ref());
+    let answer_path = request_path.with_extension("res");
+    let _ = std::fs::write(&answer_path, answer);
+}
+
+/// Ответ в том виде, в каком его читает шелл-хелпер. Формат — часть договора
+/// с ним: хелпер ищет в строке `"deny"` и вытаскивает `task` регуляркой.
+fn claim_answer(holder: Option<&crate::crew::Claim>) -> String {
+    match holder {
         Some(holder) => format!(
             "{{\"decision\":\"deny\",\"holder\":{},\"task\":{}}}",
             json_string(&holder.panel_id),
             json_string(holder.task.as_deref().unwrap_or_default())
         ),
         None => "{\"decision\":\"allow\"}".to_string(),
-    };
-    let answer_path = request_path.with_extension("res");
-    let _ = std::fs::write(&answer_path, answer);
+    }
 }
 
 fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> Option<crate::crew::Claim> {
@@ -1035,6 +1040,49 @@ mod tests {
         // А наш встал рядом, а не вместо.
         assert_eq!(settings["hooks"]["Stop"].as_array().unwrap().len(), 2);
         assert!(claude_hook_installed(&settings, &helper()));
+    }
+
+    #[test]
+    fn speaks_to_the_helper_in_the_shape_it_parses() {
+        // Хелпер — шелл-скрипт: он ищет в ответе подстроку "deny" и достаёт
+        // task регуляркой. Смена формы здесь ломает его молча, поэтому она
+        // закреплена тестом.
+        assert_eq!(claim_answer(None), r#"{"decision":"allow"}"#);
+
+        let held = claim_answer(Some(&crate::crew::Claim {
+            path: "src/app.ts".into(),
+            panel_id: "panel-3".into(),
+            task: Some("правит модель".into()),
+            since_ms: 1_000,
+        }));
+        assert!(held.contains(r#""deny""#));
+        assert!(held.contains(r#""task":"правит модель""#));
+
+        // Кавычка в тексте задачи не должна разваливать ответ.
+        let tricky = claim_answer(Some(&crate::crew::Claim {
+            path: "src/app.ts".into(),
+            panel_id: "panel-3".into(),
+            task: Some("правит \"модель\"".into()),
+            since_ms: 1_000,
+        }));
+        assert!(serde_json::from_str::<Value>(&tricky).is_ok());
+    }
+
+    #[test]
+    fn reads_a_claim_request_and_ignores_a_plain_event() {
+        let request = parse_claim_request(
+            r#"{"kind":"claim","panelId":"panel-1","file":"/proj/src/app.ts"}"#,
+        )
+        .expect("заявка должна разобраться");
+        assert_eq!(request.panel_id, "panel-1");
+        assert_eq!(request.file, "/proj/src/app.ts");
+
+        // Обычное событие хука ответа не ждёт — путать их нельзя.
+        assert!(
+            parse_claim_request(r#"{"agent":"claude","panelId":"panel-1","payload":{}}"#).is_none()
+        );
+        // Заявка без панели привязать некуда.
+        assert!(parse_claim_request(r#"{"kind":"claim","file":"/a"}"#).is_none());
     }
 
     #[test]
