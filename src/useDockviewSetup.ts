@@ -11,8 +11,8 @@ import {
   destroyTerminal,
   getTerminalWorkspaceId,
   isManualTitle,
-  rememberAutoTitle,
 } from "./terminal/registry";
+import { rememberAutoTitle } from "./terminal/panelTitles";
 import {
   rememberAgentProcess,
   panelProcessLabel,

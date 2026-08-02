@@ -4,10 +4,10 @@ import {
   destroyTerminal,
   ensureSpawned,
   fitTerminal,
-  getAutoTitle,
   getOrCreateTerminal,
   isManualTitle,
 } from "../terminal/registry";
+import { getAutoTitle } from "../terminal/panelTitles";
 
 export { destroyTerminal };
 

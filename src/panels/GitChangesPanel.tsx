@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
@@ -15,6 +16,7 @@ import {
   SyncStatus,
 } from "./git/BranchBar";
 import { HistoryView } from "./git/HistoryView";
+import { SnapshotsView } from "./git/SnapshotsView";
 import {
   loadGithubCommitAvatars,
 } from "../git/githubAvatars";
@@ -365,7 +367,15 @@ function FileCard(props: {
     </div>
   );
 }
-type GitPanelView = "changes" | "history";
+type GitPanelView = "changes" | "history" | "snapshots";
+
+const TABS = ["changes", "history", "snapshots"] as const;
+
+const TAB_LABELS = {
+  changes: "git.tabChanges",
+  history: "git.tabHistory",
+  snapshots: "snapshots.tab",
+} as const;
 type CommitDraft = { subject: string; description: string };
 
 function joinCommitMessage(subject: string, description: string): string {
@@ -504,12 +514,15 @@ function GitChangesWorkspaceView(props: {
             <div className="git-tabs" role="tablist">
               {/* Пилюля-индикатор перетекает под активную вкладку. */}
               <span
-                className={`git-tab-indicator ${
-                  view === "history" ? "is-second" : ""
-                }`}
+                className="git-tab-indicator"
+                style={
+                  {
+                    "--git-tab-index": TABS.indexOf(view),
+                  } as CSSProperties
+                }
                 aria-hidden="true"
               />
-              {(["changes", "history"] as const).map((tab) => (
+              {TABS.map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -523,7 +536,7 @@ function GitChangesWorkspaceView(props: {
                     props.onSelectView(tab);
                   }}
                 >
-                  {t(tab === "changes" ? "git.tabChanges" : "git.tabHistory")}
+                  {t(TAB_LABELS[tab])}
                 </button>
               ))}
             </div>
@@ -565,7 +578,9 @@ function GitChangesWorkspaceView(props: {
           {/* key по вкладке перемонтирует контент — короткий въезд при
               переключении «Изменения ⇄ История». */}
           <div key={view} className="git-view">
-          {view === "history" ? (
+          {view === "snapshots" ? (
+            <SnapshotsView workspaceId={workspaceId} />
+          ) : view === "history" ? (
             <HistoryView
               workspaceId={workspaceId}
               fileCount={summary.files.length}

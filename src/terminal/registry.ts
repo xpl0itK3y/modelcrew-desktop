@@ -36,6 +36,11 @@ import { clearAgentAttention } from "./attentionStore";
 import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
 import { isMouseReport } from "./terminalInput";
 import {
+  forgetAutoTitle,
+  getAutoTitle,
+  rememberAutoTitle,
+} from "./panelTitles";
+import {
   extractPanelTail,
   joinWrappedRows,
   type PanelRow,
@@ -343,19 +348,6 @@ export function markManualTitle(id: string): void {
 
 export function isManualTitle(id: string): boolean {
   return registry.get(id)?.manualTitle ?? false;
-}
-
-// Последнее автоимя (процесс переднего плана) каждого терминала: панели
-// скрытых воркспейсов не получают событий, при переключении обратно
-// имя доводится из этого кэша.
-const autoTitles = new Map<string, string>();
-
-export function rememberAutoTitle(id: string, title: string): void {
-  autoTitles.set(id, title);
-}
-
-export function getAutoTitle(id: string): string | undefined {
-  return autoTitles.get(id);
 }
 
 type PtyOutput = ArrayBuffer | string;
@@ -738,7 +730,7 @@ export async function destroyTerminal(id: string): Promise<void> {
     setHighlightedFileDropTarget(null);
   }
   registry.delete(id);
-  autoTitles.delete(id);
+  forgetAutoTitle(id);
   // Закрытие панели — намеренное: её история больше не восстановится.
   discardSnapshot(id);
   discardAgentRecord(id);

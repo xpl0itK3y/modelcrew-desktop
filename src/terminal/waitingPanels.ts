@@ -5,7 +5,8 @@
 import { AGENTS, getAgentRecord } from "../agents";
 import { sessionDisplayName, type Workspace } from "../persist";
 import { getWaitingPanelIds } from "./attentionStore";
-import { getAutoTitle, getTerminalWorkspaceId } from "./registry";
+import { getAutoTitle } from "./panelTitles";
+import { getTerminalWorkspaceId } from "./registry";
 
 export type WaitingPanel = {
   panelId: string;

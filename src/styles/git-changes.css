@@ -68,19 +68,119 @@
 }
 
 /* Подсветку рисует скользящая пилюля, сами вкладки остаются прозрачными. */
+/* Пилюля под активной вкладкой. Позиция считается от числа вкладок, а не
+   зашита под две: со сдвигом на собственную ширину набегала бы ошибка на
+   каждой следующей. */
 .git-tab-indicator {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  left: 2px;
-  width: calc(50% - 4px);
+  width: calc((100% - 4px) / 3);
+  left: calc(2px + var(--git-tab-index, 0) * (100% - 4px) / 3);
   border-radius: 5px;
   background: var(--mc-surface-active);
-  transition: transform 190ms cubic-bezier(0.3, 0, 0.2, 1.2);
+  transition: left 190ms cubic-bezier(0.3, 0, 0.2, 1.2);
 }
 
-.git-tab-indicator.is-second {
-  transform: translateX(calc(100% + 2px));
+/* ---------- Снимки работы панелей ---------- */
+
+.git-snapshots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 12px;
+  overflow-y: auto;
+}
+
+.snapshot-card {
+  border: 1px solid var(--mc-panel-border);
+  border-radius: 8px;
+  background: var(--mc-panel);
+}
+
+.snapshot-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.snapshot-panel {
+  color: var(--mc-text-bright);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-time {
+  flex: none;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+}
+
+.snapshot-files {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+
+.snapshot-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 5px;
+}
+
+.snapshot-file:hover {
+  background: var(--mc-hover);
+}
+
+/* Путь длиннее карточки — обрезаем слева: имя файла важнее начала пути. */
+.snapshot-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: 12px;
+  color: var(--mc-text);
+}
+
+.snapshot-restore {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--mc-accent-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mc-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  /* Появляется под курсором: дюжина кнопок в списке рябит. */
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.snapshot-file:hover .snapshot-restore,
+.snapshot-restore:focus-visible {
+  opacity: 1;
+}
+
+.snapshot-restore:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.snapshot-note {
+  padding: 8px 10px;
+  color: var(--mc-text-faint);
+  font-size: 12px;
 }
 
 /* Контент вкладки коротко въезжает при переключении. */

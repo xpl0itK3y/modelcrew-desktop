@@ -9,9 +9,9 @@ import {
 import { DockviewApi } from "dockview";
 import {
   destroyTerminal,
-  getAutoTitle,
   isManualTitle,
 } from "../terminal/registry";
+import { getAutoTitle } from "../terminal/panelTitles";
 import { translate, type Locale } from "../i18n";
 import {
   addPanel,
