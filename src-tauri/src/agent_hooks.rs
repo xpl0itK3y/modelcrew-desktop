@@ -24,7 +24,45 @@ const MAX_EVENT_AGE: Duration = Duration::from_secs(120);
 // stdin (claude и совместимые). Файл сначала пишется во временный, потом
 // переименовывается — watcher не должен прочитать половину.
 const HELPER_SCRIPT: &str = r#"#!/bin/sh
-# Создан ModelCrew. Вызывается хуком агента; первым аргументом — имя агента.
+# Создан ModelCrew. Вызывается хуком агента; первым аргументом — имя агента
+# либо --claim для заявки на файл перед правкой.
+dir="$MODELCREW_EVENTS_DIR"
+
+# Заявка: спрашиваем приложение, свободен ли файл, и ждём ответ. Всё, что
+# пошло не так — отсутствие каталога, неразобранный путь, молчание — трактуем
+# как «можно»: слой согласования не должен останавливать работу из-за себя.
+if [ "$1" = "--claim" ]; then
+  [ -z "$dir" ] && exit 0
+  payload="$(cat)"
+  file=$(printf '%s' "$payload" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ -z "$file" ] && exit 0
+  mkdir -p "$dir" || exit 0
+  id="claim-$(date +%s)-$$"
+  printf '{"kind":"claim","panelId":"%s","file":"%s"}' \
+    "$MODELCREW_PANEL_ID" "$file" > "$dir/$id.tmp" || exit 0
+  mv "$dir/$id.tmp" "$dir/$id.json" || exit 0
+  i=0
+  while [ $i -lt 20 ]; do
+    if [ -f "$dir/$id.res" ]; then
+      answer="$(cat "$dir/$id.res")"
+      rm -f "$dir/$id.res"
+      case "$answer" in
+        *'"deny"'*)
+          task=$(printf '%s' "$answer" | sed -n 's/.*"task":"\([^"]*\)".*/\1/p')
+          printf 'Файл сейчас правит другой агент этого проекта' >&2
+          [ -n "$task" ] && printf ': %s' "$task" >&2
+          printf '. Возьмись за другой файл и вернись к этому позже.\n' >&2
+          exit 2
+          ;;
+        *) exit 0 ;;
+      esac
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  exit 0
+fi
+
 agent="${1:-unknown}"
 payload="$2"
 [ -z "$payload" ] && payload="$(cat)"
@@ -34,7 +72,6 @@ payload="$2"
 chain="$(dirname "$0")/notify-chain-$agent"
 [ -x "$chain" ] && "$chain" "$payload" >/dev/null 2>&1 &
 
-dir="$MODELCREW_EVENTS_DIR"
 [ -z "$dir" ] && exit 0
 mkdir -p "$dir" || exit 0
 file="$dir/$(date +%s)-$$"
@@ -100,6 +137,16 @@ fn write_helper(app: &tauri::AppHandle) {
 fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
     std::thread::spawn(move || loop {
         std::thread::sleep(POLL_INTERVAL);
+        // Закрытая панель заявки не отпускает сама: её процесса уже нет.
+        // Проверять дёшево — сессий единицы, а зависшая заявка держит файл
+        // до самого TTL.
+        let crew = app.state::<crate::crew::CrewRegistry>();
+        let pty = app.state::<crate::pty::PtyManager>();
+        for panel in crew.holding_panels() {
+            if pty.session_root(&panel).is_none() {
+                crew.release_panel(&panel);
+            }
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -123,11 +170,93 @@ fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
             if !fresh {
                 continue;
             }
+            // Заявка на файл ждёт ответа: агент стоит на PreToolUse, пока
+            // мы не положим рядом решение. Обычное событие ответа не требует.
+            if let Some(request) = parse_claim_request(&raw) {
+                answer_claim(&app, &path, request);
+                continue;
+            }
             if let Some(payload) = parse_event(&raw) {
+                // Конец хода — панель отпускает всё, что держала: держать
+                // файл между ходами значит запирать его, пока агент ждёт
+                // следующего задания.
+                if payload.event.eq_ignore_ascii_case("stop") {
+                    app.state::<crate::crew::CrewRegistry>()
+                        .release_panel(&payload.panel_id);
+                }
                 let _ = app.emit_to("main", "agent-event", payload);
             }
         }
     });
+}
+
+struct ClaimRequest {
+    panel_id: String,
+    /// Абсолютный путь файла, который агент собирается править.
+    file: String,
+}
+
+fn parse_claim_request(raw: &str) -> Option<ClaimRequest> {
+    let value: Value = serde_json::from_str(raw).ok()?;
+    if text(&value, &["kind"]) != "claim" {
+        return None;
+    }
+    let panel_id = text(&value, &["panelId"]);
+    let file = text(&value, &["file"]);
+    if panel_id.is_empty() || file.is_empty() {
+        return None;
+    }
+    Some(ClaimRequest { panel_id, file })
+}
+
+/// Ответ хуку: кладём решение рядом с запросом, хелпер его подхватит.
+///
+/// Отказ выдаём, только когда точно знаем держателя. Во всех остальных
+/// случаях — пропускаем: слой согласования не должен останавливать работу
+/// из-за того, что панель не нашлась или путь не разобрался.
+fn answer_claim(app: &tauri::AppHandle, request_path: &Path, request: ClaimRequest) {
+    let decision = claim_decision(app, &request);
+    let answer = match &decision {
+        Some(holder) => format!(
+            "{{\"decision\":\"deny\",\"holder\":{},\"task\":{}}}",
+            json_string(&holder.panel_id),
+            json_string(holder.task.as_deref().unwrap_or_default())
+        ),
+        None => "{\"decision\":\"allow\"}".to_string(),
+    };
+    let answer_path = request_path.with_extension("res");
+    let _ = std::fs::write(&answer_path, answer);
+}
+
+fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> Option<crate::crew::Claim> {
+    let root = app
+        .state::<crate::pty::PtyManager>()
+        .session_root(&request.panel_id)?;
+    // Путь от агента приходит абсолютным: заявки считаются от корня проекта,
+    // иначе один файл выглядел бы разными путями из разных панелей.
+    let relative = Path::new(&request.file)
+        .strip_prefix(&root)
+        .ok()?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or_default();
+    match app.state::<crate::crew::CrewRegistry>().claim(
+        &root.to_string_lossy(),
+        &request.panel_id,
+        &relative,
+        None,
+        now_ms,
+    ) {
+        crate::crew::ClaimOutcome::Held(holder) => Some(holder),
+        _ => None,
+    }
+}
+
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 fn parse_event(raw: &str) -> Option<AgentEventPayload> {
@@ -488,6 +617,11 @@ fn hook_command(helper: &Path, agent: &str) -> String {
     format!("'{path}' {agent}")
 }
 
+fn hook_claim_command(helper: &Path) -> String {
+    let path = helper.display().to_string().replace('\'', r"'\''");
+    format!("'{path}' --claim")
+}
+
 /// Наш ли это хук. Ищем по пути хелпера, а не по всей строке: команда могла
 /// быть записана прежней версией приложения с другим хвостом.
 fn is_our_hook(entry: &Value, helper: &Path) -> bool {
@@ -508,6 +642,9 @@ fn is_our_hook(entry: &Value, helper: &Path) -> bool {
 /// События, на которых агент зовёт хук. Для claude это конец хода и всё, ради
 /// чего он просит внимания: разрешение, вопрос, простой.
 const CLAUDE_EVENTS: [&str; 2] = ["Stop", "Notification"];
+
+/// Событие перед вызовом инструмента: на нём решается, свободен ли файл.
+const CLAUDE_CLAIM_EVENT: &str = "PreToolUse";
 
 fn read_json(path: &Path) -> Result<Value, String> {
     match std::fs::read_to_string(path) {
@@ -556,6 +693,15 @@ fn claude_hook_entry(helper: &Path) -> Value {
     })
 }
 
+fn claude_claim_entry(helper: &Path) -> Value {
+    serde_json::json!({
+        // Только инструменты записи. Заявка при чтении заперла бы соседу
+        // полпроекта, стоит агенту осмотреться в тридцати файлах.
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": hook_claim_command(helper) }],
+    })
+}
+
 /// Вписывает хук, не трогая ничего чужого. Возвращает true, если файл изменился.
 fn install_claude_hook(settings: &mut Value, helper: &Path) -> bool {
     if !settings.is_object() {
@@ -585,6 +731,17 @@ fn install_claude_hook(settings: &mut Value, helper: &Path) -> bool {
         list.push(claude_hook_entry(helper));
         changed = true;
     }
+    let list = hooks
+        .entry(CLAUDE_CLAIM_EVENT)
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !list.is_array() {
+        *list = Value::Array(Vec::new());
+    }
+    let list = list.as_array_mut().expect("массив гарантирован выше");
+    if !list.iter().any(|entry| is_our_hook(entry, helper)) {
+        list.push(claude_claim_entry(helper));
+        changed = true;
+    }
     changed
 }
 
@@ -598,15 +755,15 @@ fn remove_claude_hook(settings: &mut Value, helper: &Path) -> bool {
         return false;
     };
     let mut changed = false;
-    for event in CLAUDE_EVENTS {
-        let Some(list) = hooks.get_mut(event).and_then(Value::as_array_mut) else {
+    for event in CLAUDE_EVENTS.iter().chain([&CLAUDE_CLAIM_EVENT]) {
+        let Some(list) = hooks.get_mut(*event).and_then(Value::as_array_mut) else {
             continue;
         };
         let before = list.len();
         list.retain(|entry| !is_our_hook(entry, helper));
         changed |= list.len() != before;
         if list.is_empty() {
-            hooks.remove(event);
+            hooks.remove(*event);
         }
     }
     if hooks.is_empty() {
@@ -616,14 +773,17 @@ fn remove_claude_hook(settings: &mut Value, helper: &Path) -> bool {
 }
 
 fn claude_hook_installed(settings: &Value, helper: &Path) -> bool {
-    CLAUDE_EVENTS.iter().all(|event| {
-        settings
-            .get("hooks")
-            .and_then(|hooks| hooks.get(*event))
-            .and_then(Value::as_array)
-            .map(|list| list.iter().any(|entry| is_our_hook(entry, helper)))
-            .unwrap_or(false)
-    })
+    CLAUDE_EVENTS
+        .iter()
+        .chain([&CLAUDE_CLAIM_EVENT])
+        .all(|event| {
+            settings
+                .get("hooks")
+                .and_then(|hooks| hooks.get(*event))
+                .and_then(Value::as_array)
+                .map(|list| list.iter().any(|entry| is_our_hook(entry, helper)))
+                .unwrap_or(false)
+        })
 }
 
 #[derive(Serialize)]
@@ -878,6 +1038,50 @@ mod tests {
     }
 
     #[test]
+    fn claims_a_file_only_before_the_tools_that_write() {
+        let mut settings = Value::Object(Default::default());
+        install_claude_hook(&mut settings, &helper());
+
+        let entry = &settings["hooks"]["PreToolUse"][0];
+        // Чтение не заявляем: агент осматривает десятки файлов, и заявка на
+        // каждый заперла бы соседу полпроекта.
+        assert_eq!(entry["matcher"], "Edit|Write|MultiEdit");
+        assert_eq!(
+            entry["hooks"][0]["command"],
+            "'/Users/x/Library/Application Support/mc/modelcrew-agent-notify.sh' --claim"
+        );
+    }
+
+    #[test]
+    fn keeps_a_foreign_pre_tool_hook_of_the_user() {
+        // В PreToolUse у пользователя вполне может стоять своё — линтер,
+        // запрет на правку чужих файлов. Затереть это нельзя.
+        let mut settings = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": "Bash",
+                    "hooks": [{ "type": "command", "command": "audit.sh" }]
+                }]
+            }
+        });
+
+        install_claude_hook(&mut settings, &helper());
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            "audit.sh"
+        );
+        assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+
+        remove_claude_hook(&mut settings, &helper());
+        // Ушло только наше, чужое осталось нетронутым.
+        assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            "audit.sh"
+        );
+    }
+
+    #[test]
     fn installing_twice_does_not_pile_up_duplicates() {
         let mut settings = Value::Object(Default::default());
         assert!(install_claude_hook(&mut settings, &helper()));
@@ -890,6 +1094,7 @@ mod tests {
             settings["hooks"]["Notification"].as_array().unwrap().len(),
             1
         );
+        assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
     }
 
     #[test]

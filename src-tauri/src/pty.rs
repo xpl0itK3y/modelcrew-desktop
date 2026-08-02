@@ -49,6 +49,10 @@ struct PtySession {
     // Поколение сессии под этим id. Растёт при каждом spawn, чтобы
     // exit-хендлер вытесненной сессии узнал, что его уже заменили.
     epoch: u64,
+    // Корень проекта панели. Агент может уйти в подкаталог, а заявки на файлы
+    // считаются от корня — иначе один и тот же файл выглядел бы разными
+    // путями из разных панелей.
+    root: PathBuf,
 }
 
 #[derive(Default)]
@@ -167,6 +171,7 @@ impl PtyManager {
                 child_pid,
                 exit_rx: process_exit_rx,
                 epoch,
+                root: opts.cwd.clone(),
             },
         );
         // Свежая сессия уже в карте — гасим прежний процесс того же id.
@@ -294,6 +299,15 @@ impl PtyManager {
             }
             None => Err(terminal_error(ErrorCode::TerminalNotFound, id)),
         }
+    }
+
+    /// Корень проекта панели: от него отсчитываются заявки на файлы.
+    pub fn session_root(&self, id: &str) -> Option<PathBuf> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|session| session.root.clone())
     }
 
     /// PID процесса переднего плана каждого живого терминала (для имён панелей).

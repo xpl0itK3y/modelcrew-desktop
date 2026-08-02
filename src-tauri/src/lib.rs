@@ -13,6 +13,7 @@ mod agent_hooks;
 mod agent_sessions;
 mod clipboard_images;
 mod command_error;
+mod crew;
 mod git_branches;
 mod git_changes;
 mod git_history;
@@ -31,6 +32,7 @@ mod workspace_roots;
 use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
+use crew::crew_claims;
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
     git_rename_branch, git_switch_branch,
@@ -935,6 +937,7 @@ pub fn run() {
         .manage(LinuxUpdaterState::default())
         .manage(SelfUpdaterState::default())
         .manage(GitWatchState::default())
+        .manage(crew::CrewRegistry::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
@@ -950,6 +953,7 @@ pub fn run() {
             terminal_snapshots_prune,
             terminal_clipboard_image_save,
             agent_session_locate,
+            crew_claims,
             git_changes_summary,
             git_file_diff,
             git_changes_watch,
@@ -1038,6 +1042,7 @@ mod tests {
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
+        ("crew.rs", include_str!("crew.rs")),
         ("git_branches.rs", include_str!("git_branches.rs")),
         ("git_changes.rs", include_str!("git_changes.rs")),
         ("git_history.rs", include_str!("git_history.rs")),
@@ -1061,6 +1066,7 @@ mod tests {
         "agent_session_locate",
         "app_set_badge",
         "app_set_locale",
+        "crew_claims",
         "git_amend_commit",
         "git_bash_install",
         "git_bash_status",
