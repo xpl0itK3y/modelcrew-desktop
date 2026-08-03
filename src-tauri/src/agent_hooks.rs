@@ -31,7 +31,7 @@ dir="$MODELCREW_EVENTS_DIR"
 # Заявка: спрашиваем приложение, свободен ли файл, и ждём ответ. Всё, что
 # пошло не так — отсутствие каталога, неразобранный путь, молчание — трактуем
 # как «можно»: слой согласования не должен останавливать работу из-за себя.
-if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ]; then
+if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilot" ]; then
   [ -z "$dir" ] && exit 0
   payload="$(cat)"
   # Ключ пути у агентов называется по-разному, и схему их полезной нагрузки
@@ -60,37 +60,38 @@ if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ]; then
     if [ -f "$dir/$id.res" ]; then
       answer="$(cat "$dir/$id.res")"
       rm -f "$dir/$id.res"
-      # Отказ выражается по-разному: claude и grok читают код возврата 2 и
-      # stderr, antigravity ждёт решение JSON-ом в stdout.
-      # Причина по его же контракту показывается агенту — без неё отказ для
-      # него необъясним, и он попробует тот же файл снова.
-      if [ "$1" = "--claim-json" ]; then
-        case "$answer" in
-          *'"stale"'*)
-            printf '{"decision":"deny","reason":"Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта."}\n'
-            exit 0 ;;
-          *'"deny"'*)
-            printf '{"decision":"deny","reason":"Файл сейчас правит другой агент этого проекта. Возьмись за другой файл и вернись к этому позже."}\n'
-            exit 0 ;;
-          *) printf '{"decision":"allow"}\n'; exit 0 ;;
-        esac
-      fi
+      # Отказ выражается по-разному: claude, grok и kimi читают код возврата 2
+      # и stderr, antigravity ждёт `decision` JSON-ом в stdout, copilot —
+      # `permissionDecision` там же. Причина нужна всем одинаково: без неё
+      # агент не понимает, что делать дальше, и берётся за тот же файл снова.
       case "$answer" in
         *'"stale"'*)
-          printf 'Файл изменился с тех пор, как ты его прочитал: в нём успел ' >&2
-          printf 'поработать другой агент. Перечитай файл и примени правку ' >&2
-          printf 'заново, иначе его работа будет затёрта.\n' >&2
-          exit 2
+          reason='Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.'
           ;;
         *'"deny"'*)
           task=$(printf '%s' "$answer" | sed -n 's/.*"task":"\([^"]*\)".*/\1/p')
-          printf 'Файл сейчас правит другой агент этого проекта' >&2
-          [ -n "$task" ] && printf ': %s' "$task" >&2
-          printf '. Возьмись за другой файл и вернись к этому позже.\n' >&2
-          exit 2
+          reason='Файл сейчас правит другой агент этого проекта'
+          [ -n "$task" ] && reason="$reason: $task"
+          # Про оболочку сказано нарочно: агент, которому отказали в правке
+          # файла, охотно пробует переписать его через `printf >` — это видно
+          # на живом copilot, и такая запись проходит мимо всех заявок.
+          reason="$reason. Возьмись за другой файл и вернись к этому позже; переписывать его через оболочку тоже не нужно."
           ;;
-        *) exit 0 ;;
+        *) reason='' ;;
       esac
+      case "$1" in
+        --claim-json)
+          [ -z "$reason" ] && { printf '{"decision":"allow"}\n'; exit 0; }
+          printf '{"decision":"deny","reason":"%s"}\n' "$reason"
+          exit 0 ;;
+        --claim-copilot)
+          [ -z "$reason" ] && exit 0
+          printf '{"permissionDecision":"deny","permissionDecisionReason":"%s"}\n' "$reason"
+          exit 0 ;;
+      esac
+      [ -z "$reason" ] && exit 0
+      printf '%s\n' "$reason" >&2
+      exit 2
     fi
     sleep 0.1
     i=$((i + 1))
@@ -693,6 +694,16 @@ fn own_file_body(agent: &str, helper: &Path) -> Option<String> {
                         "bash": hook_command(helper, "copilot"),
                         "timeoutSec": 5,
                     }],
+                    // Именно PascalCase: под этим именем copilot присылает
+                    // нагрузку в точности как claude — `tool_name` и
+                    // `tool_input.path`, — и хелпер разбирает её без правок.
+                    // Отбирать инструменты нечем, поля matcher у него нет:
+                    // вызовы без пути хелпер пропускает сам.
+                    "PreToolUse": [{
+                        "type": "command",
+                        "bash": hook_claim_copilot_command(helper),
+                        "timeoutSec": 10,
+                    }],
                 },
             }))
             .ok()?,
@@ -775,6 +786,11 @@ fn kimi_section(helper: &Path) -> String {
         command = hook_command(helper, "kimi"),
         claim = hook_claim_command(helper),
     )
+}
+
+fn hook_claim_copilot_command(helper: &Path) -> String {
+    let path = helper.display().to_string().replace('\'', r"'\''");
+    format!("'{path}' --claim-copilot")
 }
 
 fn hook_claim_json_command(helper: &Path) -> String {
@@ -1314,6 +1330,68 @@ mod tests {
         // Второй проход уже ничего не меняет — иначе файл переписывался бы
         // на каждом запуске.
         assert!(!install_claude_hook(&mut settings, &helper()));
+    }
+
+    /// Copilot присылает под именем `PreToolUse` ровно то же, что claude, —
+    /// проверено на живом запуске, — но решение читает своими ключами.
+    #[test]
+    fn answers_copilot_in_the_keys_it_reads() {
+        let base = std::env::temp_dir().join(format!("mc-copilot-{}", std::process::id()));
+        let events = base.join("agent-events");
+        std::fs::create_dir_all(&events).unwrap();
+        let script = base.join("notify.sh");
+        std::fs::write(&script, HELPER_SCRIPT).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let payload = concat!(
+            r#"{"hook_event_name":"PreToolUse","session_id":"s1","#,
+            r#""cwd":"/w","tool_name":"Edit","#,
+            r#""tool_input":{"path":"/w/note.txt","old_str":"а","new_str":"б"}}"#
+        );
+        let mut child = std::process::Command::new(&script)
+            .arg("--claim-copilot")
+            .env("MODELCREW_PANEL_ID", "panel-9")
+            .env("MODELCREW_EVENTS_DIR", &events)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+
+        let request = read_claim(&events);
+        assert_eq!(request["file"], "/w/note.txt");
+        assert_eq!(request["tool"], "Edit");
+
+        std::fs::write(
+            events.join(format!("{}.res", request["id"].as_str().unwrap())),
+            r#"{"verdict":"deny","task":"чинит сборку"}"#,
+        )
+        .unwrap();
+
+        let out = child.wait_with_output().unwrap();
+        let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(answer["permissionDecision"], "deny");
+        let reason = answer["permissionDecisionReason"].as_str().unwrap();
+        // Чужая задача попадает в текст: «занято» без объяснения агент
+        // трактует как поломку конфигурации, а не как очередь.
+        assert!(reason.contains("чинит сборку"), "{reason}");
+        // На живом copilot видно: получив отказ на правку файла, агент тут же
+        // пробует переписать его через оболочку мимо всяких заявок.
+        assert!(reason.contains("оболочку"), "{reason}");
+        // Код возврата у него тоже означал бы отказ, но тогда агент увидит
+        // лишь «hook exited with code 2» — без причины.
+        assert_eq!(out.status.code(), Some(0));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
