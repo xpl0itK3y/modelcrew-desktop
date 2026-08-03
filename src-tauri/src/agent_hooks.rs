@@ -903,12 +903,7 @@ fn install_claude_hook(settings: &mut Value, helper: &Path) -> bool {
             *list = Value::Array(Vec::new());
         }
         let list = list.as_array_mut().expect("массив гарантирован выше");
-        // Повторная установка не должна плодить дубликаты.
-        if list.iter().any(|entry| is_our_hook(entry, helper)) {
-            continue;
-        }
-        list.push(claude_hook_entry(helper));
-        changed = true;
+        changed |= put_our_entry(list, helper, claude_hook_entry(helper));
     }
     let list = hooks
         .entry(CLAUDE_CLAIM_EVENT)
@@ -917,11 +912,29 @@ fn install_claude_hook(settings: &mut Value, helper: &Path) -> bool {
         *list = Value::Array(Vec::new());
     }
     let list = list.as_array_mut().expect("массив гарантирован выше");
-    if !list.iter().any(|entry| is_our_hook(entry, helper)) {
-        list.push(claude_claim_entry(helper));
-        changed = true;
-    }
+    changed |= put_our_entry(list, helper, claude_claim_entry(helper));
     changed
+}
+
+/// Кладёт нашу запись, заменяя прежнюю, если она отличается.
+///
+/// Сравнение именно с ожидаемым видом, а не просто проверка наличия: конфиг
+/// пишется один раз и живёт у пользователя дальше сам по себе. Пока здесь
+/// стояло «есть наша запись — и ладно», обновление приложения не доносило до
+/// него ни новых инструментов в матчере, ни исправлений — у тех, кто поставил
+/// раньше, слежение за устаревшим чтением молча не работало вовсе.
+fn put_our_entry(list: &mut Vec<Value>, helper: &Path, expected: Value) -> bool {
+    match list.iter_mut().find(|entry| is_our_hook(entry, helper)) {
+        Some(entry) if *entry == expected => false,
+        Some(entry) => {
+            *entry = expected;
+            true
+        }
+        None => {
+            list.push(expected);
+            true
+        }
+    }
 }
 
 /// Убирает только наши записи и подчищает за собой пустые контейнеры, чтобы
@@ -1267,6 +1280,40 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         panic!("хелпер не положил заявку");
+    }
+
+    /// Конфиг агента пишется один раз и дальше живёт у пользователя сам.
+    /// Пока проверялось лишь наличие нашей записи, обновление приложения не
+    /// доносило до неё ни новых инструментов, ни исправлений.
+    #[test]
+    fn an_outdated_entry_of_ours_is_brought_up_to_date() {
+        // Ровно то, что нашлось у живого пользователя: матчер прошлой версии,
+        // без Read — то есть без слежения за устаревшим чтением.
+        let mut settings = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "matcher": "Другой|Хук", "hooks": [{ "command": "./чужой.sh" }] },
+                    {
+                        "matcher": "Edit|Write|MultiEdit",
+                        "hooks": [{
+                            "type": "command",
+                            "command": hook_claim_command(&helper()),
+                        }],
+                    },
+                ],
+            }
+        });
+
+        assert!(install_claude_hook(&mut settings, &helper()));
+
+        let list = settings["hooks"]["PreToolUse"].as_array().unwrap();
+        // Запись обновлена на месте, а не продублирована рядом.
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!(list[0]["hooks"][0]["command"], "./чужой.sh");
+        assert_eq!(list[1]["matcher"], "Edit|Write|MultiEdit|Read|NotebookEdit");
+        // Второй проход уже ничего не меняет — иначе файл переписывался бы
+        // на каждом запуске.
+        assert!(!install_claude_hook(&mut settings, &helper()));
     }
 
     #[test]
