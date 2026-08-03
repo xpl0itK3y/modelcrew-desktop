@@ -138,6 +138,8 @@ describe("terminal tab claim state", () => {
     // Раньше это было видно только у выбранной панели, в шапке группы. Смысл
     // подписи как раз в соседях: что делает агент, на которого не смотришь.
     expect(screen.getByText("auth.rs")).toBeInTheDocument();
+    // Карандаш отличает правку от ожидания без опоры на цвет.
+    expect(screen.getByText("✎")).toBeInTheDocument();
     // Правка — обычная работа, точка остаётся рабочей.
     expect(dot().className).toContain("is-running");
   });
@@ -171,6 +173,9 @@ describe("terminal tab claim state", () => {
     // На ожидании агент стоит, а правка идёт своим ходом — показываем то, что
     // его держит.
     expect(screen.getByText(/чужое\.rs/)).toBeInTheDocument();
+    // Ждёт — часы, а не карандаш: агент стоит, а не правит.
+    expect(screen.getByText("⏳")).toBeInTheDocument();
+    expect(screen.queryByText("✎")).not.toBeInTheDocument();
     expect(dot().className).toContain("is-blocked");
   });
 

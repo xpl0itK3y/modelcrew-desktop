@@ -153,11 +153,11 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
           }`}
           title={claimTitle}
         >
-          {blockedBy && (
-            <span className="tab-claim-glyph" aria-hidden="true">
-              ⏳
-            </span>
-          )}
+          {/* Значок несёт разницу состояний сам по себе: карандаш — правит,
+              часы — стоит и ждёт. На цвет тут полагаться нельзя. */}
+          <span className="tab-claim-glyph" aria-hidden="true">
+            {blockedBy ? "⏳" : "✎"}
+          </span>
           {/* Имя — своим элементом: многоточие рисует тот, у кого и ширина,
               и переполнение, а на общей строке со значком его не выходит. */}
           <span className="tab-claim-file">{fileName(current)}</span>
