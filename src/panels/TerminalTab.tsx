@@ -158,7 +158,9 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
               ⏳
             </span>
           )}
-          {fileName(current)}
+          {/* Имя — своим элементом: многоточие рисует тот, у кого и ширина,
+              и переполнение, а на общей строке со значком его не выходит. */}
+          <span className="tab-claim-file">{fileName(current)}</span>
         </span>
       )}
     </div>

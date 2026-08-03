@@ -6,7 +6,6 @@ import { platform } from "../platform";
 import { shortcutLabel } from "../hotkeys/shortcuts";
 import { useI18n } from "../i18n";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";
-import { PanelClaimStatus } from "./PanelClaimStatus";
 
 // Кнопки в шапке группы dockview: развернуть/свернуть и закрыть.
 export function GroupActions(props: IDockviewHeaderActionsProps) {
@@ -35,15 +34,14 @@ export function GroupActions(props: IDockviewHeaderActionsProps) {
 
   return (
     <div className="group-actions">
-      {props.activePanel && (
-        <PanelClaimStatus panelId={props.activePanel.id} />
-      )}
       {canMaximize && (
         <button
           type="button"
           className="icon-button"
           title={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
-          aria-label={t("group.maximizeRestore", { shortcut: maximizeShortcut })}
+          aria-label={t("group.maximizeRestore", {
+            shortcut: maximizeShortcut,
+          })}
           onClick={() => {
             if (props.activePanel) {
               togglePanelMaximized(api, props.activePanel);
