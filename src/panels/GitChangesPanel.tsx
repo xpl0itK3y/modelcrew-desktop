@@ -16,7 +16,6 @@ import {
   SyncStatus,
 } from "./git/BranchBar";
 import { HistoryView } from "./git/HistoryView";
-import { SnapshotsView } from "./git/SnapshotsView";
 import {
   loadGithubCommitAvatars,
 } from "../git/githubAvatars";
@@ -367,14 +366,13 @@ function FileCard(props: {
     </div>
   );
 }
-type GitPanelView = "changes" | "history" | "snapshots";
+type GitPanelView = "changes" | "history";
 
-const TABS = ["changes", "history", "snapshots"] as const;
+const TABS = ["changes", "history"] as const;
 
 const TAB_LABELS = {
   changes: "git.tabChanges",
   history: "git.tabHistory",
-  snapshots: "snapshots.tab",
 } as const;
 type CommitDraft = { subject: string; description: string };
 
@@ -578,9 +576,7 @@ function GitChangesWorkspaceView(props: {
           {/* key по вкладке перемонтирует контент — короткий въезд при
               переключении «Изменения ⇄ История». */}
           <div key={view} className="git-view">
-          {view === "snapshots" ? (
-            <SnapshotsView workspaceId={workspaceId} />
-          ) : view === "history" ? (
+          {view === "history" ? (
             <HistoryView
               workspaceId={workspaceId}
               fileCount={summary.files.length}
