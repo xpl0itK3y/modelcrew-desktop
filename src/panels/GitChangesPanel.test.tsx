@@ -7,10 +7,7 @@ import type { GitCommitInfo } from "../git/gitLog";
 
 const mocks = vi.hoisted(() => ({
   summaries: new Map<string, GitChangesSummary>(),
-  listeners: new Map<
-    string,
-    Set<(summary: GitChangesSummary) => void>
-  >(),
+  listeners: new Map<string, Set<(summary: GitChangesSummary) => void>>(),
   commitAll: vi.fn(async () => {}),
   createBranch: vi.fn(async () => {}),
   renameBranch: vi.fn(async () => {}),
@@ -65,10 +62,7 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     getGitSummary: (workspaceId: string) =>
       mocks.summaries.get(workspaceId) ?? null,
     subscribeGitChanges: vi.fn(
-      (
-        workspaceId: string,
-        listener: (summary: GitChangesSummary) => void,
-      ) => {
+      (workspaceId: string, listener: (summary: GitChangesSummary) => void) => {
         const listeners = mocks.listeners.get(workspaceId) ?? new Set();
         listeners.add(listener);
         mocks.listeners.set(workspaceId, listeners);
@@ -207,6 +201,30 @@ describe("GitChangesView workspace lifecycle", () => {
     );
   });
 
+  it("sizes the tab pill by how many tabs there actually are", () => {
+    const { container } = render(<GitChangesView workspaceId="project-a" />);
+
+    const tabs = container.querySelectorAll('[role="tab"]');
+    const pill = container.querySelector(".git-tab-indicator");
+    // Число вкладок жило в CSS отдельной цифрой, и удаление третьей оставило
+    // пилюлю шириной в треть: она перестала попадать под свою вкладку.
+    expect(pill).toHaveStyle({ "--git-tab-count": String(tabs.length) });
+  });
+
+  it("slides the pill onto the tab that was chosen", () => {
+    const { container } = render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+
+    const tabs = [...container.querySelectorAll('[role="tab"]')];
+    const chosen = tabs.findIndex(
+      (tab) => tab.getAttribute("aria-selected") === "true",
+    );
+    expect(container.querySelector(".git-tab-indicator")).toHaveStyle({
+      "--git-tab-index": String(chosen),
+    });
+  });
+
   it("keeps a separate draft per project while preserving the selected tab", () => {
     const view = render(<GitChangesView workspaceId="project-a" />);
 
@@ -336,7 +354,9 @@ describe("GitChangesView workspace lifecycle", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Изменить сообщение" }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Изменить сообщение" }),
+    );
 
     const editor = screen.getByRole("dialog").querySelector("textarea");
     expect(editor).toHaveValue(fullMessage);
@@ -380,7 +400,9 @@ describe("GitChangesView workspace lifecycle", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Изменить сообщение" }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Изменить сообщение" }),
+    );
     const editor = screen.getByRole("dialog").querySelector("textarea");
     expect(editor).not.toBeNull();
     fireEvent.change(editor!, { target: { value: "new subject\n\nnew body" } });
@@ -613,7 +635,9 @@ describe("GitChangesView workspace lifecycle", () => {
     );
     // Изменённая строка стоит парой: старая версия слева, новая справа.
     await waitFor(() =>
-      expect(document.querySelectorAll(".git-diff-half.is-del")).toHaveLength(1),
+      expect(document.querySelectorAll(".git-diff-half.is-del")).toHaveLength(
+        1,
+      ),
     );
     expect(document.querySelectorAll(".git-diff-half.is-add")).toHaveLength(1);
     // Подсвечен только изменившийся кусок, а не строка целиком.
@@ -637,7 +661,9 @@ describe("GitChangesView workspace lifecycle", () => {
     );
 
     fireEvent.click(screen.getByTitle("Показать одной колонкой"));
-    expect(document.querySelector(".git-diff.is-split")).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".git-diff.is-split"),
+    ).not.toBeInTheDocument();
     expect(document.querySelector(".git-diff-line.is-del")).toBeInTheDocument();
 
     // Выбор переживает перемонтирование: следующий коммит откроется так же.
@@ -647,9 +673,13 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.click(await screen.findByText("tag me"));
     fireEvent.click(await screen.findByText("src/a.ts"));
     await waitFor(() =>
-      expect(document.querySelector(".git-diff-line.is-del")).toBeInTheDocument(),
+      expect(
+        document.querySelector(".git-diff-line.is-del"),
+      ).toBeInTheDocument(),
     );
-    expect(document.querySelector(".git-diff.is-split")).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".git-diff.is-split"),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a long commit menu inside the window", async () => {
@@ -683,8 +713,9 @@ describe("GitChangesView workspace lifecycle", () => {
     // Без объяснения пользователь видел бы просто исчезнувшую панель и не знал
     // бы, что чинить.
     expect(await screen.findByText(/git не найден/i)).toBeInTheDocument();
-    expect(screen.queryByText("Папка не является git-репозиторием")).not
-      .toBeInTheDocument();
+    expect(
+      screen.queryByText("Папка не является git-репозиторием"),
+    ).not.toBeInTheDocument();
   });
 
   it("tags the commit the menu was opened on", async () => {
@@ -715,7 +746,9 @@ describe("GitChangesView workspace lifecycle", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Открыть на GitHub" }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Открыть на GitHub" }),
+    );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "нет remote на GitHub",
@@ -730,7 +763,9 @@ describe("GitChangesView workspace lifecycle", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Открыть на GitHub" }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Открыть на GitHub" }),
+    );
 
     await waitFor(() =>
       expect(mocks.openUrl).toHaveBeenCalledWith(
@@ -812,7 +847,9 @@ describe("GitChangesView workspace lifecycle", () => {
     render(<GitChangesView workspaceId="project-a" />);
 
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
-    const tag = await screen.findByTitle("Перейти на тег release (HEAD отделится)");
+    const tag = await screen.findByTitle(
+      "Перейти на тег release (HEAD отделится)",
+    );
     fireEvent.click(tag);
 
     await waitFor(() =>
@@ -900,7 +937,9 @@ describe("branch integration", () => {
     fireEvent.click(
       await screen.findByLabelText("Влить ветку «topic» в текущую"),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Влить в текущую" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Влить в текущую" }),
+    );
 
     await waitFor(() =>
       expect(mocks.mergeRef).toHaveBeenCalledWith(
@@ -927,7 +966,9 @@ describe("branch integration", () => {
     fireEvent.click(publish);
     // Первый клик только подтверждает намерение.
     expect(mocks.publishBranch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Отправить на сервер?" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Отправить на сервер?" }),
+    );
 
     await waitFor(() =>
       expect(mocks.publishBranch).toHaveBeenCalledWith(
@@ -948,7 +989,9 @@ describe("branch integration", () => {
     render(<GitChangesView workspaceId="project-a" />);
 
     expect(await screen.findByRole("status")).toHaveTextContent("ddddddd");
-    fireEvent.click(screen.getByRole("button", { name: "Вернуться на «main»" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Вернуться на «main»" }),
+    );
 
     await waitFor(() =>
       expect(mocks.switchBranch).toHaveBeenCalledWith(
@@ -1105,8 +1148,9 @@ describe("BranchSwitcher local management", () => {
     await waitFor(() => expect(mocks.fetchBranches).toHaveBeenCalledTimes(1));
     fireEvent.click(switcher);
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Переключить ветку" }))
-        .not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("dialog", { name: "Переключить ветку" }),
+      ).not.toBeInTheDocument(),
     );
     fireEvent.click(switcher);
     await waitFor(() => expect(mocks.fetchBranches).toHaveBeenCalledTimes(2));

@@ -7,7 +7,19 @@ import {
 } from "react";
 import { IDockviewPanelProps } from "dockview";
 import { localizeBackendError, useI18n } from "../i18n";
-import { commitAll, fetchFileDiff, getGitSummary, readRepoFile, refreshGitChanges, revertFile, subscribeGitChanges, type GitChangedFile, type GitChangesSummary, type GitFileDiff, writeRepoFile } from "../git/gitChanges";
+import {
+  commitAll,
+  fetchFileDiff,
+  getGitSummary,
+  readRepoFile,
+  refreshGitChanges,
+  revertFile,
+  subscribeGitChanges,
+  type GitChangedFile,
+  type GitChangesSummary,
+  type GitFileDiff,
+  writeRepoFile,
+} from "../git/gitChanges";
 import { parseUnifiedDiff } from "../git/unifiedDiff";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import {
@@ -16,9 +28,7 @@ import {
   SyncStatus,
 } from "./git/BranchBar";
 import { HistoryView } from "./git/HistoryView";
-import {
-  loadGithubCommitAvatars,
-} from "../git/githubAvatars";
+import { loadGithubCommitAvatars } from "../git/githubAvatars";
 
 const STATUS_LETTER: Record<GitChangedFile["status"], string> = {
   modified: "M",
@@ -29,10 +39,7 @@ const STATUS_LETTER: Record<GitChangedFile["status"], string> = {
   conflicted: "!",
 };
 
-function FileDiff(props: {
-  workspaceId: string;
-  file: GitChangedFile;
-}) {
+function FileDiff(props: { workspaceId: string; file: GitChangedFile }) {
   const { t } = useI18n();
   const [diff, setDiff] = useState<GitFileDiff | null>(null);
   const [failed, setFailed] = useState(false);
@@ -142,83 +149,82 @@ function FileDiff(props: {
       {/* Обёртка шириной с самую длинную строку: фон коротких строк
           тянется до неё, а не обрывается на своём тексте. */}
       <div className="git-diff-body">
-      {lines.map((line, index) =>
-        line.kind === "hunk" ? (
-          // Служебную шапку @@ … @@ не показываем; между ханками — разрыв.
-          index === 0 ? null : (
-            <div key={index} className="git-diff-gap" aria-hidden="true" />
-          )
-        ) : (
-          (() => {
-            // Редактировать можно строки, которые есть в текущем файле:
-            // добавленные и контекстные (у удалённых нет новой версии).
-            const editable = line.kind === "add" || line.kind === "context";
-            const isEditing =
-              editable && editingLine === line.newLine;
-            const sign =
-              line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
-            return (
-              <div
-                key={index}
-                className={`git-diff-line is-${line.kind} ${
-                  editable ? "is-editable" : ""
-                } ${
-                  line.kind === "add" &&
-                  freshTexts.has(`${line.newLine}\0${line.text}`)
-                    ? "is-fresh"
-                    : ""
-                }`}
-                onClick={
-                  editable && !isEditing
-                    ? () => startEditing(line.newLine!, line.text)
-                    : undefined
-                }
-              >
-                <span className="git-diff-gutter">
-                  {line.kind === "del" ? line.oldLine : line.newLine}
-                </span>
-                {isEditing ? (
-                  <span className="git-diff-text">
-                    <span className="git-diff-sign">{sign}</span>
-                    <input
-                      className="git-diff-input"
-                      value={editValue}
-                      spellCheck={false}
-                      disabled={saving}
-                      autoFocus
-                      size={Math.max(editValue.length + 2, 12)}
-                      onChange={(event) => setEditValue(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.nativeEvent.isComposing) {
-                          return;
-                        }
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void saveLine(line.newLine!, editValue);
-                        } else if (event.key === "Escape") {
-                          setEditingLine(null);
-                        }
-                      }}
-                      onBlur={() => {
-                        if (editValue !== line.text) {
-                          void saveLine(line.newLine!, editValue);
-                        } else {
-                          setEditingLine(null);
-                        }
-                      }}
-                    />
+        {lines.map((line, index) =>
+          line.kind === "hunk" ? (
+            // Служебную шапку @@ … @@ не показываем; между ханками — разрыв.
+            index === 0 ? null : (
+              <div key={index} className="git-diff-gap" aria-hidden="true" />
+            )
+          ) : (
+            (() => {
+              // Редактировать можно строки, которые есть в текущем файле:
+              // добавленные и контекстные (у удалённых нет новой версии).
+              const editable = line.kind === "add" || line.kind === "context";
+              const isEditing = editable && editingLine === line.newLine;
+              const sign =
+                line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
+              return (
+                <div
+                  key={index}
+                  className={`git-diff-line is-${line.kind} ${
+                    editable ? "is-editable" : ""
+                  } ${
+                    line.kind === "add" &&
+                    freshTexts.has(`${line.newLine}\0${line.text}`)
+                      ? "is-fresh"
+                      : ""
+                  }`}
+                  onClick={
+                    editable && !isEditing
+                      ? () => startEditing(line.newLine!, line.text)
+                      : undefined
+                  }
+                >
+                  <span className="git-diff-gutter">
+                    {line.kind === "del" ? line.oldLine : line.newLine}
                   </span>
-                ) : (
-                  <span className="git-diff-text">
-                    {sign}
-                    {line.text}
-                  </span>
-                )}
-              </div>
-            );
-          })()
-        ),
-      )}
+                  {isEditing ? (
+                    <span className="git-diff-text">
+                      <span className="git-diff-sign">{sign}</span>
+                      <input
+                        className="git-diff-input"
+                        value={editValue}
+                        spellCheck={false}
+                        disabled={saving}
+                        autoFocus
+                        size={Math.max(editValue.length + 2, 12)}
+                        onChange={(event) => setEditValue(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.nativeEvent.isComposing) {
+                            return;
+                          }
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveLine(line.newLine!, editValue);
+                          } else if (event.key === "Escape") {
+                            setEditingLine(null);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (editValue !== line.text) {
+                            void saveLine(line.newLine!, editValue);
+                          } else {
+                            setEditingLine(null);
+                          }
+                        }}
+                      />
+                    </span>
+                  ) : (
+                    <span className="git-diff-text">
+                      {sign}
+                      {line.text}
+                    </span>
+                  )}
+                </div>
+              );
+            })()
+          ),
+        )}
       </div>
       {diff.truncated && (
         <div className="git-diff-note">{t("git.diffTruncated")}</div>
@@ -294,9 +300,7 @@ function FileCard(props: {
         props.arriving ? "is-arriving" : ""
       }`}
     >
-      <div
-        className={`git-file-header ${updatedFlash ? "is-updated" : ""}`}
-      >
+      <div className={`git-file-header ${updatedFlash ? "is-updated" : ""}`}>
         <button
           type="button"
           className="git-file-toggle"
@@ -467,13 +471,9 @@ function GitChangesWorkspaceView(props: {
   const [commitError, setCommitError] = useState<string | null>(null);
   const commitMessage = joinCommitMessage(commitSubject, commitDescription);
   const commitMessageLength = Array.from(commitMessage).length;
-  const updateCommitText = (
-    nextSubject: string,
-    nextDescription: string,
-  ) => {
+  const updateCommitText = (nextSubject: string, nextDescription: string) => {
     if (
-      Array.from(joinCommitMessage(nextSubject, nextDescription)).length <=
-      4000
+      Array.from(joinCommitMessage(nextSubject, nextDescription)).length <= 4000
     ) {
       props.onDraftChange({
         subject: nextSubject,
@@ -516,6 +516,10 @@ function GitChangesWorkspaceView(props: {
                 style={
                   {
                     "--git-tab-index": TABS.indexOf(view),
+                    // Число вкладок отдаёт сам список: пока оно жило в CSS
+                    // отдельной цифрой, удаление вкладки развалило пилюлю —
+                    // она осталась шириной в треть на двух вкладках.
+                    "--git-tab-count": TABS.length,
                   } as CSSProperties
                 }
                 aria-hidden="true"
@@ -576,93 +580,93 @@ function GitChangesWorkspaceView(props: {
           {/* key по вкладке перемонтирует контент — короткий въезд при
               переключении «Изменения ⇄ История». */}
           <div key={view} className="git-view">
-          {view === "history" ? (
-            <HistoryView
-              workspaceId={workspaceId}
-              fileCount={summary.files.length}
-              onOpenChanges={() => props.onSelectView("changes")}
-              currentBranch={summary.branch}
-              headHash={summary.headHash}
-              upstreamBranch={summary.upstreamRef}
-            />
-          ) : summary.files.length === 0 ? (
-            <div className="git-empty">{t("git.clean")}</div>
-          ) : (
-            <>
-              <div className="git-commit-row">
-                <div className="git-commit-fields">
-                  <input
-                    type="text"
-                    className="git-commit-input"
-                    aria-label={t("git.commitPlaceholder")}
-                    placeholder={t("git.commitPlaceholder")}
-                    value={commitSubject}
-                    maxLength={4000}
-                    disabled={committing}
-                    onChange={(event) =>
-                      updateCommitText(event.target.value, commitDescription)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.nativeEvent.isComposing) {
-                        return;
+            {view === "history" ? (
+              <HistoryView
+                workspaceId={workspaceId}
+                fileCount={summary.files.length}
+                onOpenChanges={() => props.onSelectView("changes")}
+                currentBranch={summary.branch}
+                headHash={summary.headHash}
+                upstreamBranch={summary.upstreamRef}
+              />
+            ) : summary.files.length === 0 ? (
+              <div className="git-empty">{t("git.clean")}</div>
+            ) : (
+              <>
+                <div className="git-commit-row">
+                  <div className="git-commit-fields">
+                    <input
+                      type="text"
+                      className="git-commit-input"
+                      aria-label={t("git.commitPlaceholder")}
+                      placeholder={t("git.commitPlaceholder")}
+                      value={commitSubject}
+                      maxLength={4000}
+                      disabled={committing}
+                      onChange={(event) =>
+                        updateCommitText(event.target.value, commitDescription)
                       }
-                      if (event.key === "Enter") {
-                        void commit();
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) {
+                          return;
+                        }
+                        if (event.key === "Enter") {
+                          void commit();
+                        }
+                      }}
+                    />
+                    <textarea
+                      className="git-commit-input git-commit-description"
+                      aria-label={t("git.commitDescription")}
+                      placeholder={t("git.commitDescription")}
+                      value={commitDescription}
+                      maxLength={4000}
+                      rows={2}
+                      disabled={committing}
+                      onChange={(event) =>
+                        updateCommitText(commitSubject, event.target.value)
                       }
-                    }}
-                  />
-                  <textarea
-                    className="git-commit-input git-commit-description"
-                    aria-label={t("git.commitDescription")}
-                    placeholder={t("git.commitDescription")}
-                    value={commitDescription}
-                    maxLength={4000}
-                    rows={2}
-                    disabled={committing}
-                    onChange={(event) =>
-                      updateCommitText(commitSubject, event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.nativeEvent.isComposing) {
-                        return;
-                      }
-                      if (
-                        event.key === "Enter" &&
-                        (event.metaKey || event.ctrlKey)
-                      ) {
-                        event.preventDefault();
-                        void commit();
-                      }
-                    }}
-                  />
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) {
+                          return;
+                        }
+                        if (
+                          event.key === "Enter" &&
+                          (event.metaKey || event.ctrlKey)
+                        ) {
+                          event.preventDefault();
+                          void commit();
+                        }
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="git-commit-button"
+                    title={t("git.commitShortcut")}
+                    disabled={committing || commitMessage.length === 0}
+                    onClick={() => void commit()}
+                  >
+                    {t("git.commitButton")}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="git-commit-button"
-                  title={t("git.commitShortcut")}
-                  disabled={committing || commitMessage.length === 0}
-                  onClick={() => void commit()}
-                >
-                  {t("git.commitButton")}
-                </button>
-              </div>
-              {commitError && (
-                <div className="git-commit-error" role="alert">
-                  {commitError}
+                {commitError && (
+                  <div className="git-commit-error" role="alert">
+                    {commitError}
+                  </div>
+                )}
+                <div className="git-file-list">
+                  {summary.files.map((file) => (
+                    <FileCard
+                      key={file.path}
+                      workspaceId={workspaceId}
+                      file={file}
+                      arriving={arrivedPathsRef.current.has(file.path)}
+                    />
+                  ))}
                 </div>
-              )}
-              <div className="git-file-list">
-                {summary.files.map((file) => (
-                  <FileCard
-                    key={file.path}
-                    workspaceId={workspaceId}
-                    file={file}
-                    arriving={arrivedPathsRef.current.has(file.path)}
-                  />
-                ))}
-              </div>
-            </>
-          )}
+              </>
+            )}
           </div>
         </>
       )}
