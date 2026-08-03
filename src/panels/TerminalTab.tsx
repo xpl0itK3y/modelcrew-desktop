@@ -10,7 +10,11 @@ import {
   isAgentPanelWaiting,
   subscribeAgentAttention,
 } from "../terminal/attentionStore";
-import { getPanelClaims, subscribePanelClaims } from "../crew/claimStore";
+import {
+  getPanelClaims,
+  subscribePanelClaims,
+  type PanelClaims,
+} from "../crew/claimStore";
 import { useI18n } from "../i18n";
 
 // Имя файла без пути: на вкладке шириной в пару слов путь не поместится, а
@@ -29,8 +33,8 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const [waiting, setWaiting] = useState(() =>
     isAgentPanelWaiting(props.api.id),
   );
-  const [blockedBy, setBlockedBy] = useState<string | null>(
-    () => getPanelClaims(props.api.id).waitingFor,
+  const [claims, setClaims] = useState<PanelClaims>(() =>
+    getPanelClaims(props.api.id),
   );
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -51,9 +55,9 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     const attentionUnsubscribe = subscribeAgentAttention(() => {
       setWaiting(isAgentPanelWaiting(props.api.id));
     });
-    setBlockedBy(getPanelClaims(props.api.id).waitingFor);
+    setClaims(getPanelClaims(props.api.id));
     const claimsUnsubscribe = subscribePanelClaims(() => {
-      setBlockedBy(getPanelClaims(props.api.id).waitingFor);
+      setClaims(getPanelClaims(props.api.id));
     });
     return () => {
       titleDisposable.dispose();
@@ -97,6 +101,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   //
   // Признак нужен именно на вкладке: подпись в шапке группы показывает лишь
   // выбранную панель, и застрявшего соседа за ней не видно.
+  const blockedBy = claims.waitingFor;
   const dotState = waiting ? "waiting" : blockedBy ? "blocked" : status;
   const dotLabel = waiting
     ? t("terminal.statusWaiting")
@@ -105,6 +110,16 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       : status === "running"
         ? t("terminal.statusRunning")
         : t("terminal.statusExited");
+
+  // Что панель делает с файлами: ждёт занятый или правит свой. Ожидание
+  // важнее — на нём агент стоит, а правка идёт своим ходом. Последний взятый
+  // файл и есть тот, в котором агент работает сейчас; остальные — в подсказке.
+  const current = blockedBy ?? claims.held[claims.held.length - 1] ?? null;
+  const claimTitle = blockedBy
+    ? t("crew.waitingFor", { path: blockedBy })
+    : claims.awaited
+      ? t("crew.holdingAwaited", { paths: claims.held.join("\n") })
+      : t("crew.holding", { paths: claims.held.join("\n") });
 
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
@@ -129,14 +144,21 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
           {title}
         </span>
       )}
-      {/* Имя занятого файла — рядом с именем агента: «кто стоит и на чём».
-          Без него точка говорит только «что-то не так». */}
-      {!editing && blockedBy && (
+      {/* Файл рядом с именем агента: видно, кто чем занят, не переключаясь
+          на панель. Подпись приглушена — вкладка про агента, файл при нём. */}
+      {!editing && current && (
         <span
-          className="tab-blocked"
-          title={t("crew.waitingFor", { path: blockedBy })}
+          className={`tab-claim ${blockedBy ? "is-blocked" : ""} ${
+            claims.awaited ? "is-awaited" : ""
+          }`}
+          title={claimTitle}
         >
-          {fileName(blockedBy)}
+          {blockedBy && (
+            <span className="tab-claim-glyph" aria-hidden="true">
+              ⏳
+            </span>
+          )}
+          {fileName(current)}
         </span>
       )}
     </div>

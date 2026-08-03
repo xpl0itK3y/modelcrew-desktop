@@ -137,16 +137,38 @@
   box-shadow: 0 0 0 2px var(--mc-surface-raised);
 }
 
-/* Имя занятого файла: заметно тише имени агента, иначе вкладка читается как
-   «файл», а не «агент». */
-.tab-blocked {
+/* Файл, которым панель занята. Заметно тише имени агента: вкладка про
+   агента, файл при нём — иначе десяток вкладок читается как список файлов.
+   Ширина ограничена, чтобы длинное имя не выдавливало имя агента. */
+.tab-claim {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   max-width: 9ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--mc-text-faint);
   font-size: 0.85em;
+}
+
+/* Файл, которого панель ждёт: тот же приглушённый тон, отличает значок —
+   на цвет полагаться нельзя. */
+.tab-claim.is-blocked {
+  color: var(--mc-text-muted, var(--mc-text-faint));
+}
+
+/* Панель держит файл, которого ждёт сосед: подчёркиванием, а не цветом —
+   признак должен пережить и монохромную тему, и дальтонизм. */
+.tab-claim.is-awaited {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.tab-claim-glyph {
+  font-size: 0.9em;
+  line-height: 1;
 }
 
 /* Агент в этой панели ждёт ответа. Цвет тот же акцентный, что и у живого

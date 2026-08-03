@@ -87,6 +87,12 @@ async function blockOn(id: string, path: string) {
   });
 }
 
+async function editingFiles(id: string, held: string[], awaited = false) {
+  await act(async () => {
+    setPanelClaims(new Map([[id, { held, waitingFor: null, awaited }]]));
+  });
+}
+
 describe("terminal tab claim state", () => {
   it("shows on the tab which file the panel is stuck on", async () => {
     const id = panel("blocked-1");
@@ -121,6 +127,51 @@ describe("terminal tab claim state", () => {
 
     expect(screen.queryByText("занят.rs")).not.toBeInTheDocument();
     expect(dot().className).toContain("is-running");
+  });
+
+  it("shows on every tab what its agent is editing", async () => {
+    const id = panel("holding-1");
+    render(<TerminalTab {...headerProps(id)} />);
+
+    await editingFiles(id, ["/w/src/auth.rs"]);
+
+    // Раньше это было видно только у выбранной панели, в шапке группы. Смысл
+    // подписи как раз в соседях: что делает агент, на которого не смотришь.
+    expect(screen.getByText("auth.rs")).toBeInTheDocument();
+    // Правка — обычная работа, точка остаётся рабочей.
+    expect(dot().className).toContain("is-running");
+  });
+
+  it("names the file the agent moved on to", async () => {
+    const id = panel("holding-2");
+    render(<TerminalTab {...headerProps(id)} />);
+
+    await editingFiles(id, ["/w/первый.rs", "/w/второй.rs"]);
+
+    // Последний взятый файл и есть тот, в котором агент сейчас.
+    expect(screen.getByText("второй.rs")).toBeInTheDocument();
+    expect(screen.queryByText("первый.rs")).not.toBeInTheDocument();
+  });
+
+  it("puts a busy file ahead of its own work", async () => {
+    const id = panel("holding-3");
+    render(<TerminalTab {...headerProps(id)} />);
+
+    await act(async () => {
+      setPanelClaims(
+        new Map([
+          [
+            id,
+            { held: ["/w/своё.rs"], waitingFor: "/w/чужое.rs", awaited: false },
+          ],
+        ]),
+      );
+    });
+
+    // На ожидании агент стоит, а правка идёт своим ходом — показываем то, что
+    // его держит.
+    expect(screen.getByText(/чужое\.rs/)).toBeInTheDocument();
+    expect(dot().className).toContain("is-blocked");
   });
 
   it("leaves another panel alone", async () => {
