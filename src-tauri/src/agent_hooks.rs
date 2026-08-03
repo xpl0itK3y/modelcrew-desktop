@@ -307,6 +307,32 @@ enum ClaimVerdict {
     Stale,
 }
 
+/// Приводит путь от агента к виду «от корня проекта».
+///
+/// Сначала напрямую, а если не сошлось — разворачивая ссылки. На macOS `/tmp`
+/// — ссылка на `/private/tmp`, и агент присылает то один путь, то другой: на
+/// живом opencode оба варианта пришли за один ход. Несовпадение означало бы,
+/// что заявка на файл просто не находится, и сосед спокойно его перезапишет.
+fn relative_to_root(file: &Path, root: &Path) -> Option<String> {
+    let relative = match file.strip_prefix(root) {
+        Ok(relative) => relative.to_path_buf(),
+        Err(_) => {
+            let root = std::fs::canonicalize(root).ok()?;
+            resolve_links(file)?.strip_prefix(&root).ok()?.to_path_buf()
+        }
+    };
+    Some(relative.to_string_lossy().replace('\\', "/"))
+}
+
+/// Файла может ещё не быть — тогда разворачиваем ту часть пути, что есть.
+fn resolve_links(file: &Path) -> Option<PathBuf> {
+    if let Ok(path) = std::fs::canonicalize(file) {
+        return Some(path);
+    }
+    let parent = std::fs::canonicalize(file.parent()?).ok()?;
+    Some(parent.join(file.file_name()?))
+}
+
 fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> ClaimVerdict {
     let Some(root) = app
         .state::<crate::pty::PtyManager>()
@@ -316,10 +342,9 @@ fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> ClaimVerdic
     };
     // Путь от агента приходит абсолютным: заявки считаются от корня проекта,
     // иначе один файл выглядел бы разными путями из разных панелей.
-    let Ok(relative) = Path::new(&request.file).strip_prefix(&root) else {
+    let Some(relative) = relative_to_root(Path::new(&request.file), &root) else {
         return ClaimVerdict::Allow;
     };
-    let relative = relative.to_string_lossy().replace('\\', "/");
     let workspace = root.to_string_lossy().to_string();
     let crew = app.state::<crate::crew::CrewRegistry>();
 
@@ -758,30 +783,72 @@ fn opencode_plugin(agent: &str) -> String {
     OPENCODE_PLUGIN.replace("__AGENT__", agent)
 }
 
-const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew. Сообщает приложению, что агент в этой панели затих.
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew: заявки на файлы и сообщение о том, что агент затих.
+import { mkdirSync, renameSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+const dir = () => process.env.MODELCREW_EVENTS_DIR;
+const panel = () => process.env.MODELCREW_PANEL_ID;
+
+function put(body) {
+  // Сначала временный файл, потом переименование: вотчер не должен прочитать
+  // половину.
+  const base = join(dir(), `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  writeFileSync(`${base}.tmp`, JSON.stringify(body));
+  renameSync(`${base}.tmp`, `${base}.json`);
+  return base;
+}
+
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+
 export const ModelCrewNotify = async () => ({
+  // Заявка на файл. Всё, что пошло не так — нет каталога, молчание в ответ —
+  // трактуем как «можно»: слой согласования не должен останавливать работу
+  // из-за собственной поломки.
+  "tool.execute.before": async (input, output) => {
+    if (!dir() || !panel()) return; // запущен не из панели ModelCrew
+    const file = output?.args?.filePath;
+    if (typeof file !== "string" || !file) return;
+    let base;
+    try {
+      mkdirSync(dir(), { recursive: true });
+      base = put({ kind: "claim", panelId: panel(), file, tool: input?.tool ?? "" });
+    } catch {
+      return;
+    }
+    for (let i = 0; i < 20; i++) {
+      let answer;
+      try {
+        if (!existsSync(`${base}.res`)) {
+          await pause(100);
+          continue;
+        }
+        answer = readFileSync(`${base}.res`, "utf8");
+        rmSync(`${base}.res`, { force: true });
+      } catch {
+        return;
+      }
+      // Отказ выражается броском: opencode показывает его текст агенту, и тот
+      // берётся за другой файл.
+      if (answer.includes('"stale"')) {
+        throw new Error(
+          "Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.",
+        );
+      }
+      if (answer.includes('"deny"')) {
+        throw new Error(
+          "Файл сейчас правит другой агент этого проекта. Возьмись за другой файл и вернись к этому позже; переписывать его через оболочку тоже не нужно.",
+        );
+      }
+      return;
+    }
+  },
   event: async (arg) => {
     if (arg?.event?.type !== "session.idle") return;
-    const dir = process.env.MODELCREW_EVENTS_DIR;
-    const panelId = process.env.MODELCREW_PANEL_ID;
-    if (!dir || !panelId) return; // запущен не из панели ModelCrew
+    if (!dir() || !panel()) return;
     try {
-      mkdirSync(dir, { recursive: true });
-      // Сначала временный файл, потом переименование: вотчер не должен
-      // прочитать половину.
-      const base = join(dir, `${Date.now()}-${process.pid}`);
-      writeFileSync(
-        `${base}.tmp`,
-        JSON.stringify({
-          agent: "__AGENT__",
-          panelId,
-          payload: { type: "session.idle" },
-        }),
-      );
-      renameSync(`${base}.tmp`, `${base}.json`);
+      mkdirSync(dir(), { recursive: true });
+      put({ agent: "__AGENT__", panelId: panel(), payload: { type: "session.idle" } });
     } catch {
       // Уведомление — дополнение; его сбой не должен мешать сессии.
     }
@@ -1439,6 +1506,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Живой opencode за один ход прислал и `/private/tmp/…`, и `/tmp/…` —
+    /// две строки для одного файла. Считая их разными, заявку на файл мы бы
+    /// не нашли, и сосед спокойно его перезаписал бы.
+    #[test]
+    fn the_same_file_through_a_symlink_is_the_same_file() {
+        let base = std::env::temp_dir().join(format!("mc-links-{}", std::process::id()));
+        let root = base.join("проект");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let link = base.join("ссылка");
+        let _ = std::fs::remove_file(&link);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+
+        // Через ссылку — и для файла, которого ещё нет.
+        assert_eq!(
+            relative_to_root(&link.join("src/новый.rs"), &root).as_deref(),
+            Some("src/новый.rs")
+        );
+        // Прямой путь работает как раньше.
+        assert_eq!(
+            relative_to_root(&root.join("src/есть.rs"), &root).as_deref(),
+            Some("src/есть.rs")
+        );
+        // Чужой файл остаётся чужим — иначе заявки текли бы между проектами.
+        assert_eq!(relative_to_root(Path::new("/иной/файл.rs"), &root), None);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn the_command_survives_a_path_with_spaces() {
         let command = hook_command(&helper(), "claude");
@@ -2013,6 +2109,12 @@ mod tests {
         assert!(body.contains("MODELCREW_EVENTS_DIR"));
         // Запись через временный файл: вотчер не должен прочитать половину.
         assert!(body.contains(".tmp"));
+        // Заявка на файл: проверено на живом opencode — блокирующий обработчик
+        // называется так, путь лежит в args.filePath, а отказ выражается
+        // броском, текст которого доходит до агента дословно.
+        assert!(body.contains(r#""tool.execute.before": async"#), "{body}");
+        assert!(body.contains("output?.args?.filePath"), "{body}");
+        assert!(body.contains("throw new Error"), "{body}");
     }
 
     #[test]
