@@ -559,6 +559,7 @@ fn grok_section(helper: &Path) -> String {
 /// Событие конца хода у cursor и запись хука в его формате. Файл общий с
 /// IDE, поэтому вписываемся точечно, как и в настройки claude.
 const CURSOR_EVENT: &str = "stop";
+const CURSOR_CLAIM_EVENT: &str = "preToolUse";
 
 fn cursor_hook_entry(helper: &Path) -> Value {
     serde_json::json!({
@@ -587,20 +588,49 @@ fn install_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
     if !hooks.is_object() {
         *hooks = Value::Object(Default::default());
     }
-    let list = hooks
-        .as_object_mut()
-        .expect("объект гарантирован выше")
-        .entry(CURSOR_EVENT)
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !list.is_array() {
-        *list = Value::Array(Vec::new());
+    let hooks = hooks.as_object_mut().expect("объект гарантирован выше");
+    let mut changed = false;
+    for (event, entry) in [
+        (CURSOR_EVENT, cursor_hook_entry(helper)),
+        (CURSOR_CLAIM_EVENT, cursor_claim_entry(helper)),
+    ] {
+        let list = hooks
+            .entry(event)
+            .or_insert_with(|| Value::Array(Vec::new()));
+        if !list.is_array() {
+            *list = Value::Array(Vec::new());
+        }
+        let list = list.as_array_mut().expect("массив гарантирован выше");
+        changed |= put_our_cursor_entry(list, helper, entry);
     }
-    let list = list.as_array_mut().expect("массив гарантирован выше");
-    if list.iter().any(|entry| cursor_hook_is_ours(entry, helper)) {
-        return false;
+    changed
+}
+
+/// Как и у claude: запись заменяется, если отличается от нужной, — иначе
+/// исправления не доезжают до тех, у кого конфиг уже создан.
+fn put_our_cursor_entry(list: &mut Vec<Value>, helper: &Path, expected: Value) -> bool {
+    match list
+        .iter_mut()
+        .find(|entry| cursor_hook_is_ours(entry, helper))
+    {
+        Some(entry) if *entry == expected => false,
+        Some(entry) => {
+            *entry = expected;
+            true
+        }
+        None => {
+            list.push(expected);
+            true
+        }
     }
-    list.push(cursor_hook_entry(helper));
-    true
+}
+
+/// Заявка на файл. Живой запуск показал, что нагрузку он присылает в точности
+/// как claude — `tool_name` и `tool_input.file_path`, — и отказ читает так же:
+/// код возврата 2, причина из stderr доходит до агента дословно. Поля matcher
+/// у него нет: лишние вызовы отсеивает сам хелпер.
+fn cursor_claim_entry(helper: &Path) -> Value {
+    serde_json::json!({ "command": hook_claim_command(helper) })
 }
 
 fn remove_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
@@ -611,24 +641,29 @@ fn remove_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
     else {
         return false;
     };
-    let Some(list) = hooks.get_mut(CURSOR_EVENT).and_then(Value::as_array_mut) else {
-        return false;
-    };
-    let before = list.len();
-    list.retain(|entry| !cursor_hook_is_ours(entry, helper));
-    let after = list.len();
-    if after == 0 {
-        hooks.remove(CURSOR_EVENT);
+    let mut changed = false;
+    for event in [CURSOR_EVENT, CURSOR_CLAIM_EVENT] {
+        let Some(list) = hooks.get_mut(event).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let before = list.len();
+        list.retain(|entry| !cursor_hook_is_ours(entry, helper));
+        changed |= before != list.len();
+        if list.is_empty() {
+            hooks.remove(event);
+        }
     }
-    before != after
+    changed
 }
 
 fn cursor_hook_installed(settings: &Value, helper: &Path) -> bool {
-    settings
-        .get("hooks")
-        .and_then(|hooks| hooks.get(CURSOR_EVENT))
-        .and_then(Value::as_array)
-        .is_some_and(|list| list.iter().any(|entry| cursor_hook_is_ours(entry, helper)))
+    [CURSOR_EVENT, CURSOR_CLAIM_EVENT].iter().all(|event| {
+        settings
+            .get("hooks")
+            .and_then(|hooks| hooks.get(event))
+            .and_then(Value::as_array)
+            .is_some_and(|list| list.iter().any(|entry| cursor_hook_is_ours(entry, helper)))
+    })
 }
 
 /// Каталог kilocode: имя зависит от дистрибуции форка, берём существующий.
@@ -1842,6 +1877,13 @@ mod tests {
             "./audit.sh"
         );
         assert!(cursor_hook_installed(&settings, &helper()));
+        // Заявка на файл: проверено на живом cursor-agent — нагрузка приходит
+        // как у claude, отказ читается кодом возврата 2, причина из stderr
+        // доходит до агента дословно.
+        let claim = settings["hooks"]["preToolUse"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(claim.ends_with("--claim"), "{claim}");
         // Нагрузка аргументом: stdin cursor хуку не даёт, и хелпер завис бы.
         let ours = settings["hooks"]["stop"][0]["command"].as_str().unwrap();
         assert!(ours.ends_with(r#"'{"type":"stop"}'"#), "{ours}");
@@ -1849,6 +1891,7 @@ mod tests {
 
         assert!(remove_cursor_hook(&mut settings, &helper()));
         assert!(settings["hooks"].get("stop").is_none());
+        assert!(settings["hooks"].get("preToolUse").is_none());
         assert_eq!(
             settings["hooks"]["beforeShellExecution"][0]["command"],
             "./audit.sh"
