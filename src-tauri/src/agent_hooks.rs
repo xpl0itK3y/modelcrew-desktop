@@ -766,6 +766,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "cursor" => Some(home.join(".cursor")),
         "antigravity" => Some(home.join(".gemini")),
         "kimi" => Some(home.join(".kimi-code")),
+        "codex" => Some(home.join(".codex")),
         "kilocode" => kilo_home(home),
         _ => None,
     }
@@ -1297,8 +1298,11 @@ pub fn set_hook(
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 8] = [
+const SUPPORTED_AGENTS: [&str; 9] = [
     "claude",
+    // Уведомления у codex читаются из вывода панели, а вот заявка на файлы
+    // идёт хуком — ради неё он и в списке.
+    "codex",
     "copilot",
     "opencode",
     "grok",
@@ -2043,10 +2047,20 @@ mod tests {
     fn every_supported_agent_has_somewhere_to_write() {
         let home = Path::new("/home/x");
 
-        // Список подключаемых и список известных путей обязаны совпадать,
-        // иначе агент попал бы в автоподключение и молча ничего не получил.
+        // Попав в автоподключение, агент обязан получить хоть что-то: общий
+        // конфиг, свой файл, дописанную секцию или заявку на файлы. Иначе он
+        // числился бы подключённым и молча ничего не получал.
         for agent in SUPPORTED_AGENTS {
-            assert!(hook_config_path(agent, home).is_some(), "{agent}");
+            let somewhere = hook_config_path(agent, home).is_some()
+                || own_file_body(agent, &helper()).is_some()
+                || append_section(agent, &helper()).is_some()
+                || claim_file(agent, home).is_some();
+            assert!(somewhere, "{agent}");
+        }
+        // И он должен опознаваться на диске — иначе автоподключение обойдёт
+        // его стороной, сколько бы путей мы для него ни знали.
+        for agent in SUPPORTED_AGENTS {
+            assert!(agent_home(agent, home).is_some(), "{agent}");
         }
     }
 
@@ -2064,13 +2078,18 @@ mod tests {
             hook_config_path("kimi", home),
             Some(PathBuf::from("/home/x/.kimi-code/config.toml"))
         );
-        // У этих канал либо не подтверждён, либо его нет — молча трогать
-        // чужие конфиги на догадках нельзя. У codex хуки приходят плагинами
-        // с отдельным доверием, у aider канал только через окружение.
-        for agent in ["codex", "aider"] {
-            assert_eq!(hook_config_path(agent, home), None, "{agent}");
-            assert_eq!(agent_home(agent, home), None, "{agent}");
-        }
+        // У codex уведомления идут разбором вывода панели — общий конфиг ему
+        // писать незачем. Каталог у него при этом свой: по нему видно, что
+        // агент вообще установлен, и туда же ложится заявка на файлы.
+        assert_eq!(hook_config_path("codex", home), None);
+        assert_eq!(
+            agent_home("codex", home),
+            Some(PathBuf::from("/home/x/.codex"))
+        );
+        // У aider канал только через окружение — молча трогать чужой конфиг
+        // на догадках нельзя.
+        assert_eq!(hook_config_path("aider", home), None);
+        assert_eq!(agent_home("aider", home), None);
     }
 
     #[test]
