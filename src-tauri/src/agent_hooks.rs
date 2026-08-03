@@ -435,6 +435,7 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
         // Общий файл кастомизаций: глобальные лежат в ~/.gemini/config,
         // а не рядом с самим CLI.
         "antigravity" => Some(home.join(".gemini/config/hooks.json")),
+        "kimi" => Some(home.join(".kimi-code/config.toml")),
         // Форк opencode: каталог зависит от того, как его собрали.
         "kilocode" => kilo_home(home).map(|dir| dir.join("plugin/modelcrew-notify.js")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
@@ -626,6 +627,10 @@ fn append_section(agent: &str, helper: &Path) -> Option<(&'static str, String)> 
         // наши панели ничего не знает, а кого и когда тревожить, приложение
         // решает само — панель на виду при активном окне молчит.
         "grok" => Some(("[ui.notifications]", grok_section(helper))),
+        // Хуки kimi — массив записей в его же TOML. Договор об отказе тот же,
+        // что у claude (выход 2 и stderr), и имена инструментов те же, так
+        // что заявка на файл работает без перевода.
+        "kimi" => Some((KIMI_MARKER, kimi_section(helper))),
         _ => None,
     }
 }
@@ -642,6 +647,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "grok" => Some(home.join(".grok")),
         "cursor" => Some(home.join(".cursor")),
         "antigravity" => Some(home.join(".gemini")),
+        "kimi" => Some(home.join(".kimi-code")),
         "kilocode" => kilo_home(home),
         _ => None,
     }
@@ -727,6 +733,25 @@ fn hook_claim_command(helper: &Path) -> String {
 
 /// То же, но для агента, который ждёт решение JSON-ом в stdout, а не кодом
 /// возврата.
+/// Метка нашего блока в конфиге kimi: по ней видно, что секция уже стоит.
+const KIMI_MARKER: &str = "# modelcrew: уведомления и заявки на файлы";
+
+fn kimi_section(helper: &Path) -> String {
+    format!(
+        "\n{KIMI_MARKER}\n\
+         [[hooks]]\n\
+         event = \"Stop\"\n\
+         command = {command:?}\n\
+         \n\
+         [[hooks]]\n\
+         event = \"PreToolUse\"\n\
+         matcher = \"Edit|Write|MultiEdit|Read\"\n\
+         command = {claim:?}\n",
+        command = hook_command(helper, "kimi"),
+        claim = hook_claim_command(helper),
+    )
+}
+
 fn hook_claim_json_command(helper: &Path) -> String {
     let path = helper.display().to_string().replace('\'', r"'\''");
     format!("'{path}' --claim-json")
@@ -1058,7 +1083,7 @@ pub fn set_hook(
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 7] = [
+const SUPPORTED_AGENTS: [&str; 8] = [
     "claude",
     "copilot",
     "opencode",
@@ -1066,6 +1091,7 @@ const SUPPORTED_AGENTS: [&str; 7] = [
     "kilocode",
     "cursor",
     "antigravity",
+    "kimi",
 ];
 
 /// Подключение через окружение панели — самый безопасный вид: ничего не
@@ -1215,6 +1241,34 @@ mod tests {
             since_ms: 1_000,
         }));
         assert!(serde_json::from_str::<Value>(&tricky).is_ok());
+    }
+
+    #[test]
+    fn writes_kimi_a_toml_block_with_both_hooks() {
+        let block = kimi_section(&helper());
+
+        // Конец хода — для уведомлений, заявка — для файлов. Одна секция на
+        // обе задачи: пользователь включает и выключает их вместе.
+        assert!(block.contains("event = \"Stop\""));
+        assert!(block.contains("event = \"PreToolUse\""));
+        assert!(block.contains("matcher = \"Edit|Write|MultiEdit|Read\""));
+        assert!(block.contains("--claim"));
+        // Путь с пробелом попадает в TOML строкой, а не разваливается.
+        assert!(block.contains("Application Support"));
+        assert!(block.starts_with(&format!("\n{KIMI_MARKER}")));
+    }
+
+    #[test]
+    fn knows_where_kimi_keeps_its_config() {
+        let home = Path::new("/Users/x");
+
+        assert_eq!(
+            hook_config_path("kimi", home),
+            Some(home.join(".kimi-code/config.toml"))
+        );
+        // Каталог агента — признак, что он вообще запускался: иначе мы
+        // завели бы конфиг тому, у кого этого CLI нет.
+        assert_eq!(agent_home("kimi", home), Some(home.join(".kimi-code")));
     }
 
     #[test]
@@ -1477,9 +1531,16 @@ mod tests {
             hook_config_path("claude", home),
             Some(PathBuf::from("/home/x/.claude/settings.json"))
         );
+        // У kimi канал подтверждён по его же бинарю: секция [[hooks]] в
+        // собственном TOML, договор об отказе как у claude.
+        assert_eq!(
+            hook_config_path("kimi", home),
+            Some(PathBuf::from("/home/x/.kimi-code/config.toml"))
+        );
         // У этих канал либо не подтверждён, либо его нет — молча трогать
-        // чужие конфиги на догадках нельзя.
-        for agent in ["codex", "kimi", "aider"] {
+        // чужие конфиги на догадках нельзя. У codex хуки приходят плагинами
+        // с отдельным доверием, у aider канал только через окружение.
+        for agent in ["codex", "aider"] {
             assert_eq!(hook_config_path(agent, home), None, "{agent}");
             assert_eq!(agent_home(agent, home), None, "{agent}");
         }
