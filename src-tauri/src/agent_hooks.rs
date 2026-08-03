@@ -31,73 +31,105 @@ dir="$MODELCREW_EVENTS_DIR"
 # Заявка: спрашиваем приложение, свободен ли файл, и ждём ответ. Всё, что
 # пошло не так — отсутствие каталога, неразобранный путь, молчание — трактуем
 # как «можно»: слой согласования не должен останавливать работу из-за себя.
-if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilot" ]; then
+if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilot" ] || [ "$1" = "--claim-codex" ]; then
   [ -z "$dir" ] && exit 0
   payload="$(cat)"
-  # Ключ пути у агентов называется по-разному, и схему их полезной нагрузки
-  # никто не обещает. Пробуем известные написания по очереди; не нашли —
-  # выходим с нулём, то есть пропускаем правку.
-  # TargetFile и AbsolutePath — antigravity: он кладёт вызов вложенно
-  # (`toolCall.args.TargetFile`), поэтому по имени ключа, а не по пути в дереве.
-  for key in file_path filePath target_file absolute_path path TargetFile AbsolutePath; do
-    file=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
-    [ -n "$file" ] && break
-  done
-  [ -z "$file" ] && exit 0
-  # `name` — последним: у antigravity инструмент лежит в `toolCall.name`, но
-  # ключ слишком общий, чтобы спрашивать о нём раньше остальных.
+  # Имя инструмента: `name` последним — у antigravity он лежит в `toolCall.name`,
+  # но ключ слишком общий, чтобы спрашивать о нём раньше остальных.
   for key in tool_name toolName tool name; do
     tool=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
     [ -n "$tool" ] && break
   done
+  if [ "$1" = "--claim-codex" ]; then
+    # У codex правка идёт патчем: пути лежат внутри его текста, а не отдельным
+    # ключом, и за один вызов он трогает сколько угодно файлов.
+    files=$(printf '%s' "$payload" \
+      | grep -oE '\*\*\* (Update|Add|Delete) File: [^\\"]+' \
+      | sed 's/^.*File: //')
+  else
+    # Ключ пути у агентов называется по-разному, и схему их полезной нагрузки
+    # никто не обещает. Пробуем известные написания по очереди; не нашли —
+    # выходим с нулём, то есть пропускаем правку.
+    # TargetFile и AbsolutePath — antigravity: он кладёт вызов вложенно
+    # (`toolCall.args.TargetFile`), поэтому по имени ключа, а не по пути в дереве.
+    for key in file_path filePath target_file absolute_path path TargetFile AbsolutePath; do
+      files=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
+      [ -n "$files" ] && break
+    done
+  fi
+  [ -z "$files" ] && exit 0
   mkdir -p "$dir" || exit 0
-  id="claim-$(date +%s)-$$"
-  printf '{"kind":"claim","panelId":"%s","file":"%s","tool":"%s"}' \
-    "$MODELCREW_PANEL_ID" "$file" "$tool" > "$dir/$id.tmp" || exit 0
-  mv "$dir/$id.tmp" "$dir/$id.json" || exit 0
-  i=0
-  while [ $i -lt 20 ]; do
-    if [ -f "$dir/$id.res" ]; then
-      answer="$(cat "$dir/$id.res")"
-      rm -f "$dir/$id.res"
-      # Отказ выражается по-разному: claude, grok и kimi читают код возврата 2
-      # и stderr, antigravity ждёт `decision` JSON-ом в stdout, copilot —
-      # `permissionDecision` там же. Причина нужна всем одинаково: без неё
-      # агент не понимает, что делать дальше, и берётся за тот же файл снова.
-      case "$answer" in
-        *'"stale"'*)
-          reason='Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.'
-          ;;
-        *'"deny"'*)
-          task=$(printf '%s' "$answer" | sed -n 's/.*"task":"\([^"]*\)".*/\1/p')
-          reason='Файл сейчас правит другой агент этого проекта'
-          [ -n "$task" ] && reason="$reason: $task"
-          # Про оболочку сказано нарочно: агент, которому отказали в правке
-          # файла, охотно пробует переписать его через `printf >` — это видно
-          # на живом copilot, и такая запись проходит мимо всех заявок.
-          reason="$reason. Возьмись за другой файл и вернись к этому позже; переписывать его через оболочку тоже не нужно."
-          ;;
-        *) reason='' ;;
-      esac
-      case "$1" in
-        --claim-json)
-          [ -z "$reason" ] && { printf '{"decision":"allow"}\n'; exit 0; }
-          printf '{"decision":"deny","reason":"%s"}\n' "$reason"
-          exit 0 ;;
-        --claim-copilot)
-          [ -z "$reason" ] && exit 0
-          printf '{"permissionDecision":"deny","permissionDecisionReason":"%s"}\n' "$reason"
-          exit 0 ;;
-      esac
+
+  # Один круг вопроса-ответа. Печатает ответ приложения; пусто — молчание.
+  ask() {
+    id="claim-$(date +%s)-$$-$2"
+    printf '{"kind":"claim","panelId":"%s","file":"%s","tool":"%s"}' \
+      "$MODELCREW_PANEL_ID" "$1" "$tool" > "$dir/$id.tmp" || return 0
+    mv "$dir/$id.tmp" "$dir/$id.json" || return 0
+    i=0
+    while [ $i -lt 20 ]; do
+      if [ -f "$dir/$id.res" ]; then
+        cat "$dir/$id.res"
+        rm -f "$dir/$id.res"
+        return 0
+      fi
+      sleep 0.1
+      i=$((i + 1))
+    done
+  }
+
+  # Спрашиваем про каждый файл вызова: занят хотя бы один — правку целиком
+  # пропускать нельзя, патч применяется весь или никак.
+  verdict=allow
+  task=''
+  n=0
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    n=$((n + 1))
+    answer=$(ask "$file" "$n")
+    case "$answer" in
+      *'"stale"'*) verdict=stale; break ;;
+      *'"deny"'*)
+        verdict=deny
+        task=$(printf '%s' "$answer" | sed -n 's/.*"task":"\([^"]*\)".*/\1/p')
+        break
+        ;;
+    esac
+  done <<CLAIM_FILES
+$files
+CLAIM_FILES
+
+  # Отказ выражается по-разному: claude, grok, kimi, cursor и codex читают код
+  # возврата 2 и stderr, antigravity ждёт `decision` JSON-ом в stdout, copilot —
+  # `permissionDecision` там же. Причина нужна всем одинаково: без неё агент не
+  # понимает, что делать дальше, и берётся за тот же файл снова.
+  case "$verdict" in
+    stale)
+      reason='Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.'
+      ;;
+    deny)
+      reason='Файл сейчас правит другой агент этого проекта'
+      [ -n "$task" ] && reason="$reason: $task"
+      # Про оболочку сказано нарочно: агент, которому отказали в правке файла,
+      # охотно пробует переписать его через `printf >` — это видно на живых
+      # copilot и opencode, и такая запись проходит мимо всех заявок.
+      reason="$reason. Возьмись за другой файл и вернись к этому позже; переписывать его через оболочку тоже не нужно."
+      ;;
+    *) reason='' ;;
+  esac
+  case "$1" in
+    --claim-json)
+      [ -z "$reason" ] && { printf '{"decision":"allow"}\n'; exit 0; }
+      printf '{"decision":"deny","reason":"%s"}\n' "$reason"
+      exit 0 ;;
+    --claim-copilot)
       [ -z "$reason" ] && exit 0
-      printf '%s\n' "$reason" >&2
-      exit 2
-    fi
-    sleep 0.1
-    i=$((i + 1))
-  done
-  [ "$1" = "--claim-json" ] && printf '{"decision":"allow"}\n'
-  exit 0
+      printf '{"permissionDecision":"deny","permissionDecisionReason":"%s"}\n' "$reason"
+      exit 0 ;;
+  esac
+  [ -z "$reason" ] && exit 0
+  printf '%s\n' "$reason" >&2
+  exit 2
 fi
 
 agent="${1:-unknown}"
@@ -890,6 +922,13 @@ fn kimi_section(helper: &Path) -> String {
     )
 }
 
+/// У codex путь лежит внутри текста патча, а не отдельным ключом — разбор
+/// у хелпера отдельный.
+fn hook_claim_codex_command(helper: &Path) -> String {
+    let path = helper.display().to_string().replace('\'', r"'\''");
+    format!("'{path}' --claim-codex")
+}
+
 fn hook_claim_copilot_command(helper: &Path) -> String {
     let path = helper.display().to_string().replace('\'', r"'\''");
     format!("'{path}' --claim-copilot")
@@ -980,6 +1019,10 @@ fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
         // которым нужен явный `/hooks-trust`. Формат он принимает тот же, что
         // у claude, и сам переводит имена инструментов в свои.
         "grok" => Some(home.join(".grok/hooks/modelcrew.json")),
+        // У codex глобальные хуки лежат тут же, но запускает он их только
+        // после разового одобрения человеком: `/hooks` в его же сессии. Пока
+        // одобрения нет, файл просто лежит и ничего не делает.
+        "codex" => Some(home.join(".codex/hooks.json")),
         _ => None,
     }
 }
@@ -991,9 +1034,14 @@ fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
 /// заявки не работали вовсе, никак этого не показывая. Отбирать вызовы здесь
 /// нечем и незачем: хелпер сам пропускает всё, в чём не нашёл пути, так что
 /// незнакомый или новый инструмент ничего не ломает.
-fn claim_file_body(helper: &Path) -> String {
+fn claim_file_body(agent: &str, helper: &Path) -> String {
+    let command = if agent == "codex" {
+        hook_claim_codex_command(helper)
+    } else {
+        hook_claim_command(helper)
+    };
     let entry = serde_json::json!({
-        "hooks": [{ "type": "command", "command": hook_claim_command(helper) }],
+        "hooks": [{ "type": "command", "command": command }],
     });
     let body = serde_json::json!({ "hooks": { "PreToolUse": [entry] } });
     serde_json::to_string_pretty(&body).unwrap_or_default() + "\n"
@@ -1184,7 +1232,7 @@ pub fn set_hook(
     // уведомлений: это одна настройка для пользователя.
     if let Some(claims) = claim_file(agent, &home) {
         if enabled {
-            let body = claim_file_body(&helper);
+            let body = claim_file_body(agent, &helper);
             if std::fs::read_to_string(&claims).unwrap_or_default() != body {
                 if let Some(parent) = claims.parent() {
                     let _ = std::fs::create_dir_all(parent);
@@ -1402,6 +1450,9 @@ mod tests {
                     .unwrap()
                     .to_string_lossy()
                     .to_string();
+                // Приложение забирает заявку с диска; без этого следующий
+                // вызов нашёл бы ту же самую.
+                std::fs::remove_file(entry.path()).unwrap();
                 claim["id"] = Value::String(id);
                 return claim;
             }
@@ -1532,6 +1583,80 @@ mod tests {
         // Чужой файл остаётся чужим — иначе заявки текли бы между проектами.
         assert_eq!(relative_to_root(Path::new("/иной/файл.rs"), &root), None);
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// У codex правка идёт патчем: пути лежат внутри его текста, а не
+    /// отдельным ключом, и за один вызов он трогает сколько угодно файлов.
+    /// Образец снят с живого запуска.
+    #[test]
+    fn reads_every_file_out_of_a_codex_patch() {
+        let base = std::env::temp_dir().join(format!("mc-codex-{}", std::process::id()));
+        let events = base.join("agent-events");
+        std::fs::create_dir_all(&events).unwrap();
+        let script = base.join("notify.sh");
+        std::fs::write(&script, HELPER_SCRIPT).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let payload = concat!(
+            r#"{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":"#,
+            r#"{"command":"*** Begin Patch
+*** Update File: /w/первый.rs
+@@
+-было
++стало
+"#,
+            r#"*** Add File: /w/второй.rs
++новый
+*** End Patch
+"}}"#
+        );
+        let mut child = std::process::Command::new(&script)
+            .arg("--claim-codex")
+            .env("MODELCREW_PANEL_ID", "panel-3")
+            .env("MODELCREW_EVENTS_DIR", &events)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+
+        // Первый файл свободен — заявка на него проходит, и хелпер идёт
+        // спрашивать про второй.
+        let first = read_claim(&events);
+        assert_eq!(first["file"], "/w/первый.rs");
+        assert_eq!(first["tool"], "apply_patch");
+        std::fs::write(
+            events.join(format!("{}.res", first["id"].as_str().unwrap())),
+            r#"{"verdict":"allow"}"#,
+        )
+        .unwrap();
+
+        let second = read_claim(&events);
+        assert_eq!(second["file"], "/w/второй.rs");
+        std::fs::write(
+            events.join(format!("{}.res", second["id"].as_str().unwrap())),
+            r#"{"verdict":"deny","task":"правит сосед"}"#,
+        )
+        .unwrap();
+
+        let out = child.wait_with_output().unwrap();
+        // Занят хотя бы один файл — отказ на весь вызов: патч применяется
+        // целиком или никак.
+        assert_eq!(out.status.code(), Some(2));
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("правит сосед"), "{text}");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1722,7 +1847,7 @@ mod tests {
 
     #[test]
     fn gives_grok_the_claim_hook_without_a_matcher() {
-        let body = claim_file_body(&helper());
+        let body = claim_file_body("grok", &helper());
         let parsed: Value = serde_json::from_str(&body).expect("валидный JSON");
         let entry = &parsed["hooks"]["PreToolUse"][0];
 
@@ -1750,9 +1875,17 @@ mod tests {
         // У claude заявка идёт в общий settings.json вместе с остальными
         // хуками — отдельный файл ему не нужен.
         assert_eq!(claim_file("claude", home), None);
-        // Остальным пока нечего дать: у codex хуки приходят плагинами с
-        // доверием, у прочих канал не подтверждён.
-        for agent in ["codex", "cursor", "opencode", "kimi", "antigravity"] {
+        // У codex тоже свой файл: хуки он оттуда читает и отказ по коду
+        // возврата 2 соблюдает — проверено на живом запуске. Запускает он их
+        // только после разового `/hooks` в его же сессии, но это согласие
+        // человека, а не догадка с нашей стороны.
+        assert_eq!(
+            claim_file("codex", home),
+            Some(home.join(".codex/hooks.json"))
+        );
+        // Остальные получают заявку иначе: cursor и kimi — в свой общий
+        // конфиг, opencode — плагином, antigravity — своим диалектом.
+        for agent in ["cursor", "opencode", "kimi", "antigravity"] {
             assert_eq!(claim_file(agent, home), None, "агент {agent}");
         }
     }
