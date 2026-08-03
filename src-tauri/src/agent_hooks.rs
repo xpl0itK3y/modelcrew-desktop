@@ -37,12 +37,16 @@ if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ]; then
   # Ключ пути у агентов называется по-разному, и схему их полезной нагрузки
   # никто не обещает. Пробуем известные написания по очереди; не нашли —
   # выходим с нулём, то есть пропускаем правку.
-  for key in file_path filePath target_file absolute_path path; do
+  # TargetFile и AbsolutePath — antigravity: он кладёт вызов вложенно
+  # (`toolCall.args.TargetFile`), поэтому по имени ключа, а не по пути в дереве.
+  for key in file_path filePath target_file absolute_path path TargetFile AbsolutePath; do
     file=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
     [ -n "$file" ] && break
   done
   [ -z "$file" ] && exit 0
-  for key in tool_name toolName tool; do
+  # `name` — последним: у antigravity инструмент лежит в `toolCall.name`, но
+  # ключ слишком общий, чтобы спрашивать о нём раньше остальных.
+  for key in tool_name toolName tool name; do
     tool=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
     [ -n "$tool" ] && break
   done
@@ -58,9 +62,16 @@ if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ]; then
       rm -f "$dir/$id.res"
       # Отказ выражается по-разному: claude и grok читают код возврата 2 и
       # stderr, antigravity ждёт решение JSON-ом в stdout.
+      # Причина по его же контракту показывается агенту — без неё отказ для
+      # него необъясним, и он попробует тот же файл снова.
       if [ "$1" = "--claim-json" ]; then
         case "$answer" in
-          *'"deny"'*) printf '{"decision":"deny"}\n'; exit 0 ;;
+          *'"stale"'*)
+            printf '{"decision":"deny","reason":"Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта."}\n'
+            exit 0 ;;
+          *'"deny"'*)
+            printf '{"decision":"deny","reason":"Файл сейчас правит другой агент этого проекта. Возьмись за другой файл и вернись к этому позже."}\n'
+            exit 0 ;;
           *) printf '{"decision":"allow"}\n'; exit 0 ;;
         esac
       fi
@@ -272,8 +283,19 @@ fn claim_answer(verdict: &ClaimVerdict) -> String {
 
 /// Инструменты чтения: заявку не берут, но то, каким панель увидела файл,
 /// запоминают — на этом держится проверка устаревшего чтения.
+/// Чтение только запоминает содержимое файла — заявку оно не занимает. Ошибка
+/// здесь дорого стоит: приняв чтение за правку, мы заперли бы файл на пять
+/// минут за агентом, который его лишь посмотрел.
 fn is_read_tool(tool: &str) -> bool {
-    tool.eq_ignore_ascii_case("read") || tool.eq_ignore_ascii_case("notebookread")
+    // Первые два — claude, grok и kimi; остальные три — antigravity.
+    const READS: [&str; 5] = [
+        "read",
+        "notebookread",
+        "view_file",
+        "read_file",
+        "view_code_item",
+    ];
+    READS.iter().any(|known| tool.eq_ignore_ascii_case(known))
 }
 
 enum ClaimVerdict {
@@ -468,8 +490,11 @@ fn antigravity_block(helper: &Path) -> Value {
 
 /// Инструменты antigravity, меняющие файлы, плюс чтение — оно заявку не
 /// берёт, но нужно для сверки устаревшего чтения.
-const ANTIGRAVITY_WRITE_TOOLS: &str =
-    "write_to_file|write_file|replace_file_content|create_file|edit_file|read_file|view_file";
+/// Имена взяты из его собственных описаний инструментов, а не по догадке.
+/// Чтения тоже в списке: они не занимают файл, но запоминают его содержимое —
+/// без этого не поймать правку, построенную на устаревшем чтении.
+const ANTIGRAVITY_WRITE_TOOLS: &str = "write_to_file|replace_file_content|create_file|edit_file|\
+     read_file|view_file|view_code_item";
 
 fn install_antigravity_hook(settings: &mut Value, helper: &Path) -> bool {
     if !settings.is_object() {
@@ -1156,6 +1181,94 @@ mod tests {
         PathBuf::from("/Users/x/Library/Application Support/mc/modelcrew-agent-notify.sh")
     }
 
+    /// Прогон настоящего хелпера на полезной нагрузке, снятой с живого
+    /// antigravity. Схему вызова он кладёт вложенно и в своих ключах —
+    /// написанное «на глаз» извлечение молча пропускало каждую правку.
+    #[test]
+    fn reads_an_antigravity_payload_and_answers_in_its_dialect() {
+        let base = std::env::temp_dir().join(format!("mc-claim-{}", std::process::id()));
+        let events = base.join("agent-events");
+        std::fs::create_dir_all(&events).unwrap();
+        let script = base.join("notify.sh");
+        std::fs::write(&script, HELPER_SCRIPT).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // Ровно то, что прислал agy, вплоть до порядка ключей.
+        let payload = concat!(
+            r#"{"conversationId":"762f086f","modelName":"gemini-3.6-flash-high","#,
+            r#""stepIdx":10,"toolCall":{"args":{"AllowMultiple":false,"#,
+            r#""Instruction":"Добавить комментарий","TargetFile":"/w/README.md"},"#,
+            r#""name":"replace_file_content"},"workspacePaths":["/w"]}"#
+        );
+        let mut child = std::process::Command::new(&script)
+            .arg("--claim-json")
+            .env("MODELCREW_PANEL_ID", "panel-7")
+            .env("MODELCREW_EVENTS_DIR", &events)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+
+        // Заявка должна дойти до приложения разобранной, а не пустой.
+        let request = read_claim(&events);
+        assert_eq!(request["file"], "/w/README.md");
+        assert_eq!(request["tool"], "replace_file_content");
+        assert_eq!(request["panelId"], "panel-7");
+
+        std::fs::write(
+            events.join(format!("{}.res", request["id"].as_str().unwrap())),
+            r#"{"verdict":"deny","task":"правит сосед"}"#,
+        )
+        .unwrap();
+
+        let out = child.wait_with_output().unwrap();
+        let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
+        // Он читает решение из stdout, а не код возврата, и показывает
+        // причину агенту — без неё отказ для него необъясним.
+        assert_eq!(answer["decision"], "deny");
+        assert!(
+            answer["reason"].as_str().unwrap().contains("другой файл"),
+            "{answer}"
+        );
+        assert_eq!(out.status.code(), Some(0));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Ждёт заявку, которую хелпер кладёт файлом, и отдаёт её вместе с id.
+    fn read_claim(events: &Path) -> Value {
+        for _ in 0..100 {
+            let entry = std::fs::read_dir(events)
+                .unwrap()
+                .flatten()
+                .find(|item| item.path().extension().is_some_and(|kind| kind == "json"));
+            if let Some(entry) = entry {
+                let body = std::fs::read(entry.path()).unwrap();
+                let mut claim: Value = serde_json::from_slice(&body).unwrap();
+                let id = entry
+                    .path()
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                claim["id"] = Value::String(id);
+                return claim;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("хелпер не положил заявку");
+    }
+
     #[test]
     fn the_command_survives_a_path_with_spaces() {
         let command = hook_command(&helper(), "claude");
@@ -1303,7 +1416,22 @@ mod tests {
         assert!(is_read_tool("Read"));
         assert!(is_read_tool("read"));
         assert!(is_read_tool("NotebookRead"));
-        for writing in ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"] {
+        // У antigravity свои имена — и он единственный, кто ходит в хук за
+        // каждым просмотром файла.
+        for reading in ["view_file", "read_file", "view_code_item"] {
+            assert!(is_read_tool(reading), "инструмент {reading}");
+        }
+        for writing in [
+            "Edit",
+            "Write",
+            "MultiEdit",
+            "NotebookEdit",
+            "Bash",
+            "write_to_file",
+            "replace_file_content",
+            "edit_file",
+            "create_file",
+        ] {
             assert!(!is_read_tool(writing), "инструмент {writing}");
         }
     }
