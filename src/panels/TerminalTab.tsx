@@ -10,12 +10,7 @@ import {
   isAgentPanelWaiting,
   subscribeAgentAttention,
 } from "../terminal/attentionStore";
-import { claimGlyph, claimTooltipKey, currentClaim } from "../crew/claimLabel";
-import {
-  getPanelClaims,
-  subscribePanelClaims,
-  type PanelClaims,
-} from "../crew/claimStore";
+import { getPanelClaims, subscribePanelClaims } from "../crew/claimStore";
 import { useI18n } from "../i18n";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
@@ -27,8 +22,10 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const [waiting, setWaiting] = useState(() =>
     isAgentPanelWaiting(props.api.id),
   );
-  const [claims, setClaims] = useState<PanelClaims>(() =>
-    getPanelClaims(props.api.id),
+  // С вкладки нужен только признак «упёрся в занятый файл» — он меняет вид
+  // точки. Что панель правит, показывает подпись справа в шапке.
+  const [blockedBy, setBlockedBy] = useState<string | null>(
+    () => getPanelClaims(props.api.id).waitingFor,
   );
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -49,9 +46,9 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     const attentionUnsubscribe = subscribeAgentAttention(() => {
       setWaiting(isAgentPanelWaiting(props.api.id));
     });
-    setClaims(getPanelClaims(props.api.id));
+    setBlockedBy(getPanelClaims(props.api.id).waitingFor);
     const claimsUnsubscribe = subscribePanelClaims(() => {
-      setClaims(getPanelClaims(props.api.id));
+      setBlockedBy(getPanelClaims(props.api.id).waitingFor);
     });
     return () => {
       titleDisposable.dispose();
@@ -95,7 +92,6 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   //
   // Признак нужен именно на вкладке: подпись в шапке группы показывает лишь
   // выбранную панель, и застрявшего соседа за ней не видно.
-  const blockedBy = claims.waitingFor;
   const dotState = waiting ? "waiting" : blockedBy ? "blocked" : status;
   // Точка говорит про жизнь терминала, значок рядом — про файлы. Раньше в
   // заблокированном состоянии оба называли один и тот же файл, и читающий
@@ -105,9 +101,6 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     : status === "running"
       ? t("terminal.statusRunning")
       : t("terminal.statusExited");
-
-  const current = currentClaim(claims);
-  const { key: claimKey, values: claimValues } = claimTooltipKey(claims);
 
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
@@ -130,21 +123,6 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       ) : (
         <span className="tab-title" title={title}>
           {title}
-        </span>
-      )}
-      {/* На вкладке — только значок: имя файла живёт справа в шапке, где под
-          него есть ширина. Но там место одно на всю группу, а знать, чем
-          заняты соседи, нужно не переключаясь на каждого. */}
-      {!editing && current && (
-        <span
-          className={`tab-claim ${blockedBy ? "is-blocked" : ""} ${
-            claims.awaited ? "is-awaited" : ""
-          }`}
-          role="img"
-          title={t(claimKey, claimValues)}
-          aria-label={t(claimKey, claimValues)}
-        >
-          {claimGlyph(claims)}
         </span>
       )}
     </div>
