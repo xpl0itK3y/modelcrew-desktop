@@ -12,6 +12,7 @@ vi.mock("../terminal/registry", () => ({
 import { raiseAgentAlert } from "../terminal/agentAlerts";
 import { resetAgentAlertBurst } from "../terminal/alertDelivery";
 import { clearAgentAttention } from "../terminal/attentionStore";
+import { clearPanelClaims, setPanelClaims } from "../crew/claimStore";
 import { rememberAgentProcess } from "../agents";
 import { TerminalTab } from "./TerminalTab";
 
@@ -56,7 +57,8 @@ function dot() {
 async function alert(id: string) {
   await act(async () => {
     await raiseAgentAlert(id, "permission", {
-      visible: false, focused: false,
+      visible: false,
+      focused: false,
       workspaceId: "ws-1",
     });
   });
@@ -73,6 +75,63 @@ afterEach(() => {
     clearAgentAttention(id);
   }
   resetAgentAlertBurst();
+  clearPanelClaims();
+});
+
+// Заявки живут во внешнем хранилище, мимо событий React.
+async function blockOn(id: string, path: string) {
+  await act(async () => {
+    setPanelClaims(
+      new Map([[id, { held: [], waitingFor: path, awaited: false }]]),
+    );
+  });
+}
+
+describe("terminal tab claim state", () => {
+  it("shows on the tab which file the panel is stuck on", async () => {
+    const id = panel("blocked-1");
+    render(<TerminalTab {...headerProps(id)} />);
+
+    await blockOn(id, "/w/src/сервер.rs");
+
+    // Подпись в шапке группы показывает только выбранную панель — застрявшего
+    // соседа за ней не видно, поэтому признак нужен на самой вкладке.
+    expect(screen.getByText("сервер.rs")).toBeInTheDocument();
+    expect(dot().className).toContain("is-blocked");
+  });
+
+  it("keeps a call for the user above a busy file", async () => {
+    const id = panel("blocked-2");
+    render(<TerminalTab {...headerProps(id)} />);
+    await blockOn(id, "/w/занят.rs");
+
+    await alert(id);
+
+    // Ожидание человека важнее: занятый файл разойдётся сам, а тут ход
+    // закончен и без ответа ничего не сдвинется.
+    expect(dot().className).toContain("is-waiting");
+  });
+
+  it("goes back to plain running once the file is free", async () => {
+    const id = panel("blocked-3");
+    render(<TerminalTab {...headerProps(id)} />);
+    await blockOn(id, "/w/занят.rs");
+
+    await act(async () => setPanelClaims(new Map()));
+
+    expect(screen.queryByText("занят.rs")).not.toBeInTheDocument();
+    expect(dot().className).toContain("is-running");
+  });
+
+  it("leaves another panel alone", async () => {
+    const id = panel("blocked-4");
+    render(<TerminalTab {...headerProps(id)} />);
+
+    await blockOn("другая-панель", "/w/чужой.rs");
+
+    expect(screen.queryByText("чужой.rs")).not.toBeInTheDocument();
+    expect(dot().className).toContain("is-running");
+  });
 });
 
 describe("terminal tab attention dot", () => {
