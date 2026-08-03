@@ -10,19 +10,13 @@ import {
   isAgentPanelWaiting,
   subscribeAgentAttention,
 } from "../terminal/attentionStore";
+import { claimGlyph, claimTooltipKey, currentClaim } from "../crew/claimLabel";
 import {
   getPanelClaims,
   subscribePanelClaims,
   type PanelClaims,
 } from "../crew/claimStore";
 import { useI18n } from "../i18n";
-
-// Имя файла без пути: на вкладке шириной в пару слов путь не поместится, а
-// полный лежит в подсказке.
-function fileName(path: string): string {
-  const parts = path.split("/");
-  return parts[parts.length - 1] || path;
-}
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const { t } = useI18n();
@@ -103,23 +97,17 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   // выбранную панель, и застрявшего соседа за ней не видно.
   const blockedBy = claims.waitingFor;
   const dotState = waiting ? "waiting" : blockedBy ? "blocked" : status;
+  // Точка говорит про жизнь терминала, значок рядом — про файлы. Раньше в
+  // заблокированном состоянии оба называли один и тот же файл, и читающий
+  // вслух слышал его дважды.
   const dotLabel = waiting
     ? t("terminal.statusWaiting")
-    : blockedBy
-      ? t("crew.waitingFor", { path: blockedBy })
-      : status === "running"
-        ? t("terminal.statusRunning")
-        : t("terminal.statusExited");
+    : status === "running"
+      ? t("terminal.statusRunning")
+      : t("terminal.statusExited");
 
-  // Что панель делает с файлами: ждёт занятый или правит свой. Ожидание
-  // важнее — на нём агент стоит, а правка идёт своим ходом. Последний взятый
-  // файл и есть тот, в котором агент работает сейчас; остальные — в подсказке.
-  const current = blockedBy ?? claims.held[claims.held.length - 1] ?? null;
-  const claimTitle = blockedBy
-    ? t("crew.waitingFor", { path: blockedBy })
-    : claims.awaited
-      ? t("crew.holdingAwaited", { paths: claims.held.join("\n") })
-      : t("crew.holding", { paths: claims.held.join("\n") });
+  const current = currentClaim(claims);
+  const { key: claimKey, values: claimValues } = claimTooltipKey(claims);
 
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
@@ -144,23 +132,19 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
           {title}
         </span>
       )}
-      {/* Файл рядом с именем агента: видно, кто чем занят, не переключаясь
-          на панель. Подпись приглушена — вкладка про агента, файл при нём. */}
+      {/* На вкладке — только значок: имя файла живёт справа в шапке, где под
+          него есть ширина. Но там место одно на всю группу, а знать, чем
+          заняты соседи, нужно не переключаясь на каждого. */}
       {!editing && current && (
         <span
           className={`tab-claim ${blockedBy ? "is-blocked" : ""} ${
             claims.awaited ? "is-awaited" : ""
           }`}
-          title={claimTitle}
+          role="img"
+          title={t(claimKey, claimValues)}
+          aria-label={t(claimKey, claimValues)}
         >
-          {/* Значок несёт разницу состояний сам по себе: карандаш — правит,
-              часы — стоит и ждёт. На цвет тут полагаться нельзя. */}
-          <span className="tab-claim-glyph" aria-hidden="true">
-            {blockedBy ? "⏳" : "✎"}
-          </span>
-          {/* Имя — своим элементом: многоточие рисует тот, у кого и ширина,
-              и переполнение, а на общей строке со значком его не выходит. */}
-          <span className="tab-claim-file">{fileName(current)}</span>
+          {claimGlyph(claims)}
         </span>
       )}
     </div>

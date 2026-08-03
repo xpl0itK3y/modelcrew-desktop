@@ -48,8 +48,14 @@ function headerProps(id: string): IDockviewPanelHeaderProps {
   } as unknown as IDockviewPanelHeaderProps;
 }
 
+// Точек-картинок на вкладке теперь две — состояние терминала и значок
+// файла; берём именно ту, что про терминал.
 function dot() {
-  return screen.getByRole("img");
+  const found = document.querySelector(".tab-dot");
+  if (!found) {
+    throw new Error("точки состояния на вкладке нет");
+  }
+  return found;
 }
 
 // Внимание меняется во внешнем хранилище, мимо событий React: без act
@@ -79,14 +85,6 @@ afterEach(() => {
 });
 
 // Заявки живут во внешнем хранилище, мимо событий React.
-async function blockOn(id: string, path: string) {
-  await act(async () => {
-    setPanelClaims(
-      new Map([[id, { held: [], waitingFor: path, awaited: false }]]),
-    );
-  });
-}
-
 async function editingFiles(id: string, held: string[], awaited = false) {
   await act(async () => {
     setPanelClaims(new Map([[id, { held, waitingFor: null, awaited }]]));
@@ -94,65 +92,18 @@ async function editingFiles(id: string, held: string[], awaited = false) {
 }
 
 describe("terminal tab claim state", () => {
-  it("shows on the tab which file the panel is stuck on", async () => {
-    const id = panel("blocked-1");
-    render(<TerminalTab {...headerProps(id)} />);
-
-    await blockOn(id, "/w/src/сервер.rs");
-
-    // Подпись в шапке группы показывает только выбранную панель — застрявшего
-    // соседа за ней не видно, поэтому признак нужен на самой вкладке.
-    expect(screen.getByText("сервер.rs")).toBeInTheDocument();
-    expect(dot().className).toContain("is-blocked");
-  });
-
-  it("keeps a call for the user above a busy file", async () => {
-    const id = panel("blocked-2");
-    render(<TerminalTab {...headerProps(id)} />);
-    await blockOn(id, "/w/занят.rs");
-
-    await alert(id);
-
-    // Ожидание человека важнее: занятый файл разойдётся сам, а тут ход
-    // закончен и без ответа ничего не сдвинется.
-    expect(dot().className).toContain("is-waiting");
-  });
-
-  it("goes back to plain running once the file is free", async () => {
-    const id = panel("blocked-3");
-    render(<TerminalTab {...headerProps(id)} />);
-    await blockOn(id, "/w/занят.rs");
-
-    await act(async () => setPanelClaims(new Map()));
-
-    expect(screen.queryByText("занят.rs")).not.toBeInTheDocument();
-    expect(dot().className).toContain("is-running");
-  });
-
-  it("shows on every tab what its agent is editing", async () => {
+  it("marks on the tab that the agent is editing something", async () => {
     const id = panel("holding-1");
     render(<TerminalTab {...headerProps(id)} />);
 
     await editingFiles(id, ["/w/src/auth.rs"]);
 
-    // Раньше это было видно только у выбранной панели, в шапке группы. Смысл
-    // подписи как раз в соседях: что делает агент, на которого не смотришь.
-    expect(screen.getByText("auth.rs")).toBeInTheDocument();
-    // Карандаш отличает правку от ожидания без опоры на цвет.
+    // Имя файла живёт справа в шапке — на вкладке для него нет ширины. Но
+    // знать, чем занят сосед, нужно не переключаясь на него, поэтому значок.
     expect(screen.getByText("✎")).toBeInTheDocument();
+    expect(screen.getByLabelText(/auth\.rs/)).toBeInTheDocument();
     // Правка — обычная работа, точка остаётся рабочей.
     expect(dot().className).toContain("is-running");
-  });
-
-  it("names the file the agent moved on to", async () => {
-    const id = panel("holding-2");
-    render(<TerminalTab {...headerProps(id)} />);
-
-    await editingFiles(id, ["/w/первый.rs", "/w/второй.rs"]);
-
-    // Последний взятый файл и есть тот, в котором агент сейчас.
-    expect(screen.getByText("второй.rs")).toBeInTheDocument();
-    expect(screen.queryByText("первый.rs")).not.toBeInTheDocument();
   });
 
   it("puts a busy file ahead of its own work", async () => {
@@ -164,28 +115,42 @@ describe("terminal tab claim state", () => {
         new Map([
           [
             id,
-            { held: ["/w/своё.rs"], waitingFor: "/w/чужое.rs", awaited: false },
+            {
+              held: ["/w/своё.rs"],
+              waitingFor: "/w/чужое.rs",
+              awaited: false,
+            },
           ],
         ]),
       );
     });
 
     // На ожидании агент стоит, а правка идёт своим ходом — показываем то, что
-    // его держит.
-    expect(screen.getByText(/чужое\.rs/)).toBeInTheDocument();
-    // Ждёт — часы, а не карандаш: агент стоит, а не правит.
+    // его держит. Часы, а не карандаш: на цвет полагаться нельзя.
     expect(screen.getByText("⏳")).toBeInTheDocument();
     expect(screen.queryByText("✎")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/чужое\.rs/)).toBeInTheDocument();
     expect(dot().className).toContain("is-blocked");
   });
 
+  it("goes quiet once the panel touches nothing", async () => {
+    const id = panel("holding-4");
+    render(<TerminalTab {...headerProps(id)} />);
+    await editingFiles(id, ["/w/занят.rs"]);
+
+    await act(async () => setPanelClaims(new Map()));
+
+    expect(screen.queryByText("✎")).not.toBeInTheDocument();
+    expect(dot().className).toContain("is-running");
+  });
+
   it("leaves another panel alone", async () => {
-    const id = panel("blocked-4");
+    const id = panel("holding-5");
     render(<TerminalTab {...headerProps(id)} />);
 
-    await blockOn("другая-панель", "/w/чужой.rs");
+    await editingFiles("другая-панель", ["/w/чужой.rs"]);
 
-    expect(screen.queryByText("чужой.rs")).not.toBeInTheDocument();
+    expect(screen.queryByText("✎")).not.toBeInTheDocument();
     expect(dot().className).toContain("is-running");
   });
 });

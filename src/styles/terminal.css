@@ -137,44 +137,24 @@
   box-shadow: 0 0 0 2px var(--mc-surface-raised);
 }
 
-/* Файл, которым панель занята. Заметно тише имени агента: вкладка про
-   агента, файл при нём — иначе десяток вкладок читается как список файлов.
-   Ширина ограничена, чтобы длинное имя не выдавливало имя агента. */
+/* Значок состояния на вкладке. Имя файла живёт справа в шапке, здесь на него
+   нет ширины — но знать, чем занят сосед, нужно не переключаясь на него. */
 .tab-claim {
-  flex: 0 1 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-  color: var(--mc-text-faint);
+  flex: none;
   font-size: 0.85em;
+  line-height: 1;
+  color: var(--mc-text-faint);
 }
 
-/* Многоточие рисует тот элемент, у которого и ширина, и переполнение.
-   Двенадцати знаков хватает на обычное имя файла с расширением. */
-.tab-claim-file {
-  max-width: 12ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Файл, которого панель ждёт: тот же приглушённый тон, отличает значок —
-   на цвет полагаться нельзя. */
 .tab-claim.is-blocked {
-  color: var(--mc-text-muted, var(--mc-text-faint));
+  color: var(--mc-text-muted);
 }
 
-/* Панель держит файл, которого ждёт сосед: подчёркиванием, а не цветом —
-   признак должен пережить и монохромную тему, и дальтонизм. */
+/* Панель держит файл, которого ждёт сосед: пунктиром, а не цветом — признак
+   должен пережить и монохромную тему, и дальтонизм. */
 .tab-claim.is-awaited {
   text-decoration: underline dotted;
   text-underline-offset: 2px;
-}
-
-.tab-claim-glyph {
-  font-size: 0.9em;
-  line-height: 1;
 }
 
 /* Агент в этой панели ждёт ответа. Цвет тот же акцентный, что и у живого
@@ -249,6 +229,52 @@
 .dv-groupview:hover .group-actions,
 .dv-groupview.dv-active-group .group-actions {
   opacity: 1;
+}
+
+/* Чем занята выбранная панель — справа в шапке, где место пустует. Слева
+   подпись жалась к имени агента и читалась как часть его названия. */
+.panel-claim {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-right: 4px;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+}
+
+.panel-claim-glyph {
+  flex: none;
+  line-height: 1;
+}
+
+/* Многоточие рисует тот элемент, у которого и ширина, и переполнение: на
+   общей строке со значком имя обрывалось на полуслове. */
+.panel-claim-file {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-claim-rest {
+  flex: none;
+  color: var(--mc-text-faint);
+}
+
+/* Агент упёрся в занятый файл: это не рядовое состояние, его видно акцентом
+   вдобавок к значку. */
+.panel-claim.is-waiting {
+  color: var(--mc-accent);
+}
+
+/* В узкой панели от подписи остаётся значок с подсказкой: лучше так, чем
+   выдавить кнопки за край. */
+@container (max-width: 320px) {
+  .panel-claim-file,
+  .panel-claim-rest {
+    display: none;
+  }
 }
 
 /* ---------- Терминальная панель ---------- */

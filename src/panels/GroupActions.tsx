@@ -4,6 +4,7 @@ import { useAppActions } from "../ui/AppActions";
 import { canMaximizePanel, togglePanelMaximized } from "../animations";
 import { platform } from "../platform";
 import { shortcutLabel } from "../hotkeys/shortcuts";
+import { PanelClaimStatus } from "./PanelClaimStatus";
 import { useI18n } from "../i18n";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 
@@ -34,6 +35,7 @@ export function GroupActions(props: IDockviewHeaderActionsProps) {
 
   return (
     <div className="group-actions">
+      {props.activePanel && <PanelClaimStatus panelId={props.activePanel.id} />}
       {canMaximize && (
         <button
           type="button"
