@@ -31,12 +31,21 @@ dir="$MODELCREW_EVENTS_DIR"
 # Заявка: спрашиваем приложение, свободен ли файл, и ждём ответ. Всё, что
 # пошло не так — отсутствие каталога, неразобранный путь, молчание — трактуем
 # как «можно»: слой согласования не должен останавливать работу из-за себя.
-if [ "$1" = "--claim" ]; then
+if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ]; then
   [ -z "$dir" ] && exit 0
   payload="$(cat)"
-  file=$(printf '%s' "$payload" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  # Ключ пути у агентов называется по-разному, и схему их полезной нагрузки
+  # никто не обещает. Пробуем известные написания по очереди; не нашли —
+  # выходим с нулём, то есть пропускаем правку.
+  for key in file_path filePath target_file absolute_path path; do
+    file=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
+    [ -n "$file" ] && break
+  done
   [ -z "$file" ] && exit 0
-  tool=$(printf '%s' "$payload" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  for key in tool_name toolName tool; do
+    tool=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
+    [ -n "$tool" ] && break
+  done
   mkdir -p "$dir" || exit 0
   id="claim-$(date +%s)-$$"
   printf '{"kind":"claim","panelId":"%s","file":"%s","tool":"%s"}' \
@@ -47,6 +56,14 @@ if [ "$1" = "--claim" ]; then
     if [ -f "$dir/$id.res" ]; then
       answer="$(cat "$dir/$id.res")"
       rm -f "$dir/$id.res"
+      # Отказ выражается по-разному: claude и grok читают код возврата 2 и
+      # stderr, antigravity ждёт решение JSON-ом в stdout.
+      if [ "$1" = "--claim-json" ]; then
+        case "$answer" in
+          *'"deny"'*) printf '{"decision":"deny"}\n'; exit 0 ;;
+          *) printf '{"decision":"allow"}\n'; exit 0 ;;
+        esac
+      fi
       case "$answer" in
         *'"stale"'*)
           printf 'Файл изменился с тех пор, как ты его прочитал: в нём успел ' >&2
@@ -67,6 +84,7 @@ if [ "$1" = "--claim" ]; then
     sleep 0.1
     i=$((i + 1))
   done
+  [ "$1" = "--claim-json" ] && printf '{"decision":"allow"}\n'
   exit 0
 fi
 
@@ -436,8 +454,21 @@ const ANTIGRAVITY_KEY: &str = "modelcrew";
 fn antigravity_block(helper: &Path) -> Value {
     serde_json::json!({
         "Stop": [{ "type": "command", "command": hook_command(helper, "antigravity") }],
+        // Заявка на файл. Структура «matcher + hooks» — из его же
+        // документации; имена инструментов свои, не как у claude. Решение он
+        // ждёт не кодом возврата, а JSON-ом в stdout — за это отвечает режим
+        // `--claim-json` хелпера.
+        "PreToolUse": [{
+            "matcher": ANTIGRAVITY_WRITE_TOOLS,
+            "hooks": [{ "type": "command", "command": hook_claim_json_command(helper) }],
+        }],
     })
 }
+
+/// Инструменты antigravity, меняющие файлы, плюс чтение — оно заявку не
+/// берёт, но нужно для сверки устаревшего чтения.
+const ANTIGRAVITY_WRITE_TOOLS: &str =
+    "write_to_file|write_file|replace_file_content|create_file|edit_file|read_file|view_file";
 
 fn install_antigravity_hook(settings: &mut Value, helper: &Path) -> bool {
     if !settings.is_object() {
@@ -692,6 +723,13 @@ fn hook_command(helper: &Path, agent: &str) -> String {
 fn hook_claim_command(helper: &Path) -> String {
     let path = helper.display().to_string().replace('\'', r"'\''");
     format!("'{path}' --claim")
+}
+
+/// То же, но для агента, который ждёт решение JSON-ом в stdout, а не кодом
+/// возврата.
+fn hook_claim_json_command(helper: &Path) -> String {
+    let path = helper.display().to_string().replace('\'', r"'\''");
+    format!("'{path}' --claim-json")
 }
 
 /// Наш ли это хук. Ищем по пути хелпера, а не по всей строке: команда могла
@@ -1177,6 +1215,31 @@ mod tests {
             since_ms: 1_000,
         }));
         assert!(serde_json::from_str::<Value>(&tricky).is_ok());
+    }
+
+    #[test]
+    fn asks_antigravity_in_the_dialect_it_answers_in() {
+        let block = antigravity_block(&helper());
+
+        // Уведомления и заявка живут в одном блоке — снимаются тоже вместе.
+        assert!(block["Stop"].is_array());
+        let entry = &block["PreToolUse"][0];
+        // Имена инструментов у него свои: матчер claude тут не сработал бы.
+        assert!(entry["matcher"].as_str().unwrap().contains("write_to_file"));
+        assert!(entry["matcher"].as_str().unwrap().contains("read_file"));
+        // Решение он ждёт JSON-ом в stdout, а не кодом возврата — за это
+        // отвечает отдельный режим хелпера.
+        assert!(entry["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("--claim-json"));
+
+        // Повторная установка того же блока файл не трогает.
+        let mut settings = serde_json::json!({});
+        assert!(install_antigravity_hook(&mut settings, &helper()));
+        assert!(!install_antigravity_hook(&mut settings, &helper()));
+        assert!(antigravity_hook_installed(&settings, &helper()));
+        assert!(remove_antigravity_hook(&mut settings, &helper()));
     }
 
     #[test]
