@@ -882,8 +882,18 @@ fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Заявка для grok: событие как у claude, но без matcher.
+///
+/// Инструменты у него зовутся по-своему — `write`, `edit`, `read`,
+/// `apply_patch`, — и матчер из claude не совпадал ни с одним: хук молчал, а
+/// заявки не работали вовсе, никак этого не показывая. Отбирать вызовы здесь
+/// нечем и незачем: хелпер сам пропускает всё, в чём не нашёл пути, так что
+/// незнакомый или новый инструмент ничего не ломает.
 fn claim_file_body(helper: &Path) -> String {
-    let body = serde_json::json!({ "hooks": { "PreToolUse": [claude_claim_entry(helper)] } });
+    let entry = serde_json::json!({
+        "hooks": [{ "type": "command", "command": hook_claim_command(helper) }],
+    });
+    let body = serde_json::json!({ "hooks": { "PreToolUse": [entry] } });
     serde_json::to_string_pretty(&body).unwrap_or_default() + "\n"
 }
 
@@ -1580,17 +1590,17 @@ mod tests {
     }
 
     #[test]
-    fn gives_grok_the_same_claim_hook_in_its_own_file() {
-        // Грок принимает формат claude и сам переводит имена инструментов в
-        // свои, поэтому запись одна на двоих.
+    fn gives_grok_the_claim_hook_without_a_matcher() {
         let body = claim_file_body(&helper());
         let parsed: Value = serde_json::from_str(&body).expect("валидный JSON");
+        let entry = &parsed["hooks"]["PreToolUse"][0];
 
-        assert_eq!(
-            parsed["hooks"]["PreToolUse"][0]["matcher"],
-            "Edit|Write|MultiEdit|Read|NotebookEdit"
-        );
-        assert!(parsed["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        // Живой запуск показал: grok зовёт инструменты своими именами —
+        // `write`, `edit`, `read`, `apply_patch`, — и матчер из claude не
+        // совпадал ни с одним. Хук молчал, заявки не работали, и снаружи это
+        // ничем не отличалось от «файл свободен».
+        assert!(entry.get("matcher").is_none(), "{entry}");
+        assert!(entry["hooks"][0]["command"]
             .as_str()
             .unwrap()
             .ends_with("--claim"));
