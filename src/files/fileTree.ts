@@ -102,3 +102,47 @@ export function watchWorkspaceTree(
     void invoke("workspace_tree_unwatch", { workspaceId }).catch(() => {});
   };
 }
+
+export function createWorkspaceEntry(
+  workspaceId: string,
+  path: string,
+  isDir: boolean,
+): Promise<void> {
+  return invoke("workspace_create_entry", { workspaceId, path, isDir });
+}
+
+export function renameWorkspaceEntry(
+  workspaceId: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  return invoke("workspace_rename_entry", { workspaceId, from, to });
+}
+
+export function deleteWorkspaceEntry(
+  workspaceId: string,
+  path: string,
+): Promise<void> {
+  return invoke("workspace_delete_entry", { workspaceId, path });
+}
+
+/// Показать в проводнике системы. Полный путь собирает бэкенд: наружу он не
+/// выходит вовсе.
+export function revealWorkspaceEntry(
+  workspaceId: string,
+  path: string,
+): Promise<void> {
+  return invoke("workspace_reveal_entry", { workspaceId, path });
+}
+
+/// Каталог, в котором лежит путь. По нему кладут созданное рядом.
+export function parentOf(path: string): string {
+  const at = path.lastIndexOf("/");
+  return at === -1 ? "" : path.slice(0, at);
+}
+
+/// Заменяет имя в пути, оставляя каталог. Переименование не двигает файл.
+export function withName(path: string, name: string): string {
+  const parent = parentOf(path);
+  return parent ? `${parent}/${name}` : name;
+}

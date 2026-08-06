@@ -21,6 +21,7 @@ pub enum ErrorCode {
     WorkspaceRootNotDirectory,
     WorkspaceRootUnavailable,
     WorkspacePathUnsupported,
+    WorkspacePathTaken,
     WorkspacePickerPathInvalid,
     TerminalPtyOpenFailed,
     TerminalShellNotFound,

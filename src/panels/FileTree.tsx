@@ -18,11 +18,23 @@ import { localizeBackendError, useI18n } from "../i18n";
 import { fileGlyph } from "../files/fileGlyph";
 import {
   ancestorsOf,
+  createWorkspaceEntry,
+  deleteWorkspaceEntry,
+  parentOf,
   readWorkspaceDir,
+  renameWorkspaceEntry,
+  revealWorkspaceEntry,
   watchWorkspaceTree,
+  withName,
   type TreeEntry,
   type TreeListing,
 } from "../files/fileTree";
+import {
+  FileTreeMenu,
+  type MenuAction,
+  type MenuTarget,
+} from "./FileTreeMenu";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { treeKeyAction } from "../files/treeKeys";
 import { ChevronRightIcon, FolderIcon } from "../ui/Icons";
 
@@ -46,6 +58,18 @@ export function FileTree(props: {
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
+  // Имя вводят прямо в дереве, на месте будущей строки: диалог посреди списка
+  // отрывает от того места, куда файл кладут.
+  const [draft, setDraft] = useState<{
+    /// Каталог, в котором заводят имя; для переименования — путь строки.
+    at: string;
+    kind: "file" | "folder" | "rename";
+    value: string;
+  } | null>(null);
+  const [doomed, setDoomed] = useState<{ path: string; name: string } | null>(
+    null,
+  );
 
   const load = useCallback(
     async (path: string) => {
@@ -145,6 +169,61 @@ export function FileTree(props: {
     }
   }, [expanded, listings, loading, load]);
 
+  const runAction = (action: MenuAction, target: MenuTarget) => {
+    setMenu(null);
+    if (action === "reveal") {
+      void revealWorkspaceEntry(workspaceId, target.path).catch((cause) =>
+        setError(localizeBackendError(cause)),
+      );
+      return;
+    }
+    if (action === "delete") {
+      setDoomed({ path: target.path, name: target.name });
+      return;
+    }
+    if (action === "rename") {
+      setDraft({ at: target.path, kind: "rename", value: target.name });
+      return;
+    }
+    // Создаём рядом: у папки — внутрь неё, у файла — в его же каталоге.
+    const parent = target.isDir ? target.path : parentOf(target.path);
+    if (target.isDir) {
+      setExpanded((current) => new Set(current).add(target.path));
+    }
+    setDraft({
+      at: parent,
+      kind: action === "newFolder" ? "folder" : "file",
+      value: "",
+    });
+  };
+
+  const commitDraft = async () => {
+    if (!draft) {
+      return;
+    }
+    const name = draft.value.trim();
+    setDraft(null);
+    if (!name) {
+      return;
+    }
+    try {
+      if (draft.kind === "rename") {
+        const to = withName(draft.at, name);
+        if (to !== draft.at) {
+          await renameWorkspaceEntry(workspaceId, draft.at, to);
+        }
+      } else {
+        const path = draft.at ? `${draft.at}/${name}` : name;
+        await createWorkspaceEntry(workspaceId, path, draft.kind === "folder");
+      }
+    } catch (cause) {
+      setError(localizeBackendError(cause));
+    }
+    // Вотчер догонит и сам, но ждать его тик после собственного действия —
+    // это заметная глазу задержка там, где результат ожидают немедленно.
+    void load(draft.kind === "rename" ? parentOf(draft.at) : draft.at);
+  };
+
   const rows = flatten(listings, expanded);
   const rootListing = listings.get(ROOT);
 
@@ -207,8 +286,31 @@ export function FileTree(props: {
       ref={treeRef}
       onKeyDown={onKeyDown}
     >
+      {draft && draft.kind !== "rename" && (
+        <NameInput
+          depth={0}
+          value={draft.value}
+          onChange={(value) => setDraft({ ...draft, value })}
+          onCommit={() => void commitDraft()}
+          onCancel={() => setDraft(null)}
+          label={t("files.namePrompt")}
+        />
+      )}
       {rows.map((row) => {
         const open = expanded.has(row.path);
+        if (draft?.kind === "rename" && draft.at === row.path) {
+          return (
+            <NameInput
+              key={row.path}
+              depth={row.depth}
+              value={draft.value}
+              onChange={(value) => setDraft({ ...draft, value })}
+              onCommit={() => void commitDraft()}
+              onCancel={() => setDraft(null)}
+              label={t("files.namePrompt")}
+            />
+          );
+        }
         const glyph = fileGlyph(row.name);
         return (
           <button
@@ -230,6 +332,17 @@ export function FileTree(props: {
             onClick={() =>
               row.isDir ? toggle(row.path) : props.onOpenFile(row.path)
             }
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setFocused(row.path);
+              setMenu({
+                path: row.path,
+                name: row.name,
+                isDir: row.isDir,
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
           >
             <span className={`file-chevron ${open ? "is-open" : ""}`}>
               {row.isDir && <ChevronRightIcon />}
@@ -245,7 +358,62 @@ export function FileTree(props: {
       rootListing.truncated ? (
         <div className="file-tree-note">{t("files.truncated")}</div>
       ) : null}
+      {menu && (
+        <FileTreeMenu
+          target={menu}
+          onPick={(action) => runAction(action, menu)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {doomed && (
+        <ConfirmDialog
+          text={t("files.deleteConfirm", { name: doomed.name })}
+          confirmLabel={t("files.delete")}
+          tone="danger"
+          onConfirm={() => {
+            const target = doomed;
+            setDoomed(null);
+            void deleteWorkspaceEntry(workspaceId, target.path)
+              .catch((cause) => setError(localizeBackendError(cause)))
+              .finally(() => void load(parentOf(target.path)));
+          }}
+          onCancel={() => setDoomed(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/// Ввод имени строкой дерева — на месте будущего файла, а не диалогом посреди
+/// экрана: так видно, куда он ляжет.
+function NameInput(props: {
+  depth: number;
+  value: string;
+  label: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <input
+      className="file-row file-name-input"
+      style={{ "--file-depth": props.depth } as CSSProperties}
+      aria-label={props.label}
+      autoFocus
+      value={props.value}
+      onChange={(event) => props.onChange(event.target.value)}
+      // Уход фокуса подтверждает, а не отменяет: набранное имя — это работа,
+      // и терять её из-за случайного щелчка мимо неправильно.
+      onBlur={props.onCommit}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          props.onCommit();
+        } else if (event.key === "Escape") {
+          props.onCancel();
+        }
+      }}
+    />
   );
 }
 

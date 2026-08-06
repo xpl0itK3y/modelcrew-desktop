@@ -248,6 +248,175 @@ fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8_000).any(|byte| *byte == 0)
 }
 
+/// Создать, переименовать, удалить — то же, что делают в файловом менеджере.
+///
+/// Всё идёт через `resolve_inside`: и цель, и, где надо, источник. Без этого
+/// переименование стало бы дырой шире открытия — «переименовать» в путь
+/// наружу означает вынести файл из проекта.
+pub fn create_entry(root: &Path, path: &str, is_dir: bool) -> CommandResult<()> {
+    let full = resolve_inside(root, path)?;
+    if path.is_empty() {
+        return Err(CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", ""));
+    }
+    // Занятое имя не перезаписываем молча: под ним лежит чужая работа.
+    if full.exists() {
+        return Err(CommandError::new(ErrorCode::WorkspacePathTaken).with_context("path", path));
+    }
+    let made = if is_dir {
+        std::fs::create_dir_all(&full)
+    } else {
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+                    .with_context("path", path)
+                    .with_debug(error)
+            })?;
+        }
+        std::fs::write(&full, "")
+    };
+    made.map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+            .with_context("path", path)
+            .with_debug(error)
+    })
+}
+
+pub fn rename_entry(root: &Path, from: &str, to: &str) -> CommandResult<()> {
+    if from.is_empty() || to.is_empty() {
+        return Err(
+            CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", from)
+        );
+    }
+    let source = resolve_inside(root, from)?;
+    let target = resolve_inside(root, to)?;
+    if !source.exists() {
+        return Err(
+            CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_context("path", from)
+        );
+    }
+    // На файловых системах, не различающих регистр, `Файл` и `файл` — один и
+    // тот же путь, и проверка на занятость сорвала бы обычное переименование
+    // ради регистра. Сверяем развёрнутые пути.
+    let same = source
+        .canonicalize()
+        .ok()
+        .zip(target.canonicalize().ok())
+        .is_some_and(|(left, right)| left == right);
+    if target.exists() && !same {
+        return Err(CommandError::new(ErrorCode::WorkspacePathTaken).with_context("path", to));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+                .with_context("path", to)
+                .with_debug(error)
+        })?;
+    }
+    std::fs::rename(&source, &target).map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+            .with_context("path", to)
+            .with_debug(error)
+    })
+}
+
+pub fn delete_entry(root: &Path, path: &str) -> CommandResult<()> {
+    if path.is_empty() {
+        return Err(CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", ""));
+    }
+    let full = resolve_inside(root, path)?;
+    // Символическую ссылку удаляем как ссылку, а не как то, куда она ведёт:
+    // `metadata` пошло бы по ней и увело в чужой каталог.
+    let meta = std::fs::symlink_metadata(&full).map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+            .with_context("path", path)
+            .with_debug(error)
+    })?;
+    let removed = if meta.is_dir() {
+        std::fs::remove_dir_all(&full)
+    } else {
+        std::fs::remove_file(&full)
+    };
+    removed.map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+            .with_context("path", path)
+            .with_debug(error)
+    })
+}
+
+/// Полный путь для показа в файловом менеджере системы.
+pub fn absolute_path(root: &Path, path: &str) -> CommandResult<String> {
+    let full = resolve_inside(root, path)?;
+    if !full.exists() {
+        return Err(
+            CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_context("path", path)
+        );
+    }
+    Ok(full.display().to_string())
+}
+
+#[tauri::command]
+pub async fn workspace_create_entry(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+    is_dir: bool,
+) -> CommandResult<()> {
+    crate::ensure_main_window(&window)?;
+    let root: PathBuf = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || create_entry(&root, &path, is_dir))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn workspace_rename_entry(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    from: String,
+    to: String,
+) -> CommandResult<()> {
+    crate::ensure_main_window(&window)?;
+    let root: PathBuf = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || rename_entry(&root, &from, &to))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn workspace_delete_entry(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> CommandResult<()> {
+    crate::ensure_main_window(&window)?;
+    let root: PathBuf = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || delete_entry(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error))?
+}
+
+/// Показывает файл в проводнике системы. Путь наружу webview не отдаём: он
+/// собирается здесь и здесь же уходит в системный вызов.
+#[tauri::command]
+pub async fn workspace_reveal_entry(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> CommandResult<()> {
+    crate::ensure_main_window(&window)?;
+    let root: PathBuf = roots.resolve(&workspace_id)?;
+    let full = absolute_path(&root, &path)?;
+    tauri_plugin_opener::reveal_item_in_dir(&full).map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+            .with_context("path", &path)
+            .with_debug(error)
+    })
+}
+
 // ---------- Слежение за деревом ----------
 
 /// Тихое окно: `npm install` или генерация кода дают тысячи событий подряд, и
@@ -519,6 +688,139 @@ mod tests {
 
         // Пустой список читался бы как «папка есть, и она пуста» — а её нет.
         assert!(read_dir(&root, "нет-такой").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_new_file_and_a_new_folder_appear_where_asked() {
+        let root = sandbox("create");
+
+        create_entry(&root, "src/новый.rs", false).unwrap();
+        create_entry(&root, "docs/раздел", true).unwrap();
+
+        assert!(root.join("src/новый.rs").is_file());
+        assert!(root.join("docs/раздел").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_occupied_name_is_refused_instead_of_overwritten() {
+        let root = sandbox("taken");
+        std::fs::write(root.join("есть.txt"), "чужая работа").unwrap();
+
+        assert!(create_entry(&root, "есть.txt", false).is_err());
+
+        // Молчаливая перезапись стоила бы человеку файла, которого он не
+        // собирался трогать.
+        assert_eq!(
+            std::fs::read_to_string(root.join("есть.txt")).unwrap(),
+            "чужая работа"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn renaming_moves_the_entry_and_makes_the_way_for_it() {
+        let root = sandbox("rename");
+        std::fs::write(root.join("было.txt"), "тело").unwrap();
+
+        rename_entry(&root, "было.txt", "папка/стало.txt").unwrap();
+
+        assert!(!root.join("было.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(root.join("папка/стало.txt")).unwrap(),
+            "тело"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn renaming_onto_someone_else_is_refused() {
+        let root = sandbox("rename-taken");
+        std::fs::write(root.join("один.txt"), "первый").unwrap();
+        std::fs::write(root.join("два.txt"), "второй").unwrap();
+
+        assert!(rename_entry(&root, "один.txt", "два.txt").is_err());
+
+        assert_eq!(
+            std::fs::read_to_string(root.join("два.txt")).unwrap(),
+            "второй"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_rename_that_only_changes_the_case_still_goes_through() {
+        let root = sandbox("case");
+        std::fs::write(root.join("файл.txt"), "тело").unwrap();
+
+        // На macOS и Windows файловая система не различает регистр, и `файл`
+        // с `Файл` — один и тот же путь. Проверка на занятость не должна
+        // срывать обычное переименование ради заглавной буквы.
+        rename_entry(&root, "файл.txt", "Файл.txt").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(root.join("Файл.txt")).unwrap(),
+            "тело"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nothing_can_be_renamed_out_of_the_project() {
+        let root = sandbox("rename-escape");
+        std::fs::write(root.join("свой.txt"), "тело").unwrap();
+
+        // Переименование — дыра шире открытия: «переименовать» наружу означает
+        // вынести файл из проекта.
+        assert!(rename_entry(&root, "свой.txt", "../угнанный.txt").is_err());
+        assert!(rename_entry(&root, "../чужой.txt", "свой2.txt").is_err());
+        assert!(root.join("свой.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_is_deleted_with_what_is_inside_it() {
+        let root = sandbox("delete");
+        std::fs::create_dir_all(root.join("папка/вложенная")).unwrap();
+        std::fs::write(root.join("папка/вложенная/файл.txt"), "").unwrap();
+
+        delete_entry(&root, "папка").unwrap();
+
+        assert!(!root.join("папка").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Удаление ссылки не должно доставать до того, куда она ведёт.
+    #[cfg(unix)]
+    #[test]
+    fn deleting_a_link_leaves_its_target_alone() {
+        let base = sandbox("delete-link");
+        let root = base.join("проект");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(base.join("чужая")).unwrap();
+        std::fs::write(base.join("чужая/важное.txt"), "чужое").unwrap();
+        std::os::unix::fs::symlink(base.join("чужая"), root.join("ссылка")).unwrap();
+
+        // Сама ссылка внутри проекта, и убрать её можно; каталог за ней —
+        // снаружи, и он должен остаться.
+        let _ = delete_entry(&root, "ссылка");
+
+        assert_eq!(
+            std::fs::read_to_string(base.join("чужая/важное.txt")).unwrap(),
+            "чужое"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn nothing_outside_the_project_can_be_created_or_deleted() {
+        let root = sandbox("ops-escape");
+
+        for path in ["../снаружи.txt", "/tmp/чужой.txt", ""] {
+            assert!(create_entry(&root, path, false).is_err(), "создание {path}");
+            assert!(delete_entry(&root, path).is_err(), "удаление {path}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

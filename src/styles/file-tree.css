@@ -370,3 +370,65 @@ body.is-resizing .resize-handle {
     transition: none;
   }
 }
+
+/* Меню строки дерева. */
+
+.file-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-surface-raised);
+  box-shadow: 0 12px 32px var(--mc-shadow);
+}
+
+.file-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mc-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-menu-item:hover,
+.file-menu-item:focus-visible {
+  background: var(--mc-hover);
+  outline: 0;
+}
+
+/* Разрушительное отделено чертой: промах по соседнему пункту не должен
+   стоить файла. */
+.file-menu-item.is-danger {
+  margin-top: 4px;
+  border-top: 1px solid var(--mc-panel-border);
+  border-radius: 0 0 5px 5px;
+  color: var(--mc-danger);
+}
+
+.file-menu-item.is-danger:hover,
+.file-menu-item.is-danger:focus-visible {
+  background: var(--mc-danger-hover);
+}
+
+.file-name-input {
+  /* Встаёт ровно на место будущей строки, поэтому берёт её геометрию и
+     добавляет только рамку ввода. */
+  padding-right: 8px;
+  border: 1px solid var(--mc-accent-border);
+  border-radius: 4px;
+  background: var(--mc-panel);
+  color: var(--mc-text-bright);
+  font-size: 12.5px;
+}
+
+.file-name-input:focus-visible {
+  outline: 0;
+}

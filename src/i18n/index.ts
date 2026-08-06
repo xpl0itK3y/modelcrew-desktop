@@ -129,6 +129,7 @@ const backendErrorKeys: Record<string, MessageKey> = {
   invalid_locale: "error.invalidLocale",
   app_menu_update_failed: "error.appMenuUpdateFailed",
   workspace_invalid_id: "error.workspaceInvalidId",
+  workspace_path_taken: "error.workspacePathTaken",
   workspace_root_conflict: "error.workspaceRootConflict",
   workspace_root_not_registered: "error.workspaceRootNotRegistered",
   workspace_root_identity_changed: "error.workspaceRootIdentityChanged",

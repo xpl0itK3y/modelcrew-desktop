@@ -6,6 +6,10 @@ import { setLocale } from "../i18n";
 import type { TreeListing } from "../files/fileTree";
 
 const readWorkspaceDir = vi.fn();
+const createEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
+const renameEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
+const deleteEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
+const revealEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
 /// Сообщить дереву о правке на диске так, как это делает вотчер.
 let announce: ((dirs: string[], partial: boolean) => void) | null = null;
 const stopWatching = vi.fn();
@@ -17,6 +21,10 @@ vi.mock("../files/fileTree", async () => {
   return {
     ...actual,
     readWorkspaceDir: (...args: unknown[]) => readWorkspaceDir(...args),
+    createWorkspaceEntry: (...args: unknown[]) => createEntry(...args),
+    renameWorkspaceEntry: (...args: unknown[]) => renameEntry(...args),
+    deleteWorkspaceEntry: (...args: unknown[]) => deleteEntry(...args),
+    revealWorkspaceEntry: (...args: unknown[]) => revealEntry(...args),
     watchWorkspaceTree: (
       _id: string,
       onChanged: (dirs: string[], partial: boolean) => void,
@@ -63,6 +71,9 @@ function names(): string[] {
 beforeEach(() => {
   readWorkspaceDir.mockReset();
   stopWatching.mockReset();
+  for (const spy of [createEntry, renameEntry, deleteEntry, revealEntry]) {
+    spy.mockClear();
+  }
   announce = null;
   setLocale("ru");
 });
@@ -265,6 +276,124 @@ describe("FileTree", () => {
       .filter((row) => row.getAttribute("tabindex") === "0");
     expect(stops).toHaveLength(1);
     expect(stops[0].getAttribute("data-path")).toBe("a.txt");
+  });
+
+  /// Правый щелчок по строке и выбор пункта меню.
+  async function pick(row: string, item: string) {
+    fireEvent.contextMenu(screen.getByTitle(row));
+    await waitFor(() => expect(screen.getByRole("menu")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+  }
+
+  it("creates a file inside the folder it was asked from", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+
+    await pick("src", "Создать файл");
+    fireEvent.change(screen.getByLabelText("Имя"), {
+      target: { value: "новый.rs" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+
+    // У папки — внутрь неё: спрашивали из неё, туда и кладём.
+    await waitFor(() =>
+      expect(createEntry).toHaveBeenCalledWith("w1", "src/новый.rs", false),
+    );
+  });
+
+  it("creates a file beside the one it was asked from", async () => {
+    serve({ "": listing([["src", true]]), src: listing([["main.rs", false]], "src") });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs"]));
+
+    await pick("src/main.rs", "Создать файл");
+    fireEvent.change(screen.getByLabelText("Имя"), {
+      target: { value: "сосед.rs" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+
+    // У файла — в его каталог, а не внутрь самого файла.
+    await waitFor(() =>
+      expect(createEntry).toHaveBeenCalledWith("w1", "src/сосед.rs", false),
+    );
+  });
+
+  it("renames without moving the entry out of its folder", async () => {
+    serve({ "": listing([["src", true]]), src: listing([["было.rs", false]], "src") });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "было.rs"]));
+
+    await pick("src/было.rs", "Переименовать");
+    fireEvent.change(screen.getByLabelText("Имя"), {
+      target: { value: "стало.rs" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(renameEntry).toHaveBeenCalledWith("w1", "src/было.rs", "src/стало.rs"),
+    );
+  });
+
+  it("asks before deleting anything", async () => {
+    serve({ "": listing([["важное.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["важное.txt"]));
+
+    await pick("важное.txt", "Удалить");
+
+    // Удаление необратимо, и один промах по пункту меню не должен его
+    // выполнять.
+    expect(deleteEntry).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «важное.txt»/)).toBeInTheDocument(),
+    );
+  });
+
+  it("deletes once the question is answered", async () => {
+    serve({ "": listing([["лишнее.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["лишнее.txt"]));
+    await pick("лишнее.txt", "Удалить");
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «лишнее.txt»/)).toBeInTheDocument(),
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Удалить" });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    await waitFor(() =>
+      expect(deleteEntry).toHaveBeenCalledWith("w1", "лишнее.txt"),
+    );
+  });
+
+  it("drops the name it was typing when told to", async () => {
+    serve({ "": listing([["a.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt"]));
+
+    await pick("a.txt", "Создать файл");
+    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "зря" } });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Escape" });
+
+    expect(createEntry).not.toHaveBeenCalled();
+  });
+
+  it("hands the path to the system to reveal", async () => {
+    serve({ "": listing([["a.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt"]));
+
+    await pick("a.txt", "Показать в системе");
+
+    await waitFor(() => expect(revealEntry).toHaveBeenCalledWith("w1", "a.txt"));
   });
 
   it("says when a folder was too big to show whole", async () => {

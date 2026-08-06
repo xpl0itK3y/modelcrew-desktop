@@ -37,7 +37,8 @@ use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
 use file_tree::{
-    workspace_read_dir, workspace_read_file, workspace_tree_unwatch, workspace_tree_watch,
+    workspace_create_entry, workspace_delete_entry, workspace_read_dir, workspace_read_file,
+    workspace_rename_entry, workspace_reveal_entry, workspace_tree_unwatch, workspace_tree_watch,
     workspace_write_file, TreeWatchState,
 };
 use git_branches::{
@@ -1009,8 +1010,12 @@ pub fn run() {
             git_save_commit_patch,
             github_commit_url,
             git_reword_commit,
+            workspace_create_entry,
+            workspace_delete_entry,
             workspace_read_dir,
             workspace_read_file,
+            workspace_rename_entry,
+            workspace_reveal_entry,
             workspace_tree_unwatch,
             workspace_tree_watch,
             workspace_write_file,
@@ -1156,11 +1161,15 @@ mod tests {
         "updater_install_target",
         "updater_prepare_linux_package",
         "updater_prepare_self_update",
+        "workspace_create_entry",
+        "workspace_delete_entry",
         "workspace_pick_root",
         "workspace_read_dir",
         "workspace_read_file",
         "workspace_reconcile_roots",
         "workspace_register_root",
+        "workspace_rename_entry",
+        "workspace_reveal_entry",
         "workspace_tree_unwatch",
         "workspace_tree_watch",
         "workspace_unregister_root",
@@ -1423,8 +1432,12 @@ mod tests {
             "git_changes_unwatch",
             // Снятие вотчера дерева — тоже: оно лишь выбрасывает ручку.
             "workspace_tree_unwatch",
+            "workspace_create_entry",
+            "workspace_delete_entry",
             "workspace_pick_root",
             "workspace_register_root",
+            "workspace_rename_entry",
+            "workspace_reveal_entry",
             "workspace_tree_unwatch",
             "workspace_tree_watch",
             "workspace_unregister_root",
