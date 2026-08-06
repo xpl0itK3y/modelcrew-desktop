@@ -17,7 +17,7 @@ import "dockview/dist/styles/dockview.css";
 import { FileTree } from "./panels/FileTree";
 import { FileEditor } from "./panels/FileEditor";
 import { ResizeHandle } from "./ui/ResizeHandle";
-import { closeUnder } from "./files/openFiles";
+import { closeUnder, moveUnder } from "./files/openFiles";
 import {
   clampWidth,
   loadWidth,
@@ -498,6 +498,22 @@ export default function App() {
     });
   }, []);
 
+  // Переименовали — вкладка едет следом. Закрыть её было бы проще, но файл
+  // никуда не делся: его только что назвали по-новому.
+  const moveFiles = useCallback((from: string, to: string) => {
+    setOpenFiles((current) => {
+      const next = moveUnder(
+        { files: current, active: activeFileRef.current },
+        from,
+        to,
+      );
+      if (next.files !== current) {
+        setActiveFilePath(next.active);
+      }
+      return next.files;
+    });
+  }, []);
+
   // Дерево не исчезает рывком: спрятали — колонка съезжается, и только потом
   // её снимают.
   const treePresence = useAnimatedPresence(
@@ -660,6 +676,7 @@ export default function App() {
               onOpenFile={openFile}
               onClose={() => setFilesVisible(false)}
               onRemoved={dropFiles}
+              onMoved={moveFiles}
             />
           </aside>
         )}

@@ -62,6 +62,8 @@ export function FileTree(props: {
   onClose?: () => void;
   /// Путь исчез по воле человека: вкладку с ним держать больше не за что.
   onRemoved?: (path: string) => void;
+  /// Путь переехал: вкладка едет следом, а не остаётся на старом имени.
+  onMoved?: (from: string, to: string) => void;
 }) {
   const { t } = useI18n();
   const { workspaceId } = props;
@@ -195,6 +197,36 @@ export function FileTree(props: {
     }
   };
 
+  // Путь исчез или переехал: всё, что дерево о нём помнит, относится к тому,
+  // чего больше нет. Прочитанное содержимое, раскрытие и отметка об отказе —
+  // и то, и другое, и третье про мёртвую ветку.
+  const forget = (path: string) => {
+    const gone = (key: string) => key === path || key.startsWith(`${path}/`);
+    setListings((current) => {
+      const next = new Map(current);
+      for (const key of current.keys()) {
+        if (gone(key)) {
+          next.delete(key);
+        }
+      }
+      return next.size === current.size ? current : next;
+    });
+    setExpanded((current) => {
+      const next = new Set(current);
+      for (const key of current) {
+        if (gone(key)) {
+          next.delete(key);
+        }
+      }
+      return next.size === current.size ? current : next;
+    });
+    for (const key of [...refusedRef.current]) {
+      if (gone(key)) {
+        refusedRef.current.delete(key);
+      }
+    }
+  };
+
   // Открытый файл виден в дереве, даже если его папки свёрнуты: иначе подсветка
   // «где я» показывает пустоту, а искать файл руками приходится каждый раз.
   const activePath = props.activePath ?? null;
@@ -293,6 +325,11 @@ export function FileTree(props: {
         const to = withName(draft.at, name);
         if (to !== draft.at) {
           await renameWorkspaceEntry(workspaceId, draft.at, to);
+          // Открытый файл переехал вместе с именем. Вкладка, оставшаяся на
+          // старом пути, показывает файл, которого нет, и первое же сохранение
+          // из неё создаёт его заново рядом с переименованным.
+          forget(draft.at);
+          props.onMoved?.(draft.at, to);
         }
       } else {
         const path = draft.at ? `${draft.at}/${name}` : name;
@@ -641,7 +678,10 @@ export function FileTree(props: {
             const next = rows[at + 1] ?? rows[at - 1] ?? null;
             setFocused(next ? next.path : null);
             void deleteWorkspaceEntry(workspaceId, target.path)
-              .then(() => props.onRemoved?.(target.path))
+              .then(() => {
+                forget(target.path);
+                props.onRemoved?.(target.path);
+              })
               .catch((cause) => failed(cause, false))
               .finally(() => void load(parentOf(target.path)));
           }}

@@ -1,7 +1,7 @@
 // Что остаётся открытым после удаления.
 
 import { describe, expect, it } from "vitest";
-import { closeOne, closeUnder } from "./openFiles";
+import { closeOne, closeUnder, moveUnder } from "./openFiles";
 
 const OPEN = {
   files: ["src/a.rs", "src/panels/b.tsx", "README.md"],
@@ -67,5 +67,35 @@ describe("closeUnder", () => {
       "src/panels/b.tsx",
       "README.md",
     ]);
+  });
+});
+
+describe("moveUnder", () => {
+  it("takes the tab to the new name", () => {
+    // Иначе вкладка осталась бы на пути, которого больше нет, а сохранение
+    // воссоздало бы старый файл рядом с переименованным.
+    expect(moveUnder(OPEN, "src/a.rs", "src/api.rs")).toEqual({
+      files: ["src/api.rs", "src/panels/b.tsx", "README.md"],
+      active: "src/panels/b.tsx",
+    });
+  });
+
+  it("takes everything that lived inside a renamed folder", () => {
+    expect(moveUnder(OPEN, "src/panels", "src/views")).toEqual({
+      files: ["src/a.rs", "src/views/b.tsx", "README.md"],
+      active: "src/views/b.tsx",
+    });
+  });
+
+  it("does not mistake a neighbour for a child", () => {
+    const state = { files: ["src/a.rs", "src2/b.rs"], active: "src2/b.rs" };
+    expect(moveUnder(state, "src", "lib")).toEqual({
+      files: ["lib/a.rs", "src2/b.rs"],
+      active: "src2/b.rs",
+    });
+  });
+
+  it("keeps the very same state when nothing moved", () => {
+    expect(moveUnder(OPEN, "docs", "notes")).toBe(OPEN);
   });
 });

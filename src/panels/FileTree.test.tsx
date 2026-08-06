@@ -386,6 +386,53 @@ describe("FileTree", () => {
     );
   });
 
+  it("tells the editor that the file it shows has moved", async () => {
+    const moved = vi.fn();
+    serve({ "": listing([["было.rs", false]]) });
+    render(
+      <FileTree workspaceId="w1" onOpenFile={() => {}} onMoved={moved} />,
+    );
+    await waitFor(() => expect(names()).toEqual(["было.rs"]));
+
+    await pick("было.rs", "Переименовать");
+    fireEvent.change(screen.getByLabelText("Имя"), {
+      target: { value: "стало.rs" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+
+    // Без этого вкладка осталась бы на пути, которого больше нет, и первое же
+    // сохранение из неё создало бы старый файл заново рядом с новым.
+    await waitFor(() => expect(moved).toHaveBeenCalledWith("было.rs", "стало.rs"));
+  });
+
+  it("forgets what it had read under a path that is gone", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["старое.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "старое.rs"]));
+
+    await pick("src", "Удалить");
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await waitFor(() => expect(deleteEntry).toHaveBeenCalled());
+
+    // Папку с тем же именем завели заново — содержимое у неё другое.
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["новое.rs", false]], "src"),
+    });
+    act(() => announce?.([""], false));
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+
+    // Список удалённой папки остался бы в памяти под тем же путём, и раскрытие
+    // показало бы файлы, которых нет, не сходив на диск вовсе.
+    await waitFor(() => expect(names()).toEqual(["src", "новое.rs"]));
+  });
+
   it("asks before deleting anything", async () => {
     serve({ "": listing([["важное.txt", false]]) });
     render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);

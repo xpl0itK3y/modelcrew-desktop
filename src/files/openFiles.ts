@@ -38,3 +38,27 @@ export function closeUnder(state: OpenFiles, removed: string): OpenFiles {
 export function closeOne(state: OpenFiles, path: string): OpenFiles {
   return closeUnder({ ...state }, path);
 }
+
+/// Путь переехал: файл переименовали или переименовали папку над ним.
+///
+/// Вкладка едет следом. Закрыть её было бы проще, но переименование — не
+/// удаление: файл на месте, человек его только что назвал по-новому, и терять
+/// его из виду за это неправильно.
+export function moveUnder(
+  state: OpenFiles,
+  from: string,
+  to: string,
+): OpenFiles {
+  const moved = (file: string) =>
+    file === from ? to : file.startsWith(`${from}/`)
+      ? `${to}${file.slice(from.length)}`
+      : file;
+  const files = state.files.map(moved);
+  if (files.every((file, at) => file === state.files[at])) {
+    return state;
+  }
+  return {
+    files,
+    active: state.active === null ? null : moved(state.active),
+  };
+}
