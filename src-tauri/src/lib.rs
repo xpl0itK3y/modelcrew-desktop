@@ -15,6 +15,7 @@ mod agent_sessions;
 mod clipboard_images;
 mod command_error;
 mod crew;
+mod file_tree;
 mod git_branches;
 mod git_changes;
 mod git_history;
@@ -35,6 +36,7 @@ use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
+use file_tree::workspace_read_dir;
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
     git_rename_branch, git_switch_branch,
@@ -1003,6 +1005,7 @@ pub fn run() {
             git_save_commit_patch,
             github_commit_url,
             git_reword_commit,
+            workspace_read_dir,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,
@@ -1056,6 +1059,7 @@ mod tests {
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("crew.rs", include_str!("crew.rs")),
+        ("file_tree.rs", include_str!("file_tree.rs")),
         ("git_branches.rs", include_str!("git_branches.rs")),
         ("git_changes.rs", include_str!("git_changes.rs")),
         ("git_history.rs", include_str!("git_history.rs")),
@@ -1145,6 +1149,7 @@ mod tests {
         "updater_prepare_linux_package",
         "updater_prepare_self_update",
         "workspace_pick_root",
+        "workspace_read_dir",
         "workspace_reconcile_roots",
         "workspace_register_root",
         "workspace_unregister_root",
