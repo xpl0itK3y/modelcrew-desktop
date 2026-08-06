@@ -73,7 +73,10 @@ if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilo
         rm -f "$dir/$id.res"
         return 0
       fi
-      sleep 0.1
+      # Доля секунды — не по POSIX. Там, где sleep её не принимает, цикл без
+      # запасного хода пролетел бы мгновенно, ответа не дождался и молча
+      # пропустил правку занятого файла.
+      sleep 0.1 2>/dev/null || { sleep 1; i=$((i + 9)); }
       i=$((i + 1))
     done
   }
@@ -174,6 +177,28 @@ pub fn helper_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         .map(|base| base.join(HELPER_NAME))
 }
 
+/// Чем звать нас на этой платформе: скриптом или самим приложением.
+///
+/// Путь к себе спрашиваем у системы, а не складываем из каталога данных: у
+/// установленного приложения они лежат в разных местах, и на Windows это
+/// вообще разные диски.
+fn native_helper(app: &tauri::AppHandle) -> Option<Helper> {
+    helper_path(app).map(native_helper_at)
+}
+
+/// То же решение там, где ручки приложения нет: путь к скрипту известен, а
+/// путь к себе спрашиваем у системы.
+fn native_helper_at(script: PathBuf) -> Helper {
+    if cfg!(windows) {
+        // Не нашли себя — остаётся скрипт: он хотя бы сработает у тех, у кого
+        // стоит Git Bash. Молчать в такой ситуации хуже.
+        return std::env::current_exe()
+            .map(Helper::program)
+            .unwrap_or_else(|_| Helper::script(script));
+    }
+    Helper::script(script)
+}
+
 /// Готовит каталог событий и хелпер и запускает приём событий.
 pub fn install(app: &tauri::AppHandle) {
     let Some(dir) = events_dir(app) else {
@@ -193,14 +218,21 @@ fn write_helper(app: &tauri::AppHandle) {
         return;
     };
     // Перезаписываем всегда: скрипт мог устареть после обновления приложения.
-    if std::fs::write(&path, HELPER_SCRIPT).is_err() {
+    // Через временный файл: панель прошлого запуска или второе окно могут
+    // исполнять хелпер прямо сейчас, а усечённый скрипт оболочка выполнит
+    // молча — и оборванная ветка ответит «можно» на занятый файл.
+    let temp = path.with_extension("tmp");
+    if std::fs::write(&temp, HELPER_SCRIPT).is_err() {
         return;
     }
+    // Права ставим до подмены: иначе есть миг, когда скрипт уже на месте, но
+    // ещё не исполняемый.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        let _ = std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755));
     }
+    let _ = std::fs::rename(&temp, &path);
 }
 
 fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
@@ -221,14 +253,22 @@ fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
-            let fresh = entry
+            let age = entry
                 .metadata()
                 .and_then(|meta| meta.modified())
-                .map(|modified| modified.elapsed().unwrap_or_default() < MAX_EVENT_AGE)
-                .unwrap_or(true);
+                .map(|modified| modified.elapsed().unwrap_or_default())
+                .unwrap_or_default();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                // Ответ на заявку и временные файлы убирает за собой хелпер,
+                // но он мог не дождаться ответа или погибнуть вместе с
+                // панелью. Без уборки каталог растёт без конца, и его обход
+                // дорожает с каждым тиком.
+                if age > MAX_EVENT_AGE {
+                    let _ = std::fs::remove_file(&path);
+                }
+                continue;
+            }
+            let fresh = age < MAX_EVENT_AGE;
             let raw = std::fs::read_to_string(&path);
             // Файл забираем в любом случае: иначе битое событие останется
             // навсегда и watcher будет спотыкаться о него каждый тик.
@@ -296,8 +336,14 @@ fn parse_claim_request(raw: &str) -> Option<ClaimRequest> {
 /// из-за того, что панель не нашлась или путь не разобрался.
 fn answer_claim(app: &tauri::AppHandle, request_path: &Path, request: ClaimRequest) {
     let answer = claim_answer(&claim_decision(app, &request));
-    let answer_path = request_path.with_extension("res");
-    let _ = std::fs::write(&answer_path, answer);
+    // Через временный файл: хелпер ждёт появления `.res` и читает его сразу,
+    // а в половине ответа не будет ни «deny», ни «stale» — то есть правка
+    // занятого файла прошла бы.
+    let temp = request_path.with_extension("res-tmp");
+    if std::fs::write(&temp, answer).is_err() {
+        return;
+    }
+    let _ = std::fs::rename(&temp, request_path.with_extension("res"));
 }
 
 /// Ответ в том виде, в каком его читает шелл-хелпер. Формат — часть договора
@@ -358,11 +404,24 @@ fn relative_to_root(file: &Path, root: &Path) -> Option<String> {
 
 /// Файла может ещё не быть — тогда разворачиваем ту часть пути, что есть.
 fn resolve_links(file: &Path) -> Option<PathBuf> {
-    if let Ok(path) = std::fs::canonicalize(file) {
-        return Some(path);
+    // Разворачиваем ближайшего существующего предка и дописываем остаток:
+    // canonicalize требует, чтобы путь существовал, а заявка приходит как раз
+    // перед созданием файла. Предок может быть далеко — агент создаёт файл
+    // сразу вместе с каталогом, которого ещё нет; на одном шаге вверх такая
+    // правка оставалась без заявки.
+    let mut tail = Vec::new();
+    let mut current = file;
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(current) {
+            let mut path = resolved;
+            for name in tail.iter().rev() {
+                path.push(name);
+            }
+            return Some(path);
+        }
+        tail.push(current.file_name()?);
+        current = current.parent()?;
     }
-    let parent = std::fs::canonicalize(file.parent()?).ok()?;
-    Some(parent.join(file.file_name()?))
 }
 
 fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> ClaimVerdict {
@@ -532,7 +591,7 @@ const ANTIGRAVITY_KEY: &str = "modelcrew";
 /// `{matcher, hooks:[…]}`, как у claude, считается ошибкой — и роняет разбор
 /// всего файла, а не только своей записи: «invalid hook … command hook must
 /// specify 'command'» в его логе, и ни один хук больше не работает.
-fn antigravity_block(helper: &Path) -> Value {
+fn antigravity_block(helper: &Helper) -> Value {
     serde_json::json!({
         "Stop": [{ "type": "command", "command": hook_command(helper, "antigravity") }],
         // Заявка на файл. Структура «matcher + hooks» — из его же
@@ -554,7 +613,7 @@ fn antigravity_block(helper: &Path) -> Value {
 const ANTIGRAVITY_WRITE_TOOLS: &str = "write_to_file|replace_file_content|create_file|edit_file|\
      read_file|view_file|view_code_item";
 
-fn install_antigravity_hook(settings: &mut Value, helper: &Path) -> bool {
+fn install_antigravity_hook(settings: &mut Value, helper: &Helper) -> bool {
     if !settings.is_object() {
         *settings = Value::Object(Default::default());
     }
@@ -567,13 +626,13 @@ fn install_antigravity_hook(settings: &mut Value, helper: &Path) -> bool {
     true
 }
 
-fn remove_antigravity_hook(settings: &mut Value, _helper: &Path) -> bool {
+fn remove_antigravity_hook(settings: &mut Value, _helper: &Helper) -> bool {
     settings
         .as_object_mut()
         .is_some_and(|root| root.remove(ANTIGRAVITY_KEY).is_some())
 }
 
-fn antigravity_hook_installed(settings: &Value, helper: &Path) -> bool {
+fn antigravity_hook_installed(settings: &Value, helper: &Helper) -> bool {
     settings.get(ANTIGRAVITY_KEY) == Some(&antigravity_block(helper))
 }
 
@@ -604,7 +663,7 @@ const GROK_SECTION: &str = "\n\
     only_unfocused = false\n\
     timeout_secs = 10\n";
 
-fn grok_section(helper: &Path) -> String {
+fn grok_section(helper: &Helper) -> String {
     // Кавычки внутри TOML-строки экранируются, иначе значение обрывается.
     let command = format!(
         "{} '{{\\\"type\\\":\\\"$GROK_EVENT\\\"}}'",
@@ -618,22 +677,26 @@ fn grok_section(helper: &Path) -> String {
 const CURSOR_EVENT: &str = "stop";
 const CURSOR_CLAIM_EVENT: &str = "preToolUse";
 
-fn cursor_hook_entry(helper: &Path) -> Value {
+fn cursor_hook_entry(helper: &Helper) -> Value {
     serde_json::json!({
         // Нагрузку отдаём аргументом: stdin cursor хуку не передаёт, и
         // хелпер ушёл бы читать терминал и не вернулся.
-        "command": format!("{} '{{\"type\":\"stop\"}}'", hook_command(helper, "cursor")),
+        "command": format!(
+            "{} {}",
+            hook_command(helper, "cursor"),
+            helper.quote(r#"{"type":"stop"}"#)
+        ),
     })
 }
 
-fn cursor_hook_is_ours(entry: &Value, helper: &Path) -> bool {
+fn cursor_hook_is_ours(entry: &Value, helper: &Helper) -> bool {
     entry
         .get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| command.contains(&helper.display().to_string()))
+        .is_some_and(|command| command.contains(&helper.needle()))
 }
 
-fn install_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
+fn install_cursor_hook(settings: &mut Value, helper: &Helper) -> bool {
     if !settings.is_object() {
         *settings = Value::Object(Default::default());
     }
@@ -665,7 +728,7 @@ fn install_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
 
 /// Как и у claude: запись заменяется, если отличается от нужной, — иначе
 /// исправления не доезжают до тех, у кого конфиг уже создан.
-fn put_our_cursor_entry(list: &mut Vec<Value>, helper: &Path, expected: Value) -> bool {
+fn put_our_cursor_entry(list: &mut Vec<Value>, helper: &Helper, expected: Value) -> bool {
     match list
         .iter_mut()
         .find(|entry| cursor_hook_is_ours(entry, helper))
@@ -686,11 +749,11 @@ fn put_our_cursor_entry(list: &mut Vec<Value>, helper: &Path, expected: Value) -
 /// как claude — `tool_name` и `tool_input.file_path`, — и отказ читает так же:
 /// код возврата 2, причина из stderr доходит до агента дословно. Поля matcher
 /// у него нет: лишние вызовы отсеивает сам хелпер.
-fn cursor_claim_entry(helper: &Path) -> Value {
+fn cursor_claim_entry(helper: &Helper) -> Value {
     serde_json::json!({ "command": hook_claim_command(helper) })
 }
 
-fn remove_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
+fn remove_cursor_hook(settings: &mut Value, helper: &Helper) -> bool {
     let Some(hooks) = settings
         .as_object_mut()
         .and_then(|root| root.get_mut("hooks"))
@@ -713,7 +776,7 @@ fn remove_cursor_hook(settings: &mut Value, helper: &Path) -> bool {
     changed
 }
 
-fn cursor_hook_installed(settings: &Value, helper: &Path) -> bool {
+fn cursor_hook_installed(settings: &Value, helper: &Helper) -> bool {
     [CURSOR_EVENT, CURSOR_CLAIM_EVENT].iter().all(|event| {
         settings
             .get("hooks")
@@ -736,7 +799,7 @@ fn kilo_home(home: &Path) -> Option<PathBuf> {
 /// Секция, дописываемая в конец чужого конфига. Пара «маркер, блок»: по
 /// маркеру видно, что секция уже есть — и неважно, наша она или своя.
 /// Настройку, сделанную руками, мы не трогаем.
-fn append_section(agent: &str, helper: &Path) -> Option<(&'static str, String)> {
+fn append_section(agent: &str, helper: &Helper) -> Option<(&'static str, String)> {
     match agent {
         // Схема из самого бинарника grok:
         //   method = auto|osc9|osc99|osc777|bel|none
@@ -775,7 +838,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
 /// Свой отдельный файл у агента, где чужого содержимого не бывает: ставить
 /// его — записать, снимать — удалить. Слияние нужно только там, где мы
 /// вписываемся в общий файл настроек, как у claude.
-fn own_file_body(agent: &str, helper: &Path) -> Option<String> {
+fn own_file_body(agent: &str, helper: &Helper) -> Option<String> {
     match agent {
         // Формат из документации GitHub: version 1 и событие завершения хода.
         "copilot" => Some(
@@ -889,17 +952,83 @@ export const ModelCrewNotify = async () => ({
 });
 "#;
 
-/// Команда для конфига агента. Путь к хелперу лежит в «Application Support» —
-/// с пробелом, поэтому берётся в кавычки; одинарная кавычка внутри пути
-/// закрывается по-шелловски.
-fn hook_command(helper: &Path, agent: &str) -> String {
-    let path = helper.display().to_string().replace('\'', r"'\''");
-    format!("'{path}' {agent}")
+/// Чем именно агент нас позовёт.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Launch {
+    /// POSIX: отдельный скрипт рядом с данными приложения. Проверен живьём на
+    /// восьми агентах, менять там нечего.
+    Script,
+    /// Windows: само приложение. `.sh` там не программа вовсе, а bash есть не
+    /// у всех — мы его лишь предлагаем поставить. Exe же запускает любая
+    /// оболочка: и cmd, и PowerShell, и bash.
+    Program,
 }
 
-fn hook_claim_command(helper: &Path) -> String {
-    let path = helper.display().to_string().replace('\'', r"'\''");
-    format!("'{path}' --claim")
+/// Путь вместе со способом запуска: порознь они разъезжались бы по дороге
+/// через дюжину функций, а команда, собранная не для той платформы, молча не
+/// запускалась бы.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct Helper {
+    path: PathBuf,
+    launch: Launch,
+}
+
+impl Helper {
+    fn script(path: PathBuf) -> Self {
+        Self {
+            path,
+            launch: Launch::Script,
+        }
+    }
+
+    fn program(path: PathBuf) -> Self {
+        Self {
+            path,
+            launch: Launch::Program,
+        }
+    }
+
+    /// Дополнительный аргумент команды — например полезная нагрузка, которую
+    /// агент не передаёт сам. Кавычки те же, что и у пути: одинарные cmd
+    /// отдал бы программе как есть, вместе с самими кавычками.
+    fn quote(&self, arg: &str) -> String {
+        match self.launch {
+            Launch::Script => format!("'{}'", arg.replace('\'', r"'\''")),
+            Launch::Program => format!("\"{}\"", arg.replace('"', "\\\"")),
+        }
+    }
+
+    /// Строка, по которой мы узнаём свой хук в чужом конфиге.
+    fn needle(&self) -> String {
+        self.path.display().to_string()
+    }
+
+    /// Команда с нашими аргументами.
+    ///
+    /// Кавычки разные не для красоты: путь лежит в каталоге с пробелом, и
+    /// одинарные кавычки cmd не понимает вовсе — он передал бы их программе
+    /// как часть имени файла.
+    fn command(&self, args: &str) -> String {
+        match self.launch {
+            Launch::Script => {
+                let path = self.needle().replace('\'', r"'\''");
+                format!("'{path}' {args}")
+            }
+            Launch::Program => {
+                let path = self.needle();
+                format!("\"{path}\" {} {args}", crate::agent_hook_cli::HOOK_FLAG)
+            }
+        }
+    }
+}
+
+/// Команда для конфига агента.
+fn hook_command(helper: &Helper, agent: &str) -> String {
+    helper.command(agent)
+}
+
+fn hook_claim_command(helper: &Helper) -> String {
+    helper.command(crate::agent_hook_cli::ClaimFlag::Plain.arg())
 }
 
 /// То же, но для агента, который ждёт решение JSON-ом в stdout, а не кодом
@@ -907,7 +1036,7 @@ fn hook_claim_command(helper: &Path) -> String {
 /// Метка нашего блока в конфиге kimi: по ней видно, что секция уже стоит.
 const KIMI_MARKER: &str = "# modelcrew: уведомления и заявки на файлы";
 
-fn kimi_section(helper: &Path) -> String {
+fn kimi_section(helper: &Helper) -> String {
     format!(
         "\n{KIMI_MARKER}\n\
          [[hooks]]\n\
@@ -925,25 +1054,22 @@ fn kimi_section(helper: &Path) -> String {
 
 /// У codex путь лежит внутри текста патча, а не отдельным ключом — разбор
 /// у хелпера отдельный.
-fn hook_claim_codex_command(helper: &Path) -> String {
-    let path = helper.display().to_string().replace('\'', r"'\''");
-    format!("'{path}' --claim-codex")
+fn hook_claim_codex_command(helper: &Helper) -> String {
+    helper.command(crate::agent_hook_cli::ClaimFlag::Codex.arg())
 }
 
-fn hook_claim_copilot_command(helper: &Path) -> String {
-    let path = helper.display().to_string().replace('\'', r"'\''");
-    format!("'{path}' --claim-copilot")
+fn hook_claim_copilot_command(helper: &Helper) -> String {
+    helper.command(crate::agent_hook_cli::ClaimFlag::Copilot.arg())
 }
 
-fn hook_claim_json_command(helper: &Path) -> String {
-    let path = helper.display().to_string().replace('\'', r"'\''");
-    format!("'{path}' --claim-json")
+fn hook_claim_json_command(helper: &Helper) -> String {
+    helper.command(crate::agent_hook_cli::ClaimFlag::Json.arg())
 }
 
 /// Наш ли это хук. Ищем по пути хелпера, а не по всей строке: команда могла
 /// быть записана прежней версией приложения с другим хвостом.
-fn is_our_hook(entry: &Value, helper: &Path) -> bool {
-    let needle = helper.display().to_string();
+fn is_our_hook(entry: &Value, helper: &Helper) -> bool {
+    let needle = helper.needle();
     entry
         .get("hooks")
         .and_then(Value::as_array)
@@ -1003,7 +1129,7 @@ fn back_up_once(path: &Path) {
     let _ = std::fs::copy(path, backup);
 }
 
-fn claude_hook_entry(helper: &Path) -> Value {
+fn claude_hook_entry(helper: &Helper) -> Value {
     serde_json::json!({
         // Пустая строка — «на всё»: у Stop и Notification матчить нечего.
         "matcher": "",
@@ -1035,7 +1161,7 @@ fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
 /// заявки не работали вовсе, никак этого не показывая. Отбирать вызовы здесь
 /// нечем и незачем: хелпер сам пропускает всё, в чём не нашёл пути, так что
 /// незнакомый или новый инструмент ничего не ломает.
-fn claim_file_body(agent: &str, helper: &Path) -> String {
+fn claim_file_body(agent: &str, helper: &Helper) -> String {
     let command = if agent == "codex" {
         hook_claim_codex_command(helper)
     } else {
@@ -1048,7 +1174,7 @@ fn claim_file_body(agent: &str, helper: &Path) -> String {
     serde_json::to_string_pretty(&body).unwrap_or_default() + "\n"
 }
 
-fn claude_claim_entry(helper: &Path) -> Value {
+fn claude_claim_entry(helper: &Helper) -> Value {
     serde_json::json!({
         // Чтение тоже проходит через хук — но заявки не берёт, только
         // запоминает, каким панель увидела файл. Без этого не поймать
@@ -1059,7 +1185,7 @@ fn claude_claim_entry(helper: &Path) -> Value {
 }
 
 /// Вписывает хук, не трогая ничего чужого. Возвращает true, если файл изменился.
-fn install_claude_hook(settings: &mut Value, helper: &Path) -> bool {
+fn install_claude_hook(settings: &mut Value, helper: &Helper) -> bool {
     if !settings.is_object() {
         *settings = Value::Object(Default::default());
     }
@@ -1100,7 +1226,7 @@ fn install_claude_hook(settings: &mut Value, helper: &Path) -> bool {
 /// стояло «есть наша запись — и ладно», обновление приложения не доносило до
 /// него ни новых инструментов в матчере, ни исправлений — у тех, кто поставил
 /// раньше, слежение за устаревшим чтением молча не работало вовсе.
-fn put_our_entry(list: &mut Vec<Value>, helper: &Path, expected: Value) -> bool {
+fn put_our_entry(list: &mut Vec<Value>, helper: &Helper, expected: Value) -> bool {
     match list.iter_mut().find(|entry| is_our_hook(entry, helper)) {
         Some(entry) if *entry == expected => false,
         Some(entry) => {
@@ -1116,7 +1242,7 @@ fn put_our_entry(list: &mut Vec<Value>, helper: &Path, expected: Value) -> bool 
 
 /// Убирает только наши записи и подчищает за собой пустые контейнеры, чтобы
 /// после отключения файл выглядел как до нас.
-fn remove_claude_hook(settings: &mut Value, helper: &Path) -> bool {
+fn remove_claude_hook(settings: &mut Value, helper: &Helper) -> bool {
     let Some(root) = settings.as_object_mut() else {
         return false;
     };
@@ -1141,7 +1267,7 @@ fn remove_claude_hook(settings: &mut Value, helper: &Path) -> bool {
     changed
 }
 
-fn claude_hook_installed(settings: &Value, helper: &Path) -> bool {
+fn claude_hook_installed(settings: &Value, helper: &Helper) -> bool {
     CLAUDE_EVENTS
         .iter()
         .chain([&CLAUDE_CLAIM_EVENT])
@@ -1178,7 +1304,7 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
         installed: false,
         config: String::new(),
     };
-    let (Some(home), Some(helper)) = (home_dir(app), helper_path(app)) else {
+    let (Some(home), Some(helper)) = (home_dir(app), native_helper(app)) else {
         return unsupported;
     };
     let Some(path) = hook_config_path(agent, &home) else {
@@ -1222,11 +1348,12 @@ pub fn set_hook(
     enabled: bool,
 ) -> Result<AgentHookState, String> {
     let home = home_dir(app).ok_or_else(|| "домашний каталог недоступен".to_string())?;
-    let helper = helper_path(app).ok_or_else(|| "каталог приложения недоступен".to_string())?;
+    let helper = native_helper(app).ok_or_else(|| "каталог приложения недоступен".to_string())?;
     let path =
         hook_config_path(agent, &home).ok_or_else(|| format!("{agent}: канал не поддержан"))?;
-    // Хелпер мог не появиться, если каталог данных был недоступен на старте.
-    if !helper.exists() {
+    // Скрипт мог не появиться, если каталог данных был недоступен на старте.
+    // Приложение же на месте по определению — иначе этот код бы не выполнялся.
+    if helper.launch == Launch::Script && !helper.path.exists() {
         write_helper(app);
     }
     // Заявка на файлы живёт своим файлом и снимается вместе с каналом
@@ -1323,7 +1450,10 @@ pub fn env_hooks(events_dir: &Path) -> Vec<(String, String)> {
 }
 
 fn env_hooks_with(events_dir: &Path, already_set: impl Fn(&str) -> bool) -> Vec<(String, String)> {
-    let Some(helper) = events_dir.parent().map(|base| base.join(HELPER_NAME)) else {
+    let Some(helper) = events_dir
+        .parent()
+        .map(|base| native_helper_at(base.join(HELPER_NAME)))
+    else {
         return Vec::new();
     };
     // Своя настройка пользователя важнее нашей: если он уже задал команду
@@ -1332,8 +1462,9 @@ fn env_hooks_with(events_dir: &Path, already_set: impl Fn(&str) -> bool) -> Vec<
         return Vec::new();
     }
     let command = format!(
-        "{} '{{\"type\":\"waiting\"}}'",
-        hook_command(&helper, "aider")
+        "{} {}",
+        hook_command(&helper, "aider"),
+        helper.quote(r#"{"type":"waiting"}"#)
     );
     vec![
         ("AIDER_NOTIFICATIONS".to_string(), "true".to_string()),
@@ -1369,9 +1500,17 @@ fn install_known_hooks(app: &tauri::AppHandle) {
 mod tests {
     use super::*;
 
-    fn helper() -> PathBuf {
+    fn helper() -> Helper {
         // Реальный путь хелпера лежит в «Application Support» — с пробелом.
-        PathBuf::from("/Users/x/Library/Application Support/mc/modelcrew-agent-notify.sh")
+        Helper::script(PathBuf::from(
+            "/Users/x/Library/Application Support/mc/modelcrew-agent-notify.sh",
+        ))
+    }
+
+    /// То же, но так, как это выглядит на Windows: зовут само приложение, и
+    /// путь тоже с пробелом — «Program Files».
+    fn windows_helper() -> Helper {
+        Helper::program(PathBuf::from(r"C:\Program Files\ModelCrew\ModelCrew.exe"))
     }
 
     /// Прогон настоящего хелпера на полезной нагрузке, снятой с живого
@@ -1387,13 +1526,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("mc-claim-{}", std::process::id()));
         let events = base.join("agent-events");
         std::fs::create_dir_all(&events).unwrap();
-        let script = base.join("notify.sh");
-        std::fs::write(&script, HELPER_SCRIPT).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let script = executable_helper(&base);
 
         // Ровно то, что прислал agy, вплоть до порядка ключей.
         let payload = concat!(
@@ -1443,11 +1576,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Ждёт заявку, которую хелпер кладёт файлом, и отдаёт её вместе с id.
+    /// Кладёт настоящий хелпер под свежим именем и делает его исполняемым.
     ///
     /// Зовут её только те проверки, что поднимают сам хелпер, — а он POSIX.
     /// Без этой пометки на Windows она осталась бы никем не вызванной, и
     /// clippy справедливо назвал бы её мёртвой.
+    #[cfg(unix)]
+    fn executable_helper(base: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let script = base.join("notify.sh");
+        std::fs::write(&script, HELPER_SCRIPT).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    /// Ждёт заявку, которую хелпер кладёт файлом, и отдаёт её вместе с id.
+    ///
+    /// Тоже только для POSIX — по той же причине, что и хелпер выше.
     #[cfg(unix)]
     fn read_claim(events: &Path) -> Value {
         for _ in 0..100 {
@@ -1519,13 +1664,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("mc-copilot-{}", std::process::id()));
         let events = base.join("agent-events");
         std::fs::create_dir_all(&events).unwrap();
-        let script = base.join("notify.sh");
-        std::fs::write(&script, HELPER_SCRIPT).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let script = executable_helper(&base);
 
         let payload = concat!(
             r#"{"hook_event_name":"PreToolUse","session_id":"s1","#,
@@ -1577,28 +1716,43 @@ mod tests {
     /// Живой opencode за один ход прислал и `/private/tmp/…`, и `/tmp/…` —
     /// две строки для одного файла. Считая их разными, заявку на файл мы бы
     /// не нашли, и сосед спокойно его перезаписал бы.
+    ///
+    /// Ссылку заводим только там, где на это не нужны права администратора:
+    /// на Windows вызов отказывает, и проверка падала бы на том, что ссылки
+    /// нет, а не на разборе пути. Отдельной проверкой, а не веткой внутри
+    /// общей, — чтобы пропуск был виден в списке, а не прятался под зелёным.
+    #[cfg(unix)]
     #[test]
     fn the_same_file_through_a_symlink_is_the_same_file() {
         let base = std::env::temp_dir().join(format!("mc-links-{}", std::process::id()));
         let root = base.join("проект");
         std::fs::create_dir_all(root.join("src")).unwrap();
-        // Саму ссылку кладём только там, где её можно завести без прав
-        // администратора: на Windows вызов отказывает, и проверка падала бы
-        // на том, что ссылки нет, а не на разборе пути.
-        #[cfg(unix)]
-        {
-            let link = base.join("ссылка");
-            let _ = std::fs::remove_file(&link);
-            std::os::unix::fs::symlink(&root, &link).unwrap();
+        let link = base.join("ссылка");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&root, &link).unwrap();
 
-            // Через ссылку — и для файла, которого ещё нет.
-            assert_eq!(
-                relative_to_root(&link.join("src/новый.rs"), &root).as_deref(),
-                Some("src/новый.rs")
-            );
-        }
+        // Через ссылку — и для файла, которого ещё нет.
+        assert_eq!(
+            relative_to_root(&link.join("src/новый.rs"), &root).as_deref(),
+            Some("src/новый.rs")
+        );
+        // И для файла в каталоге, которого ещё нет: агент создаёт модуль
+        // целиком, а заявка приходит до того, как на диске появится хоть что-то.
+        assert_eq!(
+            relative_to_root(&link.join("src/новый/модуль.rs"), &root).as_deref(),
+            Some("src/новый/модуль.rs")
+        );
 
-        // Прямой путь работает как раньше.
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Разбор пути без ссылок — он одинаков на всех платформах.
+    #[test]
+    fn a_path_under_the_root_is_counted_from_it() {
+        let base = std::env::temp_dir().join(format!("mc-paths-{}", std::process::id()));
+        let root = base.join("проект");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+
         assert_eq!(
             relative_to_root(&root.join("src/есть.rs"), &root).as_deref(),
             Some("src/есть.rs")
@@ -1620,13 +1774,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("mc-codex-{}", std::process::id()));
         let events = base.join("agent-events");
         std::fs::create_dir_all(&events).unwrap();
-        let script = base.join("notify.sh");
-        std::fs::write(&script, HELPER_SCRIPT).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let script = executable_helper(&base);
 
         let payload = concat!(
             r#"{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":"#,
@@ -1698,10 +1846,74 @@ mod tests {
 
     #[test]
     fn a_quote_in_the_path_cannot_break_out_of_the_command() {
-        let command = hook_command(Path::new("/tmp/it's here/notify.sh"), "claude");
+        let command = hook_command(
+            &Helper::script(PathBuf::from("/tmp/it's here/notify.sh")),
+            "claude",
+        );
 
         // Кавычка закрывается по-шелловски, а не остаётся открытой.
         assert_eq!(command, r"'/tmp/it'\''s here/notify.sh' claude");
+    }
+
+    /// На Windows хук зовёт само приложение. Одинарных кавычек там нельзя:
+    /// cmd их не раскрывает и передал бы программе как часть имени файла —
+    /// а «Program Files» без кавычек распалось бы на два аргумента.
+    #[test]
+    fn on_windows_the_agent_calls_the_application_itself() {
+        assert_eq!(
+            hook_command(&windows_helper(), "claude"),
+            r#""C:\Program Files\ModelCrew\ModelCrew.exe" --agent-hook claude"#
+        );
+        assert_eq!(
+            hook_claim_command(&windows_helper()),
+            r#""C:\Program Files\ModelCrew\ModelCrew.exe" --agent-hook --claim"#
+        );
+    }
+
+    /// Нагрузку, которую агент не передаёт сам, мы дописываем аргументом.
+    /// На Windows её нельзя брать в одинарные кавычки: cmd их не раскрывает и
+    /// отдал бы программе строку вместе с кавычками — вместо JSON пришло бы
+    /// `'{"type":"stop"}'`, и событие конца хода потерялось бы.
+    #[test]
+    fn the_payload_argument_is_quoted_the_way_that_shell_expects() {
+        let posix = cursor_hook_entry(&helper());
+        let posix = posix["command"].as_str().unwrap();
+        assert!(posix.ends_with(r#"'{"type":"stop"}'"#), "{posix}");
+
+        let windows = cursor_hook_entry(&windows_helper());
+        let windows = windows["command"].as_str().unwrap();
+        assert!(windows.ends_with(r#""{\"type\":\"stop\"}""#), "{windows}");
+    }
+
+    /// Каждое наречие отказа должно доехать и до Windows: заявку у codex,
+    /// copilot и antigravity мы просим теми же флагами, разбор которых
+    /// проверен отдельно.
+    #[test]
+    fn every_dialect_survives_the_move_to_windows() {
+        for (command, expected) in [
+            (hook_claim_codex_command(&windows_helper()), "--claim-codex"),
+            (
+                hook_claim_copilot_command(&windows_helper()),
+                "--claim-copilot",
+            ),
+            (hook_claim_json_command(&windows_helper()), "--claim-json"),
+        ] {
+            assert_eq!(
+                command,
+                format!(r#""C:\Program Files\ModelCrew\ModelCrew.exe" --agent-hook {expected}"#)
+            );
+            // И приложение обязано разобрать ровно то, что мы записали:
+            // строка в чужом конфиге и разбор аргументов — один договор.
+            let args: Vec<String> = vec![
+                "ModelCrew.exe".to_string(),
+                crate::agent_hook_cli::HOOK_FLAG.to_string(),
+                expected.to_string(),
+            ];
+            assert!(matches!(
+                crate::agent_hook_cli::mode_from_args(&args),
+                Some(crate::agent_hook_cli::Mode::Claim(_))
+            ));
+        }
     }
 
     #[test]
@@ -1771,6 +1983,22 @@ mod tests {
             since_ms: 1_000,
         }));
         assert!(serde_json::from_str::<Value>(&tricky).is_ok());
+    }
+
+    /// Отказ до агента доходит двумя разными путями — шелл-хелпером и самим
+    /// приложением, — но услышать он должен одно и то же. Тексты живут в двух
+    /// файлах, и без этой сверки они разъехались бы молча: правку внесли бы в
+    /// один канал, а второй продолжил бы говорить по-старому.
+    #[test]
+    fn both_ways_of_refusing_say_the_same_words() {
+        use crate::agent_hook_cli::{HELD_ADVICE, HELD_REASON, STALE_REASON};
+
+        for text in [STALE_REASON, HELD_REASON, HELD_ADVICE] {
+            assert!(
+                HELPER_SCRIPT.contains(text),
+                "шелл-хелпер не говорит: {text}"
+            );
+        }
     }
 
     #[test]
@@ -2239,7 +2467,11 @@ mod tests {
     #[test]
     fn aider_is_wired_through_the_environment_with_its_payload_supplied() {
         let events_dir = Path::new("/data/mc/agent-events");
-        let vars = env_hooks(events_dir);
+        // Своё окружение проверки не спрашиваем: на машине разработчика или
+        // раннера AIDER_NOTIFICATIONS вполне может быть выставлен, и тогда
+        // env_hooks честно вернёт пустоту, а проверка упала бы на чужой
+        // настройке вместо своего предмета.
+        let vars = env_hooks_with(events_dir, |_| false);
         let command = vars
             .iter()
             .find(|(key, _)| key == "AIDER_NOTIFICATIONS_COMMAND")
@@ -2249,11 +2481,11 @@ mod tests {
         assert!(vars
             .iter()
             .any(|(key, value)| key == "AIDER_NOTIFICATIONS" && value == "true"));
-        let helper = events_dir.parent().unwrap().join(HELPER_NAME);
-        assert!(
-            command.contains(helper.to_string_lossy().as_ref()),
-            "{command}"
-        );
+        // Кем именно зовут, решает платформа: на POSIX скриптом, на Windows
+        // самим приложением. Спрашиваем то же решение, а не повторяем его
+        // здесь — иначе проверка сторожила бы собственную копию правила.
+        let helper = native_helper_at(events_dir.parent().unwrap().join(HELPER_NAME));
+        assert!(command.contains(&helper.needle()), "{command}");
         // Нагрузка вторым аргументом — иначе хелпер уйдёт читать stdin, а там
         // терминал, и вызов повиснет.
         assert!(command.ends_with(r#"'{"type":"waiting"}'"#), "{command}");

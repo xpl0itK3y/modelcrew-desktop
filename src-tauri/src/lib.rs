@@ -9,6 +9,7 @@ compile_error!(
      instead of the embedded frontend — build through `tauri build`"
 );
 
+mod agent_hook_cli;
 mod agent_hooks;
 mod agent_sessions;
 mod clipboard_images;
@@ -887,6 +888,13 @@ fn dmabuf_choice(current: Option<&str>) -> DmabufChoice {
     }
 }
 
+/// Запуск хуком агента: приложение вызывает само себя, потому что exe умеет
+/// запустить любая оболочка, а `.sh` на Windows — не программа вовсе.
+/// `None` — запуск обычный.
+pub fn run_agent_hook() -> Option<i32> {
+    agent_hook_cli::run_if_hook()
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer_by_default();
@@ -1042,6 +1050,7 @@ mod tests {
     // проверок ниже.
     const MODULE_SOURCES: &[(&str, &str)] = &[
         ("lib.rs", LIB_RS),
+        ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
