@@ -636,6 +636,57 @@ describe("FileTree", () => {
     expect(classesOf("src/main.rs")).not.toContain("is-fresh");
   });
 
+  it("puts the name field inside the folder it will land in", async () => {
+    serve({
+      "": listing([["src", true], ["README.md", false]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src", "README.md"]));
+
+    fireEvent.contextMenu(screen.getByTitle("src"));
+    await waitFor(() => expect(screen.getByRole("menu")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Создать файл" }));
+
+    // Поле встаёт под своей папкой и с её вложенностью. Сверху списка оно
+    // сообщало бы не то место, куда файл ляжет.
+    const field = await screen.findByLabelText("Имя");
+    const draft = field.closest(".file-row") as HTMLElement;
+    const rows = Array.from(
+      document.querySelectorAll(".file-tree > .file-row"),
+    );
+    expect(rows.indexOf(draft)).toBe(1);
+    expect(draft.style.getPropertyValue("--file-depth")).toBe("1");
+  });
+
+  it("shows what is being created beside the field", async () => {
+    serve({ "": listing([["a.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать папку" }));
+
+    const field = await screen.findByLabelText("Имя");
+    const glyph = field.parentElement?.querySelector(".file-glyph svg");
+    // Без значка «создать файл» и «создать папку» выглядят одинаково, и
+    // ошибиться можно уже после того, как имя набрано.
+    expect(glyph).toBeTruthy();
+  });
+
+  it("keeps the name field inside the column", async () => {
+    serve({ "": listing([["a.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать файл" }));
+
+    // Поле занимает остаток строки, а не её ширину: со `width: 100%` вместе с
+    // рамкой оно вылезало за колонку — общего border-box в проекте нет.
+    const field = await screen.findByLabelText("Имя");
+    expect(field.className).not.toContain("file-row");
+    expect(field.closest(".file-row")).toBeTruthy();
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 

@@ -7,6 +7,7 @@
 // списка становилась бы рваной.
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -440,9 +441,10 @@ export function FileTree(props: {
       ref={treeRef}
       onKeyDown={onKeyDown}
     >
-      {draft && draft.kind !== "rename" && (
+      {draft && draft.kind !== "rename" && draft.at === ROOT && (
         <NameInput
           depth={0}
+          isDir={draft.kind === "folder"}
           value={draft.value}
           onChange={(value) => setDraft({ ...draft, value })}
           onCommit={() => void commitDraft()}
@@ -457,6 +459,7 @@ export function FileTree(props: {
             <NameInput
               key={row.path}
               depth={row.depth}
+              isDir={row.isDir}
               value={draft.value}
               onChange={(value) => setDraft({ ...draft, value })}
               onCommit={() => void commitDraft()}
@@ -466,7 +469,11 @@ export function FileTree(props: {
           );
         }
         const glyph = fileGlyph(row.name);
-        return (
+        // Создаём внутри этой папки — строка ввода встаёт под ней и с её
+        // вложенностью. Сверху списка она сообщала бы не то место.
+        const inside =
+          draft && draft.kind !== "rename" && draft.at === row.path;
+        const line = (
           <button
             key={row.path}
             type="button"
@@ -512,6 +519,23 @@ export function FileTree(props: {
             )}
           </button>
         );
+
+        return inside && draft ? (
+          <Fragment key={row.path}>
+            {line}
+            <NameInput
+              depth={row.depth + 1}
+              isDir={draft.kind === "folder"}
+              value={draft.value}
+              onChange={(value) => setDraft({ ...draft, value })}
+              onCommit={() => void commitDraft()}
+              onCancel={() => setDraft(null)}
+              label={t("files.namePrompt")}
+            />
+          </Fragment>
+        ) : (
+          line
+        );
       })}
       {found?.truncated ||
       rows.some((row) => listings.get(row.path)?.truncated) ||
@@ -545,10 +569,14 @@ export function FileTree(props: {
   );
 }
 
-/// Ввод имени строкой дерева — на месте будущего файла, а не диалогом посреди
-/// экрана: так видно, куда он ляжет.
+/// Ввод имени — строка дерева, а не коробка поверх списка: с тем же отступом,
+/// с тем же значком, на том самом месте, где появится файл. Так видно, куда он
+/// ляжет, ещё до того, как имя набрано.
 function NameInput(props: {
   depth: number;
+  /// Что создаётся: от этого значок слева. При переименовании — то же, что у
+  /// самой строки, иначе файл на глазах превращался бы в папку.
+  isDir: boolean;
   value: string;
   label: string;
   onChange: (value: string) => void;
@@ -556,25 +584,33 @@ function NameInput(props: {
   onCancel: () => void;
 }) {
   return (
-    <input
-      className="file-row file-name-input"
+    <div
+      className="file-row file-draft"
       style={{ "--file-depth": props.depth } as CSSProperties}
-      aria-label={props.label}
-      autoFocus
-      value={props.value}
-      onChange={(event) => props.onChange(event.target.value)}
-      // Уход фокуса подтверждает, а не отменяет: набранное имя — это работа,
-      // и терять её из-за случайного щелчка мимо неправильно.
-      onBlur={props.onCommit}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === "Enter") {
-          props.onCommit();
-        } else if (event.key === "Escape") {
-          props.onCancel();
-        }
-      }}
-    />
+    >
+      <span className="file-chevron" />
+      <span className="file-glyph" aria-hidden="true">
+        {props.isDir ? <FolderIcon /> : <FileSheet />}
+      </span>
+      <input
+        className="file-draft-input"
+        aria-label={props.label}
+        autoFocus
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+        // Уход фокуса подтверждает, а не отменяет: набранное имя — это работа,
+        // и терять её из-за случайного щелчка мимо неправильно.
+        onBlur={props.onCommit}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") {
+            props.onCommit();
+          } else if (event.key === "Escape") {
+            props.onCancel();
+          }
+        }}
+      />
+    </div>
   );
 }
 

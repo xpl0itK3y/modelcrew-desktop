@@ -79,6 +79,9 @@
   align-items: center;
   gap: 6px;
   width: 100%;
+  /* Общего border-box в проекте нет, а строке он нужен: со `width: 100%`
+     любая рамка или отступ иначе выталкивают её за колонку. */
+  box-sizing: border-box;
   /* Отступ считается от глубины: рисовать вложенность вложенными блоками
      значит платить за неё лишним уровнем DOM на каждой папке. */
   padding: 3px 8px 3px calc(6px + var(--file-depth, 0) * 14px);
@@ -501,19 +504,30 @@ body.is-resizing .resize-handle {
   background: var(--mc-danger-hover);
 }
 
-.file-name-input {
-  /* Встаёт ровно на место будущей строки, поэтому берёт её геометрию и
-     добавляет только рамку ввода. */
-  padding-right: 8px;
+/* Строка ввода — такая же строка дерева, только вместо имени поле. Отступ,
+   значок и высота у неё общие со всеми, поэтому список не дёргается, когда она
+   появляется и исчезает. */
+.file-draft {
+  cursor: default;
+}
+
+.file-draft-input {
+  /* Занимает остаток строки, а не её ширину: `width: 100%` вместе с рамкой и
+     отступами вылезал за колонку — в проекте нет общего border-box. */
+  flex: 1;
+  min-width: 0;
+  padding: 1px 6px;
   border: 1px solid var(--mc-accent-border);
   border-radius: 4px;
   background: var(--mc-panel);
   color: var(--mc-text-bright);
+  font: inherit;
   font-size: 12.5px;
 }
 
-.file-name-input:focus-visible {
+.file-draft-input:focus-visible {
   outline: 0;
+  border-color: var(--mc-accent);
 }
 
 /* Поиск по дереву. */
@@ -611,7 +625,7 @@ body.is-resizing .resize-handle {
 
 /* Поле имени коротко подсвечивается: оно встаёт посреди списка похожих строк,
    и глазу надо помочь его найти. */
-.file-name-input {
+.file-draft-input {
   animation: file-name-in 260ms ease-out;
 }
 
@@ -628,7 +642,7 @@ body.is-resizing .resize-handle {
   .file-row.is-arriving,
   .file-row.is-fresh,
   .file-menu,
-  .file-name-input {
+  .file-draft-input {
     animation: none;
   }
 }
