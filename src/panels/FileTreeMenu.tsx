@@ -4,7 +4,13 @@
 // создать рядом, переименовать, удалить, показать в системе. Разрушительное —
 // внизу и отдельно, чтобы промах по соседнему пункту не стоил файла.
 
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import {
+  useLayoutEffect,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { useI18n } from "../i18n";
 
 export type MenuTarget = {
@@ -24,6 +30,40 @@ export function FileTreeMenu(props: {
 }) {
   const { t } = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // Куда меню в итоге встало. До замера его не показываем: у нижних строк оно
+  // иначе успевает мигнуть за краем окна.
+  const [placed, setPlaced] = useState<{
+    left: number;
+    top: number;
+    up: boolean;
+  } | null>(null);
+
+  // Раскрывается вниз-вправо, пока помещается, и переворачивается, когда нет.
+  // Без этого меню у последних строк дерева уходит под край окна целиком — и
+  // выглядит так, будто его нет вовсе.
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!element) {
+      return;
+    }
+    const { width, height } = element.getBoundingClientRect();
+    const edge = 8;
+    const room = {
+      right: window.innerWidth - props.target.x,
+      below: window.innerHeight - props.target.y,
+    };
+    const up = room.below < height + edge && props.target.y > height + edge;
+    const left =
+      room.right < width + edge
+        ? Math.max(edge, props.target.x - width)
+        : props.target.x;
+    // Места нет ни снизу, ни сверху — прижимаем к краю: обрезанное меню лучше
+    // невидимого, в нём хотя бы видны первые пункты.
+    const top = up
+      ? props.target.y - height
+      : Math.min(props.target.y, Math.max(edge, window.innerHeight - height - edge));
+    setPlaced({ left, top, up });
+  }, [props.target.x, props.target.y]);
 
   useEffect(() => {
     menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
@@ -80,7 +120,14 @@ export function FileTreeMenu(props: {
       className="file-menu"
       role="menu"
       aria-label={props.target.name}
-      style={{ left: props.target.x, top: props.target.y }}
+      style={{
+        left: placed?.left ?? props.target.x,
+        top: placed?.top ?? props.target.y,
+        // До замера меню уже в дереве — его нужно измерить, — но показывать
+        // его на непроверенном месте нельзя.
+        visibility: placed ? "visible" : "hidden",
+        transformOrigin: placed?.up ? "bottom left" : "top left",
+      }}
       onKeyDown={onKeyDown}
       onContextMenu={(event) => event.preventDefault()}
     >
