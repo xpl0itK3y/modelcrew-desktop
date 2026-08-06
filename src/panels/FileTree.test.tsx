@@ -133,6 +133,46 @@ describe("FileTree", () => {
     expect(readWorkspaceDir).toHaveBeenCalledTimes(2);
   });
 
+  it("asks a folder that will not read once, not forever", async () => {
+    serve({ "": listing([["src", true]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+
+    // Папку удалил агент в соседней панели: она ещё в списке, а прочитать её
+    // уже нельзя.
+    fireEvent.click(screen.getByTitle("src"));
+    await screen.findByRole("alert");
+    const asked = readWorkspaceDir.mock.calls.length;
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Отказ не оставляет ни списка, ни признака загрузки — и догрузка
+    // раскрытого просила бы ту же папку снова и снова, забив канал до самой
+    // смены проекта.
+    expect(readWorkspaceDir.mock.calls.length).toBe(asked);
+  });
+
+  it("tries a refused folder again when it is clicked", async () => {
+    serve({ "": listing([["src", true]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await screen.findByRole("alert");
+
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    // Свернуть и снова раскрыть — обычный способ сказать «попробуй ещё раз»,
+    // и он обязан работать: иначе папку не вернуть без смены проекта.
+    fireEvent.click(screen.getByTitle("src"));
+    fireEvent.click(screen.getByTitle("src"));
+
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs"]));
+  });
+
   it("opens a file instead of expanding it", async () => {
     const opened = vi.fn();
     serve({ "": listing([["README.md", false]]) });

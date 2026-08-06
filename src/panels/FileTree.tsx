@@ -106,6 +106,12 @@ export function FileTree(props: {
   // Номер последнего запроса по каждой папке. Два события подряд по одной и
   // той же — и старый ответ мог прийти последним, затерев свежий список.
   const requestsRef = useRef<Map<string, number>>(new Map());
+  // Папки, чтение которых отказало. Сами их больше не спрашиваем: эффект ниже
+  // догружает раскрытое, глядя на `listings` и `loading`, а отказ не оставляет
+  // ни того ни другого — и запрос пошёл бы по кругу без остановки. Хватает
+  // одной удалённой из-под нас папки, чтобы дерево до самой смены проекта
+  // молотило по диску. Повторить чтение можно щелчком по строке.
+  const refusedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(
     async (path: string) => {
@@ -117,6 +123,7 @@ export function FileTree(props: {
         if (requestsRef.current.get(path) !== turn) {
           return;
         }
+        refusedRef.current.delete(path);
         setListings((current) => {
           // Появившееся в уже прочитанной папке пришло с диска, а не от
           // раскрытия: его показывают вспышкой, иначе файл, созданный агентом,
@@ -139,6 +146,7 @@ export function FileTree(props: {
         if (requestsRef.current.get(path) !== turn) {
           return;
         }
+        refusedRef.current.add(path);
         // Не прочитали корень и показать нечего — это отказ; всё остальное
         // всего лишь устаревший кусок списка.
         setError((current) =>
@@ -163,6 +171,7 @@ export function FileTree(props: {
     setListings(new Map());
     setExpanded(new Set());
     setError(null);
+    refusedRef.current.clear();
     if (workspaceId) {
       void load(ROOT);
     }
@@ -179,6 +188,9 @@ export function FileTree(props: {
       return next;
     });
     if (!listings.has(path)) {
+      // Щелчок — это просьба человека, а не круг эффекта: отказавшую папку по
+      // нему пробуем снова.
+      refusedRef.current.delete(path);
       void load(path);
     }
   };
@@ -229,7 +241,11 @@ export function FileTree(props: {
   // Каталоги, которые раскрыли, но ещё не читали, — докладываем.
   useEffect(() => {
     for (const path of expanded) {
-      if (!listings.has(path) && !loading.has(path)) {
+      if (
+        !listings.has(path) &&
+        !loading.has(path) &&
+        !refusedRef.current.has(path)
+      ) {
         void load(path);
       }
     }
