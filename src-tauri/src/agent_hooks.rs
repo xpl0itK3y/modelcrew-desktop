@@ -2487,8 +2487,12 @@ mod tests {
         let helper = native_helper_at(events_dir.parent().unwrap().join(HELPER_NAME));
         assert!(command.contains(&helper.needle()), "{command}");
         // Нагрузка вторым аргументом — иначе хелпер уйдёт читать stdin, а там
-        // терминал, и вызов повиснет.
-        assert!(command.ends_with(r#"'{"type":"waiting"}'"#), "{command}");
+        // терминал, и вызов повиснет. Кавычки спрашиваем у того же хелпера:
+        // на Windows одинарные не годятся, cmd отдал бы их программе как есть.
+        assert!(
+            command.ends_with(&helper.quote(r#"{"type":"waiting"}"#)),
+            "{command}"
+        );
     }
 
     #[test]
