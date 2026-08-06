@@ -8,7 +8,7 @@ import {
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { FileTree } from "./panels/FileTree";
-import { FilePanel } from "./panels/FilePanel";
+import { FileEditor } from "./panels/FileEditor";
 import { invoke } from "@tauri-apps/api/core";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import {
@@ -78,7 +78,6 @@ import "./styles/index.css";
 const components = {
   terminal: TerminalPanel,
   gitChanges: GitChangesPanelLazy,
-  file: FilePanel,
 };
 const tabComponents = { terminal: TerminalTab };
 
@@ -437,38 +436,33 @@ export default function App() {
   // Дерево проекта: колонка, а не оверлей. По нему ходят подолгу, и
   // всплывающая панель, которая закрывается от щелчка мимо, тут мешала бы.
   const [filesVisible, setFilesVisible] = useState(false);
+  const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
 
-  const openFile = useCallback(
-    (path: string) => {
-      const api = apiRef.current;
-      const workspaceId = workspaces.activeId;
-      if (!api || !workspaceId) {
-        return;
-      }
-      setActiveFilePath(path);
-      // Тот же файл — та же вкладка: иначе десяток щелчков по дереву наплодит
-      // десяток одинаковых панелей.
-      const already = api.panels.find((panel) => {
-        const params = panel.api.getParameters<{
-          workspaceId?: string;
-          path?: string;
-        }>();
-        return params.workspaceId === workspaceId && params.path === path;
+  const openFile = useCallback((path: string) => {
+    setActiveFilePath(path);
+    // Тот же файл — та же вкладка: иначе десяток щелчков по дереву наплодил бы
+    // десяток одинаковых вкладок одного файла.
+    setOpenFiles((current) =>
+      current.includes(path) ? current : [...current, path],
+    );
+  }, []);
+
+  const closeFile = useCallback((path: string) => {
+    setOpenFiles((current) => {
+      const next = current.filter((open) => open !== path);
+      setActiveFilePath((active) => {
+        if (active !== path) {
+          return active;
+        }
+        // Закрыли видимый — показываем соседа слева, а не пустоту: так же
+        // ведут себя вкладки везде, где их закрывают.
+        const at = current.indexOf(path);
+        return next[Math.min(at, next.length - 1)] ?? null;
       });
-      if (already) {
-        already.api.setActive();
-        return;
-      }
-      api.addPanel({
-        id: crypto.randomUUID(),
-        component: "file",
-        title: path.split("/").pop() ?? path,
-        params: { workspaceId, path },
-      });
-    },
-    [workspaces.activeId],
-  );
+      return next;
+    });
+  }, []);
 
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
@@ -585,6 +579,15 @@ export default function App() {
               onOpenFile={openFile}
             />
           </aside>
+        )}
+        {workspaces.activeId && (
+          <FileEditor
+            workspaceId={workspaces.activeId}
+            files={openFiles}
+            activePath={activeFilePath}
+            onSelect={setActiveFilePath}
+            onClose={closeFile}
+          />
         )}
         <main className="dock-area">
           {rootRegistryReady ? (
