@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { isTauri } from "./platform";
 import {
   DockviewApi,
@@ -490,6 +497,13 @@ export default function App() {
     });
   }, []);
 
+  // Дерево не исчезает рывком: спрятали — колонка съезжается, и только потом
+  // её снимают.
+  const treePresence = useAnimatedPresence(
+    filesVisible && workspaces.activeId ? workspaces.activeId : null,
+    200,
+  );
+
   // Колонка редактора не исчезает рывком: закрыли последний файл — она
   // уезжает, и только потом её снимают.
   const editorPresence = useAnimatedPresence(
@@ -616,21 +630,30 @@ export default function App() {
             onReset={() => resetColumn("sidebar")}
           />
         )}
-        {filesVisible && workspaces.activeId && (
+        {treePresence && (
           <aside
-            className="file-tree-column"
+            className={`file-tree-column ${
+              treePresence.closing ? "is-leaving" : ""
+            }`}
             aria-label={t("files.panelTitle")}
-            style={{ width: widths.tree }}
+            // Ширину отдаём переменной: по ней съезжается и разъезжается сама
+            // колонка, а соседи двигаются вместе с ней, а не прыгают.
+            style={
+              {
+                "--column-width": `${widths.tree}px`,
+                width: "var(--column-width)",
+              } as CSSProperties
+            }
           >
             <FileTree
-              workspaceId={workspaces.activeId}
+              workspaceId={treePresence.item}
               activePath={activeFilePath}
               onOpenFile={openFile}
               onClose={() => setFilesVisible(false)}
             />
           </aside>
         )}
-        {filesVisible && workspaces.activeId && (
+        {treePresence && !treePresence.closing && (
           <ResizeHandle
             width={widths.tree}
             min={widthLimits("tree").min}

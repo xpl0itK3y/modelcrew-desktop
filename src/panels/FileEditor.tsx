@@ -5,7 +5,7 @@
 // сохранения, и файл среди них выглядит как ещё один терминал, которым он не
 // является.
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useI18n } from "../i18n";
 import { CloseIcon } from "../ui/Icons";
 import { fileGlyph } from "../files/fileGlyph";
@@ -40,7 +40,12 @@ export function FileEditor(props: {
     <section
       className={`file-editor ${props.leaving ? "is-leaving" : ""}`}
       aria-label={t("files.editorTitle")}
-      style={{ width: props.width }}
+      style={
+        {
+          "--column-width": `${props.width}px`,
+          width: "var(--column-width)",
+        } as CSSProperties
+      }
     >
       <div className="file-editor-tabs" role="tablist">
         {files.map((path) => {

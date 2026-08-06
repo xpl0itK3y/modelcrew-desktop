@@ -633,37 +633,44 @@ body.is-resizing .resize-handle {
   }
 }
 
-/* Колонка редактора приезжает и уезжает, а не возникает: появление целой
-   колонки рывком сдвигает всю сетку терминалов за один кадр, и глаз теряет
-   место, на которое смотрел. */
-.file-editor {
-  animation: file-editor-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+/* Колонка съезжается и разъезжается по ширине, а не проявляется на месте.
+   Разница видна на соседях: при проявлении сетка терминалов сдвигается в
+   первый же кадр и глаз теряет место, а при съезде она едет вместе с
+   колонкой.
+
+   Ширина берётся из переменной, потому что её задаёт перетаскивание и в
+   ключевых кадрах её не написать числом. */
+.file-editor,
+.file-tree-column {
+  animation: column-in 200ms cubic-bezier(0.2, 0, 0.13, 1);
   overflow: hidden;
 }
 
-.file-editor.is-leaving {
-  animation: file-editor-out 180ms cubic-bezier(0.4, 0, 1, 1) forwards;
+.file-editor.is-leaving,
+.file-tree-column.is-leaving {
+  animation: column-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
   pointer-events: none;
 }
 
-@keyframes file-editor-in {
+@keyframes column-in {
   from {
+    width: 0;
     opacity: 0;
-    transform: translateX(-12px);
   }
   to {
+    width: var(--column-width);
     opacity: 1;
-    transform: translateX(0);
   }
 }
 
-@keyframes file-editor-out {
+@keyframes column-out {
   from {
+    width: var(--column-width);
     opacity: 1;
   }
   to {
+    width: 0;
     opacity: 0;
-    transform: translateX(-12px);
   }
 }
 
@@ -692,6 +699,8 @@ body.is-resizing .resize-handle {
 @media (prefers-reduced-motion: reduce) {
   .file-editor,
   .file-editor.is-leaving,
+  .file-tree-column,
+  .file-tree-column.is-leaving,
   .file-tab {
     animation: none;
   }
