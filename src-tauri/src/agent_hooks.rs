@@ -1377,6 +1377,11 @@ mod tests {
     /// Прогон настоящего хелпера на полезной нагрузке, снятой с живого
     /// antigravity. Схему вызова он кладёт вложенно и в своих ключах —
     /// написанное «на глаз» извлечение молча пропускало каждую правку.
+    ///
+    /// Только там, где хелпер запускается сам: он написан на POSIX-оболочке, и
+    /// Windows отвечает на попытку выполнить его кодом 193. Разбирает он текст,
+    /// а не платформу, поэтому прогона на macOS и Linux для него достаточно.
+    #[cfg(unix)]
     #[test]
     fn reads_an_antigravity_payload_and_answers_in_its_dialect() {
         let base = std::env::temp_dir().join(format!("mc-claim-{}", std::process::id()));
@@ -1439,6 +1444,11 @@ mod tests {
     }
 
     /// Ждёт заявку, которую хелпер кладёт файлом, и отдаёт её вместе с id.
+    ///
+    /// Зовут её только те проверки, что поднимают сам хелпер, — а он POSIX.
+    /// Без этой пометки на Windows она осталась бы никем не вызванной, и
+    /// clippy справедливо назвал бы её мёртвой.
+    #[cfg(unix)]
     fn read_claim(events: &Path) -> Value {
         for _ in 0..100 {
             let entry = std::fs::read_dir(events)
@@ -1501,6 +1511,9 @@ mod tests {
 
     /// Copilot присылает под именем `PreToolUse` ровно то же, что claude, —
     /// проверено на живом запуске, — но решение читает своими ключами.
+    ///
+    /// Запускает настоящий хелпер, поэтому только на POSIX-оболочке.
+    #[cfg(unix)]
     #[test]
     fn answers_copilot_in_the_keys_it_reads() {
         let base = std::env::temp_dir().join(format!("mc-copilot-{}", std::process::id()));
@@ -1569,16 +1582,22 @@ mod tests {
         let base = std::env::temp_dir().join(format!("mc-links-{}", std::process::id()));
         let root = base.join("проект");
         std::fs::create_dir_all(root.join("src")).unwrap();
-        let link = base.join("ссылка");
-        let _ = std::fs::remove_file(&link);
+        // Саму ссылку кладём только там, где её можно завести без прав
+        // администратора: на Windows вызов отказывает, и проверка падала бы
+        // на том, что ссылки нет, а не на разборе пути.
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&root, &link).unwrap();
+        {
+            let link = base.join("ссылка");
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&root, &link).unwrap();
 
-        // Через ссылку — и для файла, которого ещё нет.
-        assert_eq!(
-            relative_to_root(&link.join("src/новый.rs"), &root).as_deref(),
-            Some("src/новый.rs")
-        );
+            // Через ссылку — и для файла, которого ещё нет.
+            assert_eq!(
+                relative_to_root(&link.join("src/новый.rs"), &root).as_deref(),
+                Some("src/новый.rs")
+            );
+        }
+
         // Прямой путь работает как раньше.
         assert_eq!(
             relative_to_root(&root.join("src/есть.rs"), &root).as_deref(),
@@ -1593,6 +1612,9 @@ mod tests {
     /// У codex правка идёт патчем: пути лежат внутри его текста, а не
     /// отдельным ключом, и за один вызов он трогает сколько угодно файлов.
     /// Образец снят с живого запуска.
+    ///
+    /// Запускает настоящий хелпер, поэтому только на POSIX-оболочке.
+    #[cfg(unix)]
     #[test]
     fn reads_every_file_out_of_a_codex_patch() {
         let base = std::env::temp_dir().join(format!("mc-codex-{}", std::process::id()));
