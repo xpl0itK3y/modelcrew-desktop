@@ -17,6 +17,7 @@ import "dockview/dist/styles/dockview.css";
 import { FileTree } from "./panels/FileTree";
 import { FileEditor } from "./panels/FileEditor";
 import { ResizeHandle } from "./ui/ResizeHandle";
+import { closeUnder } from "./files/openFiles";
 import {
   clampWidth,
   loadWidth,
@@ -471,6 +472,10 @@ export default function App() {
   }, []);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  // Видимая вкладка нужна внутри обновления списка, а звать туда состояние
+  // напрямую нельзя: оно там было бы прошлым.
+  const activeFileRef = useRef<string | null>(null);
+  activeFileRef.current = activeFilePath;
 
   const openFile = useCallback((path: string) => {
     setActiveFilePath(path);
@@ -481,19 +486,15 @@ export default function App() {
     );
   }, []);
 
-  const closeFile = useCallback((path: string) => {
+  // Закрытие вкладки и исчезновение файла — одно и то же для редактора,
+  // поэтому и правило одно. Удалили папку — уходят и все файлы под ней.
+  const dropFiles = useCallback((path: string) => {
     setOpenFiles((current) => {
-      const next = current.filter((open) => open !== path);
-      setActiveFilePath((active) => {
-        if (active !== path) {
-          return active;
-        }
-        // Закрыли видимый — показываем соседа слева, а не пустоту: так же
-        // ведут себя вкладки везде, где их закрывают.
-        const at = current.indexOf(path);
-        return next[Math.min(at, next.length - 1)] ?? null;
-      });
-      return next;
+      const next = closeUnder({ files: current, active: activeFileRef.current }, path);
+      if (next.files !== current) {
+        setActiveFilePath(next.active);
+      }
+      return next.files;
     });
   }, []);
 
@@ -650,6 +651,7 @@ export default function App() {
               activePath={activeFilePath}
               onOpenFile={openFile}
               onClose={() => setFilesVisible(false)}
+              onRemoved={dropFiles}
             />
           </aside>
         )}
@@ -672,7 +674,7 @@ export default function App() {
             files={editorPresence.item}
             activePath={activeFilePath}
             onSelect={setActiveFilePath}
-            onClose={closeFile}
+            onClose={dropFiles}
             width={widths.editor}
             leaving={editorPresence.closing}
           />

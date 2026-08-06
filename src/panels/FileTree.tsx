@@ -60,6 +60,8 @@ export function FileTree(props: {
   onOpenFile: (path: string) => void;
   /// Спрятать колонку целиком.
   onClose?: () => void;
+  /// Путь исчез по воле человека: вкладку с ним держать больше не за что.
+  onRemoved?: (path: string) => void;
 }) {
   const { t } = useI18n();
   const { workspaceId } = props;
@@ -572,6 +574,7 @@ export function FileTree(props: {
             const next = rows[at + 1] ?? rows[at - 1] ?? null;
             setFocused(next ? next.path : null);
             void deleteWorkspaceEntry(workspaceId, target.path)
+              .then(() => props.onRemoved?.(target.path))
               .catch((cause) => setError(localizeBackendError(cause)))
               .finally(() => void load(parentOf(target.path)));
           }}

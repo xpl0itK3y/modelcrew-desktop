@@ -758,6 +758,47 @@ describe("FileTree", () => {
     expect(screen.queryByText(/Удалить «/)).not.toBeInTheDocument();
   });
 
+  it("tells the editor that the path is gone", async () => {
+    const removed = vi.fn();
+    serve({ "": listing([["лишнее.txt", false]]) });
+    render(
+      <FileTree workspaceId="w1" onOpenFile={() => {}} onRemoved={removed} />,
+    );
+    await waitFor(() => expect(names()).toEqual(["лишнее.txt"]));
+    await pick("лишнее.txt", "Удалить");
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «лишнее.txt»/)).toBeInTheDocument(),
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Удалить" });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    // Иначе вкладка удалённого файла остаётся и предлагает сохранить его в
+    // никуда.
+    await waitFor(() => expect(removed).toHaveBeenCalledWith("лишнее.txt"));
+  });
+
+  it("says nothing when the deletion failed", async () => {
+    const removed = vi.fn();
+    deleteEntry.mockRejectedValue({ code: "workspaceRootUnavailable" });
+    serve({ "": listing([["занятое.txt", false]]) });
+    render(
+      <FileTree workspaceId="w1" onOpenFile={() => {}} onRemoved={removed} />,
+    );
+    await waitFor(() => expect(names()).toEqual(["занятое.txt"]));
+    await pick("занятое.txt", "Удалить");
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «занятое.txt»/)).toBeInTheDocument(),
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Удалить" });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    // Файл на месте — закрывать его вкладку не за что.
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(removed).not.toHaveBeenCalled();
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 
