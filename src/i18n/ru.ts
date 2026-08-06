@@ -22,6 +22,8 @@ export const ru = {
   "files.search": "Поиск по имени",
   "files.searching": "Ищу…",
   "files.nothingFound": "Ничего не нашлось",
+  "files.collapseAll": "Свернуть всё",
+  "files.hide": "Скрыть дерево",
   "files.editorTitle": "Редактор",
   "files.unsaved": "Есть несохранённая правка",
   "files.close": "Закрыть файл",

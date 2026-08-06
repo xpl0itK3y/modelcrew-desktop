@@ -501,6 +501,74 @@ describe("FileTree", () => {
     }
   });
 
+  it("creates at the project root from the header", async () => {
+    serve({ "": listing([["src", true]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать папку" }));
+    fireEvent.change(screen.getByLabelText("Имя"), {
+      target: { value: "новая" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+
+    // Из шапки — в корень: у неё нет выбранной строки, и класть рядом не с чем.
+    await waitFor(() =>
+      expect(createEntry).toHaveBeenCalledWith("w1", "новая", true),
+    );
+  });
+
+  it("folds the whole tree back up", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Свернуть всё" }));
+
+    await waitFor(() => expect(names()).toEqual(["src"]));
+  });
+
+  it("offers nothing to fold while nothing is open", async () => {
+    serve({ "": listing([["src", true]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+
+    // Живая кнопка, которая ничего не делает, врёт о состоянии дерева.
+    expect(screen.getByRole("button", { name: "Свернуть всё" })).toBeDisabled();
+  });
+
+  it("hides the column when asked", async () => {
+    const closed = vi.fn();
+    serve({ "": listing([["a.txt", false]]) });
+    render(
+      <FileTree workspaceId="w1" onOpenFile={() => {}} onClose={closed} />,
+    );
+    await waitFor(() => expect(names()).toEqual(["a.txt"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть дерево" }));
+
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps its header while there is nothing to show", async () => {
+    serve({ "": listing([]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByText("В проекте пусто")).toBeInTheDocument(),
+    );
+    // Создать первый файл надо уметь именно в пустом проекте — иначе кнопки
+    // появляются только там, где без них уже обошлись.
+    expect(
+      screen.getByRole("button", { name: "Создать файл" }),
+    ).toBeInTheDocument();
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 

@@ -23,6 +23,8 @@ export const en: Record<MessageKey, string> = {
   "files.search": "Search by name",
   "files.searching": "Searching…",
   "files.nothingFound": "Nothing found",
+  "files.collapseAll": "Collapse everything",
+  "files.hide": "Hide the tree",
   "files.editorTitle": "Editor",
   "files.unsaved": "There are unsaved changes",
   "files.close": "Close the file",

@@ -615,13 +615,11 @@ export default function App() {
             aria-label={t("files.panelTitle")}
             style={{ width: widths.tree }}
           >
-            <div className="file-tree-header">
-              <span className="file-tree-title">{t("files.panelTitle")}</span>
-            </div>
             <FileTree
               workspaceId={workspaces.activeId}
               activePath={activeFilePath}
               onOpenFile={openFile}
+              onClose={() => setFilesVisible(false)}
             />
           </aside>
         )}

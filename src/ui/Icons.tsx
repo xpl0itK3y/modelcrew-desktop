@@ -243,3 +243,34 @@ export function KeyboardIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function NewFileIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 2H4.5v12H9" />
+      <path d="M9 2l2.5 2.5V7" />
+      {/* Плюс отдельно и в углу: лист без него — это «файл», а не «создать». */}
+      <path d="M12 9.5v4M10 11.5h4" />
+    </svg>
+  );
+}
+
+export function NewFolderIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M2 12.5V4h4l1.2 1.5H10v2" />
+      <path d="M2 12.5h6" />
+      <path d="M12 9v4.5M9.75 11.25h4.5" />
+    </svg>
+  );
+}
+
+/// Свернуть всё: две стрелки навстречу друг другу.
+export function CollapseIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5 6.5L8 3.5l3 3" />
+      <path d="M5 9.5l3 3 3-3" />
+    </svg>
+  );
+}

@@ -37,7 +37,14 @@ import {
 } from "./FileTreeMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { treeKeyAction } from "../files/treeKeys";
-import { ChevronRightIcon, FolderIcon } from "../ui/Icons";
+import {
+  ChevronRightIcon,
+  CloseIcon,
+  CollapseIcon,
+  FolderIcon,
+  NewFileIcon,
+  NewFolderIcon,
+} from "../ui/Icons";
 
 /// Корень проекта в карте каталогов лежит под пустым путём — тем же, каким его
 /// спрашивает бэкенд.
@@ -50,6 +57,8 @@ export function FileTree(props: {
   /// Открытый сейчас файл: подсвечивается и раскрывается по пути до него.
   activePath?: string | null;
   onOpenFile: (path: string) => void;
+  /// Спрятать колонку целиком.
+  onClose?: () => void;
 }) {
   const { t } = useI18n();
   const { workspaceId } = props;
@@ -286,8 +295,53 @@ export function FileTree(props: {
       ?.focus();
   };
 
-  // Поле поиска остаётся на месте при любом состоянии дерева: очистить запрос
-  // должно быть можно и тогда, когда он ничего не нашёл.
+  // Шапка и поиск остаются на месте при любом состоянии дерева: и создать
+  // файл, и очистить запрос надо уметь тогда, когда показывать нечего.
+  const header = (
+    <div className="file-tree-header">
+      <span className="file-tree-title">{t("files.panelTitle")}</span>
+      <button
+        type="button"
+        className="icon-button"
+        title={t("files.newFile")}
+        aria-label={t("files.newFile")}
+        onClick={() => setDraft({ at: ROOT, kind: "file", value: "" })}
+      >
+        <NewFileIcon />
+      </button>
+      <button
+        type="button"
+        className="icon-button"
+        title={t("files.newFolder")}
+        aria-label={t("files.newFolder")}
+        onClick={() => setDraft({ at: ROOT, kind: "folder", value: "" })}
+      >
+        <NewFolderIcon />
+      </button>
+      <button
+        type="button"
+        className="icon-button"
+        title={t("files.collapseAll")}
+        aria-label={t("files.collapseAll")}
+        disabled={expanded.size === 0}
+        onClick={() => setExpanded(new Set())}
+      >
+        <CollapseIcon />
+      </button>
+      {props.onClose && (
+        <button
+          type="button"
+          className="icon-button"
+          title={t("files.hide")}
+          aria-label={t("files.hide")}
+          onClick={props.onClose}
+        >
+          <CloseIcon />
+        </button>
+      )}
+    </div>
+  );
+
   const search = (
     <div className="file-search">
       <input
@@ -322,6 +376,7 @@ export function FileTree(props: {
   if (message) {
     return (
       <>
+        {header}
         {search}
         <div
           className="file-tree-empty"
@@ -335,6 +390,7 @@ export function FileTree(props: {
 
   return (
     <>
+    {header}
     {search}
     <div
       className="file-tree"
