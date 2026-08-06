@@ -11,6 +11,7 @@ export const en: Record<MessageKey, string> = {
   "titlebar.newTerminal": "Add terminal to grid",
   "titlebar.gitChanges": "Project changes",
   "titlebar.toggleFiles": "Show or hide the project tree",
+  "layout.resize": "Width of the {area} area: drag or use arrow keys, double-click restores it",
   "files.editorTitle": "Editor",
   "files.unsaved": "There are unsaved changes",
   "files.close": "Close the file",

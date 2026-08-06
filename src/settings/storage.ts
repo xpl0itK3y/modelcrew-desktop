@@ -14,6 +14,9 @@ export const KEYS = {
   shell: "modelcrew.shell",
   diffView: "modelcrew.diffView",
   workspaces: "modelcrew.workspaces",
+  sidebarWidth: "modelcrew.sidebarWidth",
+  treeWidth: "modelcrew.treeWidth",
+  editorWidth: "modelcrew.editorWidth",
 
   terminalFontSize: "modelcrew.terminalFontSize",
   terminalHistoryIsolated: "modelcrew.terminalHistoryIsolated",

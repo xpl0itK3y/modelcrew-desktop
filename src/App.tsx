@@ -9,6 +9,14 @@ import {
 import "dockview/dist/styles/dockview.css";
 import { FileTree } from "./panels/FileTree";
 import { FileEditor } from "./panels/FileEditor";
+import { ResizeHandle } from "./ui/ResizeHandle";
+import {
+  clampWidth,
+  loadWidth,
+  saveWidth,
+  widthLimits,
+  type Column,
+} from "./ui/columnWidths";
 import { invoke } from "@tauri-apps/api/core";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import {
@@ -436,6 +444,24 @@ export default function App() {
   // Дерево проекта: колонка, а не оверлей. По нему ходят подолгу, и
   // всплывающая панель, которая закрывается от щелчка мимо, тут мешала бы.
   const [filesVisible, setFilesVisible] = useState(false);
+  // Ширины колонок живут вместе: разделитель двигает соседа слева, а сетка
+  // терминалов забирает остаток.
+  const [widths, setWidths] = useState<Record<Column, number>>(() => ({
+    sidebar: loadWidth("sidebar"),
+    tree: loadWidth("tree"),
+    editor: loadWidth("editor"),
+  }));
+  const resizeColumn = useCallback((column: Column, width: number) => {
+    setWidths((current) => ({ ...current, [column]: clampWidth(column, width) }));
+  }, []);
+  const rememberColumn = useCallback((column: Column, width: number) => {
+    saveWidth(column, width);
+  }, []);
+  const resetColumn = useCallback((column: Column) => {
+    const { fallback } = widthLimits(column);
+    setWidths((current) => ({ ...current, [column]: fallback }));
+    saveWidth(column, fallback);
+  }, []);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
 
@@ -534,7 +560,11 @@ export default function App() {
         onRevealPanel={revealPanel}
       />
       <div className="app-body">
-        <div className="sidebar-rail" aria-hidden={!sidebarVisible}>
+        <div
+          className="sidebar-rail"
+          aria-hidden={!sidebarVisible}
+          style={sidebarVisible ? { width: widths.sidebar } : undefined}
+        >
           <Sidebar
             workspaces={sidebarWorkspaces}
             activeId={workspaces.activeId}
@@ -568,8 +598,23 @@ export default function App() {
             }}
           />
         </div>
+        {sidebarVisible && (
+          <ResizeHandle
+            width={widths.sidebar}
+            min={widthLimits("sidebar").min}
+            max={widthLimits("sidebar").max}
+            label={t("sidebar.title")}
+            onResize={(width) => resizeColumn("sidebar", width)}
+            onResizeEnd={(width) => rememberColumn("sidebar", width)}
+            onReset={() => resetColumn("sidebar")}
+          />
+        )}
         {filesVisible && workspaces.activeId && (
-          <aside className="file-tree-column" aria-label={t("files.panelTitle")}>
+          <aside
+            className="file-tree-column"
+            aria-label={t("files.panelTitle")}
+            style={{ width: widths.tree }}
+          >
             <div className="file-tree-header">
               <span className="file-tree-title">{t("files.panelTitle")}</span>
             </div>
@@ -580,6 +625,17 @@ export default function App() {
             />
           </aside>
         )}
+        {filesVisible && workspaces.activeId && (
+          <ResizeHandle
+            width={widths.tree}
+            min={widthLimits("tree").min}
+            max={widthLimits("tree").max}
+            label={t("files.panelTitle")}
+            onResize={(width) => resizeColumn("tree", width)}
+            onResizeEnd={(width) => rememberColumn("tree", width)}
+            onReset={() => resetColumn("tree")}
+          />
+        )}
         {workspaces.activeId && (
           <FileEditor
             workspaceId={workspaces.activeId}
@@ -587,6 +643,18 @@ export default function App() {
             activePath={activeFilePath}
             onSelect={setActiveFilePath}
             onClose={closeFile}
+            width={widths.editor}
+          />
+        )}
+        {openFiles.length > 0 && (
+          <ResizeHandle
+            width={widths.editor}
+            min={widthLimits("editor").min}
+            max={widthLimits("editor").max}
+            label={t("files.editorTitle")}
+            onResize={(width) => resizeColumn("editor", width)}
+            onResizeEnd={(width) => rememberColumn("editor", width)}
+            onReset={() => resetColumn("editor")}
           />
         )}
         <main className="dock-area">

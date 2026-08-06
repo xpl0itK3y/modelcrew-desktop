@@ -19,6 +19,8 @@ export function FileEditor(props: {
   activePath: string | null;
   onSelect: (path: string) => void;
   onClose: (path: string) => void;
+  /// Ширину задаёт раскладка: колонку тянут за разделитель справа.
+  width: number;
 }) {
   const { t } = useI18n();
   const { files, activePath } = props;
@@ -33,7 +35,11 @@ export function FileEditor(props: {
   const current = activePath && files.includes(activePath) ? activePath : files[0];
 
   return (
-    <section className="file-editor" aria-label={t("files.editorTitle")}>
+    <section
+      className="file-editor"
+      aria-label={t("files.editorTitle")}
+      style={{ width: props.width }}
+    >
       <div className="file-editor-tabs" role="tablist">
         {files.map((path) => {
           const glyph = fileGlyph(fileName(path));

@@ -39,6 +39,7 @@ describe("FileEditor", () => {
         activePath={null}
         onSelect={() => {}}
         onClose={() => {}}
+        width={520}
       />,
     );
 
@@ -54,6 +55,7 @@ describe("FileEditor", () => {
         activePath="README.md"
         onSelect={() => {}}
         onClose={() => {}}
+        width={520}
       />,
     );
 
@@ -74,6 +76,7 @@ describe("FileEditor", () => {
         activePath="b.txt"
         onSelect={() => {}}
         onClose={() => {}}
+        width={520}
       />,
     );
 
@@ -92,6 +95,7 @@ describe("FileEditor", () => {
         activePath="закрытый.txt"
         onSelect={() => {}}
         onClose={() => {}}
+        width={520}
       />,
     );
 
@@ -109,6 +113,7 @@ describe("FileEditor", () => {
         activePath="a.txt"
         onSelect={() => {}}
         onClose={closed}
+        width={520}
       />,
     );
 
@@ -125,6 +130,7 @@ describe("FileEditor", () => {
         activePath="a.txt"
         onSelect={() => {}}
         onClose={() => {}}
+        width={520}
       />,
     );
     await waitFor(() =>
@@ -150,6 +156,7 @@ describe("FileEditor", () => {
         activePath="a.txt"
         onSelect={() => {}}
         onClose={() => {}}
+        width={520}
       />,
     );
     await waitFor(() =>

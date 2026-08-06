@@ -10,6 +10,7 @@ export const ru = {
   "titlebar.newTerminal": "Новый терминал в сетку",
   "titlebar.gitChanges": "Изменения в проекте",
   "titlebar.toggleFiles": "Показать или скрыть дерево проекта",
+  "layout.resize": "Ширина области «{area}»: тяните или стрелками, двойной щелчок вернёт исходную",
   "files.editorTitle": "Редактор",
   "files.unsaved": "Есть несохранённая правка",
   "files.close": "Закрыть файл",
