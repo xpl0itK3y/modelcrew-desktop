@@ -569,6 +569,73 @@ describe("FileTree", () => {
     ).toBeInTheDocument();
   });
 
+  /// Классы строки: по ним видно, что дерево считает новым.
+  function classesOf(name: string): string {
+    return screen.getByTitle(name).className;
+  }
+
+  it("moves in only the rows that just appeared", async () => {
+    serve({
+      "": listing([["src", true], ["README.md", false]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src", "README.md"]));
+
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() =>
+      expect(names()).toEqual(["src", "main.rs", "README.md"]),
+    );
+
+    // Въезжает только содержимое раскрытой папки. Если бы въезжало всё, одно
+    // раскрытие дёргало бы дерево целиком.
+    expect(classesOf("src/main.rs")).toContain("is-arriving");
+    expect(classesOf("README.md")).not.toContain("is-arriving");
+    expect(classesOf("src")).not.toContain("is-arriving");
+  });
+
+  it("does not stage an entrance for the tree it starts with", async () => {
+    serve({ "": listing([["a.txt", false], ["b.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt", "b.txt"]));
+
+    // Первый показ — это не появление: дерево уже было там, куда посмотрели.
+    expect(classesOf("a.txt")).not.toContain("is-arriving");
+  });
+
+  it("flashes a file that appeared on disk by itself", async () => {
+    let current = listing([["старый.txt", false]]);
+    readWorkspaceDir.mockImplementation(() => Promise.resolve(current));
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["старый.txt"]));
+
+    current = listing([["новый.txt", false], ["старый.txt", false]]);
+    await act(async () => announce?.([""], false));
+    await waitFor(() =>
+      expect(names()).toEqual(["новый.txt", "старый.txt"]),
+    );
+
+    // Мало показать файл, созданный агентом, — надо показать где он.
+    expect(classesOf("новый.txt")).toContain("is-fresh");
+    expect(classesOf("старый.txt")).not.toContain("is-fresh");
+  });
+
+  it("does not flash what was merely unfolded", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs"]));
+
+    // Вспышка значит «появилось на диске». Раскрытие — это не появление, и
+    // вспыхивать на нём значит обесценить сам знак.
+    expect(classesOf("src/main.rs")).not.toContain("is-fresh");
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 

@@ -69,6 +69,15 @@ export function FileTree(props: {
   const [focused, setFocused] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  // Вспышка гаснет сама: она отмечает момент появления, а не состояние файла.
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (fresh.size === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => setFresh(new Set()), 1_200);
+    return () => window.clearTimeout(timer);
+  }, [fresh]);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<TreeListing | null>(null);
   // Имя вводят прямо в дереве, на месте будущей строки: диалог посреди списка
@@ -88,7 +97,22 @@ export function FileTree(props: {
       setLoading((current) => new Set(current).add(path));
       try {
         const listing = await readWorkspaceDir(workspaceId, path);
-        setListings((current) => new Map(current).set(path, listing));
+        setListings((current) => {
+          // Появившееся в уже прочитанной папке пришло с диска, а не от
+          // раскрытия: его показывают вспышкой, иначе файл, созданный агентом,
+          // просто беззвучно возникает в списке.
+          const before = current.get(path);
+          if (before) {
+            const had = new Set(before.entries.map((entry) => entry.path));
+            const born = listing.entries
+              .map((entry) => entry.path)
+              .filter((child) => !had.has(child));
+            if (born.length > 0) {
+              setFresh((marked) => new Set([...marked, ...born]));
+            }
+          }
+          return new Map(current).set(path, listing);
+        });
         setError(null);
       } catch (cause) {
         setError(localizeBackendError(cause));
@@ -257,6 +281,23 @@ export function FileTree(props: {
     ? (found?.entries ?? []).map((entry) => ({ ...entry, depth: 0 }))
     : flatten(listings, expanded);
   const rootListing = listings.get(ROOT);
+
+  // Что было на экране прошлым кадром. Строка, которой там не было, въезжает;
+  // остальные стоят на месте — иначе раскрытие одной папки дёргало бы всё
+  // дерево целиком.
+  const shownRef = useRef<Set<string> | null>(null);
+  const previouslyShown = shownRef.current;
+  const arriving = new Set(
+    previouslyShown === null
+      ? []
+      : rows.map((row) => row.path).filter((path) => !previouslyShown.has(path)),
+  );
+  // Отсчёт начинается с первого кадра, где что-то есть: пустой кадр до
+  // прочтения корня — это ещё не «дерево было пустым», и принимать его за
+  // точку отсчёта значит объявить прибывшим весь проект.
+  if (rows.length > 0 || previouslyShown !== null) {
+    shownRef.current = new Set(rows.map((row) => row.path));
+  }
 
   // Куда смотрит клавиатура. Отдельно от выбранного файла: ходить по дереву
   // стрелками, ничего не открывая, — обычное дело, и открытый файл при этом
@@ -434,6 +475,8 @@ export function FileTree(props: {
             aria-selected={row.path === activePath}
             className={`file-row ${row.isDir ? "is-dir" : "is-file"} ${
               row.path === activePath ? "is-active" : ""
+            } ${arriving.has(row.path) ? "is-arriving" : ""} ${
+              fresh.has(row.path) ? "is-fresh" : ""
             }`}
             style={{ "--file-depth": row.depth } as CSSProperties}
             title={row.path}

@@ -490,6 +490,13 @@ export default function App() {
     });
   }, []);
 
+  // Колонка редактора не исчезает рывком: закрыли последний файл — она
+  // уезжает, и только потом её снимают.
+  const editorPresence = useAnimatedPresence(
+    openFiles.length > 0 ? openFiles : null,
+    180,
+  );
+
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
@@ -634,14 +641,17 @@ export default function App() {
             onReset={() => resetColumn("tree")}
           />
         )}
-        {workspaces.activeId && (
+        {workspaces.activeId && editorPresence && (
           <FileEditor
             workspaceId={workspaces.activeId}
-            files={openFiles}
+            // Пока колонка уезжает, показываем последний состав вкладок:
+            // опустевшая на кадр колонка мигнула бы пустотой перед уходом.
+            files={editorPresence.item}
             activePath={activeFilePath}
             onSelect={setActiveFilePath}
             onClose={closeFile}
             width={widths.editor}
+            leaving={editorPresence.closing}
           />
         )}
         {openFiles.length > 0 && (

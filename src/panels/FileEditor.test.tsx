@@ -174,6 +174,27 @@ describe("FileEditor", () => {
     expect(document.querySelector(".tok-keyword")).toBeNull();
   });
 
+  it("keeps showing its tabs while it is leaving", () => {
+    // Колонку сняли с показа, но кадр исчезания ещё идёт: опустевшая на кадр
+    // колонка мигнула бы пустотой перед уходом.
+    const { container } = render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+        leaving
+      />,
+    );
+
+    expect(tabs()).toEqual(["a.txt"]);
+    expect(container.querySelector(".file-editor")?.className).toContain(
+      "is-leaving",
+    );
+  });
+
   it("marks a tab whose file has unsaved work", async () => {
     render(
       <FileEditor

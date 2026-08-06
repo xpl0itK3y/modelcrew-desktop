@@ -21,6 +21,8 @@ export function FileEditor(props: {
   onClose: (path: string) => void;
   /// Ширину задаёт раскладка: колонку тянут за разделитель справа.
   width: number;
+  /// Колонка уезжает: последний файл закрыт, но кадр исчезания ещё идёт.
+  leaving?: boolean;
 }) {
   const { t } = useI18n();
   const { files, activePath } = props;
@@ -36,7 +38,7 @@ export function FileEditor(props: {
 
   return (
     <section
-      className="file-editor"
+      className={`file-editor ${props.leaving ? "is-leaving" : ""}`}
       aria-label={t("files.editorTitle")}
       style={{ width: props.width }}
     >

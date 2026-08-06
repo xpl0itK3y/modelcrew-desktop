@@ -555,3 +555,148 @@ body.is-resizing .resize-handle {
   color: var(--mc-text-faint);
   font-size: 11px;
 }
+
+/* ---------- Движение ---------- */
+
+/* Строка, которой на прошлом кадре не было: раскрыли папку, пришли находки
+   поиска, файл появился на диске. Едет из-под родителя — короткое движение
+   вниз читается как «раскрылось», а не «список подменили». */
+.file-row.is-arriving {
+  animation: file-row-in 160ms cubic-bezier(0.2, 0, 0.13, 1) both;
+}
+
+@keyframes file-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Файл, созданный не нами: агентом в соседней панели, сборкой, git-ом. Его
+   мало показать — надо показать где, иначе он беззвучно возникает в списке. */
+.file-row.is-fresh {
+  animation: file-row-fresh 1.2s ease-out;
+}
+
+@keyframes file-row-fresh {
+  from {
+    background: var(--mc-accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* Меню вырастает от точки щелчка, а не проявляется целиком: так видно, к чему
+   оно относится. */
+.file-menu {
+  animation: file-menu-in 120ms cubic-bezier(0.2, 0, 0.13, 1);
+  transform-origin: top left;
+}
+
+@keyframes file-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Поле имени коротко подсвечивается: оно встаёт посреди списка похожих строк,
+   и глазу надо помочь его найти. */
+.file-name-input {
+  animation: file-name-in 260ms ease-out;
+}
+
+@keyframes file-name-in {
+  from {
+    box-shadow: 0 0 0 3px var(--mc-accent-soft);
+  }
+  to {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-row.is-arriving,
+  .file-row.is-fresh,
+  .file-menu,
+  .file-name-input {
+    animation: none;
+  }
+}
+
+/* Колонка редактора приезжает и уезжает, а не возникает: появление целой
+   колонки рывком сдвигает всю сетку терминалов за один кадр, и глаз теряет
+   место, на которое смотрел. */
+.file-editor {
+  animation: file-editor-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+  overflow: hidden;
+}
+
+.file-editor.is-leaving {
+  animation: file-editor-out 180ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes file-editor-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes file-editor-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
+/* Вкладка файла: приезжает открытием, а не подменяет соседнюю. */
+.file-tab {
+  animation: file-tab-in 140ms ease-out;
+}
+
+@keyframes file-tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Крестик проступает плавно: резкое появление на наведении читается как
+   мигание, особенно когда мышь идёт мимо к соседней вкладке. */
+.file-tab-close {
+  transition: opacity 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-editor,
+  .file-editor.is-leaving,
+  .file-tab {
+    animation: none;
+  }
+
+  .file-tab-close {
+    transition: none;
+  }
+}
