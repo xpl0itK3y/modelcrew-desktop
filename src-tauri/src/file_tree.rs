@@ -417,6 +417,97 @@ pub async fn workspace_reveal_entry(
     })
 }
 
+/// Сколько находок отдаём поиску. Больше человек всё равно не просмотрит, а
+/// обход при этом можно оборвать — он и стоит дорого.
+const MAX_MATCHES: usize = 200;
+
+/// Куда не заходим при поиске. Это не «скрыть от глаз»: в дереве эти папки
+/// видны и раскрываются. Но обходить `node_modules` целиком ради поиска по
+/// именам значит ждать секунды там, где ждут мгновение.
+const SKIPPED: [&str; 6] = [
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    ".venv",
+    "__pycache__",
+];
+
+/// Ищет по именам файлов и папок вглубь всего проекта.
+///
+/// По именам, а не по содержимому: содержимое ищут `rg` и агенты, у них это
+/// выходит лучше, а дереву нужно «где лежит файл, который я помню по имени».
+pub fn search(root: &Path, query: &str) -> CommandResult<TreeListing> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(TreeListing {
+            entries: Vec::new(),
+            truncated: false,
+        });
+    }
+    let base = resolve_inside(root, "")?;
+    let mut entries: Vec<TreeEntry> = Vec::new();
+    let mut queue: std::collections::VecDeque<(PathBuf, String)> =
+        std::collections::VecDeque::new();
+    queue.push_back((base, String::new()));
+
+    // Обход в ширину: находки поближе к корню обычно и есть искомые, а
+    // обрывать список на глубине честнее, чем на середине первого уровня.
+    while let Some((dir, prefix)) = queue.pop_front() {
+        if entries.len() >= MAX_MATCHES {
+            return Ok(TreeListing {
+                entries,
+                truncated: true,
+            });
+        }
+        let Ok(listing) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in listing.flatten() {
+            let name = item.file_name().to_string_lossy().into_owned();
+            if name.is_empty() || name.contains('/') || name.contains('\\') {
+                continue;
+            }
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let is_dir = item.path().is_dir();
+            if name.to_lowercase().contains(&needle) && entries.len() < MAX_MATCHES {
+                entries.push(TreeEntry {
+                    name: name.clone(),
+                    path: path.clone(),
+                    is_dir,
+                });
+            }
+            if is_dir && !SKIPPED.contains(&name.as_str()) {
+                queue.push_back((item.path(), path));
+            }
+        }
+    }
+
+    entries.sort_by(compare_entries);
+    Ok(TreeListing {
+        entries,
+        truncated: false,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_search_tree(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    query: String,
+) -> CommandResult<TreeListing> {
+    crate::ensure_main_window(&window)?;
+    let root: PathBuf = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || search(&root, &query))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error))?
+}
+
 // ---------- Слежение за деревом ----------
 
 /// Тихое окно: `npm install` или генерация кода дают тысячи событий подряд, и
@@ -821,6 +912,82 @@ mod tests {
             assert!(create_entry(&root, path, false).is_err(), "создание {path}");
             assert!(delete_entry(&root, path).is_err(), "удаление {path}");
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_finds_by_a_piece_of_the_name_at_any_depth() {
+        let root = sandbox("search");
+        std::fs::create_dir_all(root.join("src/panels")).unwrap();
+        std::fs::write(root.join("src/panels/FileTree.tsx"), "").unwrap();
+        std::fs::write(root.join("src/main.rs"), "").unwrap();
+
+        let found = search(&root, "tree").unwrap();
+
+        // Куском имени, а не началом: файл помнят как «дерево», а не как
+        // «эф-ай-эл-и».
+        assert_eq!(
+            found
+                .entries
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["src/panels/FileTree.tsx"]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_ignores_the_case_of_both_sides() {
+        let root = sandbox("search-case");
+        std::fs::write(root.join("README.md"), "").unwrap();
+
+        assert_eq!(search(&root, "readme").unwrap().entries.len(), 1);
+        assert_eq!(search(&root, "ReAdMe").unwrap().entries.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_finds_folders_too() {
+        let root = sandbox("search-dirs");
+        std::fs::create_dir_all(root.join("panels")).unwrap();
+
+        let found = search(&root, "panel").unwrap();
+
+        assert!(found.entries[0].is_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_does_not_crawl_into_the_heavy_folders() {
+        let root = sandbox("search-skip");
+        std::fs::create_dir_all(root.join("node_modules/пакет")).unwrap();
+        std::fs::write(root.join("node_modules/пакет/цель.txt"), "").unwrap();
+        std::fs::write(root.join("цель.txt"), "").unwrap();
+
+        let found = search(&root, "цель").unwrap();
+
+        // Сама папка в дереве видна и раскрывается; обходить её ради поиска по
+        // именам — это секунды ожидания там, где ждут мгновение.
+        assert_eq!(
+            found
+                .entries
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["цель.txt"]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_empty_query_finds_nothing_rather_than_everything() {
+        let root = sandbox("search-empty");
+        std::fs::write(root.join("файл.txt"), "").unwrap();
+
+        // Пустой запрос — это «я ещё не начал искать», а не «покажи весь
+        // проект списком».
+        assert!(search(&root, "   ").unwrap().entries.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 

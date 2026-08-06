@@ -38,8 +38,8 @@ use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
 use file_tree::{
     workspace_create_entry, workspace_delete_entry, workspace_read_dir, workspace_read_file,
-    workspace_rename_entry, workspace_reveal_entry, workspace_tree_unwatch, workspace_tree_watch,
-    workspace_write_file, TreeWatchState,
+    workspace_rename_entry, workspace_reveal_entry, workspace_search_tree, workspace_tree_unwatch,
+    workspace_tree_watch, workspace_write_file, TreeWatchState,
 };
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
@@ -1015,6 +1015,7 @@ pub fn run() {
             workspace_read_dir,
             workspace_read_file,
             workspace_rename_entry,
+            workspace_search_tree,
             workspace_reveal_entry,
             workspace_tree_unwatch,
             workspace_tree_watch,
@@ -1170,6 +1171,7 @@ mod tests {
         "workspace_register_root",
         "workspace_rename_entry",
         "workspace_reveal_entry",
+        "workspace_search_tree",
         "workspace_tree_unwatch",
         "workspace_tree_watch",
         "workspace_unregister_root",
@@ -1438,6 +1440,7 @@ mod tests {
             "workspace_register_root",
             "workspace_rename_entry",
             "workspace_reveal_entry",
+            "workspace_search_tree",
             "workspace_tree_unwatch",
             "workspace_tree_watch",
             "workspace_unregister_root",

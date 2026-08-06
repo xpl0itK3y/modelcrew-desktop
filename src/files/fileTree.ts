@@ -146,3 +146,12 @@ export function withName(path: string, name: string): string {
   const parent = parentOf(path);
   return parent ? `${parent}/${name}` : name;
 }
+
+/// Ищет по именам файлов и папок вглубь проекта. По именам, а не по
+/// содержимому: содержимое ищут `rg` и агенты, у них это выходит лучше.
+export function searchWorkspaceTree(
+  workspaceId: string,
+  query: string,
+): Promise<TreeListing> {
+  return invoke<TreeListing>("workspace_search_tree", { workspaceId, query });
+}

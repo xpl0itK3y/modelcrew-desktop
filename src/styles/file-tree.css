@@ -432,3 +432,43 @@ body.is-resizing .resize-handle {
 .file-name-input:focus-visible {
   outline: 0;
 }
+
+/* Поиск по дереву. */
+
+.file-search {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--mc-panel-border);
+}
+
+.file-search-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-panel);
+  color: var(--mc-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.file-search-input::placeholder {
+  color: var(--mc-text-faint);
+}
+
+.file-search-input:focus-visible {
+  border-color: var(--mc-accent-border);
+  outline: 0;
+}
+
+/* В находках имя одно и то же встречается часто, и без каталога их не
+   различить. Путь приписан сбоку и приглушён: он подсказка, а не заголовок. */
+.file-row-where {
+  margin-left: auto;
+  padding-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+}

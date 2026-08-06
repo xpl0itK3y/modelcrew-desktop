@@ -24,6 +24,7 @@ import {
   readWorkspaceDir,
   renameWorkspaceEntry,
   revealWorkspaceEntry,
+  searchWorkspaceTree,
   watchWorkspaceTree,
   withName,
   type TreeEntry,
@@ -59,6 +60,8 @@ export function FileTree(props: {
   const [focused, setFocused] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<TreeListing | null>(null);
   // Имя вводят прямо в дереве, на месте будущей строки: диалог посреди списка
   // отрывает от того места, куда файл кладут.
   const [draft, setDraft] = useState<{
@@ -224,7 +227,26 @@ export function FileTree(props: {
     void load(draft.kind === "rename" ? parentOf(draft.at) : draft.at);
   };
 
-  const rows = flatten(listings, expanded);
+  // Поиск идёт на диск, а печатают быстро: без паузы каждый символ запускал бы
+  // обход всего проекта, и отвечали бы они вразнобой.
+  useEffect(() => {
+    const needle = query.trim();
+    if (!needle) {
+      setFound(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void searchWorkspaceTree(workspaceId, needle)
+        .then(setFound)
+        .catch((cause) => setError(localizeBackendError(cause)));
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [workspaceId, query]);
+
+  const searching = query.trim().length > 0;
+  const rows = searching
+    ? (found?.entries ?? []).map((entry) => ({ ...entry, depth: 0 }))
+    : flatten(listings, expanded);
   const rootListing = listings.get(ROOT);
 
   // Куда смотрит клавиатура. Отдельно от выбранного файла: ходить по дереву
@@ -264,21 +286,56 @@ export function FileTree(props: {
       ?.focus();
   };
 
-  if (error) {
+  // Поле поиска остаётся на месте при любом состоянии дерева: очистить запрос
+  // должно быть можно и тогда, когда он ничего не нашёл.
+  const search = (
+    <div className="file-search">
+      <input
+        type="search"
+        className="file-search-input"
+        aria-label={t("files.search")}
+        placeholder={t("files.search")}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Escape") {
+            setQuery("");
+          }
+        }}
+      />
+    </div>
+  );
+
+  const message = error
+    ? { text: error, alert: true }
+    : searching && found === null
+      ? { text: t("files.searching"), alert: false }
+      : searching && rows.length === 0
+        ? { text: t("files.nothingFound"), alert: false }
+        : !rootListing
+          ? { text: t("files.loading"), alert: false }
+          : rootListing.entries.length === 0
+            ? { text: t("files.empty"), alert: false }
+            : null;
+
+  if (message) {
     return (
-      <div className="file-tree-empty" role="alert">
-        {error}
-      </div>
+      <>
+        {search}
+        <div
+          className="file-tree-empty"
+          role={message.alert ? "alert" : undefined}
+        >
+          {message.text}
+        </div>
+      </>
     );
-  }
-  if (!rootListing) {
-    return <div className="file-tree-empty">{t("files.loading")}</div>;
-  }
-  if (rootListing.entries.length === 0) {
-    return <div className="file-tree-empty">{t("files.empty")}</div>;
   }
 
   return (
+    <>
+    {search}
     <div
       className="file-tree"
       role="tree"
@@ -351,11 +408,15 @@ export function FileTree(props: {
               {row.isDir ? <FolderIcon /> : glyph.label || <FileSheet />}
             </span>
             <span className="file-name">{row.name}</span>
+            {searching && parentOf(row.path) && (
+              <span className="file-row-where">{parentOf(row.path)}</span>
+            )}
           </button>
         );
       })}
-      {rows.some((row) => listings.get(row.path)?.truncated) ||
-      rootListing.truncated ? (
+      {found?.truncated ||
+      rows.some((row) => listings.get(row.path)?.truncated) ||
+      rootListing?.truncated ? (
         <div className="file-tree-note">{t("files.truncated")}</div>
       ) : null}
       {menu && (
@@ -381,6 +442,7 @@ export function FileTree(props: {
         />
       )}
     </div>
+    </>
   );
 }
 

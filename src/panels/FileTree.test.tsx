@@ -10,6 +10,7 @@ const createEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
 const renameEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
 const deleteEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
 const revealEntry = vi.fn((..._args: unknown[]) => Promise.resolve());
+const searchTree = vi.fn();
 /// Сообщить дереву о правке на диске так, как это делает вотчер.
 let announce: ((dirs: string[], partial: boolean) => void) | null = null;
 const stopWatching = vi.fn();
@@ -25,6 +26,7 @@ vi.mock("../files/fileTree", async () => {
     renameWorkspaceEntry: (...args: unknown[]) => renameEntry(...args),
     deleteWorkspaceEntry: (...args: unknown[]) => deleteEntry(...args),
     revealWorkspaceEntry: (...args: unknown[]) => revealEntry(...args),
+    searchWorkspaceTree: (...args: unknown[]) => searchTree(...args),
     watchWorkspaceTree: (
       _id: string,
       onChanged: (dirs: string[], partial: boolean) => void,
@@ -71,6 +73,8 @@ function names(): string[] {
 beforeEach(() => {
   readWorkspaceDir.mockReset();
   stopWatching.mockReset();
+  searchTree.mockReset();
+  searchTree.mockResolvedValue({ entries: [], truncated: false });
   for (const spy of [createEntry, renameEntry, deleteEntry, revealEntry]) {
     spy.mockClear();
   }
@@ -394,6 +398,107 @@ describe("FileTree", () => {
     await pick("a.txt", "Показать в системе");
 
     await waitFor(() => expect(revealEntry).toHaveBeenCalledWith("w1", "a.txt"));
+  });
+
+  it("shows what the search found instead of the tree", async () => {
+    vi.useFakeTimers();
+    try {
+      serve({ "": listing([["src", true]]) });
+      searchTree.mockResolvedValue(
+        listing([["FileTree.tsx", false]], "src/panels"),
+      );
+      render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+      await vi.waitFor(() => expect(names()).toEqual(["src"]));
+
+      fireEvent.change(screen.getByLabelText("Поиск по имени"), {
+        target: { value: "tree" },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      await vi.waitFor(() => expect(names()).toEqual(["FileTree.tsx"]));
+      expect(searchTree).toHaveBeenCalledWith("w1", "tree");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits out the typing before going to disk", async () => {
+    vi.useFakeTimers();
+    try {
+      serve({ "": listing([["src", true]]) });
+      render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+      await vi.waitFor(() => expect(names()).toEqual(["src"]));
+      const box = screen.getByLabelText("Поиск по имени");
+
+      for (const value of ["t", "tr", "tre", "tree"]) {
+        fireEvent.change(box, { target: { value } });
+        await act(async () => {
+          vi.advanceTimersByTime(40);
+        });
+      }
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // Печатают быстро, а поиск идёт на диск: без паузы каждый символ
+      // запускал бы обход всего проекта, и отвечали бы они вразнобой.
+      expect(searchTree).toHaveBeenCalledTimes(1);
+      expect(searchTree).toHaveBeenCalledWith("w1", "tree");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says plainly when the search found nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      serve({ "": listing([["src", true]]) });
+      render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+      await vi.waitFor(() => expect(names()).toEqual(["src"]));
+
+      fireEvent.change(screen.getByLabelText("Поиск по имени"), {
+        target: { value: "такого-нет" },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // Пустое дерево читалось бы как пустой проект.
+      await vi.waitFor(() =>
+        expect(screen.getByText("Ничего не нашлось")).toBeInTheDocument(),
+      );
+      // И поле остаётся на месте: очистить запрос надо уметь и отсюда.
+      expect(screen.getByLabelText("Поиск по имени")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("brings the tree back when the query is cleared", async () => {
+    vi.useFakeTimers();
+    try {
+      serve({ "": listing([["src", true]]) });
+      searchTree.mockResolvedValue(listing([["найдено.txt", false]]));
+      render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+      await vi.waitFor(() => expect(names()).toEqual(["src"]));
+      const box = screen.getByLabelText("Поиск по имени");
+      fireEvent.change(box, { target: { value: "най" } });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      await vi.waitFor(() => expect(names()).toEqual(["найдено.txt"]));
+
+      fireEvent.change(box, { target: { value: "" } });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      await vi.waitFor(() => expect(names()).toEqual(["src"]));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says when a folder was too big to show whole", async () => {
