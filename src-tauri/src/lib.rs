@@ -1434,15 +1434,8 @@ mod tests {
             "git_changes_unwatch",
             // Снятие вотчера дерева — тоже: оно лишь выбрасывает ручку.
             "workspace_tree_unwatch",
-            "workspace_create_entry",
-            "workspace_delete_entry",
             "workspace_pick_root",
             "workspace_register_root",
-            "workspace_rename_entry",
-            "workspace_reveal_entry",
-            "workspace_search_tree",
-            "workspace_tree_unwatch",
-            "workspace_tree_watch",
             "workspace_unregister_root",
         ];
 

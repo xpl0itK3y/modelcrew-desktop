@@ -73,17 +73,24 @@ fn resolve_inside(root: &Path, path: &str) -> CommandResult<PathBuf> {
         );
     };
     let mut ancestor = full.as_path();
-    let inside = loop {
-        if let Ok(resolved) = ancestor.canonicalize() {
-            break resolved;
-        }
-        let Some(parent) = ancestor.parent() else {
-            return Err(
-                CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_context("path", path)
-            );
+    let inside =
+        loop {
+            if let Ok(resolved) = ancestor.canonicalize() {
+                break resolved;
+            }
+            // Путь не разворачивается, но на диске что-то есть — значит это битая
+            // ссылка. Куда она ведёт, мы проверить не можем, а запись по ней
+            // пойдёт: пропустив её, мы позволили бы создать файл вне проекта.
+            if std::fs::symlink_metadata(ancestor).is_ok() {
+                return Err(CommandError::new(ErrorCode::WorkspacePathUnsupported)
+                    .with_context("path", path));
+            }
+            let Some(parent) = ancestor.parent() else {
+                return Err(CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+                    .with_context("path", path));
+            };
+            ancestor = parent;
         };
-        ancestor = parent;
-    };
     if !inside.starts_with(&base) {
         return Err(
             CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", path)
@@ -989,6 +996,72 @@ mod tests {
         // проект списком».
         assert!(search(&root, "   ").unwrap().entries.is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_project_itself_cannot_be_named_as_a_path() {
+        let root = sandbox("dot");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/файл.txt"), "тело").unwrap();
+
+        // `.` разворачивается в сам каталог, и «удалить .» означало бы снести
+        // проект целиком — вместе с `.git`. `..` уже отсекался, `.` нет.
+        for path in [
+            ".",
+            "./",
+            "src/.",
+            "src/./файл.txt",
+            "src//файл.txt",
+            "src/",
+        ] {
+            assert!(delete_entry(&root, path).is_err(), "удаление {path:?}");
+            assert!(read_dir(&root, path).is_err(), "чтение {path:?}");
+        }
+        assert!(root.join("src/файл.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Битая ссылка — единственный путь мимо проверки: развернуть её нельзя,
+    /// поэтому разбор доходит до её родителя и признаёт путь своим, а запись
+    /// потом идёт по ссылке наружу.
+    #[cfg(unix)]
+    #[test]
+    fn a_broken_link_out_of_the_project_cannot_be_written_through() {
+        let base = sandbox("broken-link");
+        let root = base.join("проект");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = base.join("снаружи.txt");
+        std::os::unix::fs::symlink(&outside, root.join("ссылка.txt")).unwrap();
+        std::os::unix::fs::symlink(base.join("нет-каталога"), root.join("папка")).unwrap();
+
+        assert!(write_file(&root, "ссылка.txt", "чужое").is_err());
+        assert!(create_entry(&root, "ссылка.txt", false).is_err());
+        // И через битую ссылку-каталог тоже: там разбор поднимался ещё выше.
+        assert!(write_file(&root, "папка/внутри.txt", "чужое").is_err());
+        assert!(create_entry(&root, "папка/внутри.txt", false).is_err());
+
+        assert!(!outside.exists(), "файл создан вне проекта");
+        assert!(!base.join("нет-каталога").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_that_stays_inside_the_project_still_works() {
+        let base = sandbox("inside-link");
+        let root = base.join("проект");
+        std::fs::create_dir_all(root.join("настоящая")).unwrap();
+        std::os::unix::fs::symlink(root.join("настоящая"), root.join("ссылка")).unwrap();
+
+        // Запрет касается выхода наружу, а не ссылок вообще: внутри проекта
+        // они обычное дело, и ломать их работу незачем.
+        write_file(&root, "ссылка/файл.txt", "тело").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(root.join("настоящая/файл.txt")).unwrap(),
+            "тело"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
