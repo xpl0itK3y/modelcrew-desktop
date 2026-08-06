@@ -312,23 +312,76 @@
   font-size: 12px;
 }
 
-.file-view-text {
+/* Два слоя, лежащих друг на друге: подсветка снизу, поле ввода сверху и
+   прозрачным текстом. Всё, что задаёт положение буквы, обязано совпадать —
+   иначе курсор окажется не там, где буква. */
+.file-view-code {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+
+.file-view-paint,
+.file-view-text {
+  position: absolute;
+  inset: 0;
+  margin: 0;
   padding: 10px 12px;
   border: 0;
-  resize: none;
-  background: transparent;
-  color: var(--mc-text);
   font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12.5px;
   line-height: 1.5;
   tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+.file-view-paint {
+  /* Слой рисуют, но не трогают: щелчки и выделение — дело поля сверху. */
+  pointer-events: none;
+  color: var(--mc-text);
+  overflow: hidden;
+}
+
+.file-view-text {
+  resize: none;
+  background: transparent;
+  /* Текст прозрачный, курсор виден: буквы даёт слой снизу. */
+  color: transparent;
+  caret-color: var(--mc-text-bright);
+}
+
+.file-view-text::selection {
+  background: var(--mc-accent-soft);
 }
 
 .file-view-text:focus-visible {
   outline: 0;
 }
+
+/* Разряды токенов. Приглушённые нарочно: подсветка помогает глазу найти
+   границу, а не соревнуется с текстом за внимание. */
+.tok-comment {
+  color: var(--mc-text-faint);
+  font-style: italic;
+}
+
+.tok-string {
+  color: #9ccfa0;
+}
+
+.tok-number {
+  color: #d8956a;
+}
+
+.tok-keyword {
+  color: #b48ede;
+}
+
+.tok-punct {
+  color: var(--mc-text-muted);
+}
+
 
 /* Разделители колонок. */
 

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import { readWorkspaceFile, writeWorkspaceFile } from "../files/fileTree";
+import { grammarOf, tokenize } from "../files/highlight";
 
 type Loaded = {
   text: string;
@@ -39,6 +40,10 @@ export function FileView(props: {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  // Язык от имени файла, а не от содержимого: имя мы знаем сразу, а угадывать
+  // язык по тексту — отдельная задача с собственными ошибками.
+  const language = grammarOf(path.split("/").pop() ?? path);
 
   const dirty = loaded !== null && text !== loaded.text;
   const dirtyRef = useRef(dirty);
@@ -135,20 +140,45 @@ export function FileView(props: {
       {loaded === null && !error ? (
         <div className="file-view-empty">{t("files.loading")}</div>
       ) : (
-        <textarea
-          className="file-view-text"
-          aria-label={path}
-          spellCheck={false}
-          readOnly={loaded === null || loaded.blocked !== null}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "s" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              void save();
-            }
-          }}
-        />
+        <div className="file-view-code">
+          {/* Подсветка лежит под полем ввода, а не заменяет его: правка
+              остаётся обычным текстовым полем со своим курсором, выделением и
+              отменой, а красит только фон. Оба слоя обязаны совпадать до
+              пикселя — отсюда общий шрифт, отступы и межстрочный интервал. */}
+          <pre className="file-view-paint" aria-hidden="true">
+            {tokenize(text, language).map((token, index) => (
+              <span key={index} className={`tok-${token.kind}`}>
+                {token.text}
+              </span>
+            ))}
+            {/* Последняя строка без перевода иначе не даёт слою высоты, и
+                поле прокручивается на строку дальше подсветки. */}
+            {"\n"}
+          </pre>
+          <textarea
+            ref={textRef}
+            className="file-view-text"
+            aria-label={path}
+            spellCheck={false}
+            readOnly={loaded === null || loaded.blocked !== null}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onScroll={(event) => {
+              const paint = event.currentTarget
+                .previousElementSibling as HTMLElement | null;
+              if (paint) {
+                paint.scrollTop = event.currentTarget.scrollTop;
+                paint.scrollLeft = event.currentTarget.scrollLeft;
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "s" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                void save();
+              }
+            }}
+          />
+        </div>
       )}
     </div>
   );

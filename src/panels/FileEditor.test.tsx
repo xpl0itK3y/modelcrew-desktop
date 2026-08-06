@@ -129,6 +129,51 @@ describe("FileEditor", () => {
     expect(closed).toHaveBeenCalledWith("b.txt");
   });
 
+  it("paints the code under the very text being edited", async () => {
+    readWorkspaceFile.mockResolvedValue(file('const x = 1; // хвост'));
+
+    render(
+      <FileEditor
+        workspaceId="w1"
+        files={["main.ts"]}
+        activePath="main.ts"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(document.querySelector(".tok-keyword")).toHaveTextContent("const"),
+    );
+    expect(document.querySelector(".tok-comment")).toHaveTextContent("// хвост");
+    // И слой подсветки повторяет текст целиком: поле ввода лежит поверх него,
+    // и любое расхождение сдвинет курсор относительно букв.
+    const painted = document.querySelector(".file-view-paint")?.textContent;
+    expect(painted?.startsWith("const x = 1; // хвост")).toBe(true);
+  });
+
+  it("leaves a file it cannot read as plain text", async () => {
+    readWorkspaceFile.mockResolvedValue(file("просто текст"));
+
+    render(
+      <FileEditor
+        workspaceId="w1"
+        files={["ЛИЦЕНЗИЯ"]}
+        activePath="ЛИЦЕНЗИЯ"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("ЛИЦЕНЗИЯ")).toHaveValue("просто текст"),
+    );
+    // Выдуманная разметка мешает сильнее, чем её отсутствие.
+    expect(document.querySelector(".tok-keyword")).toBeNull();
+  });
+
   it("marks a tab whose file has unsaved work", async () => {
     render(
       <FileEditor
