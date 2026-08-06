@@ -24,6 +24,8 @@ export const ru = {
   "files.nothingFound": "Ничего не нашлось",
   "files.collapseAll": "Свернуть всё",
   "files.hide": "Скрыть дерево",
+  "files.closeUnsaved": "В «{name}» есть несохранённая правка. Закрыть и потерять её?",
+  "files.closeAnyway": "Закрыть без сохранения",
   "files.editorTitle": "Редактор",
   "files.unsaved": "Есть несохранённая правка",
   "files.close": "Закрыть файл",

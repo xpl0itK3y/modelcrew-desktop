@@ -723,3 +723,11 @@ body.is-resizing .resize-handle {
     transition: none;
   }
 }
+
+/* Каждый открытый файл остаётся смонтированным, видно один: переключение
+   вкладок не должно уносить несохранённую правку. */
+.file-view-slot {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}

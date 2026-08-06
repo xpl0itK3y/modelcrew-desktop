@@ -24,6 +24,16 @@ function file(content: string) {
   return { content, isBinary: false, tooLarge: false, exists: true };
 }
 
+/// Поле видимого файла: у скрытых вкладок поля тоже смонтированы.
+function visibleField(): HTMLElement | undefined {
+  return screen
+    .getAllByRole("textbox")
+    .find((field) => {
+      const slot = field.closest(".file-view-slot") as HTMLElement | null;
+      return slot?.style.display !== "none";
+    });
+}
+
 function tabs(): string[] {
   return screen
     .getAllByRole("tab")
@@ -66,9 +76,14 @@ describe("FileEditor", () => {
       />,
     );
 
-    // На вкладке имя, а не путь: путь не помещается, он в подсказке.
+    // На вкладке имя, а не путь: путь не помещается, он в подсказке. Ищем
+    // именно на вкладке — теперь смонтированы все открытые файлы, и путь
+    // встречается ещё и в шапке каждого вида.
     expect(tabs()).toEqual(["main.rs", "README.md"]);
-    expect(screen.getByTitle("src/main.rs")).toBeInTheDocument();
+    const first = screen.getAllByRole("tab")[0];
+    expect(first.querySelector(".file-tab-open")?.getAttribute("title")).toBe(
+      "src/main.rs",
+    );
   });
 
   it("shows the file that was chosen", async () => {
@@ -127,6 +142,107 @@ describe("FileEditor", () => {
     fireEvent.click(screen.getByLabelText("Закрыть файл: b.txt"));
 
     expect(closed).toHaveBeenCalledWith("b.txt");
+  });
+
+  it("keeps an unsaved edit while another tab is looked at", async () => {
+    readWorkspaceFile.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(file(`внутри ${path}`)),
+    );
+    const view = render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("внутри a.txt"),
+    );
+    fireEvent.change(screen.getByLabelText("a.txt"), {
+      target: { value: "моя правка" },
+    });
+
+    view.rerender(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt"]}
+        activePath="b.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+    await waitFor(() => expect(visibleField()).toHaveValue("внутри b.txt"));
+    view.rerender(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+
+    // Правка на месте. Раньше вид перемонтировался по пути, и возвращение на
+    // вкладку показывало файл, перечитанный с диска, — работа исчезала молча.
+    await waitFor(() => expect(screen.getByLabelText("a.txt")).toHaveValue("моя правка"));
+  });
+
+  it("asks before closing a tab that holds unsaved work", async () => {
+    const closed = vi.fn();
+    render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={closed}
+        width={520}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+    fireEvent.change(screen.getByLabelText("a.txt"), {
+      target: { value: "не сохранил" },
+    });
+    await waitFor(() =>
+      expect(screen.getByTitle("Есть несохранённая правка")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Закрыть файл: a.txt"));
+
+    // Закрытая вкладка уносит работу, а вернуть её неоткуда.
+    expect(closed).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/есть несохранённая правка/i),
+    ).toBeInTheDocument();
+  });
+
+  it("closes a clean tab without a word", async () => {
+    const closed = vi.fn();
+    render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={closed}
+        width={520}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+
+    fireEvent.click(screen.getByLabelText("Закрыть файл: a.txt"));
+
+    // Вопрос там, где терять нечего, — это лишний щелчок на каждое закрытие.
+    expect(closed).toHaveBeenCalledWith("a.txt");
   });
 
   it("paints the code under the very text being edited", async () => {

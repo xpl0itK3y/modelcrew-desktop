@@ -11,6 +11,7 @@ import { CloseIcon } from "../ui/Icons";
 import { fileGlyph } from "../files/fileGlyph";
 import { fileName } from "../crew/claimLabel";
 import { FileView } from "./FileView";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 export function FileEditor(props: {
   workspaceId: string;
@@ -30,6 +31,9 @@ export function FileEditor(props: {
   // молча. Держим по всем открытым, а не только по видимому: переключился —
   // метка соседа не должна пропасть.
   const [dirty, setDirty] = useState<Set<string>>(new Set());
+  // Какую вкладку закрывают с несохранённой правкой. Спрашиваем: закрытая
+  // вкладка уносит работу, а вернуть её неоткуда.
+  const [asking, setAsking] = useState<string | null>(null);
 
   if (files.length === 0) {
     return null;
@@ -85,11 +89,10 @@ export function FileEditor(props: {
                 title={t("files.close")}
                 aria-label={`${t("files.close")}: ${fileName(path)}`}
                 onClick={() => {
-                  setDirty((current) => {
-                    const next = new Set(current);
-                    next.delete(path);
-                    return next;
-                  });
+                  if (dirty.has(path)) {
+                    setAsking(path);
+                    return;
+                  }
                   props.onClose(path);
                 }}
               >
@@ -99,28 +102,49 @@ export function FileEditor(props: {
           );
         })}
       </div>
-      {/* key по пути перемонтирует вид: у другого файла своё содержимое и своя
-          история правки, и переиспользовать состояние нельзя. */}
-      <FileView
-        key={current}
-        workspaceId={props.workspaceId}
-        path={current}
-        onDirtyChange={(isDirty) =>
-          setDirty((currentSet) => {
-            const has = currentSet.has(current);
-            if (has === isDirty) {
-              return currentSet;
+      {/* Каждый открытый файл остаётся смонтированным, а видно один. Раньше
+          вид перемонтировался по пути, и переключение вкладок уносило
+          несохранённую правку молча: текст исчезал, а точка на вкладке
+          продолжала обещать, что он цел. */}
+      {files.map((path) => (
+        <div
+          key={path}
+          className="file-view-slot"
+          style={{ display: path === current ? "flex" : "none" }}
+        >
+          <FileView
+            workspaceId={props.workspaceId}
+            path={path}
+            onDirtyChange={(isDirty) =>
+              setDirty((marked) => {
+                if (marked.has(path) === isDirty) {
+                  return marked;
+                }
+                const next = new Set(marked);
+                if (isDirty) {
+                  next.add(path);
+                } else {
+                  next.delete(path);
+                }
+                return next;
+              })
             }
-            const next = new Set(currentSet);
-            if (isDirty) {
-              next.add(current);
-            } else {
-              next.delete(current);
-            }
-            return next;
-          })
-        }
-      />
+          />
+        </div>
+      ))}
+      {asking && (
+        <ConfirmDialog
+          text={t("files.closeUnsaved", { name: fileName(asking) })}
+          confirmLabel={t("files.closeAnyway")}
+          tone="danger"
+          onConfirm={() => {
+            const path = asking;
+            setAsking(null);
+            props.onClose(path);
+          }}
+          onCancel={() => setAsking(null)}
+        />
+      )}
     </section>
   );
 }

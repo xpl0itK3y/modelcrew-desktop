@@ -56,6 +56,9 @@ export function FileView(props: {
   notify.current = onDirtyChange;
   useEffect(() => {
     notify.current?.(dirty);
+    // Уходя, снимаем метку за собой: без этого закрытая вкладка оставляла бы
+    // за собой обещание несохранённой правки, которой уже нет.
+    return () => notify.current?.(false);
   }, [dirty]);
 
   useEffect(() => {

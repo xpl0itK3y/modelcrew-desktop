@@ -25,6 +25,8 @@ export const en: Record<MessageKey, string> = {
   "files.nothingFound": "Nothing found",
   "files.collapseAll": "Collapse everything",
   "files.hide": "Hide the tree",
+  "files.closeUnsaved": "\u00ab{name}\u00bb has unsaved changes. Close and lose them?",
+  "files.closeAnyway": "Close without saving",
   "files.editorTitle": "Editor",
   "files.unsaved": "There are unsaved changes",
   "files.close": "Close the file",
