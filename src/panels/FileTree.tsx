@@ -68,7 +68,15 @@ export function FileTree(props: {
   const [listings, setListings] = useState<Map<string, TreeListing>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
+  // У ошибки два вида. Не прочитали проект — показывать нечего, и сообщение
+  // занимает место списка. Не удалась операция — список на месте, сообщение
+  // висит полоской и держится, пока его не закроют: удачное перечитывание
+  // соседней папки не довод считать, что человек всё увидел.
+  const [error, setError] = useState<{ text: string; fatal: boolean } | null>(
+    null,
+  );
+  const failed = (cause: unknown, fatal: boolean) =>
+    setError({ text: localizeBackendError(cause), fatal });
   const [focused, setFocused] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -116,9 +124,16 @@ export function FileTree(props: {
           }
           return new Map(current).set(path, listing);
         });
-        setError(null);
+        // Гасим только отказ чтения: сообщение об операции ждёт человека.
+        setError((current) => (current?.fatal ? null : current));
       } catch (cause) {
-        setError(localizeBackendError(cause));
+        // Не прочитали корень и показать нечего — это отказ; всё остальное
+        // всего лишь устаревший кусок списка.
+        setError((current) =>
+          current?.fatal === false
+            ? current
+            : { text: localizeBackendError(cause), fatal: path === ROOT },
+        );
       } finally {
         setLoading((current) => {
           const next = new Set(current);
@@ -212,7 +227,7 @@ export function FileTree(props: {
     setMenu(null);
     if (action === "reveal") {
       void revealWorkspaceEntry(workspaceId, target.path).catch((cause) =>
-        setError(localizeBackendError(cause)),
+        failed(cause, false),
       );
       return;
     }
@@ -256,7 +271,7 @@ export function FileTree(props: {
         await createWorkspaceEntry(workspaceId, path, draft.kind === "folder");
       }
     } catch (cause) {
-      setError(localizeBackendError(cause));
+      failed(cause, false);
     }
     // Вотчер догонит и сам, но ждать его тик после собственного действия —
     // это заметная глазу задержка там, где результат ожидают немедленно.
@@ -274,7 +289,7 @@ export function FileTree(props: {
     const timer = window.setTimeout(() => {
       void searchWorkspaceTree(workspaceId, needle)
         .then(setFound)
-        .catch((cause) => setError(localizeBackendError(cause)));
+        .catch((cause) => failed(cause, false));
     }, 160);
     return () => window.clearTimeout(timer);
   }, [workspaceId, query]);
@@ -414,28 +429,51 @@ export function FileTree(props: {
     </div>
   );
 
-  const message = error
-    ? { text: error, alert: true }
-    : searching && found === null
-      ? { text: t("files.searching"), alert: false }
+  // Ошибка операции — это полоска над деревом, а не вместо него. Занятое имя
+  // или промах меню не повод убирать список: вернуть его можно было только
+  // сменой проекта, а фоновое перечитывание от вотчера заставляло дерево
+  // мигать между списком и сообщением, пока агент в соседней панели работал.
+  const notice = error && !error.fatal && (
+    <div className="file-tree-alert" role="alert">
+      <span className="file-tree-alert-text">{error.text}</span>
+      <button
+        type="button"
+        className="icon-button"
+        title={t("common.close")}
+        aria-label={t("common.close")}
+        onClick={() => setError(null)}
+      >
+        <CloseIcon />
+      </button>
+    </div>
+  );
+
+  // А вот когда показывать нечего вовсе — сообщение занимает место списка:
+  // пустое дерево ничем не отличается от непрочитанного.
+  const message =
+    searching && found === null
+      ? t("files.searching")
       : searching && rows.length === 0
-        ? { text: t("files.nothingFound"), alert: false }
-        : !rootListing
-          ? { text: t("files.loading"), alert: false }
+        ? t("files.nothingFound")
+        : error?.fatal
+          ? error.text
+          : !rootListing
+            ? t("files.loading")
           : rootListing.entries.length === 0
-            ? { text: t("files.empty"), alert: false }
+            ? t("files.empty")
             : null;
 
-  if (message) {
+  if (message !== null) {
     return (
       <>
         {header}
         {search}
+        {notice}
         <div
           className="file-tree-empty"
-          role={message.alert ? "alert" : undefined}
+          role={error?.fatal ? "alert" : undefined}
         >
-          {message.text}
+          {message}
         </div>
       </>
     );
@@ -445,6 +483,7 @@ export function FileTree(props: {
     <>
     {header}
     {search}
+    {notice}
     <div
       className="file-tree"
       role="tree"
@@ -575,7 +614,7 @@ export function FileTree(props: {
             setFocused(next ? next.path : null);
             void deleteWorkspaceEntry(workspaceId, target.path)
               .then(() => props.onRemoved?.(target.path))
-              .catch((cause) => setError(localizeBackendError(cause)))
+              .catch((cause) => failed(cause, false))
               .finally(() => void load(parentOf(target.path)));
           }}
           onCancel={() => setDoomed(null)}

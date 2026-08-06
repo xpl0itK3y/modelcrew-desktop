@@ -799,6 +799,51 @@ describe("FileTree", () => {
     expect(removed).not.toHaveBeenCalled();
   });
 
+  it("keeps the tree on screen when an operation fails", async () => {
+    createEntry.mockRejectedValue({ code: "workspacePathTaken" });
+    serve({ "": listing([["src", true], ["README.md", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src", "README.md"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать файл" }));
+    fireEvent.change(screen.getByLabelText("Имя"), {
+      target: { value: "занятое" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    // Раньше сообщение вставало вместо дерева, и вернуть список можно было
+    // только сменой проекта.
+    expect(names()).toEqual(["src", "README.md"]);
+  });
+
+  it("lets the message be dismissed", async () => {
+    createEntry.mockRejectedValue({ code: "workspacePathTaken" });
+    serve({ "": listing([["src", true]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByRole("button", { name: "Создать файл" }));
+    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "x" } });
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    const alert = screen.getByRole("alert");
+    fireEvent.click(alert.querySelector("button") as HTMLElement);
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("still gives up the space when the project cannot be read at all", async () => {
+    readWorkspaceDir.mockRejectedValue({ code: "workspaceRootUnavailable" });
+
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+
+    // Показывать нечего вовсе: держать пустое место под несуществующий список
+    // незачем, и «читаю проект…» здесь врало бы.
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.queryByText("Читаю проект…")).not.toBeInTheDocument();
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 

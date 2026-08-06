@@ -731,3 +731,47 @@ body.is-resizing .resize-handle {
   min-height: 0;
   flex-direction: column;
 }
+
+/* Сообщение об ошибке — полоска над деревом, а не вместо него: занятое имя
+   или промах меню не повод убирать список с экрана. */
+.file-tree-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 4px 6px 10px;
+  border-bottom: 1px solid var(--mc-panel-border);
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+  font-size: 11.5px;
+  line-height: 1.35;
+  animation: file-alert-in 160ms ease-out;
+}
+
+.file-tree-alert-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-tree-alert .icon-button {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+@keyframes file-alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-tree-alert {
+    animation: none;
+  }
+}
