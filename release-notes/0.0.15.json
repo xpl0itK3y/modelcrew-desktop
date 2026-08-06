@@ -1,0 +1,25 @@
+{
+  "version": "0.0.15",
+  "ru": {
+    "title": "Агенты в одном проекте перестали перезаписывать друг друга",
+    "summary": "Перед правкой агент заявляет файл, занятый оставляет соседу, а запись поверх устаревшего чтения отклоняется. В шапке панели видно, чем он занят.",
+    "highlights": [
+      "Перед правкой агент заявляет файл, а занятый оставляет соседу и берётся за другой",
+      "Заявки поддерживают все подключаемые агенты, каждый получает отказ на своём языке",
+      "Запись поверх устаревшего чтения отклоняется — агент перечитывает файл заново",
+      "В шапке панели видно, какой файл правит агент, а на вкладке — кто упёрся в занятый",
+      "После каждого хода агента дерево проекта снимается в служебную ветку"
+    ]
+  },
+  "en": {
+    "title": "Agents in one project no longer overwrite each other",
+    "summary": "An agent claims a file before editing it, leaves a busy one to its neighbour, and a write built on a stale read is refused. Panel headers show what it edits.",
+    "highlights": [
+      "An agent claims a file before editing and leaves a busy one to its neighbour",
+      "Every connectable agent supports claims and is refused in its own dialect",
+      "A write built on a stale read is refused, so the agent re-reads the file",
+      "Panel headers name the file being edited; tabs show who is stuck on a busy one",
+      "The project tree is snapshotted after every agent turn"
+    ]
+  }
+}

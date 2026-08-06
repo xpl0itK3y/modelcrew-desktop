@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.0.15
+
+### Русский
+
+Перед правкой агент заявляет файл, занятый оставляет соседу, а запись поверх устаревшего чтения отклоняется. В шапке панели видно, чем он занят.
+
+- Перед правкой агент заявляет файл, а занятый оставляет соседу и берётся за другой
+- Заявки поддерживают claude, codex, copilot, cursor, grok, kimi, opencode, kilocode и antigravity
+- Каждый агент получает отказ на своём языке: кодом выхода, решением в JSON или ошибкой плагина
+- В отказе сказано и то, что переписывать занятый файл через оболочку тоже не нужно
+- Запись поверх устаревшего чтения отклоняется — агент перечитывает файл заново
+- Из патча codex вычитываются все файлы сразу, а не только первый
+- Пути через символические ссылки считаются одним и тем же файлом
+- Устаревшая запись хука обновляется при подключении, а не остаётся лежать как есть
+- Хуки codex ставятся автоматически; чтобы он их запускал, нужно разовое `/hooks` в его сессии
+- В шапке панели видно, какой файл правит агент, полный список — в подсказке
+- Правка отмечается карандашом, ожидание — песочными часами, а подпись мягко пульсирует
+- Длинное имя файла в подписи обрывается многоточием
+- На вкладке видно, какая панель упёрлась в занятый файл
+- После каждого хода агента дерево проекта снимается в служебную ветку
+- Вкладка снимков убрана из Git-панели, а пилюля вкладок считает ширину по их числу
+
+### English
+
+An agent claims a file before editing it, leaves a busy one to its neighbour, and a write built on a stale read is refused. Panel headers show what it edits.
+
+- An agent claims a file before editing and leaves a busy one to its neighbour
+- Claims work in claude, codex, copilot, cursor, grok, kimi, opencode, kilocode and antigravity
+- Each agent is refused in its own dialect: exit code, JSON decision, or plugin error
+- The refusal also says not to rewrite the busy file through the shell
+- A write built on a stale read is refused, so the agent re-reads the file
+- Every file in a codex patch is claimed, not just the first one
+- Paths that differ only by a symlink count as the same file
+- An outdated hook entry is brought up to date on connect instead of being left alone
+- Codex hooks are installed automatically; running them needs a one-time `/hooks` in its session
+- Panel headers name the file being edited, with the full list in the tooltip
+- An edit is marked with a pencil, waiting with an hourglass, and the label pulses gently
+- A long file name in the label ends in an ellipsis
+- Tabs show which panel is stuck on a busy file
+- The project tree is snapshotted after every agent turn
+- The snapshots tab is gone from the git panel, and the tab pill sizes itself by tab count
+
 ## 0.0.14
 
 ### Русский
