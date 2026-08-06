@@ -9,6 +9,7 @@
 @import "./git-changes.css";
 @import "./github-auth.css";
 @import "./sidebar.css";
+@import "./file-tree.css";
 @import "./terminal.css";
 @import "./overlays.css";
 @import "./settings.css";

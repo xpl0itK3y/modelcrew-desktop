@@ -1,0 +1,165 @@
+/* Дерево проекта: колонка слева от сетки терминалов. */
+
+.file-tree-column {
+  display: flex;
+  flex-direction: column;
+  /* Ширины хватает на «THIRD_PARTY_NOTICES.md» с отступом второго уровня;
+     длиннее имена обрываются многоточием, а не растягивают колонку. */
+  width: 248px;
+  flex: 0 0 auto;
+  min-height: 0;
+  border-right: 1px solid var(--mc-border);
+  background: var(--mc-sidebar);
+}
+
+.file-tree-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px 0 12px;
+  color: var(--mc-text-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--mc-panel-border);
+}
+
+.file-tree-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 12px;
+}
+
+.file-tree-empty,
+.file-tree-note {
+  padding: 12px;
+  color: var(--mc-text-faint);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  /* Отступ считается от глубины: рисовать вложенность вложенными блоками
+     значит платить за неё лишним уровнем DOM на каждой папке. */
+  padding: 3px 8px 3px calc(6px + var(--file-depth, 0) * 14px);
+  border: 0;
+  background: transparent;
+  color: var(--mc-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-row:hover {
+  background: var(--mc-hover-subtle);
+}
+
+.file-row.is-active {
+  background: var(--mc-surface-active);
+  color: var(--mc-text-bright);
+}
+
+.file-row:focus-visible {
+  outline: 1px solid var(--mc-accent-border);
+  outline-offset: -1px;
+}
+
+.file-chevron {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  flex: 0 0 auto;
+  color: var(--mc-text-faint);
+  transition: transform 120ms ease;
+}
+
+.file-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.file-glyph {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  flex: 0 0 auto;
+  color: var(--mc-text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Цвет разряда — та же подсказка, что и надпись, но её видно боковым зрением:
+   глазу хватает пятна, чтобы найти нужный файл в длинном списке. */
+.file-glyph.is-ts {
+  color: #6cb6ff;
+}
+
+.file-glyph.is-js {
+  color: #e3c05c;
+}
+
+.file-glyph.is-json {
+  color: #e0985a;
+}
+
+.file-glyph.is-md {
+  color: #9aa4b8;
+}
+
+.file-glyph.is-rs {
+  color: #d8956a;
+}
+
+.file-glyph.is-toml,
+.file-glyph.is-yaml {
+  color: #a68fd4;
+}
+
+.file-glyph.is-css {
+  color: #6bb8c8;
+}
+
+.file-glyph.is-html {
+  color: #e08a6a;
+}
+
+.file-glyph.is-sh {
+  color: #7fc784;
+}
+
+.file-row.is-dir .file-glyph {
+  color: var(--mc-text-muted);
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Папка выделяется наклоном, как в редакторах: разряд виден до того, как
+   глаз дошёл до значка. */
+.file-row.is-dir .file-name {
+  font-style: italic;
+  color: var(--mc-text-bright);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-chevron {
+    transition: none;
+  }
+}
