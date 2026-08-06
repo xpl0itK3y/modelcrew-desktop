@@ -687,6 +687,77 @@ describe("FileTree", () => {
     expect(field.closest(".file-row")).toBeTruthy();
   });
 
+  it("asks to delete from the keyboard just as from the menu", async () => {
+    serve({ "": listing([["важное.txt", false], ["сосед.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() =>
+      expect(names()).toEqual(["важное.txt", "сосед.txt"]),
+    );
+
+    fireEvent.keyDown(screen.getByRole("tree"), { key: "Delete" });
+
+    // Клавиша рядом со стрелками — тем более не повод обходиться без вопроса.
+    expect(deleteEntry).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «важное.txt»/)).toBeInTheDocument(),
+    );
+  });
+
+  it("deletes the row the keyboard was on, not the first one", async () => {
+    serve({ "": listing([["первый.txt", false], ["второй.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() =>
+      expect(names()).toEqual(["первый.txt", "второй.txt"]),
+    );
+    const tree = screen.getByRole("tree");
+    fireEvent.keyDown(tree, { key: "ArrowDown" });
+
+    fireEvent.keyDown(tree, { key: "Backspace" });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «второй.txt»/)).toBeInTheDocument(),
+    );
+  });
+
+  it("moves the keyboard onto a neighbour of what it deleted", async () => {
+    serve({
+      "": listing([["первый.txt", false], ["второй.txt", false]]),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() =>
+      expect(names()).toEqual(["первый.txt", "второй.txt"]),
+    );
+    fireEvent.keyDown(screen.getByRole("tree"), { key: "Delete" });
+    await waitFor(() =>
+      expect(screen.getByText(/Удалить «первый.txt»/)).toBeInTheDocument(),
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Удалить" });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    // Строки под курсором больше не будет, и клавиатура иначе осталась бы ни
+    // на чём: следующее нажатие стрелки прыгнуло бы в начало списка.
+    await waitFor(() => expect(deleteEntry).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        screen.getByTitle("второй.txt").getAttribute("tabindex"),
+      ).toBe("0"),
+    );
+  });
+
+  it("leaves the delete key to the search box while typing there", async () => {
+    serve({ "": listing([["файл.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["файл.txt"]));
+
+    fireEvent.keyDown(screen.getByLabelText("Поиск по имени"), {
+      key: "Delete",
+    });
+
+    // Стирать букву в запросе не значит удалять файл.
+    expect(screen.queryByText(/Удалить «/)).not.toBeInTheDocument();
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 

@@ -319,6 +319,15 @@ export function FileTree(props: {
       setFocused(action.path);
       return;
     }
+    if (action.kind === "delete") {
+      const row = rows.find((item) => item.path === action.path);
+      if (row) {
+        // Спрашиваем так же, как из меню: удаление необратимо, и клавиша рядом
+        // со стрелками тем более не повод обходиться без вопроса.
+        setDoomed({ path: row.path, name: row.name });
+      }
+      return;
+    }
     if (action.kind === "open") {
       const row = rows.find((item) => item.path === action.path);
       if (row?.isDir) {
@@ -557,6 +566,11 @@ export function FileTree(props: {
           onConfirm={() => {
             const target = doomed;
             setDoomed(null);
+            // Фокус переезжает на соседа: строки под ним больше не будет, и
+            // клавиатура иначе осталась бы ни на чём.
+            const at = rows.findIndex((row) => row.path === target.path);
+            const next = rows[at + 1] ?? rows[at - 1] ?? null;
+            setFocused(next ? next.path : null);
             void deleteWorkspaceEntry(workspaceId, target.path)
               .catch((cause) => setError(localizeBackendError(cause)))
               .finally(() => void load(parentOf(target.path)));

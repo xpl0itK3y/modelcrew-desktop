@@ -11,6 +11,7 @@ export type TreeAction =
   | { kind: "expand"; path: string }
   | { kind: "collapse"; path: string }
   | { kind: "open"; path: string }
+  | { kind: "delete"; path: string }
   | null;
 
 export function treeKeyAction(
@@ -68,6 +69,11 @@ export function treeKeyAction(
     case "Enter":
     case " ":
       return row ? { kind: "open", path: row.path } : null;
+    case "Delete":
+    case "Backspace":
+      // Спрашивать будет тот, кто это выполняет: клавиша лишь называет цель.
+      // Backspace — привычка Finder-а, Delete — всего остального.
+      return row ? { kind: "delete", path: row.path } : null;
     default:
       return null;
   }

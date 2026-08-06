@@ -109,6 +109,21 @@ describe("treeKeyAction", () => {
     }
   });
 
+  it("names the row to delete for both habits of the key", () => {
+    // Backspace — привычка из Finder, Delete — из всего остального. Спорить с
+    // чужой привычкой тут не за что: обе означают одно.
+    for (const key of ["Delete", "Backspace"]) {
+      expect(treeKeyAction(key, ROWS, "src/main.rs", OPEN)).toEqual({
+        kind: "delete",
+        path: "src/main.rs",
+      });
+    }
+  });
+
+  it("has nothing to delete while nothing is focused", () => {
+    expect(treeKeyAction("Delete", ROWS, null, OPEN)).toBeNull();
+  });
+
   it("keeps its hands off keys that are not its own", () => {
     // Печатаемые символы уйдут поиску по дереву, а Tab — переходу дальше.
     for (const key of ["Tab", "a", "Escape", "PageDown"]) {
