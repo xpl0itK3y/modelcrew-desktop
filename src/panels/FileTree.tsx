@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import { fileGlyph } from "../files/fileGlyph";
@@ -22,6 +23,7 @@ import {
   type TreeEntry,
   type TreeListing,
 } from "../files/fileTree";
+import { treeKeyAction } from "../files/treeKeys";
 import { ChevronRightIcon, FolderIcon } from "../ui/Icons";
 
 /// Корень проекта в карте каталогов лежит под пустым путём — тем же, каким его
@@ -42,6 +44,8 @@ export function FileTree(props: {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const treeRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(
     async (path: string) => {
@@ -144,6 +148,43 @@ export function FileTree(props: {
   const rows = flatten(listings, expanded);
   const rootListing = listings.get(ROOT);
 
+  // Куда смотрит клавиатура. Отдельно от выбранного файла: ходить по дереву
+  // стрелками, ничего не открывая, — обычное дело, и открытый файл при этом
+  // подсвечен своим.
+  const focusedPath =
+    focused && rows.some((row) => row.path === focused)
+      ? focused
+      : (rows[0]?.path ?? null);
+
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const action = treeKeyAction(event.key, rows, focusedPath, expanded);
+    if (!action) {
+      return;
+    }
+    event.preventDefault();
+    if (action.kind === "expand" || action.kind === "collapse") {
+      toggle(action.path);
+      setFocused(action.path);
+      return;
+    }
+    if (action.kind === "open") {
+      const row = rows.find((item) => item.path === action.path);
+      if (row?.isDir) {
+        toggle(action.path);
+      } else if (row) {
+        props.onOpenFile(action.path);
+      }
+      setFocused(action.path);
+      return;
+    }
+    setFocused(action.path);
+    // Фокус переносим сами: строки — кнопки, и без этого клавиатура осталась бы
+    // на прежней, а Enter открыл бы не то, что подсвечено.
+    treeRef.current
+      ?.querySelector<HTMLElement>(`[data-path="${cssEscape(action.path)}"]`)
+      ?.focus();
+  };
+
   if (error) {
     return (
       <div className="file-tree-empty" role="alert">
@@ -159,7 +200,13 @@ export function FileTree(props: {
   }
 
   return (
-    <div className="file-tree" role="tree" aria-label={t("files.panelTitle")}>
+    <div
+      className="file-tree"
+      role="tree"
+      aria-label={t("files.panelTitle")}
+      ref={treeRef}
+      onKeyDown={onKeyDown}
+    >
       {rows.map((row) => {
         const open = expanded.has(row.path);
         const glyph = fileGlyph(row.name);
@@ -175,6 +222,11 @@ export function FileTree(props: {
             }`}
             style={{ "--file-depth": row.depth } as CSSProperties}
             title={row.path}
+            data-path={row.path}
+            // Табом входят в дерево один раз и попадают туда, где были: два
+            // десятка строк подряд в порядке обхода — это не навигация.
+            tabIndex={row.path === focusedPath ? 0 : -1}
+            onFocus={() => setFocused(row.path)}
             onClick={() =>
               row.isDir ? toggle(row.path) : props.onOpenFile(row.path)
             }
@@ -195,6 +247,14 @@ export function FileTree(props: {
       ) : null}
     </div>
   );
+}
+
+/// Путь внутри селектора: имена файлов содержат что угодно, включая кавычки и
+/// скобки, а `CSS.escape` в jsdom есть не всегда.
+function cssEscape(value: string): string {
+  return typeof CSS !== "undefined" && CSS.escape
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
 }
 
 /// Лист бумаги для файла без своего значка. Отдельной иконкой в общем наборе он

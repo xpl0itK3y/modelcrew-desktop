@@ -235,6 +235,38 @@ describe("FileTree", () => {
     expect(stopWatching).toHaveBeenCalled();
   });
 
+  it("walks and opens from the keyboard", async () => {
+    const opened = vi.fn();
+    serve({
+      "": listing([["src", true], ["README.md", false]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={opened} />);
+    await waitFor(() => expect(names()).toEqual(["src", "README.md"]));
+
+    const tree = screen.getByRole("tree");
+    fireEvent.keyDown(tree, { key: "ArrowRight" });
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs", "README.md"]));
+    fireEvent.keyDown(tree, { key: "ArrowDown" });
+    fireEvent.keyDown(tree, { key: "Enter" });
+
+    expect(opened).toHaveBeenCalledWith("src/main.rs");
+  });
+
+  it("keeps a single stop for the Tab key", async () => {
+    serve({ "": listing([["a.txt", false], ["b.txt", false], ["c.txt", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt", "b.txt", "c.txt"]));
+
+    // Два десятка строк подряд в порядке обхода — это не навигация: входят в
+    // дерево один раз и дальше ходят стрелками.
+    const stops = screen
+      .getAllByRole("treeitem")
+      .filter((row) => row.getAttribute("tabindex") === "0");
+    expect(stops).toHaveLength(1);
+    expect(stops[0].getAttribute("data-path")).toBe("a.txt");
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 
