@@ -4,6 +4,7 @@ import {
   BellIcon,
   DiffIcon,
   PlusIcon,
+  FolderIcon,
   SidebarIcon,
   SlidersIcon,
 } from "./Icons";
@@ -31,9 +32,11 @@ type TitlebarProps = {
   workspaceName: string;
   workspaceFolder: string | null;
   sidebarVisible: boolean;
+  filesVisible: boolean;
   // Живой агрегат git-изменений активного проекта; null — не показывать.
   gitCounts: { additions: number; deletions: number; files: number } | null;
   onToggleSidebar: () => void;
+  onToggleFiles: () => void;
   onNewTerminal: () => void;
   onOpenSettings: () => void;
   onOpenGitChanges: () => void;
@@ -66,6 +69,7 @@ export function Titlebar(props: TitlebarProps) {
   const bellRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const toggleSidebarLabel = t("titlebar.toggleSidebar");
+  const toggleFilesLabel = t("titlebar.toggleFiles");
   const newTerminalLabel = t("titlebar.newTerminal");
   const settingsLabel = t("titlebar.settings");
 
@@ -234,6 +238,16 @@ export function Titlebar(props: TitlebarProps) {
           onClick={props.onToggleSidebar}
         >
           <SidebarIcon />
+        </button>
+        <button
+          type="button"
+          className={`icon-button ${props.filesVisible ? "" : "is-off"}`}
+          title={toggleFilesLabel}
+          aria-label={toggleFilesLabel}
+          aria-pressed={props.filesVisible}
+          onClick={props.onToggleFiles}
+        >
+          <FolderIcon />
         </button>
       </div>
       <div className="titlebar-center">
