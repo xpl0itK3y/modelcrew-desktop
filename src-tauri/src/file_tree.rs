@@ -454,19 +454,14 @@ pub fn search(root: &Path, query: &str) -> CommandResult<TreeListing> {
     }
     let base = resolve_inside(root, "")?;
     let mut entries: Vec<TreeEntry> = Vec::new();
+    let mut truncated = false;
     let mut queue: std::collections::VecDeque<(PathBuf, String)> =
         std::collections::VecDeque::new();
     queue.push_back((base, String::new()));
 
     // Обход в ширину: находки поближе к корню обычно и есть искомые, а
     // обрывать список на глубине честнее, чем на середине первого уровня.
-    while let Some((dir, prefix)) = queue.pop_front() {
-        if entries.len() >= MAX_MATCHES {
-            return Ok(TreeListing {
-                entries,
-                truncated: true,
-            });
-        }
+    'walk: while let Some((dir, prefix)) = queue.pop_front() {
         let Ok(listing) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -480,25 +475,40 @@ pub fn search(root: &Path, query: &str) -> CommandResult<TreeListing> {
             } else {
                 format!("{prefix}/{name}")
             };
-            let is_dir = item.path().is_dir();
-            if name.to_lowercase().contains(&needle) && entries.len() < MAX_MATCHES {
+            // Тип для показа — с разыменованием, как в самом дереве: ссылка на
+            // папку и выглядит папкой.
+            let is_dir = std::fs::metadata(item.path())
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false);
+            if name.to_lowercase().contains(&needle) {
+                if entries.len() >= MAX_MATCHES {
+                    // Обрываем здесь, а не на следующем каталоге: очередь может
+                    // на нём и кончиться, и тогда обрезанный список уехал бы
+                    // как полный.
+                    truncated = true;
+                    break 'walk;
+                }
                 entries.push(TreeEntry {
                     name: name.clone(),
                     path: path.clone(),
                     is_dir,
                 });
             }
-            if is_dir && !SKIPPED.contains(&name.as_str()) {
+            // А вглубь идём только по настоящим каталогам. Ссылка `latest -> ..`
+            // замкнула бы обход в кольцо — выхода из него нет вовсе, если
+            // находок не набирается, — а `link -> /Users/denis` вывела бы поиск
+            // из проекта и перечислила бы чужие файлы в webview.
+            let real_dir = item.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+            if real_dir && !SKIPPED.contains(&name.as_str()) {
                 queue.push_back((item.path(), path));
             }
         }
     }
 
+    // Порядок один и для полного списка, и для обрезанного: иначе запрос,
+    // сузившийся на символ, вдруг оказывался бы отсортированным.
     entries.sort_by(compare_entries);
-    Ok(TreeListing {
-        entries,
-        truncated: false,
-    })
+    Ok(TreeListing { entries, truncated })
 }
 
 #[tauri::command]
@@ -1015,6 +1025,71 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["цель.txt"]
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Ссылка на собственного предка — обычное дело: `docs/latest -> ..`,
+    /// `build/current -> ..`. Обход, идущий по ней, ходит по кругу, и выход у
+    /// него один — набрать находок под завязку. Запрос с опечаткой не наберёт
+    /// их никогда: поток крутится, пока не кончится память.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_back_onto_the_project_does_not_send_the_search_in_circles() {
+        let root = sandbox("search-cycle");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/цель.txt"), "").unwrap();
+        std::os::unix::fs::symlink(&root, root.join("docs/latest")).unwrap();
+
+        let found = search(&root, "цель").unwrap();
+
+        assert_eq!(
+            found
+                .entries
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["docs/цель.txt"]
+        );
+        assert!(!found.truncated);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Границу проекта держит `resolve_inside`, но поиск спрашивает его один
+    /// раз — про корень. Дальше он идёт по каталогам сам, и ссылка наружу
+    /// вывела бы его в чужой домашний каталог: открыть найденное там не дадут,
+    /// но имена файлов уже перечислены в webview.
+    #[cfg(unix)]
+    #[test]
+    fn the_search_does_not_step_out_of_the_project_through_a_link() {
+        let base = sandbox("search-escape");
+        let root = base.join("проект");
+        let outside = base.join("чужое");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("секрет.txt"), "").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("наружу")).unwrap();
+
+        assert!(search(&root, "секрет").unwrap().entries.is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_search_that_had_to_be_cut_says_so_and_stays_in_order() {
+        let root = sandbox("search-cut");
+        for index in 0..MAX_MATCHES + 20 {
+            std::fs::write(root.join(format!("цель-{index:03}.txt")), "").unwrap();
+        }
+
+        let found = search(&root, "цель").unwrap();
+
+        // Обрыв случался на следующем каталоге очереди, а в плоской папке его
+        // нет: обрезанный список уезжал как полный, без пометки и без порядка.
+        assert_eq!(found.entries.len(), MAX_MATCHES);
+        assert!(found.truncated);
+        assert!(found
+            .entries
+            .windows(2)
+            .all(|pair| pair[0].name <= pair[1].name));
         let _ = std::fs::remove_dir_all(&root);
     }
 
