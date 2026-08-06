@@ -521,6 +521,10 @@ pub async fn workspace_search_tree(
 /// перечитывать каталог на каждое — значит не показать ничего до самого конца.
 const TREE_DEBOUNCE_MS: u64 = 250;
 
+/// Но ждать тишины бесконечно нельзя: события идут сплошным потоком всё время,
+/// пока работает установка пакетов или сборка.
+const TREE_MAX_WAIT_MS: u64 = 1_000;
+
 /// Сколько каталогов называем в одном событии. Больше — и проще перечитать
 /// раскрытое целиком, чем разбирать список.
 const MAX_CHANGED_DIRS: usize = 64;
@@ -553,10 +557,12 @@ struct TreeChangedEvent<'a> {
 fn changed_dir(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     // Внутренности `.git` меняются на каждой команде git — от `index.lock` до
-    // перезаписи ссылок. В дереве это одна папка, и перечитывать её на каждый
-    // чих незачем.
-    if relative.components().next()?.as_os_str() == ".git" {
-        return Some(String::new());
+    // перезаписи ссылок. В дереве это одна строка, и её содержимое от такой
+    // возни не меняется: перечитывать нечего. Сама папка `.git` — другое дело,
+    // она может появиться и исчезнуть.
+    let mut parts = relative.components();
+    if parts.next()?.as_os_str() == ".git" {
+        return parts.next().map_or_else(|| Some(String::new()), |_| None);
     }
     let parent = relative.parent()?;
     let mut parts: Vec<String> = Vec::new();
@@ -594,14 +600,30 @@ fn spawn_tree_watch(
     std::thread::spawn(move || {
         while let Ok(first) = receiver.recv() {
             let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-            dirs.insert(first);
-            while let Ok(next) =
-                receiver.recv_timeout(std::time::Duration::from_millis(TREE_DEBOUNCE_MS))
-            {
-                dirs.insert(next);
+            let mut partial = false;
+            let mut insert = |dir: String, dirs: &mut std::collections::BTreeSet<String>| {
+                if dirs.len() >= MAX_CHANGED_DIRS && !dirs.contains(&dir) {
+                    // Дальше копить незачем: список всё равно поедет обрезанным,
+                    // а под `node_modules` это десятки тысяч строк в памяти.
+                    partial = true;
+                    return;
+                }
+                dirs.insert(dir);
+            };
+            insert(first, &mut dirs);
+            // У тишины есть потолок: `npm install` сыплет событиями без пауз
+            // минуту, и ожидание тишины заморозило бы дерево ровно тогда, когда
+            // оно меняется сильнее всего.
+            let until =
+                std::time::Instant::now() + std::time::Duration::from_millis(TREE_MAX_WAIT_MS);
+            while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+                let quiet = std::time::Duration::from_millis(TREE_DEBOUNCE_MS);
+                let Ok(next) = receiver.recv_timeout(left.min(quiet)) else {
+                    break;
+                };
+                insert(next, &mut dirs);
             }
-            let partial = dirs.len() > MAX_CHANGED_DIRS;
-            let named: Vec<String> = dirs.into_iter().take(MAX_CHANGED_DIRS).collect();
+            let named: Vec<String> = dirs.into_iter().collect();
             use tauri::Emitter;
             let _ = app.emit(
                 "workspace-tree",
@@ -620,8 +642,12 @@ fn spawn_tree_watch(
 /// Возвращает false, если вотчер поднять не удалось — например упёрлись в
 /// лимит inotify на огромном дереве. Дерево от этого не ломается: оно просто
 /// обновляется по открытию папки, как раньше.
+/// Синхронные нарочно, как и у соседнего вотчера изменений. Асинхронные
+/// команды Tauri исполняет независимыми задачами, и порядок между ними не
+/// обещан: снятие вотчера при смене проекта могло отработать после установки
+/// нового, и дерево тихо переставало обновляться.
 #[tauri::command]
-pub async fn workspace_tree_watch(
+pub fn workspace_tree_watch(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
@@ -630,7 +656,10 @@ pub async fn workspace_tree_watch(
 ) -> CommandResult<bool> {
     crate::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    let mut watchers = state.watchers.lock().unwrap();
+    // Отравленный мьютекс — не повод ронять окно паникой из команды.
+    let mut watchers = state.watchers.lock().map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error)
+    })?;
     if watchers.contains_key(&workspace_id) {
         return Ok(true);
     }
@@ -644,13 +673,15 @@ pub async fn workspace_tree_watch(
 }
 
 #[tauri::command]
-pub async fn workspace_tree_unwatch(
+pub fn workspace_tree_unwatch(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, TreeWatchState>,
     workspace_id: String,
 ) -> CommandResult<()> {
     crate::ensure_main_window(&window)?;
-    state.watchers.lock().unwrap().remove(&workspace_id);
+    if let Ok(mut watchers) = state.watchers.lock() {
+        watchers.remove(&workspace_id);
+    }
     Ok(())
 }
 
@@ -1084,23 +1115,27 @@ mod tests {
     }
 
     #[test]
-    fn the_churn_inside_git_counts_as_one_folder() {
+    fn the_churn_inside_git_changes_nothing_that_is_shown() {
         let root = Path::new("/w/проект");
 
         // `.git` меняется на каждой команде git — от `index.lock` до
-        // перезаписи ссылок. В дереве это одна папка, и перечитывать её
-        // внутренности незачем: их там не показывают.
+        // перезаписи ссылок. В дереве это одна строка, и её содержимое от
+        // такой возни не меняется: перечитывать нечего. Раньше каждое такое
+        // событие звало перечитать корень, то есть обойти его целиком с
+        // `metadata()` на каждую запись.
         for path in [
             "/w/проект/.git/index.lock",
             "/w/проект/.git/refs/heads/main",
             "/w/проект/.git/objects/ab/cdef",
         ] {
-            assert_eq!(
-                changed_dir(root, Path::new(path)).as_deref(),
-                Some(""),
-                "{path}"
-            );
+            assert_eq!(changed_dir(root, Path::new(path)), None, "{path}");
         }
+
+        // А появление и исчезновение самой папки корень меняет.
+        assert_eq!(
+            changed_dir(root, Path::new("/w/проект/.git")).as_deref(),
+            Some("")
+        );
     }
 
     #[test]

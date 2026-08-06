@@ -844,6 +844,38 @@ describe("FileTree", () => {
     expect(screen.queryByText("Читаю проект…")).not.toBeInTheDocument();
   });
 
+  it("ignores an answer that a newer request has overtaken", async () => {
+    const slow = listing([["устаревший.txt", false]]);
+    const fresh = listing([["свежий.txt", false]]);
+    let release: ((value: TreeListing) => void) | null = null;
+    let call = 0;
+    readWorkspaceDir.mockImplementation(() => {
+      call += 1;
+      if (call === 1) {
+        return Promise.resolve(fresh);
+      }
+      if (call === 2) {
+        return new Promise<TreeListing>((resolve) => {
+          release = resolve;
+        });
+      }
+      return Promise.resolve(fresh);
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["свежий.txt"]));
+
+    // Два события подряд по одной папке: второй ответ приходит первым.
+    await act(async () => announce?.([""], false));
+    await act(async () => announce?.([""], false));
+    await waitFor(() => expect(names()).toEqual(["свежий.txt"]));
+    await act(async () => {
+      release?.(slow);
+    });
+
+    // Отставший ответ не должен затирать список, собранный позже него.
+    expect(names()).toEqual(["свежий.txt"]);
+  });
+
   it("says when a folder was too big to show whole", async () => {
     serve({ "": listing([["много.txt", false]], "", true) });
 

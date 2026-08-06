@@ -4,7 +4,7 @@
 // захвата. Кто именно меняет размер и в каких границах, решает владелец
 // колонки — иначе разделитель пришлось бы учить всем правилам сразу.
 
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { useI18n } from "../i18n";
 
 /// На сколько двигает одно нажатие стрелки. Мышью ширину подбирают на глаз, а
@@ -26,6 +26,10 @@ export function ResizeHandle(props: {
 }) {
   const { t } = useI18n();
   const start = useRef<{ x: number; width: number } | null>(null);
+  // Колонка может исчезнуть прямо во время перетаскивания — сменили проект,
+  // спрятали дерево. Без уборки окно осталось бы без выделения текста и с
+  // курсором изменения размера до самой перезагрузки.
+  useEffect(() => () => document.body.classList.remove("is-resizing"), []);
   const latest = useRef(props.width);
   latest.current = props.width;
 

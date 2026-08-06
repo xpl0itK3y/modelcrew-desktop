@@ -1,6 +1,6 @@
 // Разделитель колонок: перетаскивание, клавиши и границы.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 import { ResizeHandle } from "./ResizeHandle";
@@ -91,6 +91,19 @@ describe("ResizeHandle", () => {
     fireEvent.pointerUp(element, { pointerId: 1 });
     // Метка обязана сняться: иначе окно остаётся с курсором-стрелкой и без
     // выделения текста до самой перезагрузки.
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("cleans up after itself when the column disappears mid-drag", () => {
+    const { element } = handle();
+    fireEvent.pointerDown(element, { button: 0, clientX: 100, pointerId: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+
+    cleanup();
+
+    // Колонка может исчезнуть прямо во время перетаскивания — сменили проект,
+    // спрятали дерево. Иначе окно остаётся без выделения текста и с курсором
+    // изменения размера до самой перезагрузки.
     expect(document.body.classList.contains("is-resizing")).toBe(false);
   });
 

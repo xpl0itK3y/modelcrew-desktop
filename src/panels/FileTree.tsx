@@ -103,11 +103,20 @@ export function FileTree(props: {
     null,
   );
 
+  // Номер последнего запроса по каждой папке. Два события подряд по одной и
+  // той же — и старый ответ мог прийти последним, затерев свежий список.
+  const requestsRef = useRef<Map<string, number>>(new Map());
+
   const load = useCallback(
     async (path: string) => {
+      const turn = (requestsRef.current.get(path) ?? 0) + 1;
+      requestsRef.current.set(path, turn);
       setLoading((current) => new Set(current).add(path));
       try {
         const listing = await readWorkspaceDir(workspaceId, path);
+        if (requestsRef.current.get(path) !== turn) {
+          return;
+        }
         setListings((current) => {
           // Появившееся в уже прочитанной папке пришло с диска, а не от
           // раскрытия: его показывают вспышкой, иначе файл, созданный агентом,
@@ -127,6 +136,9 @@ export function FileTree(props: {
         // Гасим только отказ чтения: сообщение об операции ждёт человека.
         setError((current) => (current?.fatal ? null : current));
       } catch (cause) {
+        if (requestsRef.current.get(path) !== turn) {
+          return;
+        }
         // Не прочитали корень и показать нечего — это отказ; всё остальное
         // всего лишь устаревший кусок списка.
         setError((current) =>
