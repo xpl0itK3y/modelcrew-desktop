@@ -36,7 +36,7 @@ use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
-use file_tree::workspace_read_dir;
+use file_tree::{workspace_read_dir, workspace_read_file, workspace_write_file};
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
     git_rename_branch, git_switch_branch,
@@ -1006,6 +1006,8 @@ pub fn run() {
             github_commit_url,
             git_reword_commit,
             workspace_read_dir,
+            workspace_read_file,
+            workspace_write_file,
             workspace_reconcile_roots,
             workspace_register_root,
             workspace_validate_root,
@@ -1150,10 +1152,12 @@ mod tests {
         "updater_prepare_self_update",
         "workspace_pick_root",
         "workspace_read_dir",
+        "workspace_read_file",
         "workspace_reconcile_roots",
         "workspace_register_root",
         "workspace_unregister_root",
         "workspace_validate_root",
+        "workspace_write_file",
     ];
 
     struct IpcCommand {

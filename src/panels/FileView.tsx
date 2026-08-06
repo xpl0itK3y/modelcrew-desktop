@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
-import { readRepoFile, writeRepoFile } from "../git/gitChanges";
+import { readWorkspaceFile, writeWorkspaceFile } from "../files/fileTree";
 
 type Loaded = {
   text: string;
@@ -60,7 +60,7 @@ export function FileView(props: {
     if (!workspaceId || !path) {
       return;
     }
-    void readRepoFile(workspaceId, path)
+    void readWorkspaceFile(workspaceId, path)
       .then((file) => {
         if (cancelled) {
           return;
@@ -97,7 +97,7 @@ export function FileView(props: {
     setSaving(true);
     setError(null);
     try {
-      await writeRepoFile(workspaceId, path, text);
+      await writeWorkspaceFile(workspaceId, path, text);
       setLoaded((current) => (current ? { ...current, text } : current));
     } catch (cause) {
       setError(localizeBackendError(cause));

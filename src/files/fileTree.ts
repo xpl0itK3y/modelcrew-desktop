@@ -39,3 +39,27 @@ export function ancestorsOf(path: string): string[] {
   }
   return ancestors;
 }
+
+export type FileContent = {
+  content: string;
+  isBinary: boolean;
+  tooLarge: boolean;
+  exists: boolean;
+};
+
+/// Читает файл проекта мимо git: папка без репозитория остаётся папкой с
+/// файлами, и открывать их в ней надо так же.
+export function readWorkspaceFile(
+  workspaceId: string,
+  path: string,
+): Promise<FileContent> {
+  return invoke<FileContent>("workspace_read_file", { workspaceId, path });
+}
+
+export function writeWorkspaceFile(
+  workspaceId: string,
+  path: string,
+  content: string,
+): Promise<void> {
+  return invoke("workspace_write_file", { workspaceId, path, content });
+}

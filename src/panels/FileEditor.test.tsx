@@ -4,12 +4,19 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 
-const readRepoFile = vi.fn();
-const writeRepoFile = vi.fn();
-vi.mock("../git/gitChanges", () => ({
-  readRepoFile: (...args: unknown[]) => readRepoFile(...args),
-  writeRepoFile: (...args: unknown[]) => writeRepoFile(...args),
-}));
+const readWorkspaceFile = vi.fn();
+const writeWorkspaceFile = vi.fn();
+vi.mock("../files/fileTree", async () => {
+  const actual =
+    await vi.importActual<typeof import("../files/fileTree")>(
+      "../files/fileTree",
+    );
+  return {
+    ...actual,
+    readWorkspaceFile: (...args: unknown[]) => readWorkspaceFile(...args),
+    writeWorkspaceFile: (...args: unknown[]) => writeWorkspaceFile(...args),
+  };
+});
 
 const { FileEditor } = await import("./FileEditor");
 
@@ -24,9 +31,9 @@ function tabs(): string[] {
 }
 
 beforeEach(() => {
-  readRepoFile.mockReset();
-  writeRepoFile.mockReset();
-  readRepoFile.mockResolvedValue(file("текст"));
+  readWorkspaceFile.mockReset();
+  writeWorkspaceFile.mockReset();
+  readWorkspaceFile.mockResolvedValue(file("текст"));
   setLocale("ru");
 });
 
@@ -65,7 +72,7 @@ describe("FileEditor", () => {
   });
 
   it("shows the file that was chosen", async () => {
-    readRepoFile.mockImplementation((_id: string, path: string) =>
+    readWorkspaceFile.mockImplementation((_id: string, path: string) =>
       Promise.resolve(file(`внутри ${path}`)),
     );
 
@@ -148,7 +155,7 @@ describe("FileEditor", () => {
   });
 
   it("drops the mark once the file is saved", async () => {
-    writeRepoFile.mockResolvedValue(undefined);
+    writeWorkspaceFile.mockResolvedValue(undefined);
     render(
       <FileEditor
         workspaceId="w1"
@@ -172,7 +179,7 @@ describe("FileEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() =>
-      expect(writeRepoFile).toHaveBeenCalledWith("w1", "a.txt", "сохранённое"),
+      expect(writeWorkspaceFile).toHaveBeenCalledWith("w1", "a.txt", "сохранённое"),
     );
     // Метка обязана погаснуть: иначе она перестаёт что-либо значить.
     await waitFor(() =>
