@@ -5,6 +5,8 @@
 // вид дерева.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { isTauri } from "../platform";
 
 export type TreeEntry = {
   name: string;
@@ -62,4 +64,41 @@ export function writeWorkspaceFile(
   content: string,
 ): Promise<void> {
   return invoke("workspace_write_file", { workspaceId, path, content });
+}
+
+type TreeChangedEvent = {
+  workspaceId: string;
+  /// Каталоги, чьё содержимое изменилось, путями от корня.
+  dirs: string[];
+  /// Названы не все: перечитывать надо всё раскрытое.
+  partial: boolean;
+};
+
+/// Слежение за деревом проекта.
+///
+/// Отдельно от git-вотчера нарочно: тот дедуплицирует по сводке `git status` и
+/// молчит, когда изменился игнорируемый файл, а в папке без репозитория его
+/// нет вовсе. Дереву же безразлично, под гитом файл или нет.
+export function watchWorkspaceTree(
+  workspaceId: string,
+  onChanged: (dirs: string[], partial: boolean) => void,
+): () => void {
+  if (!isTauri) {
+    return () => {};
+  }
+  let stopped = false;
+  const unlisten = listen<TreeChangedEvent>("workspace-tree", (event) => {
+    if (!stopped && event.payload.workspaceId === workspaceId) {
+      onChanged(event.payload.dirs, event.payload.partial);
+    }
+  });
+  void invoke("workspace_tree_watch", { workspaceId }).catch(() => {
+    // Вотчер мог не подняться — упёрлись в лимит системы. Дерево от этого не
+    // ломается: оно обновляется по раскрытию папки, как раньше.
+  });
+  return () => {
+    stopped = true;
+    void unlisten.then((stop) => stop()).catch(() => {});
+    void invoke("workspace_tree_unwatch", { workspaceId }).catch(() => {});
+  };
 }

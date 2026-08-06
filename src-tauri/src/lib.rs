@@ -36,7 +36,10 @@ use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
-use file_tree::{workspace_read_dir, workspace_read_file, workspace_write_file};
+use file_tree::{
+    workspace_read_dir, workspace_read_file, workspace_tree_unwatch, workspace_tree_watch,
+    workspace_write_file, TreeWatchState,
+};
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
     git_rename_branch, git_switch_branch,
@@ -949,6 +952,7 @@ pub fn run() {
         .manage(LinuxUpdaterState::default())
         .manage(SelfUpdaterState::default())
         .manage(GitWatchState::default())
+        .manage(TreeWatchState::default())
         .manage(crew::CrewRegistry::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
@@ -1007,6 +1011,8 @@ pub fn run() {
             git_reword_commit,
             workspace_read_dir,
             workspace_read_file,
+            workspace_tree_unwatch,
+            workspace_tree_watch,
             workspace_write_file,
             workspace_reconcile_roots,
             workspace_register_root,
@@ -1155,6 +1161,8 @@ mod tests {
         "workspace_read_file",
         "workspace_reconcile_roots",
         "workspace_register_root",
+        "workspace_tree_unwatch",
+        "workspace_tree_watch",
         "workspace_unregister_root",
         "workspace_validate_root",
         "workspace_write_file",
@@ -1413,8 +1421,12 @@ mod tests {
         // git_changes_unwatch только снимает вотчер и к диску не ходит.
         const REGISTRY_LIFECYCLE: &[&str] = &[
             "git_changes_unwatch",
+            // Снятие вотчера дерева — тоже: оно лишь выбрасывает ручку.
+            "workspace_tree_unwatch",
             "workspace_pick_root",
             "workspace_register_root",
+            "workspace_tree_unwatch",
+            "workspace_tree_watch",
             "workspace_unregister_root",
         ];
 

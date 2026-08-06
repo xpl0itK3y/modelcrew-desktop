@@ -6,13 +6,25 @@ import { setLocale } from "../i18n";
 import type { TreeListing } from "../files/fileTree";
 
 const readWorkspaceDir = vi.fn();
+/// Сообщить дереву о правке на диске так, как это делает вотчер.
+let announce: ((dirs: string[], partial: boolean) => void) | null = null;
+const stopWatching = vi.fn();
 vi.mock("../files/fileTree", async () => {
   const actual =
     await vi.importActual<typeof import("../files/fileTree")>(
       "../files/fileTree",
     );
-  return { ...actual, readWorkspaceDir: (...args: unknown[]) =>
-    readWorkspaceDir(...args) };
+  return {
+    ...actual,
+    readWorkspaceDir: (...args: unknown[]) => readWorkspaceDir(...args),
+    watchWorkspaceTree: (
+      _id: string,
+      onChanged: (dirs: string[], partial: boolean) => void,
+    ) => {
+      announce = onChanged;
+      return stopWatching;
+    },
+  };
 });
 
 const { FileTree } = await import("./FileTree");
@@ -50,6 +62,8 @@ function names(): string[] {
 
 beforeEach(() => {
   readWorkspaceDir.mockReset();
+  stopWatching.mockReset();
+  announce = null;
   setLocale("ru");
 });
 
@@ -153,6 +167,72 @@ describe("FileTree", () => {
     // Чужие файлы не должны мелькнуть даже на кадр: щелчок по такому открыл бы
     // файл не из того проекта.
     await waitFor(() => expect(names()).toEqual(["второй.txt"]));
+  });
+
+  it("picks up a file that appeared on disk", async () => {
+    const before = listing([["старый.txt", false]]);
+    const after = listing([
+      ["новый.txt", false],
+      ["старый.txt", false],
+    ]);
+    let current = before;
+    readWorkspaceDir.mockImplementation(() => Promise.resolve(current));
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["старый.txt"]));
+
+    current = after;
+    await act(async () => announce?.([""], false));
+
+    // Агент в соседней панели создаёт и удаляет файлы: дерево, застывшее на
+    // том, что было при раскрытии, врёт тем сильнее, чем дольше на него смотрят.
+    await waitFor(() => expect(names()).toEqual(["новый.txt", "старый.txt"]));
+  });
+
+  it("rereads only the folders it actually holds", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    readWorkspaceDir.mockClear();
+
+    await act(async () => announce?.(["src", "docs", "node_modules"], false));
+
+    // Ни `docs`, ни `node_modules` мы не раскрывали: спрашивать про них — это
+    // обход диска ради списка, который никто не увидит.
+    expect(readWorkspaceDir).not.toHaveBeenCalled();
+  });
+
+  it("rereads everything it holds when the change list is cut", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs"]));
+    readWorkspaceDir.mockClear();
+
+    await act(async () => announce?.([], true));
+
+    // Список каталогов обрезан — значит названному верить нельзя, и
+    // перечитывать надо всё, что показано.
+    expect(readWorkspaceDir).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops watching the project it left", async () => {
+    serve({ "": listing([["a.txt", false]]) });
+    const view = render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["a.txt"]));
+
+    await act(async () => {
+      view.rerender(<FileTree workspaceId="w2" onOpenFile={() => {}} />);
+    });
+
+    // Иначе вотчеры копятся по одному на каждый открытый за сеанс проект.
+    expect(stopWatching).toHaveBeenCalled();
   });
 
   it("says when a folder was too big to show whole", async () => {

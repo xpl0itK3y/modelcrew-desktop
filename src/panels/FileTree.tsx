@@ -6,12 +6,19 @@
 // дереве каждый уровень добавлял бы React своё поддерево, а прокрутка длинного
 // списка становилась бы рваной.
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import { fileGlyph } from "../files/fileGlyph";
 import {
   ancestorsOf,
   readWorkspaceDir,
+  watchWorkspaceTree,
   type TreeEntry,
   type TreeListing,
 } from "../files/fileTree";
@@ -104,6 +111,26 @@ export function FileTree(props: {
       return next;
     });
   }, [activePath]);
+
+  // Правки на диске: агент в соседней панели создаёт и удаляет файлы, и
+  // дерево, застывшее на том, что было при раскрытии, врёт тем сильнее, чем
+  // дольше на него смотрят. Перечитываем только то, что у нас загружено:
+  // остальное прочтётся само при раскрытии.
+  const knownRef = useRef<Set<string>>(new Set());
+  knownRef.current = new Set(listings.keys());
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    return watchWorkspaceTree(workspaceId, (dirs, partial) => {
+      const stale = partial
+        ? [...knownRef.current]
+        : dirs.filter((dir) => knownRef.current.has(dir));
+      for (const dir of stale) {
+        void load(dir);
+      }
+    });
+  }, [workspaceId, load]);
 
   // Каталоги, которые раскрыли, но ещё не читали, — докладываем.
   useEffect(() => {

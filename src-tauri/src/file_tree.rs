@@ -248,6 +248,145 @@ fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8_000).any(|byte| *byte == 0)
 }
 
+// ---------- Слежение за деревом ----------
+
+/// Тихое окно: `npm install` или генерация кода дают тысячи событий подряд, и
+/// перечитывать каталог на каждое — значит не показать ничего до самого конца.
+const TREE_DEBOUNCE_MS: u64 = 250;
+
+/// Сколько каталогов называем в одном событии. Больше — и проще перечитать
+/// раскрытое целиком, чем разбирать список.
+const MAX_CHANGED_DIRS: usize = 64;
+
+#[derive(Default)]
+pub struct TreeWatchState {
+    watchers: std::sync::Mutex<std::collections::HashMap<String, TreeWatchHandle>>,
+}
+
+struct TreeWatchHandle {
+    _watcher: notify::RecommendedWatcher,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TreeChangedEvent<'a> {
+    workspace_id: &'a str,
+    /// Каталоги, чьё содержимое изменилось, путями от корня проекта. Пустая
+    /// строка — сам корень.
+    dirs: Vec<String>,
+    /// Каталогов оказалось больше, чем мы называем: перечитывать надо всё
+    /// раскрытое, а не только названное.
+    partial: bool,
+}
+
+/// Каталог, который затронуло событие, путём от корня проекта.
+///
+/// Берём именно родителя: изменился файл — перечитать надо папку, в которой он
+/// лежит, а не его самого.
+fn changed_dir(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    // Внутренности `.git` меняются на каждой команде git — от `index.lock` до
+    // перезаписи ссылок. В дереве это одна папка, и перечитывать её на каждый
+    // чих незачем.
+    if relative.components().next()?.as_os_str() == ".git" {
+        return Some(String::new());
+    }
+    let parent = relative.parent()?;
+    let mut parts: Vec<String> = Vec::new();
+    for part in parent.components() {
+        let std::path::Component::Normal(name) = part else {
+            return None;
+        };
+        parts.push(name.to_string_lossy().into_owned());
+    }
+    Some(parts.join("/"))
+}
+
+fn spawn_tree_watch(
+    app: tauri::AppHandle,
+    workspace_id: String,
+    root: PathBuf,
+) -> Result<TreeWatchHandle, notify::Error> {
+    use notify::Watcher;
+
+    let (sender, receiver) = std::sync::mpsc::channel::<String>();
+    let filter_root = root.clone();
+    let mut watcher =
+        notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
+            let Ok(event) = event else {
+                return;
+            };
+            for path in &event.paths {
+                if let Some(dir) = changed_dir(&filter_root, path) {
+                    let _ = sender.send(dir);
+                }
+            }
+        })?;
+    watcher.watch(&root, notify::RecursiveMode::Recursive)?;
+
+    std::thread::spawn(move || {
+        while let Ok(first) = receiver.recv() {
+            let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            dirs.insert(first);
+            while let Ok(next) =
+                receiver.recv_timeout(std::time::Duration::from_millis(TREE_DEBOUNCE_MS))
+            {
+                dirs.insert(next);
+            }
+            let partial = dirs.len() > MAX_CHANGED_DIRS;
+            let named: Vec<String> = dirs.into_iter().take(MAX_CHANGED_DIRS).collect();
+            use tauri::Emitter;
+            let _ = app.emit(
+                "workspace-tree",
+                TreeChangedEvent {
+                    workspace_id: &workspace_id,
+                    dirs: named,
+                    partial,
+                },
+            );
+        }
+    });
+
+    Ok(TreeWatchHandle { _watcher: watcher })
+}
+
+/// Возвращает false, если вотчер поднять не удалось — например упёрлись в
+/// лимит inotify на огромном дереве. Дерево от этого не ломается: оно просто
+/// обновляется по открытию папки, как раньше.
+#[tauri::command]
+pub async fn workspace_tree_watch(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    state: tauri::State<'_, TreeWatchState>,
+    workspace_id: String,
+) -> CommandResult<bool> {
+    crate::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    let mut watchers = state.watchers.lock().unwrap();
+    if watchers.contains_key(&workspace_id) {
+        return Ok(true);
+    }
+    match spawn_tree_watch(app, workspace_id.clone(), root) {
+        Ok(handle) => {
+            watchers.insert(workspace_id, handle);
+            Ok(true)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub async fn workspace_tree_unwatch(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, TreeWatchState>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    crate::ensure_main_window(&window)?;
+    state.watchers.lock().unwrap().remove(&workspace_id);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn workspace_read_file(
     window: tauri::WebviewWindow,
@@ -381,6 +520,45 @@ mod tests {
         // Пустой список читался бы как «папка есть, и она пуста» — а её нет.
         assert!(read_dir(&root, "нет-такой").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_change_points_at_the_folder_that_has_to_be_reread() {
+        let root = Path::new("/w/проект");
+
+        // Изменился файл — перечитать надо папку, в которой он лежит, а не его
+        // самого: у файла содержимого списка нет.
+        assert_eq!(
+            changed_dir(root, Path::new("/w/проект/src/main.rs")).as_deref(),
+            Some("src")
+        );
+        assert_eq!(
+            changed_dir(root, Path::new("/w/проект/README.md")).as_deref(),
+            Some("")
+        );
+        // Чужой путь не наш: вотчер сторожит один корень, но события приходят
+        // и о переименованиях, где второй путь может быть каким угодно.
+        assert_eq!(changed_dir(root, Path::new("/иное/файл.rs")), None);
+    }
+
+    #[test]
+    fn the_churn_inside_git_counts_as_one_folder() {
+        let root = Path::new("/w/проект");
+
+        // `.git` меняется на каждой команде git — от `index.lock` до
+        // перезаписи ссылок. В дереве это одна папка, и перечитывать её
+        // внутренности незачем: их там не показывают.
+        for path in [
+            "/w/проект/.git/index.lock",
+            "/w/проект/.git/refs/heads/main",
+            "/w/проект/.git/objects/ab/cdef",
+        ] {
+            assert_eq!(
+                changed_dir(root, Path::new(path)).as_deref(),
+                Some(""),
+                "{path}"
+            );
+        }
     }
 
     #[test]
