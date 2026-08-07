@@ -553,7 +553,37 @@ const MAX_CHANGED_DIRS: usize = 64;
 
 #[derive(Default)]
 pub struct TreeWatchState {
-    watchers: std::sync::Mutex<std::collections::HashMap<String, TreeWatchHandle>>,
+    watchers: std::sync::Mutex<TreeWatchers>,
+}
+
+/// Один вотчер на проект и счёт тех, кто его держит.
+///
+/// Держат его не только деревом: каждый открытый файл слушает те же события,
+/// чтобы заметить правку агента под своим редактором. Без счёта первая же
+/// закрытая вкладка снимала бы вотчер со всего проекта, и дерево рядом
+/// переставало бы обновляться — молча, до перезапуска.
+#[derive(Default)]
+struct TreeWatchers {
+    live: std::collections::HashMap<String, TreeWatchHandle>,
+    holders: std::collections::HashMap<String, usize>,
+}
+
+/// Ещё один подписчик на этот проект.
+fn take_hold(holders: &mut std::collections::HashMap<String, usize>, workspace_id: &str) {
+    *holders.entry(workspace_id.to_owned()).or_insert(0) += 1;
+}
+
+/// Подписчик ушёл. `true` — он был последним, вотчер пора снимать.
+fn drop_hold(holders: &mut std::collections::HashMap<String, usize>, workspace_id: &str) -> bool {
+    let Some(count) = holders.get_mut(workspace_id) else {
+        return true;
+    };
+    *count = count.saturating_sub(1);
+    if *count == 0 {
+        holders.remove(workspace_id);
+        return true;
+    }
+    false
 }
 
 struct TreeWatchHandle {
@@ -682,12 +712,13 @@ pub fn workspace_tree_watch(
     let mut watchers = state.watchers.lock().map_err(|error| {
         CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error)
     })?;
-    if watchers.contains_key(&workspace_id) {
+    take_hold(&mut watchers.holders, &workspace_id);
+    if watchers.live.contains_key(&workspace_id) {
         return Ok(true);
     }
     match spawn_tree_watch(app, workspace_id.clone(), root) {
         Ok(handle) => {
-            watchers.insert(workspace_id, handle);
+            watchers.live.insert(workspace_id, handle);
             Ok(true)
         }
         Err(_) => Ok(false),
@@ -702,7 +733,9 @@ pub fn workspace_tree_unwatch(
 ) -> CommandResult<()> {
     crate::ensure_main_window(&window)?;
     if let Ok(mut watchers) = state.watchers.lock() {
-        watchers.remove(&workspace_id);
+        if drop_hold(&mut watchers.holders, &workspace_id) {
+            watchers.live.remove(&workspace_id);
+        }
     }
     Ok(())
 }
@@ -1264,6 +1297,33 @@ mod tests {
         assert!(file.is_binary);
         assert_eq!(file.content, "");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_watcher_lives_until_the_last_part_of_the_window_lets_go() {
+        let mut holders = std::collections::HashMap::new();
+        // Дерево и два открытых файла смотрят за одним проектом.
+        take_hold(&mut holders, "w1");
+        take_hold(&mut holders, "w1");
+        take_hold(&mut holders, "w1");
+
+        assert!(!drop_hold(&mut holders, "w1"));
+        assert!(!drop_hold(&mut holders, "w1"));
+        // И только когда ушёл последний. Иначе закрытая вкладка снимала бы
+        // слежение со всего проекта, и дерево рядом переставало бы обновляться
+        // — молча, до перезапуска окна.
+        assert!(drop_hold(&mut holders, "w1"));
+        assert!(holders.is_empty());
+    }
+
+    #[test]
+    fn letting_go_of_a_watcher_nobody_holds_is_not_an_error() {
+        let mut holders = std::collections::HashMap::new();
+
+        // Отписка без подписки приходит при перезагрузке окна: считать её
+        // ошибкой незачем, снимать нечего.
+        assert!(drop_hold(&mut holders, "w1"));
+        assert!(holders.is_empty());
     }
 
     #[test]
