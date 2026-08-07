@@ -113,6 +113,29 @@ describe("FileTreeMenu", () => {
     expect(document.activeElement).toBe(items[items.length - 1]);
   });
 
+  it("keeps the keys it handles to itself", () => {
+    const outer = vi.fn();
+    render(
+      <div onKeyDown={outer}>
+        <FileTreeMenu
+          target={{ path: "src/a.txt", name: "a.txt", isDir: false, x: 300, y: 200 }}
+          onPick={() => {}}
+          onClose={() => {}}
+        />
+      </div>,
+    );
+    const menu = screen.getAllByRole("menu")[0];
+
+    for (const key of ["ArrowDown", "ArrowUp", "Delete", "Escape"]) {
+      fireEvent.keyDown(menu, { key });
+    }
+
+    // Меню живёт внутри дерева, и дерево слушает те же клавиши: стрелка
+    // уводила фокус на строку под открытым меню, а Delete поднимал
+    // подтверждение её удаления.
+    expect(outer).not.toHaveBeenCalled();
+  });
+
   it("closes on Escape", () => {
     const { menu, onClose } = open(300, 200);
 

@@ -86,6 +86,10 @@ export function FileTreeMenu(props: {
   }, [props]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Пока меню открыто, клавиши принадлежат ему. Оно лежит внутри дерева, и
+    // всплывшая стрелка уводила фокус на строку под меню с первого нажатия, а
+    // Delete поднимал подтверждение удаления той самой строки.
+    event.stopPropagation();
     if (event.key === "Escape" || event.key === "Tab") {
       event.preventDefault();
       props.onClose();
