@@ -1,7 +1,7 @@
 // Колонка редактора: вкладки открытых файлов.
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 
 const readWorkspaceFile = vi.fn();
@@ -393,6 +393,107 @@ describe("FileEditor", () => {
         screen.queryByTitle("Есть несохранённая правка"),
       ).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("FileView on a long file", () => {
+  function gutter(): HTMLElement | null {
+    return document.querySelector(".file-view-lines");
+  }
+
+  /// jsdom не считает раскладки: подставляем ту, что поле имело бы на экране.
+  /// Без этого окно показа всегда стоит на первой строке, и его переезд —
+  /// главное, что здесь может сломаться, — проверить нечем.
+  let scrolled = 0;
+  function measureAs(lineCount: number, lineHeight = 19, visible = 400) {
+    scrolled = 0;
+    for (const [name, value] of [
+      ["scrollHeight", lineCount * lineHeight],
+      ["clientHeight", visible],
+    ] as const) {
+      Object.defineProperty(HTMLTextAreaElement.prototype, name, {
+        configurable: true,
+        get: () => value,
+      });
+    }
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollTop", {
+      configurable: true,
+      get: () => scrolled,
+      set: (value: number) => {
+        scrolled = value;
+      },
+    });
+  }
+
+  afterEach(() => {
+    for (const name of ["scrollHeight", "clientHeight", "scrollTop"]) {
+      Reflect.deleteProperty(HTMLTextAreaElement.prototype, name);
+    }
+  });
+
+  it("numbers the lines", async () => {
+    readWorkspaceFile.mockResolvedValue(file("первая\nвторая\nтретья"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue(
+        "первая\nвторая\nтретья",
+      ),
+    );
+
+    expect(gutter()?.textContent).toBe("1\n2\n3\n");
+  });
+
+  it("paints a window of a long file, not the whole of it", async () => {
+    const long = Array.from(
+      { length: 5_000 },
+      (_, index) => `const строка${index} = ${index};`,
+    ).join("\n");
+    readWorkspaceFile.mockResolvedValue(file(long));
+    open("app.js");
+    await waitFor(() =>
+      expect(screen.getByLabelText("app.js")).toHaveValue(long),
+    );
+    const paint = document.querySelector(".file-view-paint");
+
+    // Нарисовано окно, а не файл: по элементу на токен на все пять тысяч строк
+    // — это сорок пять тысяч элементов, и прокрутка на них рвётся. Видно всё
+    // равно экран.
+    const drawn = paint?.textContent
+      ?.split("\n")
+      .filter((line) => line.length > 0).length;
+    expect(drawn).toBe(600);
+    // Но высота слоя обязана остаться прежней: строки до окна и после него —
+    // ровно столько переводов строки, сколько их в файле. Иначе подсветка
+    // разъедется с текстом, который лежит поверх неё.
+    expect(paint?.textContent?.split("\n").length).toBe(5_001);
+    expect(gutter()?.textContent?.split("\n").length).toBe(5_001);
+  });
+
+  it("moves the window to where the file was scrolled", async () => {
+    const long = Array.from(
+      { length: 5_000 },
+      (_, index) => `строка ${index + 1}`,
+    ).join("\n");
+    measureAs(5_000);
+    readWorkspaceFile.mockResolvedValue(file(long));
+    open("app.js");
+    const field = await screen.findByLabelText("app.js");
+    await waitFor(() => expect(field).toHaveValue(long));
+
+    field.scrollTop = 2_400 * 19;
+    fireEvent.scroll(field);
+
+    // Окно уехало за взглядом…
+    await waitFor(() =>
+      expect(gutter()?.textContent).toContain("\n2401\n"),
+    );
+    const paint = document.querySelector(".file-view-paint");
+    expect(paint?.textContent).toContain("строка 2401");
+    // …а высота обоих слоёв осталась прежней: строки до окна — это ровно
+    // столько же переводов строки. Иначе подсветка и номера съезжают вверх на
+    // всё, что не нарисовано, и текст остаётся сам по себе.
+    expect(paint?.textContent?.split("\n").length).toBe(5_001);
+    expect(gutter()?.textContent?.split("\n").length).toBe(5_001);
   });
 });
 

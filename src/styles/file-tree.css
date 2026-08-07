@@ -385,10 +385,15 @@
   position: relative;
   flex: 1;
   min-height: 0;
+  /* Ширина колонки номеров — одно число на всех: по нему она рисуется и по
+     нему же оба слоя отступают вправо. Разойдись они — и первые буквы строк
+     уедут под номера. */
+  --file-gutter: calc(var(--file-digits, 3ch) + 22px);
 }
 
 .file-view-paint,
-.file-view-text {
+.file-view-text,
+.file-view-lines {
   position: absolute;
   inset: 0;
   margin: 0;
@@ -400,6 +405,33 @@
   tab-size: 2;
   white-space: pre;
   overflow: auto;
+}
+
+/* Место под номера отдают оба слоя сразу: текст начинается за колонкой, а не
+   под ней. */
+.file-view-paint,
+.file-view-text {
+  padding-left: calc(var(--file-gutter) + 10px);
+}
+
+/* Номера строк. Подложка непрозрачная: длинная строка при прокрутке вбок
+   уезжает под них, а не поверх. */
+.file-view-lines {
+  right: auto;
+  width: var(--file-gutter);
+  /* Общего border-box в проекте нет, а колонке он нужен: без него её `width`
+     не считает ни отступов, ни рамки, колонка выходит шире обещанного, и
+     первые буквы каждой строки прячутся под ней. */
+  box-sizing: border-box;
+  padding: 10px 8px 10px 6px;
+  overflow: hidden;
+  background: var(--mc-panel);
+  border-right: 1px solid var(--mc-panel-border);
+  color: var(--mc-text-faint);
+  text-align: right;
+  /* Щелчок по номеру должен попадать в текст под ним. */
+  pointer-events: none;
+  user-select: none;
 }
 
 .file-view-paint {

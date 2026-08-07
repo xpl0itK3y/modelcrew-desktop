@@ -8,7 +8,14 @@
 // изменений: путь один, проверки одни, и второй способ добраться до диска
 // заводить незачем.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
   parentOf,
@@ -17,7 +24,7 @@ import {
   writeWorkspaceFile,
   type FileContent,
 } from "../files/fileTree";
-import { grammarOf, tokenize } from "../files/highlight";
+import { grammarOf, lineOffsets, paintLines } from "../files/highlight";
 import { fileName } from "../crew/claimLabel";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
@@ -34,6 +41,17 @@ const BLOCKED_TEXT = {
   tooLarge: "files.tooLarge",
   missing: "files.missing",
 } as const;
+
+/// Окно показа: строки `[from, to)`.
+type Span = { from: number; to: number };
+
+/// До этого размера файл рисуем целиком. Несколько сотен строк — это тысячи
+/// элементов в слое подсветки, с ними браузер справляется не глядя.
+const WHOLE = 600;
+
+/// Запас сверху и снизу от видимого. По нему же считается, когда окно пора
+/// двигать: пока взгляд внутри запаса, перерисовывать нечего.
+const MARGIN = 80;
 
 function blockedBy(file: FileContent): Loaded["blocked"] {
   if (!file.exists) {
@@ -183,10 +201,76 @@ export function FileView(props: {
     void save();
   };
 
+  // Начала строк держим готовыми: по ним берётся окно показа и считаются
+  // номера. Пересчёт — только когда текст сменился.
+  const offsets = useMemo(() => lineOffsets(text), [text]);
+  const lineCount = offsets.length;
+  const [window, setWindow] = useState<Span>({ from: 0, to: WHOLE });
+  // Файл в несколько сотен строк рисуем целиком: окно на нём — лишняя работа
+  // и лишний повод разъехаться.
+  const shown: Span =
+    lineCount <= WHOLE ? { from: 0, to: lineCount } : window;
+
   // Разбор стоит десятки миллисекунд на большом файле, а рендер случается и от
   // того, что сменилась метка правки или подъехала полоска: пересчитывать его
-  // там, где текст тот же, незачем.
-  const painted = useMemo(() => tokenize(text, language), [text, language]);
+  // там, где текст и окно те же, незачем.
+  const painted = useMemo(
+    () => paintLines(text, language, offsets, shown.from, shown.to),
+    [text, language, offsets, shown.from, shown.to],
+  );
+  const numbers = useMemo(() => {
+    const rows: string[] = [];
+    for (let line = shown.from; line < shown.to; line += 1) {
+      rows.push(String(line + 1));
+    }
+    return rows.join("\n");
+  }, [shown.from, shown.to]);
+
+  // Открыли другой файл — окно начинается сверху.
+  useEffect(() => setWindow({ from: 0, to: WHOLE }), [workspaceId, path]);
+
+  const paintRef = useRef<HTMLPreElement | null>(null);
+  const gutterRef = useRef<HTMLPreElement | null>(null);
+
+  // Прокрутка ведёт за собой оба нижних слоя и, если ушла за край окна,
+  // передвигает само окно.
+  const follow = useCallback(() => {
+    const element = textRef.current;
+    if (!element) {
+      return;
+    }
+    if (paintRef.current) {
+      paintRef.current.scrollTop = element.scrollTop;
+      paintRef.current.scrollLeft = element.scrollLeft;
+    }
+    if (gutterRef.current) {
+      gutterRef.current.scrollTop = element.scrollTop;
+    }
+    const perLine = element.scrollHeight / Math.max(1, lineCount);
+    if (!(perLine > 0)) {
+      // Высоты нет — окно оставляем как есть. Так бывает у скрытой вкладки: она
+      // смонтирована, но не показана, и мерить у неё нечего.
+      return;
+    }
+    const first = Math.floor(element.scrollTop / perLine);
+    const last = Math.ceil((element.scrollTop + element.clientHeight) / perLine);
+    setWindow((current) =>
+      first < current.from || last > current.to
+        ? {
+            from: Math.max(0, first - MARGIN),
+            to: Math.min(lineCount, last + MARGIN),
+          }
+        : current,
+    );
+  }, [lineCount]);
+
+  // Не только на прокрутку: колонку тянут за разделитель, окно приложения
+  // меняет высоту — видно становится больше строк, чем нарисовано.
+  useEffect(() => {
+    follow();
+    globalThis.addEventListener("resize", follow);
+    return () => globalThis.removeEventListener("resize", follow);
+  }, [follow, text]);
 
   return (
     <div className="file-view">
@@ -225,20 +309,31 @@ export function FileView(props: {
       {loaded === null && !error ? (
         <div className="file-view-empty">{t("files.loading")}</div>
       ) : (
-        <div className="file-view-code">
+        <div
+          className="file-view-code"
+          style={
+            { "--file-digits": `${String(lineCount).length}ch` } as CSSProperties
+          }
+        >
           {/* Подсветка лежит под полем ввода, а не заменяет его: правка
               остаётся обычным текстовым полем со своим курсором, выделением и
               отменой, а красит только фон. Оба слоя обязаны совпадать до
-              пикселя — отсюда общий шрифт, отступы и межстрочный интервал. */}
-          <pre className="file-view-paint" aria-hidden="true">
+              пикселя — отсюда общий шрифт, отступы и межстрочный интервал.
+
+              Строки до окна и после него — это ровно столько переводов строки,
+              сколько их там на самом деле. Пустая строка в `pre` имеет ту же
+              высоту, что и любая другая, поэтому окно встаёт на своё место без
+              единого вычисления в пикселях: разъехаться тут нечему. */}
+          <pre ref={paintRef} className="file-view-paint" aria-hidden="true">
+            {"\n".repeat(shown.from)}
             {painted.map((token, index) => (
               <span key={index} className={`tok-${token.kind}`}>
                 {token.text}
               </span>
             ))}
-            {/* Последняя строка без перевода иначе не даёт слою высоты, и
-                поле прокручивается на строку дальше подсветки. */}
-            {"\n"}
+            {/* Хвост и последняя строка без перевода: без них слой ниже поля
+                кончается раньше, и подсветка отстаёт на строку. */}
+            {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
           </pre>
           <textarea
             ref={textRef}
@@ -248,14 +343,7 @@ export function FileView(props: {
             readOnly={loaded === null || loaded.blocked !== null}
             value={text}
             onChange={(event) => setText(event.target.value)}
-            onScroll={(event) => {
-              const paint = event.currentTarget
-                .previousElementSibling as HTMLElement | null;
-              if (paint) {
-                paint.scrollTop = event.currentTarget.scrollTop;
-                paint.scrollLeft = event.currentTarget.scrollLeft;
-              }
-            }}
+            onScroll={follow}
             onKeyDown={(event) => {
               if (event.key === "s" && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
@@ -263,6 +351,14 @@ export function FileView(props: {
               }
             }}
           />
+          {/* Номера поверх обоих слоёв и с непрозрачной подложкой: длинная
+              строка уезжает под них, а не поверх. Мышь их не видит — щелчок
+              по номеру должен попадать в текст. */}
+          <pre ref={gutterRef} className="file-view-lines" aria-hidden="true">
+            {"\n".repeat(shown.from)}
+            {numbers}
+            {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+          </pre>
         </div>
       )}
       {asking && (

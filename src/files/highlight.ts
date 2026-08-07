@@ -99,6 +99,70 @@ export function grammarOf(name: string): string | null {
   return family[extension] ?? null;
 }
 
+/// Смещение начала каждой строки. По нему берут кусок текста под окно показа,
+/// не разрезая файл на строки целиком: на файле в двадцать тысяч строк такой
+/// разрез — двадцать тысяч отдельных строк в памяти на каждое нажатие.
+export function lineOffsets(text: string): number[] {
+  const offsets = [0];
+  let at = text.indexOf("\n");
+  while (at !== -1) {
+    offsets.push(at + 1);
+    at = text.indexOf("\n", at + 1);
+  }
+  return offsets;
+}
+
+/// Сколько строк перед окном разбираем вслепую, чтобы попасть в их разряд.
+///
+/// Разбор — машина состояний: строка, начатая кавычкой на прошлой строке, и
+/// код внутри `/* */` выглядят кодом, если начать читать с середины. Полного
+/// файла для этого не нужно — хватает оглядки, а комментарий длиннее её ещё
+/// поискать.
+const LOOK_BEHIND = 400;
+
+/// Токены строк `[from, to)` — ровно их, без единого лишнего символа.
+///
+/// Окном, а не целым файлом: слой подсветки рисует по элементу на токен, и
+/// файл на пару мегабайт — это сотни тысяч элементов, из-за которых рвётся
+/// прокрутка. Видно всё равно экран.
+export function paintLines(
+  text: string,
+  language: string | null,
+  offsets: number[],
+  from: number,
+  to: number,
+): Token[] {
+  const total = offsets.length;
+  const first = Math.max(0, Math.min(from, total));
+  const last = Math.min(to, total);
+  if (last <= first) {
+    return [];
+  }
+  const start = offsets[Math.max(0, first - LOOK_BEHIND)];
+  // Конец последней строки окна — перед её переводом строки; у последней
+  // строки файла перевода нет вовсе.
+  const stop = last >= total ? text.length : offsets[last] - 1;
+  const skip = offsets[first] - start;
+  const tokens = tokenize(text.slice(start, stop), language);
+  if (skip === 0) {
+    return tokens;
+  }
+  const shown: Token[] = [];
+  let at = 0;
+  for (const token of tokens) {
+    const end = at + token.text.length;
+    if (end > skip) {
+      // Токен оглядки, дотянувшийся до окна, показываем с того места, где окно
+      // началось: иначе строка, начатая выше, съехала бы вбок.
+      shown.push(
+        at >= skip ? token : { text: token.text.slice(skip - at), kind: token.kind },
+      );
+    }
+    at = end;
+  }
+  return shown;
+}
+
 /// Липкие: примеряются с конкретного места строки, а не с её начала. Обычный
 /// `exec` пришлось бы кормить хвостом текста, а хвост под регулярное выражение
 /// движок разворачивает в настоящую строку.

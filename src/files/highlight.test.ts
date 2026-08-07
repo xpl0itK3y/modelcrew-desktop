@@ -1,7 +1,13 @@
 // Подсветка: что она красит и чего не теряет.
 
 import { describe, expect, it } from "vitest";
-import { grammarOf, tokenize, type Token } from "./highlight";
+import {
+  grammarOf,
+  lineOffsets,
+  paintLines,
+  tokenize,
+  type Token,
+} from "./highlight";
 
 function kinds(tokens: Token[]): [string, string][] {
   return tokens
@@ -100,6 +106,43 @@ describe("tokenize", () => {
 
     // Выдуманная разметка мешает сильнее, чем её отсутствие.
     expect(tokens).toEqual([{ text: "# заголовок\nтекст", kind: "plain" }]);
+  });
+});
+
+describe("paintLines", () => {
+  const file = [
+    "const a = 1;",
+    "/* большой",
+    "   комментарий",
+    "   на много строк */",
+    'const b = "строка";',
+    "const c = 3;",
+  ].join("\n");
+  const offsets = () => lineOffsets(file);
+
+  it("gives back exactly the lines it was asked for", () => {
+    // На этом всё и держится: слой подсветки лежит под полем ввода, и лишний
+    // или потерянный символ сдвинет буквы относительно курсора.
+    for (const [from, to] of [[0, 6], [1, 3], [4, 6], [5, 6], [2, 2], [0, 99]]) {
+      const lines = file.split("\n").slice(from, to).join("\n");
+      expect(joined(paintLines(file, "ts", offsets(), from, to)), `${from}..${to}`)
+        .toBe(lines);
+    }
+  });
+
+  it("knows a comment that started above the window", () => {
+    const tokens = paintLines(file, "ts", offsets(), 2, 4);
+
+    // Без оглядки назад середина комментария читалась бы как код: разбор — это
+    // машина состояний, и начинать её с середины файла нельзя.
+    expect(tokens.every((token) => token.kind === "comment")).toBe(true);
+  });
+
+  it("holds the line numbering of an empty file", () => {
+    expect(lineOffsets("")).toEqual([0]);
+    expect(lineOffsets("одна\nдве")).toEqual([0, 5]);
+    expect(lineOffsets("хвост\n")).toEqual([0, 6]);
+    expect(paintLines("", "ts", lineOffsets(""), 0, 1)).toEqual([]);
   });
 });
 
