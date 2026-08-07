@@ -35,6 +35,11 @@ export const ru = {
   "files.truncated": "Показана часть: в папке слишком много файлов",
   "files.save": "Сохранить",
   "files.saveShortcut": "Сохранить файл (⌘S)",
+  "files.changedOnDisk": "Файл изменился на диске, пока вы его правили",
+  "files.reload": "Прочитать заново",
+  "files.overwriteChanged":
+    "«{name}» изменился на диске. Сохранить своё поверх и потерять то, что там появилось?",
+  "files.overwrite": "Сохранить поверх",
   "files.binary": "Двоичный файл — показать нечем",
   "files.tooLarge": "Файл слишком большой для правки",
   "files.missing": "Файла больше нет",

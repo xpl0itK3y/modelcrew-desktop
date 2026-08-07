@@ -1,11 +1,13 @@
 // Колонка редактора: вкладки открытых файлов.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 
 const readWorkspaceFile = vi.fn();
 const writeWorkspaceFile = vi.fn();
+/// Сообщить редактору о правке на диске так, как это делает вотчер дерева.
+let announce: ((dirs: string[], partial: boolean) => void) | null = null;
 vi.mock("../files/fileTree", async () => {
   const actual =
     await vi.importActual<typeof import("../files/fileTree")>(
@@ -15,6 +17,13 @@ vi.mock("../files/fileTree", async () => {
     ...actual,
     readWorkspaceFile: (...args: unknown[]) => readWorkspaceFile(...args),
     writeWorkspaceFile: (...args: unknown[]) => writeWorkspaceFile(...args),
+    watchWorkspaceTree: (
+      _id: string,
+      onChanged: (dirs: string[], partial: boolean) => void,
+    ) => {
+      announce = onChanged;
+      return () => {};
+    },
   };
 });
 
@@ -44,8 +53,23 @@ beforeEach(() => {
   readWorkspaceFile.mockReset();
   writeWorkspaceFile.mockReset();
   readWorkspaceFile.mockResolvedValue(file("текст"));
+  announce = null;
   setLocale("ru");
 });
+
+/// Один открытый файл — этого хватает всему, что касается самого вида.
+function open(path = "a.txt") {
+  return render(
+    <FileEditor
+      workspaceId="w1"
+      files={[path]}
+      activePath={path}
+      onSelect={() => {}}
+      onClose={() => {}}
+      width={520}
+    />,
+  );
+}
 
 describe("FileEditor", () => {
   it("stays out of the way while nothing is open", () => {
@@ -369,5 +393,111 @@ describe("FileEditor", () => {
         screen.queryByTitle("Есть несохранённая правка"),
       ).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("FileView and the disk under it", () => {
+  it("picks up what the agent wrote while the file sat untouched", async () => {
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+
+    readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
+    act(() => announce?.([""], false));
+
+    // Нетронутый буфер догоняет диск сам: это то же самое, что открыть файл
+    // заново, только без щелчка.
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("написанное агентом"),
+    );
+  });
+
+  it("says so instead of quietly replacing work in progress", async () => {
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+    fireEvent.change(screen.getByLabelText("a.txt"), {
+      target: { value: "моя правка" },
+    });
+
+    readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
+    act(() => announce?.([""], false));
+
+    // Правку из-под рук не забирают: пришедшее с диска предлагают, а не
+    // подставляют.
+    await screen.findByText("Файл изменился на диске, пока вы его правили");
+    expect(screen.getByLabelText("a.txt")).toHaveValue("моя правка");
+  });
+
+  it("asks before saving over what appeared on disk", async () => {
+    writeWorkspaceFile.mockResolvedValue(undefined);
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+    fireEvent.change(screen.getByLabelText("a.txt"), {
+      target: { value: "моя правка" },
+    });
+    readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
+    act(() => announce?.([""], false));
+    await screen.findByText("Файл изменился на диске, пока вы его правили");
+
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    // Это тот самый случай, ради которого приложение и написано: два автора у
+    // одного файла. Сохранение стирало версию агента без единого слова.
+    expect(writeWorkspaceFile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить поверх" }));
+    await waitFor(() =>
+      expect(writeWorkspaceFile).toHaveBeenCalledWith("w1", "a.txt", "моя правка"),
+    );
+  });
+
+  it("takes the disk version when that is what was asked", async () => {
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+    fireEvent.change(screen.getByLabelText("a.txt"), {
+      target: { value: "моя правка" },
+    });
+    readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
+    act(() => announce?.([""], false));
+    await screen.findByText("Файл изменился на диске, пока вы его правили");
+
+    fireEvent.click(screen.getByRole("button", { name: "Прочитать заново" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("написанное агентом"),
+    );
+    expect(
+      screen.queryByText("Файл изменился на диске, пока вы его правили"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the change on disk is our own save", async () => {
+    writeWorkspaceFile.mockResolvedValue(undefined);
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("текст"),
+    );
+    fireEvent.change(screen.getByLabelText("a.txt"), {
+      target: { value: "сохранённое" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(writeWorkspaceFile).toHaveBeenCalled());
+
+    readWorkspaceFile.mockResolvedValue(file("сохранённое"));
+    act(() => announce?.([""], false));
+
+    // Своё же сохранение возвращается событием вотчера. Полоска на него —
+    // это предупреждение ни о чём, и цена ему та же: на следующее её уже не
+    // читают.
+    await waitFor(() => expect(readWorkspaceFile).toHaveBeenCalledTimes(2));
+    expect(
+      screen.queryByText("Файл изменился на диске, пока вы его правили"),
+    ).not.toBeInTheDocument();
   });
 });

@@ -337,6 +337,39 @@
   font-size: 12px;
 }
 
+/* Файл разошёлся с диском. Полоска, а не диалог: правку не прерывают, но и
+   молчать о том, что под руками сменилось содержимое, нельзя. */
+.file-view-stale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+  font-size: 12px;
+  animation: file-alert-in 160ms ease-out;
+}
+
+.file-view-stale-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-view-reload {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.file-view-reload:hover {
+  background: var(--mc-button-hover);
+}
+
 .file-view-empty {
   display: grid;
   place-items: center;
@@ -771,7 +804,8 @@ body.is-resizing .resize-handle {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .file-tree-alert {
+  .file-tree-alert,
+  .file-view-stale {
     animation: none;
   }
 }

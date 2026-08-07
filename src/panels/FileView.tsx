@@ -10,8 +10,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
-import { readWorkspaceFile, writeWorkspaceFile } from "../files/fileTree";
+import {
+  parentOf,
+  readWorkspaceFile,
+  watchWorkspaceTree,
+  writeWorkspaceFile,
+  type FileContent,
+} from "../files/fileTree";
 import { grammarOf, tokenize } from "../files/highlight";
+import { fileName } from "../crew/claimLabel";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 type Loaded = {
   text: string;
@@ -26,6 +34,16 @@ const BLOCKED_TEXT = {
   tooLarge: "files.tooLarge",
   missing: "files.missing",
 } as const;
+
+function blockedBy(file: FileContent): Loaded["blocked"] {
+  if (!file.exists) {
+    return "missing";
+  }
+  if (file.isBinary) {
+    return "binary";
+  }
+  return file.tooLarge ? "tooLarge" : null;
+}
 
 export function FileView(props: {
   workspaceId: string;
@@ -73,16 +91,7 @@ export function FileView(props: {
         if (cancelled) {
           return;
         }
-        setLoaded({
-          text: file.content,
-          blocked: !file.exists
-            ? "missing"
-            : file.isBinary
-              ? "binary"
-              : file.tooLarge
-                ? "tooLarge"
-                : null,
-        });
+        setLoaded({ text: file.content, blocked: blockedBy(file) });
         setText(file.content);
       })
       .catch((cause) => {
@@ -107,12 +116,72 @@ export function FileView(props: {
     try {
       await writeWorkspaceFile(workspaceId, path, text);
       setLoaded((current) => (current ? { ...current, text } : current));
+      // Поверх писали осознанно: спрашивали, ответили.
+      setStale(null);
     } catch (cause) {
       setError(localizeBackendError(cause));
     } finally {
       setSaving(false);
     }
   }, [workspaceId, path, text, saving]);
+
+  // Тот же файл правит агент в соседней панели — ради этого приложение и
+  // существует. Сохранение пишет буфер целиком, так что версия агента исчезала
+  // бы от одного нашего нажатия, и узнать об этом было бы неоткуда.
+  const [stale, setStale] = useState<FileContent | null>(null);
+  const [asking, setAsking] = useState(false);
+  const loadedRef = useRef<Loaded | null>(loaded);
+  loadedRef.current = loaded;
+  useEffect(() => {
+    setStale(null);
+    setAsking(false);
+    if (!workspaceId || !path) {
+      return;
+    }
+    const home = parentOf(path);
+    return watchWorkspaceTree(workspaceId, (dirs, partial) => {
+      if (!partial && !dirs.includes(home)) {
+        return;
+      }
+      void readWorkspaceFile(workspaceId, path)
+        .then((file) => {
+          const base = loadedRef.current;
+          if (!base || file.content === base.text) {
+            // Ещё не прочитали или пришло наше же сохранение.
+            return;
+          }
+          if (dirtyRef.current) {
+            // Правки разошлись — решает человек, а не тот, кто нажал последним.
+            setStale(file);
+            return;
+          }
+          // Нетронутый буфер догоняет диск сам: это то же самое, что открыть
+          // файл заново, только без щелчка.
+          setLoaded({ text: file.content, blocked: blockedBy(file) });
+          setText(file.content);
+        })
+        .catch(() => {
+          // Перечитывание фоновое: не прочиталось — покажем прежнее.
+        });
+    });
+  }, [workspaceId, path]);
+
+  const adopt = () => {
+    if (!stale) {
+      return;
+    }
+    setLoaded({ text: stale.content, blocked: blockedBy(stale) });
+    setText(stale.content);
+    setStale(null);
+  };
+
+  const requestSave = () => {
+    if (stale) {
+      setAsking(true);
+      return;
+    }
+    void save();
+  };
 
   return (
     <div className="file-view">
@@ -129,7 +198,7 @@ export function FileView(props: {
             className="file-view-save"
             disabled={!dirty || saving}
             title={t("files.saveShortcut")}
-            onClick={() => void save()}
+            onClick={requestSave}
           >
             {t("files.save")}
           </button>
@@ -138,6 +207,14 @@ export function FileView(props: {
       {error && (
         <div className="file-view-error" role="alert">
           {error}
+        </div>
+      )}
+      {stale && (
+        <div className="file-view-stale" role="alert">
+          <span className="file-view-stale-text">{t("files.changedOnDisk")}</span>
+          <button type="button" className="file-view-reload" onClick={adopt}>
+            {t("files.reload")}
+          </button>
         </div>
       )}
       {loaded === null && !error ? (
@@ -177,11 +254,23 @@ export function FileView(props: {
             onKeyDown={(event) => {
               if (event.key === "s" && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
-                void save();
+                requestSave();
               }
             }}
           />
         </div>
+      )}
+      {asking && (
+        <ConfirmDialog
+          text={t("files.overwriteChanged", { name: fileName(path) })}
+          confirmLabel={t("files.overwrite")}
+          tone="danger"
+          onConfirm={() => {
+            setAsking(false);
+            void save();
+          }}
+          onCancel={() => setAsking(false)}
+        />
       )}
     </div>
   );

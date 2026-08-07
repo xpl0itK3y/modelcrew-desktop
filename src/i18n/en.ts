@@ -36,6 +36,11 @@ export const en: Record<MessageKey, string> = {
   "files.truncated": "Showing part of it: this folder holds too many files",
   "files.save": "Save",
   "files.saveShortcut": "Save the file (⌘S)",
+  "files.changedOnDisk": "The file changed on disk while you were editing it",
+  "files.reload": "Read it again",
+  "files.overwriteChanged":
+    "«{name}» changed on disk. Save yours over it and lose what appeared there?",
+  "files.overwrite": "Save over it",
   "files.binary": "A binary file — nothing to show",
   "files.tooLarge": "The file is too large to edit",
   "files.missing": "The file is gone",
