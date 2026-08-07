@@ -97,6 +97,11 @@ const components = {
 };
 const tabComponents = { terminal: TerminalTab };
 
+/// Сколько уезжает колонка. Дерево и редактор съезжаются одной и той же
+/// анимацией `column-out` из file-tree.css: разойдись эти числа — и соседние
+/// колонки снимаются в разный момент, одну обрезает на середине кадра.
+const COLUMN_EXIT_MS = 200;
+
 type SessionDeleteRequest = {
   workspaceId: string;
   sessionId: string;
@@ -518,7 +523,7 @@ export default function App() {
   // её снимают.
   const treePresence = useAnimatedPresence(
     filesVisible && workspaces.activeId ? workspaces.activeId : null,
-    200,
+    COLUMN_EXIT_MS,
   );
 
   // Открытые файлы принадлежат своему проекту. Оставшись при переключении,
@@ -533,7 +538,7 @@ export default function App() {
   // уезжает, и только потом её снимают.
   const editorPresence = useAnimatedPresence(
     openFiles.length > 0 ? openFiles : null,
-    180,
+    COLUMN_EXIT_MS,
   );
 
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.

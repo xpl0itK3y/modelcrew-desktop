@@ -695,6 +695,8 @@ body.is-resizing .resize-handle {
 
 .file-editor.is-leaving,
 .file-tree-column.is-leaving {
+  /* 200 мс — то же число живёт в App.tsx как COLUMN_EXIT_MS: по нему колонку
+     снимают с экрана, и разъехаться им нельзя. */
   animation: column-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
   pointer-events: none;
 }
