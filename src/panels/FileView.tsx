@@ -8,7 +8,7 @@
 // изменений: путь один, проверки одни, и второй способ добраться до диска
 // заводить незачем.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
   parentOf,
@@ -183,6 +183,11 @@ export function FileView(props: {
     void save();
   };
 
+  // Разбор стоит десятки миллисекунд на большом файле, а рендер случается и от
+  // того, что сменилась метка правки или подъехала полоска: пересчитывать его
+  // там, где текст тот же, незачем.
+  const painted = useMemo(() => tokenize(text, language), [text, language]);
+
   return (
     <div className="file-view">
       <div className="file-view-header">
@@ -226,7 +231,7 @@ export function FileView(props: {
               отменой, а красит только фон. Оба слоя обязаны совпадать до
               пикселя — отсюда общий шрифт, отступы и межстрочный интервал. */}
           <pre className="file-view-paint" aria-hidden="true">
-            {tokenize(text, language).map((token, index) => (
+            {painted.map((token, index) => (
               <span key={index} className={`tok-${token.kind}`}>
                 {token.text}
               </span>

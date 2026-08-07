@@ -99,6 +99,12 @@ export function grammarOf(name: string): string | null {
   return family[extension] ?? null;
 }
 
+/// Липкие: примеряются с конкретного места строки, а не с её начала. Обычный
+/// `exec` пришлось бы кормить хвостом текста, а хвост под регулярное выражение
+/// движок разворачивает в настоящую строку.
+const NUMBER = /[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?/y;
+const WORD = /[A-Za-z_$][A-Za-z0-9_$]*/y;
+
 export function tokenize(text: string, language: string | null): Token[] {
   const rules = language ? GRAMMARS[language] : undefined;
   if (!rules || text.length === 0) {
@@ -118,59 +124,62 @@ export function tokenize(text: string, language: string | null): Token[] {
     tokens.push({ text: value, kind });
   };
 
+  // Идём по индексам в самом тексте, не отрезая хвост на каждом токене. Срез
+  // сам по себе дёшев — движок держит его видом на ту же строку, — но каждое
+  // примеривание регулярного выражения этот вид разворачивает. На полумегабайте
+  // разница выходит в два с половиной раза.
   let at = 0;
   while (at < text.length) {
-    const rest = text.slice(at);
-
-    const lineStart = rules.line.find((mark) => rest.startsWith(mark));
+    const lineStart = rules.line.find((mark) => text.startsWith(mark, at));
     if (lineStart) {
-      const end = rest.indexOf("\n");
-      const value = end === -1 ? rest : rest.slice(0, end);
-      push(value, "comment");
-      at += value.length;
+      const end = text.indexOf("\n", at);
+      const stop = end === -1 ? text.length : end;
+      push(text.slice(at, stop), "comment");
+      at = stop;
       continue;
     }
 
-    if (rules.block && rest.startsWith(rules.block[0])) {
+    if (rules.block && text.startsWith(rules.block[0], at)) {
       const [open, close] = rules.block;
-      const end = rest.indexOf(close, open.length);
+      const end = text.indexOf(close, at + open.length);
       // Незакрытый комментарий тянется до конца файла — ровно так его и
       // прочитает компилятор, и видеть это полезно.
-      const value = end === -1 ? rest : rest.slice(0, end + close.length);
-      push(value, "comment");
-      at += value.length;
+      const stop = end === -1 ? text.length : end + close.length;
+      push(text.slice(at, stop), "comment");
+      at = stop;
       continue;
     }
 
-    const quote = rules.quotes.find((mark) => rest.startsWith(mark));
+    const quote = rules.quotes.find((mark) => text.startsWith(mark, at));
     if (quote) {
-      let index = quote.length;
-      while (index < rest.length) {
-        if (rest[index] === "\\") {
+      let index = at + quote.length;
+      while (index < text.length) {
+        if (text[index] === "\\") {
           // Экранированная кавычка строку не закрывает.
           index += 2;
           continue;
         }
-        if (rest.startsWith(quote, index)) {
+        if (text.startsWith(quote, index)) {
           index += quote.length;
           break;
         }
         // Обычная строка не переживает перевод строки: незакрытая кавычка
         // иначе покрасила бы весь остаток файла.
-        if (rest[index] === "\n" && quote !== "`") {
+        if (text[index] === "\n" && quote !== "`") {
           break;
         }
         index += 1;
       }
-      const value = rest.slice(0, index);
-      push(value, "string");
-      at += value.length;
+      const stop = Math.min(index, text.length);
+      push(text.slice(at, stop), "string");
+      at = stop;
       continue;
     }
 
-    const first = rest[0];
-    if (rules.numbers && /[0-9]/.test(first)) {
-      const match = /^[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?/.exec(rest);
+    const first = text[at];
+    if (rules.numbers && first >= "0" && first <= "9") {
+      NUMBER.lastIndex = at;
+      const match = NUMBER.exec(text);
       if (match) {
         push(match[0], "number");
         at += match[0].length;
@@ -178,18 +187,16 @@ export function tokenize(text: string, language: string | null): Token[] {
       }
     }
 
-    if (/[A-Za-z_$]/.test(first)) {
-      const match = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(rest);
-      if (match) {
-        const word = match[0];
-        if (rules.keywords.has(word)) {
-          push(word, "keyword");
-        } else {
-          plain += word;
-        }
-        at += word.length;
-        continue;
+    WORD.lastIndex = at;
+    const word = WORD.exec(text)?.[0];
+    if (word) {
+      if (rules.keywords.has(word)) {
+        push(word, "keyword");
+      } else {
+        plain += word;
       }
+      at += word.length;
+      continue;
     }
 
     if (CLIKE_PUNCT.includes(first)) {
