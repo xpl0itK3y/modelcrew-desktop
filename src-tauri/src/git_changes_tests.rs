@@ -336,6 +336,15 @@ fn reads_and_writes_files_within_the_repository() {
     std::fs::write(root.join("blob.bin"), [0_u8, 1, 2, 0]).unwrap();
     assert!(read_repo_file(root, "blob.bin").unwrap().is_binary);
 
+    // Не UTF-8 — тоже недоступен: «привет» в Windows-1251 нулевого байта не
+    // содержит, а показ через `from_utf8_lossy` подменил бы каждый байт ромбом
+    // с вопросом, и сохранение записало бы ромбы поверх текста.
+    let cp1251 = [0xEF_u8, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
+    std::fs::write(root.join("записка.txt"), cp1251).unwrap();
+    let note = read_repo_file(root, "записка.txt").unwrap();
+    assert!(note.is_binary);
+    assert!(note.content.is_empty());
+
     // Побег из корня и абсолютные пути отклоняются на чтении и записи.
     assert!(read_repo_file(root, "../escape.txt").is_err());
     assert!(write_repo_file(root, "/etc/passwd", "x").is_err());

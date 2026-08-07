@@ -576,16 +576,22 @@ pub fn read_repo_file(root: &Path, path: &str) -> CommandResult<GitFileContent> 
     }
     let bytes = std::fs::read(&full)
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
-    if count_text_lines(&bytes).is_none() {
-        return Ok(GitFileContent {
-            content: String::new(),
-            is_binary: true,
-            too_large: false,
-            exists: true,
-        });
-    }
+    // Не UTF-8 править нельзя по той же причине, что и двоичное: показать его
+    // можно только через `from_utf8_lossy`, а сохранение записало бы ромбы с
+    // вопросом поверх настоящих байтов.
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(text) if count_text_lines(&bytes).is_some() => text,
+        _ => {
+            return Ok(GitFileContent {
+                content: String::new(),
+                is_binary: true,
+                too_large: false,
+                exists: true,
+            });
+        }
+    };
     Ok(GitFileContent {
-        content: String::from_utf8_lossy(&bytes).into_owned(),
+        content: text.to_owned(),
         is_binary: false,
         too_large: false,
         exists: true,

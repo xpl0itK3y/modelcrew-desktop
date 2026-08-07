@@ -207,6 +207,18 @@ pub fn read_file(root: &Path, path: &str) -> CommandResult<FileContent> {
             .with_context("path", path)
             .with_debug(error)
     })?;
+    // Не UTF-8 — тоже «показать нечем». Раньше здесь стояло `from_utf8_lossy`:
+    // каждый непонятый байт становился ромбом с вопросом, а сохранение
+    // записывало эти ромбы поверх файла. Так уничтожался любой текст в
+    // Windows-1251 — нулевого байта в нём нет, и двоичным он не выглядит.
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Ok(FileContent {
+            content: String::new(),
+            is_binary: true,
+            too_large: false,
+            exists: true,
+        });
+    };
     if looks_binary(&bytes) {
         return Ok(FileContent {
             content: String::new(),
@@ -216,7 +228,7 @@ pub fn read_file(root: &Path, path: &str) -> CommandResult<FileContent> {
         });
     }
     Ok(FileContent {
-        content: String::from_utf8_lossy(&bytes).into_owned(),
+        content: text.to_owned(),
         is_binary: false,
         too_large: false,
         exists: true,
@@ -1251,6 +1263,25 @@ mod tests {
         // пустой файл, и сохранение затёрло бы картинку.
         assert!(file.is_binary);
         assert_eq!(file.content, "");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_that_is_not_utf8_is_refused_rather_than_replaced_by_diamonds() {
+        let root = sandbox("cp1251");
+        // «привет» в Windows-1251: нулевого байта нет, двоичным такой файл не
+        // выглядит, а UTF-8 в нём не читается.
+        let bytes = [0xEF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
+        std::fs::write(root.join("записка.txt"), bytes).unwrap();
+
+        let file = read_file(&root, "записка.txt").unwrap();
+
+        // Показ через `from_utf8_lossy` — это не показ, а подмена: каждый
+        // непонятый байт становится ромбом с вопросом, и первое же сохранение
+        // записывает эти ромбы поверх текста.
+        assert!(file.is_binary);
+        assert_eq!(file.content, "");
+        assert_eq!(std::fs::read(root.join("записка.txt")).unwrap(), bytes);
         let _ = std::fs::remove_dir_all(&root);
     }
 
