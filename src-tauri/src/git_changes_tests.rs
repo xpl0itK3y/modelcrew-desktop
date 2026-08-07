@@ -351,6 +351,40 @@ fn reads_and_writes_files_within_the_repository() {
     assert!(write_repo_file(root, "../../evil", "x").is_err());
 }
 
+/// Ссылка — единственный путь мимо проверки написанного: в `notes/passwd` нет
+/// ни `..`, ни ведущего слэша, а ведёт он куда угодно. Дерево эту дыру уже
+/// закрыло; здесь она оставалась открытой, потому что путь собирался обычным
+/// `join`.
+#[cfg(unix)]
+#[test]
+fn a_link_out_of_the_repository_is_refused_on_both_sides() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path();
+    let root = base.join("проект");
+    let outside = base.join("чужое");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("секрет.txt"), "чужое\n").unwrap();
+    let init = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    std::os::unix::fs::symlink(&outside, root.join("наружу")).unwrap();
+
+    assert!(read_repo_file(&root, "наружу/секрет.txt").is_err());
+    assert!(write_repo_file(&root, "наружу/подложенный.txt", "x").is_err());
+    assert!(!outside.join("подложенный.txt").exists());
+    // Ссылка внутрь проекта работать не перестаёт.
+    std::fs::write(root.join("свой.txt"), "своё\n").unwrap();
+    std::os::unix::fs::symlink(root.join("свой.txt"), root.join("ссылка.txt")).unwrap();
+    assert_eq!(
+        read_repo_file(&root, "ссылка.txt").unwrap().content,
+        "своё\n"
+    );
+}
+
 #[test]
 fn commits_and_reverts_in_a_real_repository() {
     let dir = tempfile::tempdir().unwrap();

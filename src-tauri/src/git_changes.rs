@@ -544,6 +544,17 @@ pub struct GitFileContent {
     pub exists: bool,
 }
 
+/// Путь внутри репозитория, развёрнутый до настоящего места на диске.
+///
+/// `is_safe_repo_path` отсекает написанное — `..`, ведущий слэш, — но ссылку
+/// оно не видит: `notes -> /etc` состоит из обычных букв, а ведёт наружу.
+/// Проверка та же, что у дерева, и живёт она в одном месте: два способа
+/// добраться до файла не должны держать границу проекта поодиночке.
+fn inside_repo(toplevel: &Path, path: &str) -> CommandResult<PathBuf> {
+    crate::file_tree::resolve_inside(toplevel, path)
+        .map_err(|_| CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path))
+}
+
 pub fn read_repo_file(root: &Path, path: &str) -> CommandResult<GitFileContent> {
     if !is_safe_repo_path(path) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
@@ -551,7 +562,7 @@ pub fn read_repo_file(root: &Path, path: &str) -> CommandResult<GitFileContent> 
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    let full = toplevel.join(path);
+    let full = inside_repo(&toplevel, path)?;
     let metadata = match std::fs::metadata(&full) {
         Ok(metadata) => metadata,
         Err(_) => {
@@ -610,7 +621,7 @@ pub fn write_repo_file(root: &Path, path: &str, content: &str) -> CommandResult<
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
-    let full = toplevel.join(path);
+    let full = inside_repo(&toplevel, path)?;
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;

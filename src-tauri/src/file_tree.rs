@@ -56,7 +56,7 @@ fn is_safe_tree_path(path: &str) -> bool {
 /// нет, и через неё дерево показало бы чужие файлы, а открытие дало бы их
 /// прочитать. Разворачиваем ближайшего существующего предка: у создаваемого
 /// файла своего пути на диске ещё нет, а предок есть всегда — хотя бы корень.
-fn resolve_inside(root: &Path, path: &str) -> CommandResult<PathBuf> {
+pub(crate) fn resolve_inside(root: &Path, path: &str) -> CommandResult<PathBuf> {
     if !is_safe_tree_path(path) {
         return Err(
             CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", path)
