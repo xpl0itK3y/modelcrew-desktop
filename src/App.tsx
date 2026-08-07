@@ -614,7 +614,11 @@ export default function App() {
         <div
           className="sidebar-rail"
           aria-hidden={!sidebarVisible}
-          style={sidebarVisible ? { width: widths.sidebar } : undefined}
+          // Ширину отдаём переменной, как и колонкам дерева и редактора: по ней
+          // тянется и сама рейка, и список внутри неё. Пока панель прячут,
+          // переменная остаётся прежней — рейка съезжается к нулю и подрезает
+          // список, а не сплющивает его текст на глазах.
+          style={{ "--sidebar-width": `${widths.sidebar}px` } as CSSProperties}
         >
           <Sidebar
             workspaces={sidebarWorkspaces}
