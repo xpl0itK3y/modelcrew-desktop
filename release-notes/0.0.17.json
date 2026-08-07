@@ -1,0 +1,17 @@
+{
+  "version": "0.0.17",
+  "ru": {
+    "title": "Боковая панель тянется за своим разделителем",
+    "summary": "Разделитель у списка проектов менял ширину рейки, а сам список стоял на месте: между ним и терминалами росла пустая полоса. Теперь ширину получает панель.",
+    "highlights": [
+      "Список проектов растёт вместе с разделителем — пустой полосы перед терминалами больше нет"
+    ]
+  },
+  "en": {
+    "title": "The sidebar follows its own divider",
+    "summary": "Dragging the divider by the project list resized the rail while the list stayed put, opening a strip of empty space before the terminals. The width now goes to the panel.",
+    "highlights": [
+      "The project list grows with its divider — no empty strip before the terminals"
+    ]
+  }
+}

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.17
+
+### Русский
+
+Разделитель у списка проектов менял ширину рейки, а сам список стоял на месте: между ним и терминалами росла пустая полоса. Теперь ширину получает панель.
+
+- Список проектов растёт вместе с разделителем — пустой полосы перед терминалами больше нет
+- Скрытие панели не изменилось: список уезжает за край, а не сплющивает свой текст
+
+### English
+
+Dragging the divider by the project list resized the rail while the list stayed put, opening a strip of empty space before the terminals. The width now goes to the panel.
+
+- The project list grows with its divider — no empty strip before the terminals
+- Hiding the sidebar is unchanged: the list slides past the edge instead of squeezing its text
+
 ## 0.0.16
 
 ### Русский
