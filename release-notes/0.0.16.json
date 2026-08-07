@@ -1,0 +1,25 @@
+{
+  "version": "0.0.16",
+  "ru": {
+    "title": "Дерево проекта и редактор файлов рядом с терминалами",
+    "summary": "Файлы проекта видны деревом, открываются в своей колонке с подсветкой и номерами строк, а колонки тянутся за разделители. Хуки агентов заработали на Windows.",
+    "highlights": [
+      "Дерево проекта: поиск по имени, создание, переименование, удаление и показ в системе",
+      "Файл открывается в своей колонке — вкладки, подсветка, номера строк, сохранение",
+      "Дерево следит за диском: файл, созданный агентом, появляется сам и подсвечивается",
+      "Редактор предупреждает, если файл изменился на диске, и не затирает чужую правку",
+      "Хуки агентов работают на Windows: приложение само отвечает на их запросы"
+    ]
+  },
+  "en": {
+    "title": "A project tree and a file editor beside the terminals",
+    "summary": "Project files show as a tree and open in a column of their own with highlighting and line numbers; every column drags to size. Agent hooks now work on Windows.",
+    "highlights": [
+      "Project tree: search by name, create, rename, delete and reveal in the system",
+      "A file opens in its own column — tabs, highlighting, line numbers, saving",
+      "The tree follows the disk: a file an agent creates appears on its own and flashes",
+      "The editor says when the file changed on disk and never overwrites it silently",
+      "Agent hooks work on Windows: the application answers their requests itself"
+    ]
+  }
+}

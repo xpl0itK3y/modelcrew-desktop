@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.0.16
+
+### Русский
+
+Файлы проекта видны деревом, открываются в своей колонке с подсветкой и номерами строк, а колонки тянутся за разделители. Хуки агентов заработали на Windows.
+
+- Дерево проекта слева от терминалов: папка читается ровно тогда, когда её раскрыли
+- Файл открывается мимо git — папка без репозитория остаётся папкой с файлами
+- Открытый файл живёт в своей колонке, а не вкладкой среди терминалов
+- Вкладки открытых файлов: переключение не теряет несохранённую правку
+- Подсветка кода под текстом, номера строк, сохранение по ⌘S
+- Большой файл рисуется окном по видимым строкам — прокрутка не спотыкается
+- Поиск по имени вглубь проекта, мимо node_modules, target и прочих тяжёлых папок
+- Создание, переименование, удаление и показ в системном проводнике
+- Имя нового файла вводится строкой дерева, на том самом месте, где он появится
+- Ходьба по дереву стрелками, удаление с клавиатуры, контекстное меню по правой кнопке
+- Дерево следит за диском: созданное агентом появляется само и отмечается вспышкой
+- Удалили или переименовали файл — вкладка закрывается или едет следом за именем
+- Редактор предупреждает, если файл изменился на диске, и спрашивает перед записью поверх
+- Файл не в UTF-8 больше не уничтожается сохранением
+- Ширину дерева, редактора и боковой панели задают разделители, двойной щелчок возвращает исходную
+- Хуки агентов работают на Windows: приложение отвечает на их запросы само, без оболочки
+- Возня внутри target, node_modules и .git больше не занимает окно, пока работает агент
+- Смена размера панелей больше не выглядит для приложения как ответ агента
+
+### English
+
+Project files show as a tree and open in a column of their own with highlighting and line numbers; every column drags to size. Agent hooks now work on Windows.
+
+- A project tree beside the terminals: a folder is read exactly when it is opened
+- Files open without asking git — a folder with no repository is still a folder with files
+- The open file lives in its own column, not as a tab among the terminals
+- Tabs for open files: switching between them keeps unsaved work
+- Syntax highlighting under the text, line numbers, saving with ⌘S
+- A large file is painted by the window of visible lines, so scrolling does not stutter
+- Search by name through the project, skipping node_modules, target and other heavy folders
+- Create, rename, delete and reveal in the system file manager
+- A new name is typed as a row of the tree, in the place the file will appear
+- Arrow-key navigation, deleting from the keyboard, a context menu on right click
+- The tree follows the disk: what an agent creates appears on its own and flashes
+- Delete or rename a file and its tab closes or follows the new name
+- The editor says when the file changed on disk and asks before writing over it
+- A file that is not UTF-8 is no longer destroyed by saving
+- Dividers size the tree, the editor and the sidebar; a double click restores the original width
+- Agent hooks work on Windows: the application answers their requests itself, with no shell
+- Churn inside target, node_modules and .git no longer keeps the window busy while an agent works
+- Resizing the panels no longer looks to the application like an agent answering
+
 ## 0.0.15
 
 ### Русский
