@@ -66,12 +66,16 @@ function blockedBy(file: FileContent): Loaded["blocked"] {
 export function FileView(props: {
   workspaceId: string;
   path: string;
+  /// Эту вкладку сейчас видно. Остальные смонтированы, но спрятаны — им незачем
+  /// ходить на диск за каждой правкой агента: посмотрят, когда их откроют.
+  visible?: boolean;
   /// Есть ли несохранённая правка: по ней вкладка ставит метку, а закрытие
   /// спрашивает подтверждение.
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useI18n();
   const { workspaceId, path, onDirtyChange } = props;
+  const visible = props.visible ?? true;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -150,9 +154,38 @@ export function FileView(props: {
   const [asking, setAsking] = useState(false);
   const loadedRef = useRef<Loaded | null>(loaded);
   loadedRef.current = loaded;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  // Пока вкладка была спрятана, файл на диске менялся.
+  const missed = useRef(false);
+
+  const recheck = useCallback(() => {
+    void readWorkspaceFile(workspaceId, path)
+      .then((file) => {
+        const base = loadedRef.current;
+        if (!base || file.content === base.text) {
+          // Ещё не прочитали или пришло наше же сохранение.
+          return;
+        }
+        if (dirtyRef.current) {
+          // Правки разошлись — решает человек, а не тот, кто нажал последним.
+          setStale(file);
+          return;
+        }
+        // Нетронутый буфер догоняет диск сам: это то же самое, что открыть
+        // файл заново, только без щелчка.
+        setLoaded({ text: file.content, blocked: blockedBy(file) });
+        setText(file.content);
+      })
+      .catch(() => {
+        // Перечитывание фоновое: не прочиталось — покажем прежнее.
+      });
+  }, [workspaceId, path]);
+
   useEffect(() => {
     setStale(null);
     setAsking(false);
+    missed.current = false;
     if (!workspaceId || !path) {
       return;
     }
@@ -161,28 +194,24 @@ export function FileView(props: {
       if (!partial && !dirs.includes(home)) {
         return;
       }
-      void readWorkspaceFile(workspaceId, path)
-        .then((file) => {
-          const base = loadedRef.current;
-          if (!base || file.content === base.text) {
-            // Ещё не прочитали или пришло наше же сохранение.
-            return;
-          }
-          if (dirtyRef.current) {
-            // Правки разошлись — решает человек, а не тот, кто нажал последним.
-            setStale(file);
-            return;
-          }
-          // Нетронутый буфер догоняет диск сам: это то же самое, что открыть
-          // файл заново, только без щелчка.
-          setLoaded({ text: file.content, blocked: blockedBy(file) });
-          setText(file.content);
-        })
-        .catch(() => {
-          // Перечитывание фоновое: не прочиталось — покажем прежнее.
-        });
+      if (!visibleRef.current) {
+        // Спрятанная вкладка ждёт своей очереди: держать по чтению файла на
+        // каждую вкладку и на каждую правку агента — это работа, которой
+        // никто не видит, и окно за ней не успевает.
+        missed.current = true;
+        return;
+      }
+      recheck();
     });
-  }, [workspaceId, path]);
+  }, [workspaceId, path, recheck]);
+
+  // Вкладку открыли — догоняем всё, что пропустили, пока она была скрыта.
+  useEffect(() => {
+    if (visible && missed.current) {
+      missed.current = false;
+      recheck();
+    }
+  }, [visible, recheck]);
 
   const adopt = () => {
     if (!stale) {

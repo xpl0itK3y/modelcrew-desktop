@@ -608,21 +608,24 @@ struct TreeChangedEvent<'a> {
 /// лежит, а не его самого.
 fn changed_dir(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
-    // Внутренности `.git` меняются на каждой команде git — от `index.lock` до
-    // перезаписи ссылок. В дереве это одна строка, и её содержимое от такой
-    // возни не меняется: перечитывать нечего. Сама папка `.git` — другое дело,
-    // она может появиться и исчезнуть.
-    let mut parts = relative.components();
-    if parts.next()?.as_os_str() == ".git" {
-        return parts.next().map_or_else(|| Some(String::new()), |_| None);
-    }
     let parent = relative.parent()?;
     let mut parts: Vec<String> = Vec::new();
     for part in parent.components() {
         let std::path::Component::Normal(name) = part else {
             return None;
         };
-        parts.push(name.to_string_lossy().into_owned());
+        let name = name.to_string_lossy();
+        // Возня внутри тяжёлых папок — не новость для дерева. `.git` переписывает
+        // ссылки на каждой команде, сборка перекладывает тысячи файлов в
+        // `target`, установка пакетов — в `node_modules`. Событий оттуда идёт
+        // столько, что список изменённых папок каждый раз переполняется, окно
+        // получает «перечитай всё раскрытое» — и перечитывает, пока агент
+        // работает. Смотреть там всё равно не на что: содержимое этих папок в
+        // дереве никто не разглядывает, а сами они видны и раскрываются.
+        if SKIPPED.contains(&name.as_ref()) {
+            return None;
+        }
+        parts.push(name.into_owned());
     }
     Some(parts.join("/"))
 }
@@ -1255,6 +1258,38 @@ mod tests {
         assert_eq!(
             changed_dir(root, Path::new("/w/проект/.git")).as_deref(),
             Some("")
+        );
+    }
+
+    #[test]
+    fn the_churn_of_a_build_does_not_reach_the_window() {
+        let root = Path::new("/w/проект");
+
+        // Сборка и установка пакетов перекладывают тысячи файлов. Каждое такое
+        // событие называло папку, список изменённых переполнялся, и окно
+        // получало «перечитай всё раскрытое» — по нескольку раз в секунду, всё
+        // время, пока работает агент. За этим потоком переставал успевать и
+        // вывод терминалов: они выглядели замершими.
+        for path in [
+            "/w/проект/target/debug/deps/крошка.o",
+            "/w/проект/node_modules/пакет/index.js",
+            "/w/проект/packages/сайт/node_modules/пакет/index.js",
+            "/w/проект/dist/bundle.js",
+            "/w/проект/.venv/lib/python3.12/site.py",
+            "/w/проект/src/__pycache__/модуль.pyc",
+        ] {
+            assert_eq!(changed_dir(root, Path::new(path)), None, "{path}");
+        }
+
+        // Сами папки при этом остаются в дереве, и их появление корень меняет:
+        // это не «спрятать от глаз», это «не разглядывать содержимое».
+        assert_eq!(
+            changed_dir(root, Path::new("/w/проект/target")).as_deref(),
+            Some("")
+        );
+        assert_eq!(
+            changed_dir(root, Path::new("/w/проект/src/main.rs")).as_deref(),
+            Some("src")
         );
     }
 

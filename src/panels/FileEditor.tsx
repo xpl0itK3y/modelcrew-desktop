@@ -115,6 +115,7 @@ export function FileEditor(props: {
           <FileView
             workspaceId={props.workspaceId}
             path={path}
+            visible={path === current}
             onDirtyChange={(isDirty) =>
               setDirty((marked) => {
                 if (marked.has(path) === isDirty) {

@@ -256,6 +256,9 @@ export function FileTree(props: {
   // остальное прочтётся само при раскрытии.
   const knownRef = useRef<Set<string>>(new Set());
   knownRef.current = new Set(listings.keys());
+  // Папки, чьи списки сейчас на экране. Заполняется ниже, когда посчитаны
+  // строки: перечитывать имеет смысл только их.
+  const shownDirsRef = useRef<Set<string>>(new Set([ROOT]));
   useEffect(() => {
     if (!workspaceId) {
       return;
@@ -265,7 +268,22 @@ export function FileTree(props: {
         ? [...knownRef.current]
         : dirs.filter((dir) => knownRef.current.has(dir));
       for (const dir of stale) {
-        void load(dir);
+        if (shownDirsRef.current.has(dir)) {
+          void load(dir);
+          continue;
+        }
+        // Свёрнутую папку перечитывать сейчас незачем — её не видно. Забываем
+        // прочитанное: раскроют — прочтём заново и свежим. Раньше каждое
+        // событие с диска перечитывало все папки, которые были открыты хоть
+        // раз за сеанс, и работающий агент держал окно занятым непрерывно.
+        setListings((current) => {
+          if (!current.has(dir)) {
+            return current;
+          }
+          const next = new Map(current);
+          next.delete(dir);
+          return next;
+        });
       }
     });
   }, [workspaceId, load]);
@@ -364,6 +382,13 @@ export function FileTree(props: {
     ? (found?.entries ?? []).map((entry) => ({ ...entry, depth: 0 }))
     : flatten(listings, expanded);
   const rootListing = listings.get(ROOT);
+  // Корень виден всегда; из остальных — раскрытые, до которых дошла отрисовка.
+  shownDirsRef.current = new Set([
+    ROOT,
+    ...rows
+      .filter((row) => row.isDir && expanded.has(row.path))
+      .map((row) => row.path),
+  ]);
 
   // Что было на экране прошлым кадром. Строка, которой там не было, въезжает;
   // остальные стоят на месте — иначе раскрытие одной папки дёргало бы всё

@@ -277,6 +277,35 @@ describe("FileTree", () => {
     expect(readWorkspaceDir).toHaveBeenCalledTimes(2);
   });
 
+  it("leaves a folded folder alone until it is opened again", async () => {
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "main.rs"]));
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src"]));
+    readWorkspaceDir.mockClear();
+
+    await act(async () => announce?.(["src"], false));
+
+    // Свёрнутую папку никто не видит. Перечитывать всё, что было открыто хоть
+    // раз за сеанс, — это работа на каждое движение агента на диске, и за ней
+    // окно перестаёт успевать за терминалами.
+    expect(readWorkspaceDir).not.toHaveBeenCalled();
+
+    // Но и показывать потом старое нельзя: раскрытие идёт на диск заново.
+    serve({
+      "": listing([["src", true]]),
+      src: listing([["другой.rs", false]], "src"),
+    });
+    fireEvent.click(screen.getByTitle("src"));
+    await waitFor(() => expect(names()).toEqual(["src", "другой.rs"]));
+  });
+
   it("stops watching the project it left", async () => {
     serve({ "": listing([["a.txt", false]]) });
     const view = render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);

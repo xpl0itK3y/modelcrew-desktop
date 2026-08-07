@@ -6,8 +6,14 @@ import { setLocale } from "../i18n";
 
 const readWorkspaceFile = vi.fn();
 const writeWorkspaceFile = vi.fn();
-/// Сообщить редактору о правке на диске так, как это делает вотчер дерева.
-let announce: ((dirs: string[], partial: boolean) => void) | null = null;
+/// Вотчер один, а подписчиков сколько открыто вкладок: событие получают все.
+/// Держать только последнего — значит проверять не то, что происходит.
+const watchers = new Set<(dirs: string[], partial: boolean) => void>();
+function announce(dirs: string[], partial: boolean): void {
+  for (const listener of [...watchers]) {
+    listener(dirs, partial);
+  }
+}
 vi.mock("../files/fileTree", async () => {
   const actual =
     await vi.importActual<typeof import("../files/fileTree")>(
@@ -21,8 +27,8 @@ vi.mock("../files/fileTree", async () => {
       _id: string,
       onChanged: (dirs: string[], partial: boolean) => void,
     ) => {
-      announce = onChanged;
-      return () => {};
+      watchers.add(onChanged);
+      return () => watchers.delete(onChanged);
     },
   };
 });
@@ -53,7 +59,7 @@ beforeEach(() => {
   readWorkspaceFile.mockReset();
   writeWorkspaceFile.mockReset();
   readWorkspaceFile.mockResolvedValue(file("текст"));
-  announce = null;
+  watchers.clear();
   setLocale("ru");
 });
 
@@ -505,7 +511,7 @@ describe("FileView and the disk under it", () => {
     );
 
     readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
-    act(() => announce?.([""], false));
+    act(() => announce([""], false));
 
     // Нетронутый буфер догоняет диск сам: это то же самое, что открыть файл
     // заново, только без щелчка.
@@ -524,7 +530,7 @@ describe("FileView and the disk under it", () => {
     });
 
     readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
-    act(() => announce?.([""], false));
+    act(() => announce([""], false));
 
     // Правку из-под рук не забирают: пришедшее с диска предлагают, а не
     // подставляют.
@@ -542,7 +548,7 @@ describe("FileView and the disk under it", () => {
       target: { value: "моя правка" },
     });
     readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
-    act(() => announce?.([""], false));
+    act(() => announce([""], false));
     await screen.findByText("Файл изменился на диске, пока вы его правили");
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
@@ -565,7 +571,7 @@ describe("FileView and the disk under it", () => {
       target: { value: "моя правка" },
     });
     readWorkspaceFile.mockResolvedValue(file("написанное агентом"));
-    act(() => announce?.([""], false));
+    act(() => announce([""], false));
     await screen.findByText("Файл изменился на диске, пока вы его правили");
 
     fireEvent.click(screen.getByRole("button", { name: "Прочитать заново" }));
@@ -576,6 +582,71 @@ describe("FileView and the disk under it", () => {
     expect(
       screen.queryByText("Файл изменился на диске, пока вы его правили"),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not send every hidden tab to the disk on someone else's change", async () => {
+    readWorkspaceFile.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(file(`внутри ${path}`)),
+    );
+    render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt", "c.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("внутри a.txt"),
+    );
+    readWorkspaceFile.mockClear();
+
+    act(() => announce([""], false));
+
+    // Агент правит файлы непрерывно, а вкладок открыто сколько открыто. Чтение
+    // на каждую из них — это работа, которой никто не видит: пока окно ею
+    // занято, за ним не успевает вывод терминалов.
+    await waitFor(() => expect(readWorkspaceFile).toHaveBeenCalledTimes(1));
+    expect(readWorkspaceFile).toHaveBeenCalledWith("w1", "a.txt");
+  });
+
+  it("catches up with the disk when a hidden tab is opened", async () => {
+    readWorkspaceFile.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(file(`внутри ${path}`)),
+    );
+    const view = render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("b.txt")).toHaveValue("внутри b.txt"),
+    );
+
+    readWorkspaceFile.mockResolvedValue(file("переписано агентом"));
+    act(() => announce([""], false));
+    view.rerender(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt"]}
+        activePath="b.txt"
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />,
+    );
+
+    // Отложенное — не забытое: вкладка догоняет диск, когда её открывают.
+    await waitFor(() =>
+      expect(screen.getByLabelText("b.txt")).toHaveValue("переписано агентом"),
+    );
   });
 
   it("says nothing when the change on disk is our own save", async () => {
@@ -591,7 +662,7 @@ describe("FileView and the disk under it", () => {
     await waitFor(() => expect(writeWorkspaceFile).toHaveBeenCalled());
 
     readWorkspaceFile.mockResolvedValue(file("сохранённое"));
-    act(() => announce?.([""], false));
+    act(() => announce([""], false));
 
     // Своё же сохранение возвращается событием вотчера. Полоска на него —
     // это предупреждение ни о чём, и цена ему та же: на следующее её уже не
