@@ -27,6 +27,7 @@ import {
   disposeAgentAlertTracker,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
+  muteAlertsWhileRedrawing,
   raiseAgentHookAlert,
   trackAgentOutput,
   type AgentAlertTracker,
@@ -680,6 +681,8 @@ async function spawnTerminal(
     entry.resizeTimer = window.setTimeout(() => {
       entry.resizeTimer = undefined;
       if (!entry.exited) {
+        // Следом придёт перерисовка всего экрана — наша, а не агентская.
+        muteAlertsWhileRedrawing(entry.alerts);
         void invoke("pty_resize", { id: entry.id, cols, rows }).catch(() => {});
       }
     }, RESIZE_DEBOUNCE_MS);

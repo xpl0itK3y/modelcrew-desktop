@@ -34,12 +34,16 @@ export const AGENT_IDLE_QUIET_MS = 6_000;
 // Первые секунды после запуска панели не сигналят: восстановленный TUI
 // агента штатно рисует экран и замолкает.
 export const SPAWN_ALERT_MUTE_MS = 25_000;
+// Столько ждём перерисовку после того, как сами сменили размер панели.
+export const AGENT_REDRAW_MUTE_MS = 2_500;
 
 export type AgentAlertTracker = {
   scanState: AttentionScanState;
   activityBytes: number;
   quietTimer: number | undefined;
   muteUntil: number;
+  // До какого момента ждём перерисовку на наш же ресайз.
+  redrawUntil: number;
   // Пользователь что-то печатал в панель в этой сессии. Без этого агент
   // «ждёт» по определению (восстановлен и простаивает) — не событие.
   engaged: boolean;
@@ -51,12 +55,24 @@ export function createAgentAlertTracker(): AgentAlertTracker {
     activityBytes: 0,
     quietTimer: undefined,
     muteUntil: 0,
+    redrawUntil: 0,
     engaged: false,
   };
 }
 
 export function muteAlertsAfterSpawn(tracker: AgentAlertTracker): void {
   tracker.muteUntil = Date.now() + SPAWN_ALERT_MUTE_MS;
+}
+
+/// Панели меняют размер: открыли дерево, открыли файл, потянули разделитель.
+///
+/// Каждый TUI на это перерисовывает весь экран — тысячи байт разом, и по нашей
+/// же вине. Отличить эту перерисовку от ответа агента по самому выводу нельзя,
+/// поэтому и не пробуем: мы знаем, что сами её вызвали. Иначе одно движение
+/// разделителя звало пользователя из всех панелей сразу — от всех агентов,
+/// которым он ничего не писал.
+export function muteAlertsWhileRedrawing(tracker: AgentAlertTracker): void {
+  tracker.redrawUntil = Date.now() + AGENT_REDRAW_MUTE_MS;
 }
 
 // Живой вывод PTY: structured OSC даёт точный тип, звонок BEL — мгновенный
@@ -98,19 +114,34 @@ export function trackAgentOutput(
   if (scan.bells > 0 && !muted) {
     void raiseAgentAlert(terminalId, "bell", getContext());
   }
-  tracker.activityBytes +=
-    typeof data === "string" ? data.length : data.byteLength;
   if (tracker.quietTimer !== undefined) {
     window.clearTimeout(tracker.quietTimer);
     tracker.quietTimer = undefined;
   }
-  if (tracker.activityBytes >= AGENT_IDLE_MIN_BYTES && !muted) {
-    tracker.quietTimer = window.setTimeout(() => {
-      tracker.quietTimer = undefined;
-      tracker.activityBytes = 0;
-      void raiseAgentAlert(terminalId, "idle", getContext());
-    }, AGENT_IDLE_QUIET_MS);
+  // Перерисовка на наш собственный ресайз — не работа агента, и считать её
+  // выводом нельзя: звонок и OSC выше по-прежнему проходят, гадаем мы только
+  // по объёму.
+  if (Date.now() < tracker.redrawUntil) {
+    tracker.activityBytes = 0;
+    return;
   }
+  tracker.activityBytes +=
+    typeof data === "string" ? data.length : data.byteLength;
+  if (muted) {
+    return;
+  }
+  // Отсчёт тишины ведём после любого вывода, а не только после достаточного.
+  // Иначе накопленное не обнулялось никогда: строка состояния агента — проценты
+  // контекста, часы квоты — подрисовывает по сотне байт, за минуту простоя их
+  // набирается на «ответ», и следующая пауза выглядит как законченная работа.
+  tracker.quietTimer = window.setTimeout(() => {
+    tracker.quietTimer = undefined;
+    const worked = tracker.activityBytes >= AGENT_IDLE_MIN_BYTES;
+    tracker.activityBytes = 0;
+    if (worked) {
+      void raiseAgentAlert(terminalId, "idle", getContext());
+    }
+  }, AGENT_IDLE_QUIET_MS);
 }
 
 // Пользователь напечатал в панель: с этого момента её сигналы имеют смысл.

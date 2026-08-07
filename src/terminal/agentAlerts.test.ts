@@ -26,11 +26,13 @@ vi.mock("../notifications", () => ({
 import {
   AGENT_IDLE_MIN_BYTES,
   AGENT_IDLE_QUIET_MS,
+  AGENT_REDRAW_MUTE_MS,
   SPAWN_ALERT_MUTE_MS,
   acknowledgeAgentPanel,
   createAgentAlertTracker,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
+  muteAlertsWhileRedrawing,
   raiseAgentAlert,
   raiseAgentHookAlert,
   trackAgentOutput,
@@ -390,6 +392,50 @@ describe("trackAgentOutput", () => {
     await vi.advanceTimersByTimeAsync(600);
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
     expect(getAgentAttentionCount()).toBe(1);
+  });
+
+  it("does not take the redraw after a resize for an answer", async () => {
+    const tracker = engaged("redraw-panel");
+
+    // Открыли дерево, открыли файл, потянули разделитель — размер сменился у
+    // всех панелей сразу, и каждый TUI перерисовал весь экран.
+    muteAlertsWhileRedrawing(tracker);
+    trackAgentOutput(tracker, "redraw-panel", "э".repeat(20_000), () => hidden);
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 1_000);
+
+    // Иначе одно движение разделителя звало из всех панелей разом — от всех
+    // агентов, которым пользователь ничего не писал.
+    expect(mocks.playSound).not.toHaveBeenCalled();
+    expect(getAgentAttentionCount()).toBe(0);
+
+    // А настоящая работа после перерисовки зовёт как обычно.
+    await vi.advanceTimersByTimeAsync(AGENT_REDRAW_MUTE_MS);
+    trackAgentOutput(
+      tracker,
+      "redraw-panel",
+      "о".repeat(AGENT_IDLE_MIN_BYTES),
+      () => hidden,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 100);
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a trickle add up to an answer over a quiet hour", async () => {
+    const tracker = engaged("trickle-panel");
+
+    // Строка состояния агента живёт своей жизнью: проценты контекста, часы
+    // квоты, точка спиннера. Каждая подрисовка — сотня байт, между ними
+    // полная тишина.
+    for (let round = 0; round < 12; round += 1) {
+      trackAgentOutput(tracker, "trickle-panel", "·".repeat(150), () => hidden);
+      await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 2_000);
+    }
+
+    // Накопленное обнулялось только вместе с сигналом, поэтому за минуту
+    // простоя набиралось «на ответ», и следующая пауза выглядела как
+    // законченная работа — у каждой панели по очереди.
+    expect(mocks.playSound).not.toHaveBeenCalled();
+    expect(getAgentAttentionCount()).toBe(0);
   });
 
   it("stays silent right after spawn, for plain shells and when watched", async () => {
