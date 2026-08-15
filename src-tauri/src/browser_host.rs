@@ -24,6 +24,15 @@ use crate::command_error::{CommandError, CommandResult, ErrorCode};
 /// дольше — значит он не поднялся, и держать агента незачем.
 const PORT_WAIT: Duration = Duration::from_secs(10);
 
+/// Сколько ждём отклика с порта уже поднятого браузера. Он свой, локальный:
+/// не ответил быстро — значит его нет.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Файл, в который Chrome сам записывает порт своего CDP. Лежит в каталоге
+/// профиля и переживает падение приложения — по нему и находится браузер,
+/// оставшийся без хозяина.
+const PORT_FILE: &str = "DevToolsActivePort";
+
 /// Живой браузер одного проекта.
 ///
 /// Каталог профиля здесь не хранится намеренно: он однозначно считается из
@@ -32,25 +41,54 @@ const PORT_WAIT: Duration = Duration::from_secs(10);
 pub struct BrowserInstance {
     /// Порт CDP, выбранный системой.
     pub port: u16,
-    child: Child,
+    /// Пусто у подобранного браузера: его запустил не этот запуск приложения,
+    /// дескриптора процесса у нас нет и убить его нечем.
+    child: Option<Child>,
 }
 
 impl BrowserInstance {
-    pub fn new(port: u16, child: Child) -> Self {
-        Self { port, child }
+    pub fn started(port: u16, child: Child) -> Self {
+        Self {
+            port,
+            child: Some(child),
+        }
+    }
+
+    /// Браузер, оставшийся от прошлого запуска: см. `adopt`.
+    pub fn adopted(port: u16) -> Self {
+        Self { port, child: None }
     }
 
     /// Процесс мог умереть сам: пользователь закрыл окно, система убила по
     /// памяти. Мёртвый экземпляр в реестре хуже отсутствующего — на него
     /// будут звонить, а он не ответит.
+    ///
+    /// У своего спрашиваем сам процесс, у подобранного — порт: другого способа
+    /// узнать про чужой процесс у нас нет.
     fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        match &mut self.child {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => port_answers(self.port),
+        }
     }
 
     fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let Some(child) = &mut self.child else {
+            return;
+        };
+        let _ = child.kill();
+        let _ = child.wait();
     }
+}
+
+/// Отвечает ли кто-нибудь на порту CDP.
+fn port_answers(port: u16) -> bool {
+    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+    TcpStream::connect_timeout(
+        &SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+        PROBE_TIMEOUT,
+    )
+    .is_ok()
 }
 
 #[derive(Default)]
@@ -155,9 +193,18 @@ pub fn profile_dir(base: &Path, root: &str) -> PathBuf {
     base.join("browser-profiles").join(name)
 }
 
+/// Размер окна страницы. От него зависит вёрстка, которую увидят и агент, и
+/// человек, поэтому он задан явно, а не отдан на волю системы.
+const VIEWPORT: (u32, u32) = (1280, 800);
+
 /// Аргументы запуска. Порт нулевой намеренно — см. заголовок модуля.
 fn launch_args(profile: &Path) -> Vec<String> {
     vec![
+        // Своего окна у браузера нет: страницу показывает само приложение,
+        // как в Claude Code desktop. Всплывающее поверх ModelCrew окно Chrome
+        // было бы не инструментом внутри приложения, а вторым приложением.
+        "--headless=new".to_string(),
+        format!("--window-size={},{}", VIEWPORT.0, VIEWPORT.1),
         "--remote-debugging-port=0".to_string(),
         format!("--user-data-dir={}", profile.display()),
         // Первый запуск иначе съедает окно мастером настройки, а нам нужен
@@ -171,13 +218,35 @@ fn launch_args(profile: &Path) -> Vec<String> {
     ]
 }
 
-/// Поднять браузер для проекта.
+/// Порт браузера, оставшегося от прошлого запуска приложения.
+///
+/// Если приложение сняли не по-хорошему — SIGTERM, падение, — Chrome остаётся
+/// жить и держит каталог профиля. Запустить второй с тем же профилем нельзя:
+/// он передаёт управление первому и молча выходит, не назвав порта, а мы
+/// видим только «браузер не поднялся».
+///
+/// Поэтому не убиваем, а подбираем: у пользователя целы вкладки и логины, а
+/// плагин работает дальше. Порт Chrome кладёт в профиль сам.
+fn adopt(profile: &Path) -> Option<u16> {
+    let raw = std::fs::read_to_string(profile.join(PORT_FILE)).ok()?;
+    // Первая строка — порт, дальше путь к веб-сокету.
+    let port: u16 = raw.lines().next()?.trim().parse().ok()?;
+    // Файл переживает и сам браузер: чистого выхода могло не быть, и тогда
+    // порт в нём указывает в пустоту.
+    port_answers(port).then_some(port)
+}
+
+/// Поднять браузер для проекта или подобрать уже поднятый.
 pub fn launch(program: &Path, profile: &Path) -> CommandResult<BrowserInstance> {
     std::fs::create_dir_all(profile).map_err(|error| {
         CommandError::new(ErrorCode::BrowserLaunchFailed)
             .with_context("profile", profile.display())
             .with_debug(error)
     })?;
+
+    if let Some(port) = adopt(profile) {
+        return Ok(BrowserInstance::adopted(port));
+    }
 
     let mut child = Command::new(program)
         .args(launch_args(profile))
@@ -199,7 +268,7 @@ pub fn launch(program: &Path, profile: &Path) -> CommandResult<BrowserInstance> 
     };
 
     match read_port(stderr, PORT_WAIT) {
-        Some(port) => Ok(BrowserInstance::new(port, child)),
+        Some(port) => Ok(BrowserInstance::started(port, child)),
         None => {
             // Порт не назвался — процесс бесполезен, и оставлять его висеть
             // нельзя: следующий запуск поднял бы второй такой же.
@@ -256,7 +325,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        Ok(BrowserInstance::new(port, child))
+        Ok(BrowserInstance::started(port, child))
     }
 
     #[test]
@@ -380,7 +449,79 @@ mod tests {
     }
 
     #[test]
+    fn shows_no_window_of_its_own() {
+        let args = launch_args(Path::new("/data/profile"));
+        // Страницу показывает приложение. Окно Chrome поверх ModelCrew было бы
+        // вторым приложением, а не инструментом внутри нашего.
+        assert!(args.iter().any(|arg| arg == "--headless=new"));
+        // Размер задан явно: от него зависит вёрстка, которую увидят и агент,
+        // и человек, и она не должна зависеть от машины.
+        assert!(args.iter().any(|arg| arg == "--window-size=1280,800"));
+    }
+
+    #[test]
     fn finds_nothing_when_no_browser_is_installed() {
         assert_eq!(first_existing(&["/nope/chrome", "/also/nope"]), None);
+    }
+
+    /// Приложение сняли не по-хорошему, Chrome остался жив и держит профиль.
+    /// Запустить второй с тем же профилем нельзя — он отдаёт управление
+    /// первому и выходит, не назвав порта. Поэтому подбираем.
+    #[test]
+    fn picks_up_a_browser_left_from_a_previous_run() {
+        use std::net::{Ipv4Addr, TcpListener};
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let profile = std::env::temp_dir().join(format!("mc-adopt-{}", std::process::id()));
+        std::fs::create_dir_all(&profile).unwrap();
+        // Ровно в таком виде файл пишет Chrome: порт, затем путь веб-сокета.
+        std::fs::write(
+            profile.join(PORT_FILE),
+            format!("{port}\n/devtools/browser/abc-def\n"),
+        )
+        .unwrap();
+
+        assert_eq!(adopt(&profile), Some(port));
+        let _ = std::fs::remove_dir_all(&profile);
+    }
+
+    #[test]
+    fn ignores_a_port_file_left_by_a_browser_that_is_gone() {
+        let profile = std::env::temp_dir().join(format!("mc-adopt-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&profile).unwrap();
+
+        // Файл переживает браузер: после падения он остаётся, а порта нет.
+        // Поверив ему, мы отдали бы агенту порт, на котором никого нет.
+        std::fs::write(profile.join(PORT_FILE), "1\n/devtools/browser/x\n").unwrap();
+        assert_eq!(adopt(&profile), None);
+
+        std::fs::write(profile.join(PORT_FILE), "не число\n").unwrap();
+        assert_eq!(adopt(&profile), None);
+
+        std::fs::remove_file(profile.join(PORT_FILE)).unwrap();
+        assert_eq!(adopt(&profile), None);
+
+        let _ = std::fs::remove_dir_all(&profile);
+    }
+
+    #[test]
+    fn an_adopted_browser_is_judged_by_its_port() {
+        use std::net::{Ipv4Addr, TcpListener};
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let live = listener.local_addr().unwrap().port();
+        assert!(BrowserInstance::adopted(live).is_alive());
+
+        // Свободный порт берём отдельным слушателем, закрытым до единой
+        // попытки соединения: подключение к только что закрытому порту
+        // система какое-то время ещё принимает, и проверка была бы плавающей.
+        let spare = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let dead = spare.local_addr().unwrap().port();
+        drop(spare);
+
+        // Браузера на порту нет — экземпляр мёртв, и реестр поднимет новый.
+        assert!(!BrowserInstance::adopted(dead).is_alive());
     }
 }
