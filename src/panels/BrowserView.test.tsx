@@ -83,6 +83,44 @@ describe("BrowserView", () => {
     expect(address()).toHaveValue("example.com");
   });
 
+  it("keeps a typed address after the caret leaves the field", async () => {
+    // Набрать адрес и потянуться мышью к «Открыть» — этого хватало, чтобы
+    // поле опустело: слежение за страницей смотрело только на курсор.
+    invoke.mockResolvedValue(frame());
+    render(<BrowserView workspaceId="w1" />);
+
+    address().focus();
+    fireEvent.change(address(), { target: { value: "example.com" } });
+    address().blur();
+    await waitFor(
+      () => expect(invoke.mock.calls.length).toBeGreaterThan(2),
+      { timeout: 4_000 },
+    );
+
+    expect(address()).toHaveValue("example.com");
+  });
+
+  it("follows the page again once the page has been opened", async () => {
+    // Иначе поле замирало бы на набранном навсегда, и переход по ссылке
+    // внутри страницы в адресе бы не отражался.
+    invoke.mockImplementation((command: string) =>
+      command === "browser_go"
+        ? Promise.resolve()
+        : Promise.resolve(
+            frame({ url: "http://example.com/after-redirect", running: true }),
+          ),
+    );
+    render(<BrowserView workspaceId="w1" />);
+
+    fireEvent.change(address(), { target: { value: "example.com" } });
+    fireEvent.submit(address());
+
+    await waitFor(
+      () => expect(address()).toHaveValue("http://example.com/after-redirect"),
+      { timeout: 4_000 },
+    );
+  });
+
   it("opens what the person typed, with the scheme filled in", async () => {
     render(<BrowserView workspaceId="w1" />);
 

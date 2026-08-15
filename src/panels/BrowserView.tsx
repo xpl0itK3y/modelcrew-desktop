@@ -26,16 +26,15 @@ export function BrowserView(props: { workspaceId: string }) {
   const [address, setAddress] = useState("");
   const [failure, setFailure] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  // Поле трогали руками. Пока это так, адрес за страницей не следует: кадр
+  // приходит раз в секунду и стирал бы набранное — достаточно было увести
+  // курсор из поля, и от адреса ничего не оставалось.
+  const typed = useRef(false);
 
   useEffect(() => {
-    setFrame(NO_FRAME);
-    setFailure(null);
     return watchBrowserFrame(props.workspaceId, (next) => {
       setFrame(next);
-      // Адрес в поле подтягивается за страницей, но не тогда, когда человек
-      // в нём пишет: иначе набранное затиралось бы на каждом кадре.
-      if (document.activeElement !== input.current) {
+      if (!typed.current) {
         setAddress(next.url);
       }
     });
@@ -50,6 +49,12 @@ export function BrowserView(props: { workspaceId: string }) {
     setOpening(true);
     setFailure(null);
     openPage(props.workspaceId, url)
+      // Открылось — снова следуем за страницей: она сама скажет, куда попала,
+      // с поправкой на редиректы. Не открылось — набранное остаётся, его
+      // правят и пробуют ещё раз.
+      .then(() => {
+        typed.current = false;
+      })
       .catch((error) => setFailure(localizeBackendError(error)))
       .finally(() => setOpening(false));
   };
@@ -60,14 +65,16 @@ export function BrowserView(props: { workspaceId: string }) {
     <div className="browser-view">
       <form className="browser-address-bar" onSubmit={submit}>
         <input
-          ref={input}
           type="text"
           className="browser-address"
           value={address}
           spellCheck={false}
           placeholder={t("browser.address")}
           aria-label={t("browser.address")}
-          onChange={(event) => setAddress(event.target.value)}
+          onChange={(event) => {
+            typed.current = true;
+            setAddress(event.target.value);
+          }}
         />
         <button
           type="submit"
