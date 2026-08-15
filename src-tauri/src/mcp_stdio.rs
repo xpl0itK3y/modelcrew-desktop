@@ -47,7 +47,9 @@ fn run() -> i32 {
     };
     let panel_id = std::env::var(PANEL_ENV).unwrap_or_default();
     if panel_id.is_empty() {
-        return fail(&format!("{PANEL_ENV} не задана: непонятно, чья это панель."));
+        return fail(&format!(
+            "{PANEL_ENV} не задана: непонятно, чья это панель."
+        ));
     }
     let Ok(stream) = UnixStream::connect(&path) else {
         return fail(&format!("ModelCrew не отвечает на {path}."));
@@ -99,7 +101,10 @@ fn pump(stream: std::os::unix::net::UnixStream, panel_id: &str) -> i32 {
 
     // stdin → сокет. Конец ввода означает, что агент закончил: закрываем
     // запись, чтобы приложение увидело конец, и ждём остатки ответов.
-    for line in BufReader::new(std::io::stdin()).lines().map_while(Result::ok) {
+    for line in BufReader::new(std::io::stdin())
+        .lines()
+        .map_while(Result::ok)
+    {
         if to_app
             .write_all(line.as_bytes())
             .and_then(|()| to_app.write_all(b"\n"))
