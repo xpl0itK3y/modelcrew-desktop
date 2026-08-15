@@ -431,28 +431,30 @@ export default function App() {
     workspaceId: string;
     summary: GitChangesSummary;
   } | null>(null);
-  const activeGitWorkspaceId =
+  // Проект, с которым уже можно работать: папка выбрана и реестр её признал.
+  // Гитом дело не ограничивается — по нему же живут заявки панелей и браузер.
+  const activeProjectId =
     rootRegistryReady && activeWorkspace?.folder ? activeWorkspace.id : null;
   // Кто из панелей проекта какие файлы держит — для подписи в шапке панели.
   useEffect(
-    () => watchPanelClaims(activeGitWorkspaceId),
-    [activeGitWorkspaceId],
+    () => watchPanelClaims(activeProjectId),
+    [activeProjectId],
   );
 
   // Эффект подписки выполняется после render: сводку предыдущего проекта
   // нельзя показывать даже на этот промежуточный кадр.
   const gitSummary =
-    gitSummaryState?.workspaceId === activeGitWorkspaceId
+    gitSummaryState?.workspaceId === activeProjectId
       ? gitSummaryState.summary
       : null;
   useEffect(() => {
-    if (!activeGitWorkspaceId) {
+    if (!activeProjectId) {
       return;
     }
-    return subscribeGitChanges(activeGitWorkspaceId, (summary) => {
-      setGitSummaryState({ workspaceId: activeGitWorkspaceId, summary });
+    return subscribeGitChanges(activeProjectId, (summary) => {
+      setGitSummaryState({ workspaceId: activeProjectId, summary });
     });
-  }, [activeGitWorkspaceId]);
+  }, [activeProjectId]);
 
   // Дерево проекта: колонка, а не оверлей. По нему ходят подолгу, и
   // всплывающая панель, которая закрывается от щелчка мимо, тут мешала бы.
@@ -545,7 +547,7 @@ export default function App() {
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
   const liveGitDrawerWorkspaceId = gitDrawerOpen
-    ? activeGitWorkspaceId
+    ? activeProjectId
     : null;
   const gitDrawerPresence = useAnimatedPresence(liveGitDrawerWorkspaceId, 160);
   // При A -> B presence ещё один render хранит A. Пока drawer открыт,
