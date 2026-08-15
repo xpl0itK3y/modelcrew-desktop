@@ -161,15 +161,26 @@ impl Cdp {
 }
 
 fn connect_stream(port: u16) -> CommandResult<TcpStream> {
-    let stream = TcpStream::connect_timeout(
-        &SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
-        CONNECT_TIMEOUT,
-    )
-    .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
+    connect_within(port, CONNECT_TIMEOUT, CALL_TIMEOUT)
+}
+
+fn connect_within(port: u16, connect: Duration, read: Duration) -> CommandResult<TcpStream> {
+    let stream =
+        TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), connect)
+            .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
     // Без таймаута зависший браузер держал бы поток агента вечно.
-    let _ = stream.set_read_timeout(Some(CALL_TIMEOUT));
+    let _ = stream.set_read_timeout(Some(read));
     let _ = stream.set_nodelay(true);
     Ok(stream)
+}
+
+/// Браузер ли на этом порту.
+///
+/// Одного «кто-то принял соединение» мало: порт достался нам из файла в
+/// профиле, файл переживает сам браузер, а порт за это время могла занять
+/// любая программа. Спрашиваем то, на что умеет отвечать только DevTools.
+pub fn is_devtools(port: u16, timeout: Duration) -> bool {
+    fetch_within(port, "/json/version", timeout).is_ok_and(|answer| answer.get("Browser").is_some())
 }
 
 /// Маленький GET по localhost.
@@ -178,7 +189,11 @@ fn connect_stream(port: u16) -> CommandResult<TcpStream> {
 /// здесь всё синхронное, и ради одного запроса известной формы к своему же
 /// порту тащить сюда рантайм незачем.
 fn fetch(port: u16, path: &str) -> CommandResult<Value> {
-    let mut stream = connect_stream(port)?;
+    fetch_within(port, path, CALL_TIMEOUT)
+}
+
+fn fetch_within(port: u16, path: &str, timeout: Duration) -> CommandResult<Value> {
+    let mut stream = connect_within(port, timeout, timeout)?;
     let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     stream
         .write_all(request.as_bytes())

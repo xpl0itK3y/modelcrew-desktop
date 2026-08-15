@@ -81,14 +81,14 @@ impl BrowserInstance {
     }
 }
 
-/// Отвечает ли кто-нибудь на порту CDP.
+/// Отвечает ли на порту браузер.
+///
+/// Спрашиваем именно браузера, а не «принял ли кто-то соединение»: порт мы
+/// берём из файла в профиле, файл переживает сам браузер, и за это время порт
+/// могла занять любая программа. Приняв её за наш браузер, мы отдали бы
+/// агенту чужое соединение и больше не запустили бы своё.
 fn port_answers(port: u16) -> bool {
-    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-    TcpStream::connect_timeout(
-        &SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
-        PROBE_TIMEOUT,
-    )
-    .is_ok()
+    crate::cdp::is_devtools(port, PROBE_TIMEOUT)
 }
 
 #[derive(Default)]
@@ -480,12 +480,40 @@ mod tests {
     /// Приложение сняли не по-хорошему, Chrome остался жив и держит профиль.
     /// Запустить второй с тем же профилем нельзя — он отдаёт управление
     /// первому и выходит, не назвав порта. Поэтому подбираем.
-    #[test]
-    fn picks_up_a_browser_left_from_a_previous_run() {
+    /// Порт, который отвечает как DevTools.
+    ///
+    /// Просто открытого сокета мало: браузер узнаётся по ответу, а не по
+    /// тому, что кто-то принял соединение. Отвечаем на несколько запросов и
+    /// заканчиваем — поток умрёт сам, ждать его тесту незачем.
+    fn fake_devtools() -> u16 {
+        use std::io::{Read, Write};
         use std::net::{Ipv4Addr, TcpListener};
 
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for _ in 0..4 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut ignored = [0_u8; 512];
+                let _ = stream.read(&mut ignored);
+                let body = r#"{"Browser":"Chrome/151.0.0.0"}"#;
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn picks_up_a_browser_left_from_a_previous_run() {
+        let port = fake_devtools();
 
         let profile = std::env::temp_dir().join(format!("mc-adopt-{}", std::process::id()));
         std::fs::create_dir_all(&profile).unwrap();
@@ -523,9 +551,7 @@ mod tests {
     fn an_adopted_browser_is_judged_by_its_port() {
         use std::net::{Ipv4Addr, TcpListener};
 
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let live = listener.local_addr().unwrap().port();
-        assert!(BrowserInstance::adopted(live).is_alive());
+        assert!(BrowserInstance::adopted(fake_devtools()).is_alive());
 
         // Свободный порт берём отдельным слушателем, закрытым до единой
         // попытки соединения: подключение к только что закрытому порту
@@ -536,5 +562,24 @@ mod tests {
 
         // Браузера на порту нет — экземпляр мёртв, и реестр поднимет новый.
         assert!(!BrowserInstance::adopted(dead).is_alive());
+    }
+
+    #[test]
+    fn a_stranger_on_the_port_is_not_our_browser() {
+        use std::io::Write;
+        use std::net::{Ipv4Addr, TcpListener};
+
+        // Порт из файла профиля могла занять любая программа: дежурный
+        // веб-сервер, чужой инструмент. Приняв её за наш браузер, мы отдали
+        // бы агенту чужое соединение и своего браузера уже не запустили.
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi");
+            }
+        });
+
+        assert!(!BrowserInstance::adopted(port).is_alive());
     }
 }
