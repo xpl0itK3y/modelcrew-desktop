@@ -630,9 +630,21 @@ export default function App() {
         onToggleFiles={() => setFilesVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
+        // Ящик один за раз: они лежат в одном углу, и второй просто накрыл бы
+        // первый — с виду тот бы пропал, хотя остался бы открытым.
+        onOpenGitChanges={() => {
+          setGitDrawerOpen(!gitDrawerOpen);
+          if (!gitDrawerOpen) {
+            setBrowserDrawerOpen(false);
+          }
+        }}
         browserOpen={browserDrawerOpen}
-        onOpenBrowser={() => setBrowserDrawerOpen((open) => !open)}
+        onOpenBrowser={() => {
+          setBrowserDrawerOpen(!browserDrawerOpen);
+          if (!browserDrawerOpen) {
+            setGitDrawerOpen(false);
+          }
+        }}
         updater={updater}
         waiting={waitingPanels}
         onRevealPanel={revealPanel}
