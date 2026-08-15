@@ -24,6 +24,16 @@ pub fn set_agent_events_dir(dir: PathBuf) {
     let _ = AGENT_EVENTS_DIR.set(dir);
 }
 
+/// Сокет MCP: тем же путём, что и каталог событий. Пусто там, где слушателя
+/// нет (Windows) — тогда панель не получает переменной вовсе, и агент не
+/// видит инструмента вместо того, чтобы видеть его и упираться в мёртвый
+/// сокет.
+static MCP_SOCKET: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_mcp_socket(path: PathBuf) {
+    let _ = MCP_SOCKET.set(path);
+}
+
 pub struct SpawnOptions {
     pub id: String,
     pub shell: Option<String>,
@@ -135,6 +145,12 @@ impl PtyManager {
             for (key, value) in crate::agent_hooks::env_hooks(events) {
                 cmd.env(key, value);
             }
+        }
+        // Тем же путём — адрес сокета MCP. Шим наследует его вместе с id
+        // панели, поэтому приложение знает, кто позвал, и берёт корень
+        // проекта у себя, а не из аргументов вызова.
+        if let Some(socket) = MCP_SOCKET.get() {
+            cmd.env(crate::mcp::SOCK_ENV, socket);
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
