@@ -9,7 +9,7 @@
 
 use serde::Serialize;
 
-use crate::command_error::{CommandError, CommandResult, ErrorCode};
+use crate::command_error::CommandResult;
 use crate::workspace_roots::WorkspaceRoots;
 
 /// Что показать в панели браузера.
@@ -79,7 +79,6 @@ pub async fn browser_go(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     // Здесь браузер как раз поднимаем: человек попросил открыть страницу.
-    let port = crate::mcp::browser_port(&app, &root)
-        .map_err(|reason| CommandError::new(ErrorCode::BrowserLaunchFailed).with_debug(reason))?;
+    let port = crate::mcp::browser_port(&app, &root)?;
     crate::cdp::Cdp::connect(port)?.navigate(&url)
 }

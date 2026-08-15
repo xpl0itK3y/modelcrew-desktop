@@ -286,11 +286,13 @@ struct AppTools {
 
 impl Tools for AppTools {
     fn open_browser(&self, root: &Path) -> Result<(), String> {
-        browser_port(&self.app, root).map(|_port| ())
+        browser_port(&self.app, root)
+            .map(|_port| ())
+            .map_err(|error| excuse(&error))
     }
 
     fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
-        let port = browser_port(&self.app, root)?;
+        let port = browser_port(&self.app, root).map_err(|error| excuse(&error))?;
         let mut cdp = crate::cdp::Cdp::connect(port)
             .map_err(|error| format!("не удалось связаться с браузером: {}", excuse(&error)))?;
         cdp.navigate(url).map_err(|error| match error.code {
@@ -321,25 +323,35 @@ fn excuse(error: &crate::command_error::CommandError) -> String {
 
 /// Поднять браузер проекта и вернуть его порт.
 ///
-/// Ошибки здесь — фразой, а не кодом: их читает агент и показывает человеку.
-pub fn browser_port(app: &tauri::AppHandle, root: &Path) -> Result<u16, String> {
+/// Отказ — кодом, а не фразой: по нему интерфейс подбирает свой текст, а
+/// «Chrome не установлен» и «не смог запуститься» — это разные разговоры с
+/// человеком. Агенту фразу собирает `excuse` из той же ошибки.
+pub fn browser_port(
+    app: &tauri::AppHandle,
+    root: &Path,
+) -> crate::command_error::CommandResult<u16> {
+    use crate::command_error::{CommandError, ErrorCode};
     use tauri::Manager;
 
     let Some(program) = crate::browser_host::chrome_program() else {
-        return Err("Chrome не найден. Плагин браузера без него не работает: \
-             поставьте Google Chrome или Chromium."
-            .to_string());
+        return Err(
+            CommandError::new(ErrorCode::BrowserNotInstalled).with_context(
+                "reason",
+                "Chrome не найден. Плагин браузера без него не работает: \
+                 поставьте Google Chrome или Chromium.",
+            ),
+        );
     };
-    let base = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("некуда положить профиль браузера: {error}"))?;
+    let base = app.path().app_data_dir().map_err(|error| {
+        CommandError::new(ErrorCode::BrowserLaunchFailed)
+            .with_context("reason", "некуда положить профиль браузера")
+            .with_debug(error)
+    })?;
     let key = root.to_string_lossy().to_string();
     let profile = crate::browser_host::profile_dir(&base, &key);
 
     app.state::<crate::browser_host::BrowserHost>()
         .ensure(&key, || crate::browser_host::launch(&program, &profile))
-        .map_err(|error| format!("браузер не запустился: {:?}", error.code))
 }
 
 /// Путь сокета. Рядом с каталогом событий хуков — то же место, та же уборка.
