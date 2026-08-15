@@ -69,6 +69,19 @@ impl Cdp {
         self.await_event("Page.loadEventFired")
     }
 
+    /// Кадр страницы: PNG в base64, как его отдаёт сам протокол.
+    pub fn screenshot(&mut self) -> CommandResult<String> {
+        let answer = self.call("Page.captureScreenshot", json!({ "format": "png" }))?;
+        answer
+            .get("data")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                CommandError::new(ErrorCode::BrowserCommandFailed)
+                    .with_context("reason", "в ответе нет кадра")
+            })
+    }
+
     /// Адрес и заголовок текущей страницы — чтобы человеку было видно, где он.
     pub fn location(&mut self) -> CommandResult<(String, String)> {
         let answer = self.call(

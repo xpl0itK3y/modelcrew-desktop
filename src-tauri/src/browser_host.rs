@@ -122,6 +122,19 @@ impl BrowserHost {
         Ok(port)
     }
 
+    /// Порт уже поднятого браузера. `None` — его нет, и поднимать его здесь
+    /// нельзя: панель браузера открыта у человека постоянно, и открытие панели
+    /// не повод запускать Chrome.
+    pub fn port(&self, key: &str) -> Option<u16> {
+        let mut instances = self.instances.lock().unwrap();
+        let instance = instances.get_mut(key)?;
+        if instance.is_alive() {
+            return Some(instance.port);
+        }
+        instances.remove(key);
+        None
+    }
+
     /// Закрыть браузер проекта: проект закрыли или отвязали папку.
     pub fn close(&self, key: &str) {
         if let Some(mut instance) = self.instances.lock().unwrap().remove(key) {
