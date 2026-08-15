@@ -44,6 +44,12 @@ export const en: Record<MessageKey, string> = {
   "files.binary": "A binary file — nothing to show",
   "files.tooLarge": "The file is too large to edit",
   "files.missing": "The file is gone",
+  "browser.address": "Page address",
+  "browser.open": "Open",
+  "browser.frameAlt": "The page in the project browser",
+  "browser.blank": "The page is still blank",
+  "browser.notRunning":
+    "The project browser is not running yet. Type an address, or wait for an agent to open one.",
   "git.panelTitle": "Changes",
   "git.close": "Close the changes panel",
   "git.maximize": "Expand the panel",
