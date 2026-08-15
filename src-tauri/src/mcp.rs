@@ -14,7 +14,7 @@
 //! Почему не HTTP на localhost: порт доступен любому процессу в системе,
 //! привязки к панели у него нет, и это ломает нынешний периметр безопасности.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -53,11 +53,21 @@ impl PanelContext {
     }
 }
 
+/// То, что инструменты умеют делать по-настоящему.
+///
+/// Отдельно от разбора протокола: сам разбор ничего не запускает и не знает
+/// ни про Chrome, ни про Tauri, поэтому проверяется без них обоих.
+pub trait Tools: Send + Sync {
+    /// Поднять браузер проекта или убедиться, что он уже поднят.
+    /// Текст ошибки уходит агенту дословно — он должен быть ему понятен.
+    fn open_browser(&self, root: &Path) -> Result<(), String>;
+}
+
 /// Один запрос JSON-RPC → одна строка ответа.
 ///
 /// `None` — отвечать не нужно: это уведомление (у него нет `id`), и ответ на
 /// него был бы нарушением протокола.
-pub fn dispatch(ctx: &PanelContext, line: &str) -> Option<String> {
+pub fn dispatch(ctx: &PanelContext, tools: &dyn Tools, line: &str) -> Option<String> {
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         // Разобрать не смогли — `id` взять неоткуда, отвечаем нулевым по
@@ -76,8 +86,8 @@ pub fn dispatch(ctx: &PanelContext, line: &str) -> Option<String> {
         "initialize" => result(id, initialize_result()),
         // Проверка живости из самого протокола: пустой результат.
         "ping" => result(id, json!({})),
-        "tools/list" => result(id, json!({ "tools": tools() })),
-        "tools/call" => call_tool(ctx, id, value.get("params")),
+        "tools/list" => result(id, json!({ "tools": tool_list() })),
+        "tools/call" => call_tool(ctx, tools, id, value.get("params")),
         "" => error(id, -32600, "в запросе нет метода"),
         other => error(id, -32601, &format!("метод «{other}» неизвестен")),
     })
@@ -94,30 +104,46 @@ fn initialize_result() -> Value {
     })
 }
 
-/// Пока инструмент один и он ничего не делает — он проверяет, что труба
-/// проложена: что агент нас нашёл, дозвонился и что мы узнали его панель.
-fn tools() -> Value {
-    json!([{
-        "name": "crew_ping",
-        "description": concat!(
-            "Проверка связи с ModelCrew. Возвращает номер панели, из которой ",
-            "запущен агент, и корень проекта этой панели.",
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false,
+fn tool_list() -> Value {
+    json!([
+        {
+            // Служебный: проверяет, что труба проложена, а агент и его проект
+            // опознаны. Инструмент работы, а не диагностики, — следующий.
+            "name": "crew_ping",
+            "description": concat!(
+                "Проверка связи с ModelCrew. Возвращает номер панели, из которой ",
+                "запущен агент, и корень проекта этой панели.",
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+            },
         },
-    }])
+        {
+            "name": "browser_open",
+            "description": concat!(
+                "Поднять браузер этого проекта, если он ещё не запущен. ",
+                "Браузер общий для всех агентов проекта: профиль и вход в ",
+                "тестовые стенды у вас общие. У другого проекта браузер свой.",
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+            },
+        },
+    ])
 }
 
-fn call_tool(ctx: &PanelContext, id: Value, params: Option<&Value>) -> String {
+fn call_tool(ctx: &PanelContext, tools: &dyn Tools, id: Value, params: Option<&Value>) -> String {
     let name = params
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     match name {
         "crew_ping" => result(id, text_content(&ping_text(ctx))),
+        "browser_open" => result(id, open_browser(ctx, tools)),
         // Ошибка инструмента — не ошибка протокола: агент должен прочитать
         // причину и продолжить, а не считать сервер сломанным.
         other => result(
@@ -148,10 +174,31 @@ fn ping_text(ctx: &PanelContext) -> String {
     }
 }
 
+/// Браузер поднимается для проекта панели, а не для того, что назвал агент:
+/// параметра с путём у инструмента нет и быть не должно.
+fn open_browser(ctx: &PanelContext, tools: &dyn Tools) -> Value {
+    let Some(root) = &ctx.root else {
+        return error_content(&ping_text(ctx));
+    };
+    match tools.open_browser(root) {
+        Ok(()) => text_content(&format!("Браузер проекта {} готов.", root.display())),
+        Err(reason) => error_content(&reason),
+    }
+}
+
 fn text_content(text: &str) -> Value {
     json!({
         "content": [{ "type": "text", "text": text }],
         "isError": false,
+    })
+}
+
+/// Неудача инструмента — не поломка сервера: агент читает причину и решает
+/// сам, а сессия продолжается.
+fn error_content(text: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": true,
     })
 }
 
@@ -185,6 +232,38 @@ pub fn handshake(panel_id: &str) -> String {
 
 // ---------------------------------------------------------------------------
 // Сторона приложения: слушаем сокет.
+
+/// Боевые инструменты: те же действия, но через состояние приложения.
+struct AppTools {
+    app: tauri::AppHandle,
+}
+
+impl Tools for AppTools {
+    fn open_browser(&self, root: &Path) -> Result<(), String> {
+        use tauri::Manager;
+
+        let Some(program) = crate::browser_host::chrome_program() else {
+            return Err("Chrome не найден. Плагин браузера без него не работает: \
+                 поставьте Google Chrome или Chromium."
+                .to_string());
+        };
+        let base = self
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("некуда положить профиль браузера: {error}"))?;
+        let key = root.to_string_lossy().to_string();
+        let profile = crate::browser_host::profile_dir(&base, &key);
+
+        self.app
+            .state::<crate::browser_host::BrowserHost>()
+            .ensure(&key, || crate::browser_host::launch(&program, &profile))
+            .map(|_port| ())
+            // Код ошибки нужен интерфейсу, а агенту — фраза: он покажет её
+            // человеку и на неё же будет опираться, решая, что делать дальше.
+            .map_err(|error| format!("браузер не запустился: {:?}", error.code))
+    }
+}
 
 /// Путь сокета. Рядом с каталогом событий хуков — то же место, та же уборка.
 #[cfg(unix)]
@@ -241,7 +320,8 @@ pub fn serve(app: tauri::AppHandle) {
             // Поток на соединение: сессия агента живёт, пока жив он сам, и
             // одна панель не должна ждать другую.
             std::thread::spawn(move || {
-                serve_connection(stream, &|panel_id| panel_root(&app, panel_id));
+                let tools = AppTools { app: app.clone() };
+                serve_connection(stream, &tools, &|panel_id| panel_root(&app, panel_id));
             });
         }
     });
@@ -258,6 +338,7 @@ pub fn serve(_app: tauri::AppHandle) {}
 #[cfg(unix)]
 fn serve_connection(
     stream: std::os::unix::net::UnixStream,
+    tools: &dyn Tools,
     root_of: &dyn Fn(&str) -> Option<PathBuf>,
 ) {
     use std::io::{BufRead, BufReader, Write};
@@ -285,7 +366,7 @@ fn serve_connection(
         // панель могли закрыть посреди сессии агента, и отвечать по
         // устаревшему корню значило бы работать в чужом каталоге.
         let ctx = PanelContext::new(panel_id.clone(), root_of(&panel_id));
-        let Some(answer) = dispatch(&ctx, &line) else {
+        let Some(answer) = dispatch(&ctx, tools, &line) else {
             continue;
         };
         if out.write_all(answer.as_bytes()).is_err()
@@ -306,9 +387,39 @@ fn panel_root(app: &tauri::AppHandle, panel_id: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     fn ctx() -> PanelContext {
         PanelContext::new("panel-a".into(), Some(PathBuf::from("/w/project")))
+    }
+
+    /// Инструменты, которые ничего не запускают, но помнят, о чём их просили.
+    struct StubTools {
+        answer: Result<(), String>,
+        asked_for: Mutex<Vec<PathBuf>>,
+    }
+
+    impl StubTools {
+        fn working() -> Self {
+            Self {
+                answer: Ok(()),
+                asked_for: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn failing(reason: &str) -> Self {
+            Self {
+                answer: Err(reason.to_string()),
+                asked_for: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Tools for StubTools {
+        fn open_browser(&self, root: &Path) -> Result<(), String> {
+            self.asked_for.lock().unwrap().push(root.to_path_buf());
+            self.answer.clone()
+        }
     }
 
     fn parse(raw: &str) -> Value {
@@ -317,7 +428,12 @@ mod tests {
 
     #[test]
     fn agrees_on_the_protocol_and_names_itself() {
-        let answer = dispatch(&ctx(), r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#).unwrap();
+        let answer = dispatch(
+            &ctx(),
+            &StubTools::working(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+        )
+        .unwrap();
         let answer = parse(&answer);
 
         assert_eq!(answer["id"], 1);
@@ -333,6 +449,7 @@ mod tests {
         // клиенту некуда его отнести.
         assert!(dispatch(
             &ctx(),
+            &StubTools::working(),
             r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
         )
         .is_none());
@@ -340,20 +457,38 @@ mod tests {
 
     #[test]
     fn shows_the_agent_what_it_can_call() {
-        let answer = dispatch(&ctx(), r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).unwrap();
+        let answer = dispatch(
+            &ctx(),
+            &StubTools::working(),
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        )
+        .unwrap();
         let answer = parse(&answer);
 
         let tools = answer["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "crew_ping");
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["crew_ping", "browser_open"]);
         // Схему клиент показывает модели: без неё инструмент не вызвать.
-        assert_eq!(tools[0]["inputSchema"]["type"], "object");
+        for tool in tools {
+            assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
+            // Описание — единственное, по чему модель решает, звать ли его.
+            assert!(
+                tool["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty()),
+                "инструмент без описания: {tool}"
+            );
+        }
     }
 
     #[test]
     fn tells_the_agent_which_panel_it_speaks_from() {
         let answer = dispatch(
             &ctx(),
+            &StubTools::working(),
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"crew_ping"}}"#,
         )
         .unwrap();
@@ -372,6 +507,7 @@ mod tests {
         let orphan = PanelContext::new("panel-gone".into(), None);
         let answer = dispatch(
             &orphan,
+            &StubTools::working(),
             r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"crew_ping"}}"#,
         )
         .unwrap();
@@ -388,6 +524,7 @@ mod tests {
     fn refuses_an_unknown_tool_without_breaking_the_session() {
         let answer = dispatch(
             &ctx(),
+            &StubTools::working(),
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"browser_navigate"}}"#,
         )
         .unwrap();
@@ -399,8 +536,12 @@ mod tests {
 
     #[test]
     fn answers_an_unknown_method_by_the_protocol() {
-        let answer = dispatch(&ctx(), r#"{"jsonrpc":"2.0","id":6,"method":"resources/list"}"#)
-            .unwrap();
+        let answer = dispatch(
+            &ctx(),
+            &StubTools::working(),
+            r#"{"jsonrpc":"2.0","id":6,"method":"resources/list"}"#,
+        )
+        .unwrap();
         let answer = parse(&answer);
 
         // -32601 — «метода нет»; по нему клиент понимает, что способности нет,
@@ -411,7 +552,7 @@ mod tests {
     #[test]
     fn survives_a_broken_line() {
         // Мусор в трубе не должен ронять сессию: отвечаем и слушаем дальше.
-        let answer = dispatch(&ctx(), "{это не json").unwrap();
+        let answer = dispatch(&ctx(), &StubTools::working(), "{это не json").unwrap();
         let answer = parse(&answer);
 
         assert_eq!(answer["error"]["code"], -32700);
@@ -422,7 +563,12 @@ mod tests {
     fn echoes_the_id_as_it_came() {
         // id по спецификации бывает и строкой; вернув число, мы бы разошлись
         // с клиентом, и он не нашёл бы свой ответ.
-        let answer = dispatch(&ctx(), r#"{"jsonrpc":"2.0","id":"a-1","method":"ping"}"#).unwrap();
+        let answer = dispatch(
+            &ctx(),
+            &StubTools::working(),
+            r#"{"jsonrpc":"2.0","id":"a-1","method":"ping"}"#,
+        )
+        .unwrap();
         assert_eq!(parse(&answer)["id"], "a-1");
     }
 
@@ -443,7 +589,7 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            serve_connection(stream, &|panel| {
+            serve_connection(stream, &StubTools::working(), &|panel| {
                 (panel == "panel-a").then(|| PathBuf::from("/w/project"))
             });
         });
@@ -459,7 +605,10 @@ mod tests {
         };
 
         say(&mut out, &handshake("panel-a"));
-        say(&mut out, r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#);
+        say(
+            &mut out,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+        );
         say(
             &mut out,
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"crew_ping"}}"#,
@@ -490,14 +639,15 @@ mod tests {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::{UnixListener, UnixStream};
 
-        let path =
-            std::env::temp_dir().join(format!("mc-mcp-nohand-{}.sock", std::process::id()));
+        let path = std::env::temp_dir().join(format!("mc-mcp-nohand-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
 
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            serve_connection(stream, &|_| Some(PathBuf::from("/w/project")));
+            serve_connection(stream, &StubTools::working(), &|_| {
+                Some(PathBuf::from("/w/project"))
+            });
         });
 
         let mut client = UnixStream::connect(&path).unwrap();
@@ -512,6 +662,61 @@ mod tests {
 
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn opens_the_browser_of_the_panel_project() {
+        let tools = StubTools::working();
+        let answer = dispatch(
+            &ctx(),
+            &tools,
+            r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"browser_open"}}"#,
+        )
+        .unwrap();
+
+        // Проект берётся у панели. У инструмента нет параметра с путём, и это
+        // не упущение: иначе агент открыл бы браузер чужому проекту.
+        assert_eq!(
+            *tools.asked_for.lock().unwrap(),
+            vec![PathBuf::from("/w/project")]
+        );
+        assert_eq!(parse(&answer)["result"]["isError"], false);
+    }
+
+    #[test]
+    fn passes_the_browser_failure_on_to_the_agent() {
+        // Причина уходит агенту дословно: он покажет её человеку, и по ней же
+        // решит, стоит ли пробовать снова.
+        let tools = StubTools::failing("Chrome не найден.");
+        let answer = dispatch(
+            &ctx(),
+            &tools,
+            r#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"browser_open"}}"#,
+        )
+        .unwrap();
+        let answer = parse(&answer);
+
+        assert_eq!(answer["result"]["isError"], true);
+        assert_eq!(answer["result"]["content"][0]["text"], "Chrome не найден.");
+        // Сессия при этом цела: это ошибка инструмента, а не протокола.
+        assert!(answer["error"].is_null());
+    }
+
+    #[test]
+    fn refuses_to_open_a_browser_for_a_panel_that_is_gone() {
+        let tools = StubTools::working();
+        let orphan = PanelContext::new("panel-gone".into(), None);
+        let answer = dispatch(
+            &orphan,
+            &tools,
+            r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"browser_open"}}"#,
+        )
+        .unwrap();
+
+        // Без панели неизвестен проект, а браузер заводится на проект: поднять
+        // его «куда-нибудь» хуже, чем не поднять вовсе.
+        assert!(tools.asked_for.lock().unwrap().is_empty());
+        assert_eq!(parse(&answer)["result"]["isError"], true);
     }
 
     #[test]
