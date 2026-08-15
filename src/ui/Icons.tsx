@@ -120,6 +120,17 @@ export function UndoIcon(props: IconProps) {
   );
 }
 
+export function GlobeIcon(props: IconProps) {
+  // Меридиан и экватор: шар без них читается как пустой кружок.
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M2.5 8h11" />
+      <path d="M8 2.5a8.5 8.5 0 0 1 0 11a8.5 8.5 0 0 1 0-11z" />
+    </svg>
+  );
+}
+
 export function DiffIcon(props: IconProps) {
   // «±» как у счётчика изменений в Warp: плюс сверху, минус снизу.
   return (
