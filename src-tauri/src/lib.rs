@@ -12,6 +12,7 @@ compile_error!(
 mod agent_hook_cli;
 mod agent_hooks;
 mod agent_sessions;
+mod browser_host;
 mod clipboard_images;
 mod command_error;
 mod crew;
@@ -453,8 +454,12 @@ fn pty_kill(
 fn pty_kill_all(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, PtyManager>,
+    browsers: tauri::State<'_, browser_host::BrowserHost>,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
+    // Вместе с шеллами гасим и браузеры: команда зовётся перед обновлением, и
+    // переживший его Chrome остался бы висеть без хозяина.
+    browsers.close_all();
     state.kill_all()
 }
 
@@ -525,9 +530,15 @@ async fn workspace_pick_root(
 fn workspace_unregister_root(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, WorkspaceRoots>,
+    browsers: tauri::State<'_, browser_host::BrowserHost>,
     workspace_id: String,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
+    // Браузер живёт при проекте: папку отвязали — его держать не для кого.
+    // Корень берём до отвязки, после неё он уже не разрешится.
+    if let Ok(root) = state.resolve(&workspace_id) {
+        browsers.close(&root.to_string_lossy());
+    }
     state.unbind(&workspace_id)
 }
 
@@ -964,6 +975,7 @@ pub fn run() {
         .manage(GitWatchState::default())
         .manage(TreeWatchState::default())
         .manage(crew::CrewRegistry::default())
+        .manage(browser_host::BrowserHost::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
@@ -1054,6 +1066,9 @@ pub fn run() {
             // Гарантированная уборка шеллов при любом пути выхода — иначе зомби.
             RunEvent::Exit => {
                 let _ = app.state::<PtyManager>().kill_all();
+                // Chrome — отдельный процесс и наше завершение его не касается:
+                // без этого он пережил бы приложение, забрав себе профиль.
+                app.state::<browser_host::BrowserHost>().close_all();
             }
             // Клик по иконке в доке (macOS) при спрятанном окне — вернуть его.
             #[cfg(target_os = "macos")]
@@ -1079,6 +1094,7 @@ mod tests {
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
+        ("browser_host.rs", include_str!("browser_host.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("crew.rs", include_str!("crew.rs")),
