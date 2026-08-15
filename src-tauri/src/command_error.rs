@@ -68,6 +68,9 @@ pub enum ErrorCode {
     BrowserNotInstalled,
     BrowserLaunchFailed,
     BrowserPortUnavailable,
+    BrowserNotConnected,
+    BrowserCommandFailed,
+    BrowserUrlUnsupported,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

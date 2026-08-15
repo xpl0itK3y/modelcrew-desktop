@@ -61,6 +61,10 @@ pub trait Tools: Send + Sync {
     /// Поднять браузер проекта или убедиться, что он уже поднят.
     /// Текст ошибки уходит агенту дословно — он должен быть ему понятен.
     fn open_browser(&self, root: &Path) -> Result<(), String>;
+
+    /// Открыть страницу в браузере проекта. Возвращает заголовок страницы —
+    /// по нему агент понимает, что попал куда хотел.
+    fn navigate(&self, root: &Path, url: &str) -> Result<String, String>;
 }
 
 /// Один запрос JSON-RPC → одна строка ответа.
@@ -125,11 +129,32 @@ fn tool_list() -> Value {
             "description": concat!(
                 "Поднять браузер этого проекта, если он ещё не запущен. ",
                 "Браузер общий для всех агентов проекта: профиль и вход в ",
-                "тестовые стенды у вас общие. У другого проекта браузер свой.",
+                "тестовые стенды у вас общие. У другого проекта браузер свой. ",
+                "Своего окна у него нет — страницу видно в самом ModelCrew.",
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": false,
+            },
+        },
+        {
+            "name": "browser_navigate",
+            "description": concat!(
+                "Открыть страницу в браузере проекта и дождаться загрузки. ",
+                "Это единственный способ посмотреть страницу в этом проекте: ",
+                "то, что откроешь, человек увидит в окне ModelCrew. ",
+                "Годятся только http и https.",
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Адрес страницы, http или https.",
+                    },
+                },
+                "required": ["url"],
                 "additionalProperties": false,
             },
         },
@@ -141,9 +166,11 @@ fn call_tool(ctx: &PanelContext, tools: &dyn Tools, id: Value, params: Option<&V
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let arguments = params.and_then(|params| params.get("arguments"));
     match name {
         "crew_ping" => result(id, text_content(&ping_text(ctx))),
         "browser_open" => result(id, open_browser(ctx, tools)),
+        "browser_navigate" => result(id, navigate(ctx, tools, arguments)),
         // Ошибка инструмента — не ошибка протокола: агент должен прочитать
         // причину и продолжить, а не считать сервер сломанным.
         other => result(
@@ -182,6 +209,25 @@ fn open_browser(ctx: &PanelContext, tools: &dyn Tools) -> Value {
     };
     match tools.open_browser(root) {
         Ok(()) => text_content(&format!("Браузер проекта {} готов.", root.display())),
+        Err(reason) => error_content(&reason),
+    }
+}
+
+fn navigate(ctx: &PanelContext, tools: &dyn Tools, arguments: Option<&Value>) -> Value {
+    let Some(root) = &ctx.root else {
+        return error_content(&ping_text(ctx));
+    };
+    let url = arguments
+        .and_then(|arguments| arguments.get("url"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if url.is_empty() {
+        return error_content("Не сказано, что открывать: нужен параметр url.");
+    }
+    match tools.navigate(root, url) {
+        // Заголовок — то, по чему агент понимает, что попал куда хотел:
+        // «страница открыта» одинаково звучит и для формы входа, и для 404.
+        Ok(title) => text_content(&format!("Открыто: {url}\nЗаголовок страницы: {title}")),
         Err(reason) => error_content(&reason),
     }
 }
@@ -240,29 +286,49 @@ struct AppTools {
 
 impl Tools for AppTools {
     fn open_browser(&self, root: &Path) -> Result<(), String> {
-        use tauri::Manager;
-
-        let Some(program) = crate::browser_host::chrome_program() else {
-            return Err("Chrome не найден. Плагин браузера без него не работает: \
-                 поставьте Google Chrome или Chromium."
-                .to_string());
-        };
-        let base = self
-            .app
-            .path()
-            .app_data_dir()
-            .map_err(|error| format!("некуда положить профиль браузера: {error}"))?;
-        let key = root.to_string_lossy().to_string();
-        let profile = crate::browser_host::profile_dir(&base, &key);
-
-        self.app
-            .state::<crate::browser_host::BrowserHost>()
-            .ensure(&key, || crate::browser_host::launch(&program, &profile))
-            .map(|_port| ())
-            // Код ошибки нужен интерфейсу, а агенту — фраза: он покажет её
-            // человеку и на неё же будет опираться, решая, что делать дальше.
-            .map_err(|error| format!("браузер не запустился: {:?}", error.code))
+        browser_port(&self.app, root).map(|_port| ())
     }
+
+    fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
+        let port = browser_port(&self.app, root)?;
+        let mut cdp = crate::cdp::Cdp::connect(port)
+            .map_err(|error| format!("не удалось связаться с браузером: {:?}", error.code))?;
+        cdp.navigate(url).map_err(|error| match error.code {
+            crate::command_error::ErrorCode::BrowserUrlUnsupported => {
+                "Такой адрес открывать нельзя: годятся только http и https.".to_string()
+            }
+            code => format!("страница не открылась: {code:?}"),
+        })?;
+        // Заголовок читаем после загрузки: до неё он пустой или ещё от
+        // прошлой страницы.
+        Ok(cdp
+            .location()
+            .map(|(_url, title)| title)
+            .unwrap_or_default())
+    }
+}
+
+/// Поднять браузер проекта и вернуть его порт.
+///
+/// Ошибки здесь — фразой, а не кодом: их читает агент и показывает человеку.
+pub fn browser_port(app: &tauri::AppHandle, root: &Path) -> Result<u16, String> {
+    use tauri::Manager;
+
+    let Some(program) = crate::browser_host::chrome_program() else {
+        return Err("Chrome не найден. Плагин браузера без него не работает: \
+             поставьте Google Chrome или Chromium."
+            .to_string());
+    };
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("некуда положить профиль браузера: {error}"))?;
+    let key = root.to_string_lossy().to_string();
+    let profile = crate::browser_host::profile_dir(&base, &key);
+
+    app.state::<crate::browser_host::BrowserHost>()
+        .ensure(&key, || crate::browser_host::launch(&program, &profile))
+        .map_err(|error| format!("браузер не запустился: {:?}", error.code))
 }
 
 /// Путь сокета. Рядом с каталогом событий хуков — то же место, та же уборка.
@@ -397,6 +463,7 @@ mod tests {
     struct StubTools {
         answer: Result<(), String>,
         asked_for: Mutex<Vec<PathBuf>>,
+        opened: Mutex<Vec<String>>,
     }
 
     impl StubTools {
@@ -404,6 +471,7 @@ mod tests {
             Self {
                 answer: Ok(()),
                 asked_for: Mutex::new(Vec::new()),
+                opened: Mutex::new(Vec::new()),
             }
         }
 
@@ -411,6 +479,7 @@ mod tests {
             Self {
                 answer: Err(reason.to_string()),
                 asked_for: Mutex::new(Vec::new()),
+                opened: Mutex::new(Vec::new()),
             }
         }
     }
@@ -419,6 +488,14 @@ mod tests {
         fn open_browser(&self, root: &Path) -> Result<(), String> {
             self.asked_for.lock().unwrap().push(root.to_path_buf());
             self.answer.clone()
+        }
+
+        fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
+            self.asked_for.lock().unwrap().push(root.to_path_buf());
+            self.opened.lock().unwrap().push(url.to_string());
+            self.answer
+                .clone()
+                .map(|()| "Тестовая страница".to_string())
         }
     }
 
@@ -470,7 +547,7 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["crew_ping", "browser_open"]);
+        assert_eq!(names, ["crew_ping", "browser_open", "browser_navigate"]);
         // Схему клиент показывает модели: без неё инструмент не вызвать.
         for tool in tools {
             assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
@@ -717,6 +794,43 @@ mod tests {
         // его «куда-нибудь» хуже, чем не поднять вовсе.
         assert!(tools.asked_for.lock().unwrap().is_empty());
         assert_eq!(parse(&answer)["result"]["isError"], true);
+    }
+
+    #[test]
+    fn opens_the_page_the_agent_asked_for() {
+        let tools = StubTools::working();
+        let answer = dispatch(
+            &ctx(),
+            &tools,
+            r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"browser_navigate","arguments":{"url":"http://localhost:1420/"}}}"#,
+        )
+        .unwrap();
+        let answer = parse(&answer);
+
+        assert_eq!(
+            *tools.opened.lock().unwrap(),
+            vec!["http://localhost:1420/"]
+        );
+        assert_eq!(answer["result"]["isError"], false);
+        // Заголовок в ответе: «страница открыта» одинаково звучит и для формы
+        // входа, и для 404, а заголовок говорит, куда агент попал на самом деле.
+        let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Тестовая страница"), "{text}");
+    }
+
+    #[test]
+    fn says_what_is_missing_when_no_address_was_given() {
+        let tools = StubTools::working();
+        for call in [
+            r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"browser_navigate"}}"#,
+            r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"browser_navigate","arguments":{}}}"#,
+            r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"browser_navigate","arguments":{"url":""}}}"#,
+        ] {
+            let answer = parse(&dispatch(&ctx(), &tools, call).unwrap());
+            assert_eq!(answer["result"]["isError"], true, "вызов {call}");
+        }
+        // Никуда не пошли: без адреса открывать нечего.
+        assert!(tools.opened.lock().unwrap().is_empty());
     }
 
     #[test]
