@@ -43,6 +43,9 @@ type TitlebarProps = {
   onOpenGitChanges: () => void;
   onOpenBrowser: () => void;
   browserOpen: boolean;
+  // Есть ли проект, чей браузер можно показать. Без папки показывать нечего,
+  // и кнопки тоже быть не должно: нажатие в пустоту читается как поломка.
+  browserAvailable: boolean;
   updater: AppUpdaterController;
   // Панели, где агент ждёт ответа, и переход к одной из них.
   waiting: readonly WaitingPanel[];
@@ -271,16 +274,18 @@ export function Titlebar(props: TitlebarProps) {
         >
           <PlusIcon />
         </button>
-        <button
-          type="button"
-          className="icon-button"
-          title={t("titlebar.browser")}
-          aria-label={t("titlebar.browser")}
-          aria-pressed={props.browserOpen}
-          onClick={props.onOpenBrowser}
-        >
-          <GlobeIcon />
-        </button>
+        {props.browserAvailable && (
+          <button
+            type="button"
+            className="icon-button"
+            title={t("titlebar.browser")}
+            aria-label={t("titlebar.browser")}
+            aria-pressed={props.browserOpen}
+            onClick={props.onOpenBrowser}
+          >
+            <GlobeIcon />
+          </button>
+        )}
         {props.gitCounts && (
           <button
             type="button"

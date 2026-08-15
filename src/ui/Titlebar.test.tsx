@@ -73,6 +73,7 @@ function titlebar(
       onOpenSettings={vi.fn()}
       onOpenGitChanges={vi.fn()}
       browserOpen={false}
+      browserAvailable
       onOpenBrowser={vi.fn()}
       updater={updater}
       {...overrides}
@@ -319,5 +320,19 @@ describe("Titlebar browser button", () => {
     expect(
       screen.getByRole("button", { name: "Браузер проекта" }),
     ).toBeInTheDocument();
+  });
+
+  it("is gone entirely until a project folder is chosen", () => {
+    // Без папки браузеру нечего показывать, и нажатие не делало ничего —
+    // при этом кнопка отжималась-нажималась, то есть врала о состоянии.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserAvailable: false,
+      }),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Браузер проекта" }),
+    ).not.toBeInTheDocument();
   });
 });

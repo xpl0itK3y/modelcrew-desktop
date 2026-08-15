@@ -592,6 +592,14 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [browserDrawerOpen]);
+  // Проект пропал (папку отвязали, переключились на непривязанный) — ящик
+  // закрываем сами. Иначе он остаётся «открытым» невидимо и всплывает потом,
+  // стоит появиться папке.
+  useEffect(() => {
+    if (!activeProjectId) {
+      setBrowserDrawerOpen(false);
+    }
+  }, [activeProjectId]);
   const sidebarWorkspaces = workspaces.list.map((workspace) => {
     const sessions = workspace.sessions.map((session) => ({
       id: session.id,
@@ -639,6 +647,7 @@ export default function App() {
           }
         }}
         browserOpen={browserDrawerOpen}
+        browserAvailable={activeProjectId !== null}
         onOpenBrowser={() => {
           setBrowserDrawerOpen(!browserDrawerOpen);
           if (!browserDrawerOpen) {
