@@ -24,6 +24,8 @@ mod git_sync;
 mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
+mod mcp;
+mod mcp_stdio;
 mod panel_snapshots;
 mod pty;
 mod terminal_snapshots;
@@ -901,6 +903,12 @@ pub fn run_agent_hook() -> Option<i32> {
     agent_hook_cli::run_if_hook()
 }
 
+/// Запуск шимом MCP: тем же приёмом, что и хук, но разговор длинный —
+/// процесс живёт, пока агент держит сессию. `None` — запуск обычный.
+pub fn run_mcp_shim() -> Option<i32> {
+    mcp_stdio::run_if_shim()
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer_by_default();
@@ -927,6 +935,7 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             spawn_title_watcher(app.handle().clone());
             agent_hooks::install(app.handle());
+            mcp::serve(app.handle().clone());
             #[cfg(desktop)]
             setup_tray(app)?;
             Ok(())
@@ -1081,6 +1090,8 @@ mod tests {
         ("git_sync.rs", include_str!("git_sync.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
+        ("mcp.rs", include_str!("mcp.rs")),
+        ("mcp_stdio.rs", include_str!("mcp_stdio.rs")),
         ("panel_snapshots.rs", include_str!("panel_snapshots.rs")),
         ("pty.rs", include_str!("pty.rs")),
         (
