@@ -43,6 +43,7 @@ reqwest = { version = "0.13", default-features = false, features = [
   "form",
   "rustls",
 ] }
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
