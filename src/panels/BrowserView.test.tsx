@@ -174,6 +174,27 @@ describe("BrowserView", () => {
     );
   });
 
+  it("shows nothing of the previous project when the project changes", async () => {
+    // Чужая страница в ящике — не косметика: в адресной строке остался бы
+    // чужой адрес, и «Открыть» отправил бы его в браузер нового проекта.
+    invoke.mockImplementation((_command: string, args: { workspaceId: string }) =>
+      Promise.resolve(
+        args.workspaceId === "w1"
+          ? frame({ image: PIXEL, url: "http://a.test/", running: true })
+          : frame(),
+      ),
+    );
+
+    const view = render(<BrowserView workspaceId="w1" />);
+    await waitFor(() => expect(address()).toHaveValue("http://a.test/"));
+
+    view.rerender(<BrowserView workspaceId="w2" />);
+
+    // Сразу же, тем же кадром отрисовки, а не после первого ответа нового.
+    expect(address()).toHaveValue("");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
   it("keeps the open button out of reach while there is nothing to open", () => {
     render(<BrowserView workspaceId="w1" />);
 

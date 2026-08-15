@@ -20,7 +20,20 @@ import {
 } from "../browser/browserFrames";
 import { localizeBackendError, useI18n } from "../i18n";
 
+/**
+ * Ящик со страницей проекта.
+ *
+ * Содержимое живёт под ключом проекта: со сменой проекта состояние обязано
+ * начаться заново. Иначе в ящике до первого ответа нового проекта висел бы
+ * кадр предыдущего — чужая страница целиком, — а в адресной строке чужой
+ * адрес, который ушёл бы в чужой браузер, нажми человек «Открыть». Сброс
+ * эффектом тут не спасает: эффект выполняется уже после отрисовки.
+ */
 export function BrowserView(props: { workspaceId: string }) {
+  return <BrowserProjectView key={props.workspaceId} {...props} />;
+}
+
+function BrowserProjectView(props: { workspaceId: string }) {
   const { t } = useI18n();
   const [frame, setFrame] = useState<BrowserFrame>(NO_FRAME);
   const [address, setAddress] = useState("");
