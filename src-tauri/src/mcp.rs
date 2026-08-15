@@ -292,12 +292,12 @@ impl Tools for AppTools {
     fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
         let port = browser_port(&self.app, root)?;
         let mut cdp = crate::cdp::Cdp::connect(port)
-            .map_err(|error| format!("не удалось связаться с браузером: {:?}", error.code))?;
+            .map_err(|error| format!("не удалось связаться с браузером: {}", excuse(&error)))?;
         cdp.navigate(url).map_err(|error| match error.code {
             crate::command_error::ErrorCode::BrowserUrlUnsupported => {
                 "Такой адрес открывать нельзя: годятся только http и https.".to_string()
             }
-            code => format!("страница не открылась: {code:?}"),
+            _ => format!("страница не открылась: {}", excuse(&error)),
         })?;
         // Заголовок читаем после загрузки: до неё он пустой или ещё от
         // прошлой страницы.
@@ -305,6 +305,17 @@ impl Tools for AppTools {
             .location()
             .map(|(_url, title)| title)
             .unwrap_or_default())
+    }
+}
+
+/// Причина отказа словами, а не кодом.
+///
+/// Читает это агент: по коду вроде `BrowserNotConnected` он ничего сделать не
+/// может, а по причине — иногда может, и человеку её же и покажет.
+fn excuse(error: &crate::command_error::CommandError) -> String {
+    match error.context.get("reason") {
+        Some(reason) => format!("{reason} ({:?})", error.code),
+        None => format!("{:?}", error.code),
     }
 }
 
@@ -457,6 +468,26 @@ mod tests {
 
     fn ctx() -> PanelContext {
         PanelContext::new("panel-a".into(), Some(PathBuf::from("/w/project")))
+    }
+
+    #[test]
+    fn tells_the_agent_the_reason_and_not_only_the_code() {
+        use crate::command_error::{CommandError, ErrorCode};
+
+        // Живой случай: «не удалось связаться с браузером: BrowserNotConnected»
+        // — всё, что видел агент, и делать с этим было нечего.
+        let with_reason = CommandError::new(ErrorCode::BrowserNotConnected)
+            .with_context("reason", "у браузера нет ни одной страницы");
+        assert_eq!(
+            excuse(&with_reason),
+            "у браузера нет ни одной страницы (BrowserNotConnected)"
+        );
+
+        // Причины может и не быть — тогда остаётся код, и это лучше пустоты.
+        assert_eq!(
+            excuse(&CommandError::new(ErrorCode::BrowserLaunchFailed)),
+            "BrowserLaunchFailed"
+        );
     }
 
     /// Инструменты, которые ничего не запускают, но помнят, о чём их просили.
