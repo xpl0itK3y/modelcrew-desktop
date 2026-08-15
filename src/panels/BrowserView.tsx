@@ -91,7 +91,15 @@ export function BrowserView(props: { workspaceId: string }) {
           />
         ) : (
           <p className="browser-empty">
-            {frame.running ? t("browser.blank") : t("browser.notRunning")}
+            {
+              // Первый запуск браузера занимает секунды, и без этой строки
+              // нажатие «Открыть» выглядит как будто ничего не произошло.
+              opening
+                ? t("browser.opening")
+                : frame.running
+                  ? t("browser.blank")
+                  : t("browser.notRunning")
+            }
           </p>
         )}
       </div>

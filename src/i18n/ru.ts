@@ -52,6 +52,7 @@ export const ru = {
   "browser.open": "Открыть",
   "browser.frameAlt": "Страница в браузере проекта",
   "browser.blank": "Страница пока пустая",
+  "browser.opening": "Открываю страницу…",
   "browser.notRunning":
     "Браузер проекта ещё не запущен. Наберите адрес или дождитесь агента — он откроет его сам.",
   "git.panelTitle": "Изменения",

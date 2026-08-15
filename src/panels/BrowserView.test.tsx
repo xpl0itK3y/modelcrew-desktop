@@ -112,6 +112,30 @@ describe("BrowserView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/Chrome/);
   });
 
+  it("says it is working while the browser starts up", async () => {
+    // Первый запуск Chrome занимает секунды: без этой строки нажатие
+    // выглядит как будто ничего не произошло, и человек жмёт ещё раз.
+    let release = () => {};
+    invoke.mockImplementation((command: string) =>
+      command === "browser_go"
+        ? new Promise<void>((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve(frame()),
+    );
+
+    render(<BrowserView workspaceId="w1" />);
+    fireEvent.change(address(), { target: { value: "example.com" } });
+    fireEvent.submit(address());
+
+    expect(await screen.findByText("Открываю страницу…")).toBeInTheDocument();
+
+    release();
+    await waitFor(() =>
+      expect(screen.queryByText("Открываю страницу…")).not.toBeInTheDocument(),
+    );
+  });
+
   it("keeps the open button out of reach while there is nothing to open", () => {
     render(<BrowserView workspaceId="w1" />);
 

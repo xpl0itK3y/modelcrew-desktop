@@ -53,6 +53,7 @@ export const en: Record<MessageKey, string> = {
   "browser.open": "Open",
   "browser.frameAlt": "The page in the project browser",
   "browser.blank": "The page is still blank",
+  "browser.opening": "Opening the page…",
   "browser.notRunning":
     "The project browser is not running yet. Type an address, or wait for an agent to open one.",
   "git.panelTitle": "Changes",
