@@ -65,6 +65,9 @@ pub enum ErrorCode {
     GitCommandFailed,
     GithubNotConfigured,
     GithubRequestFailed,
+    BrowserNotInstalled,
+    BrowserLaunchFailed,
+    BrowserPortUnavailable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
