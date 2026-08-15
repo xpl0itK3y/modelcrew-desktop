@@ -184,24 +184,55 @@ fn fetch(port: u16, path: &str) -> CommandResult<Value> {
         .write_all(request.as_bytes())
         .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
 
-    let mut raw = String::new();
-    stream
-        .read_to_string(&mut raw)
-        .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
-
-    body_of(&raw)
-        .and_then(|body| serde_json::from_str(body).ok())
-        .ok_or_else(|| {
-            CommandError::new(ErrorCode::BrowserNotConnected)
-                .with_context("reason", "браузер ответил не тем, чем ожидалось")
-        })
+    // Читаем ровно столько, сколько обещано в заголовке, а не до конца связи:
+    // `Connection: close` браузер игнорирует и соединение держит открытым.
+    // Чтение «до EOF» упиралось бы в таймаут и всякий раз кончалось отказом,
+    // хотя ответ уже пришёл целиком.
+    let mut raw = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        if let Some(body) = complete_body(&raw) {
+            return serde_json::from_str(body).map_err(|error| {
+                CommandError::new(ErrorCode::BrowserNotConnected)
+                    .with_context("reason", "браузер ответил не тем, чем ожидалось")
+                    .with_debug(error)
+            });
+        }
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
+        if read == 0 {
+            return Err(CommandError::new(ErrorCode::BrowserNotConnected)
+                .with_context("reason", "браузер оборвал ответ"));
+        }
+        raw.extend_from_slice(&chunk[..read]);
+    }
 }
 
-/// Тело ответа после пустой строки, отделяющей заголовки.
-fn body_of(raw: &str) -> Option<&str> {
+/// Тело ответа, если оно пришло целиком.
+///
+/// `None` — заголовки ещё не кончились или тела пришло меньше обещанного.
+fn complete_body(raw: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(raw).ok()?;
+    let (head, body) = split_head(text)?;
+    let length = content_length(head)?;
+    // `then`, а не `then_some`: срез считается сразу, и на недочитанном теле
+    // он бы вышел за границу вместо честного «ещё не всё».
+    (body.len() >= length).then(|| &body[..length])
+}
+
+/// Заголовки и тело: пустая строка между ними.
+fn split_head(raw: &str) -> Option<(&str, &str)> {
     raw.split_once("\r\n\r\n")
-        .map(|(_, body)| body)
-        .or_else(|| raw.split_once("\n\n").map(|(_, body)| body))
+        .or_else(|| raw.split_once("\n\n"))
+}
+
+/// Длина тела из заголовков.
+fn content_length(head: &str) -> Option<usize> {
+    head.lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse().ok())
 }
 
 /// Адрес веб-сокета первой страницы.
@@ -298,14 +329,56 @@ mod tests {
     #[test]
     fn reads_the_body_after_the_headers() {
         assert_eq!(
-            body_of("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[]"),
+            complete_body(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]"),
             Some("[]")
         );
         // Некоторые сборки отвечают с переводами строк без возврата каретки.
         assert_eq!(
-            body_of("HTTP/1.1 200 OK\nContent-Type: x\n\n[]"),
+            complete_body(b"HTTP/1.1 200 OK\nContent-Length: 2\n\n[]"),
             Some("[]")
         );
-        assert_eq!(body_of("совсем не ответ"), None);
+        // Имена заголовков регистронезависимы, и Chrome пишет их без пробела.
+        assert_eq!(
+            complete_body(b"HTTP/1.1 200 OK\r\ncontent-length:2\r\n\r\n[]"),
+            Some("[]")
+        );
+        assert_eq!(complete_body("совсем не ответ".as_bytes()), None);
+    }
+
+    #[test]
+    fn waits_for_the_whole_body() {
+        // Соединение браузер держит открытым и `Connection: close` не слушает:
+        // дочитав до конца связи, мы упёрлись бы в таймаут при готовом ответе.
+        // Признак конца здесь один — обещанная длина.
+        let head = b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n";
+        assert_eq!(complete_body(head), None);
+        assert_eq!(
+            complete_body(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[1,2,3"),
+            None
+        );
+        assert_eq!(
+            complete_body(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[1,2,3,4]\n"),
+            Some("[1,2,3,4]\n")
+        );
+    }
+
+    #[test]
+    fn stops_at_the_promised_length() {
+        // Chrome умеет прислать следом ответ на следующий запрос по тому же
+        // соединению: лишнее в разбор JSON попадать не должно.
+        assert_eq!(
+            complete_body(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]HTTP/1.1 200 OK"),
+            Some("[]")
+        );
+    }
+
+    #[test]
+    fn an_answer_without_a_length_is_not_an_answer() {
+        // Заголовок обязателен: без него мы не знаем, всё ли пришло, и
+        // догадка «пришло всё» рано или поздно отдала бы половину списка.
+        assert_eq!(
+            complete_body(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[]"),
+            None
+        );
     }
 }
