@@ -74,6 +74,9 @@ impl BrowserInstance {
 
     fn kill(&mut self) {
         let Some(child) = &mut self.child else {
+            // Подобранный: своего процесса у нас нет, поэтому просим уйти по
+            // протоколу. Иначе он переживает приложение и держит профиль.
+            crate::cdp::close_browser(self.port, PROBE_TIMEOUT);
             return;
         };
         let _ = child.kill();

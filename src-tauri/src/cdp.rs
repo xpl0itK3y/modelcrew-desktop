@@ -183,6 +183,43 @@ pub fn is_devtools(port: u16, timeout: Duration) -> bool {
     fetch_within(port, "/json/version", timeout).is_ok_and(|answer| answer.get("Browser").is_some())
 }
 
+/// Попросить браузер закрыться.
+///
+/// Для подобранного браузера это единственный способ: его процесс запускали
+/// не мы, дескриптора у нас нет, а профиль проекта он держит до конца — и
+/// следующий запуск приложения упрётся в занятый профиль.
+///
+/// Ответа не ждём: на эту команду браузер отвечает тем, что уходит.
+pub fn close_browser(port: u16, timeout: Duration) -> bool {
+    let Ok(version) = fetch_within(port, "/json/version", timeout) else {
+        return false;
+    };
+    let Some(url) = browser_socket(&version) else {
+        return false;
+    };
+    let Ok(stream) = connect_within(port, timeout, timeout) else {
+        return false;
+    };
+    let Ok((mut socket, _)) = tungstenite::client::client(&url, stream) else {
+        return false;
+    };
+    socket
+        .send(tungstenite::Message::Text(
+            json!({ "id": 1, "method": "Browser.close" })
+                .to_string()
+                .into(),
+        ))
+        .is_ok()
+}
+
+/// Веб-сокет самого браузера — не страницы: закрыть себя умеет только он.
+fn browser_socket(version: &Value) -> Option<String> {
+    version
+        .get("webSocketDebuggerUrl")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 /// Маленький GET по localhost.
 ///
 /// Своими руками, а не готовым клиентом: тот в этом проекте асинхронный, а
@@ -294,6 +331,22 @@ mod tests {
             page_socket(&targets).as_deref(),
             Some("ws://127.0.0.1:1/page/a")
         );
+    }
+
+    #[test]
+    fn asks_the_browser_itself_to_close_and_not_a_page() {
+        // Страница закрыть браузер не умеет: адрес нужен браузерный, и его
+        // отдаёт `/json/version`, а не список целей.
+        assert_eq!(
+            browser_socket(&json!({
+                "Browser": "Chrome/151.0.0.0",
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/abc",
+            }))
+            .as_deref(),
+            Some("ws://127.0.0.1:9222/devtools/browser/abc")
+        );
+        // Сборки без отладочного сокета встречаются — молча ничего не делаем.
+        assert_eq!(browser_socket(&json!({ "Browser": "Chrome" })), None);
     }
 
     #[test]
