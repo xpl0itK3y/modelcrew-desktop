@@ -577,6 +577,15 @@ export const ru = {
     "WinGet недоступен — установите Git for Windows с официального сайта",
   "error.gitBashInstallFailed":
     "Git Bash не был установлен. Проверьте системное окно установки и повторите попытку",
+  "error.browserNotInstalled":
+    "Chrome не найден — поставьте Google Chrome или Chromium, без него браузер проекта не работает",
+  "error.browserLaunchFailed": "Браузер проекта не запустился",
+  "error.browserPortUnavailable":
+    "Браузер запустился, но не сказал, по какому порту с ним говорить",
+  "error.browserNotConnected": "Связь с браузером проекта потеряна",
+  "error.browserCommandFailed": "Браузер не смог это выполнить",
+  "error.browserUrlUnsupported":
+    "Такой адрес открывать нельзя — годятся только http и https",
   "error.unknown": "Произошла неизвестная ошибка",
   "error.gitUnavailable": "git не найден — установите его, чтобы видеть изменения",
   "error.gitNotARepository": "Папка не является git-репозиторием",

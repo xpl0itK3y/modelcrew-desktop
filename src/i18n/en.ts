@@ -582,6 +582,15 @@ export const en: Record<MessageKey, string> = {
     "WinGet is unavailable — install Git for Windows from the official website",
   "error.gitBashInstallFailed":
     "Git Bash was not installed. Check the system installer window and try again",
+  "error.browserNotInstalled":
+    "Chrome was not found — install Google Chrome or Chromium; the project browser needs it",
+  "error.browserLaunchFailed": "The project browser did not start",
+  "error.browserPortUnavailable":
+    "The browser started but never said which port to talk to it on",
+  "error.browserNotConnected": "Lost the connection to the project browser",
+  "error.browserCommandFailed": "The browser could not do that",
+  "error.browserUrlUnsupported":
+    "That address cannot be opened — only http and https work",
   "error.unknown": "An unknown error occurred",
   "error.gitUnavailable": "git was not found — install it to see changes",
   "error.gitNotARepository": "The folder is not a git repository",
