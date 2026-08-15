@@ -754,13 +754,13 @@ export default function App() {
           )}
           {renderedGitDrawerWorkspaceId && (
             <aside
-              className={`git-drawer ${
+              className={`drawer git-drawer ${
                 gitDrawerMaximized ? "is-maximized" : ""
               } ${gitDrawerClosing ? "is-closing" : ""}`}
               aria-label={t("git.panelTitle")}
             >
-              <div className="git-drawer-header">
-                <span className="git-drawer-title">{t("git.panelTitle")}</span>
+              <div className="drawer-header">
+                <span className="drawer-title">{t("git.panelTitle")}</span>
                 {gitSummary?.isRepo && (
                   <span className="git-drawer-branch" title={t("git.branch")}>
                     {gitSummary.branch ?? t("git.detachedHead")}
@@ -768,7 +768,7 @@ export default function App() {
                     {gitSummary.behind ? ` ↓${gitSummary.behind}` : ""}
                   </span>
                 )}
-                <span className="git-drawer-spacer" />
+                <span className="drawer-spacer" />
                 {gitSummary?.isRepo &&
                   aggregateCounts(gitSummary).files > 0 && (
                     <span className="git-file-counts">

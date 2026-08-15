@@ -1214,82 +1214,7 @@
   color: var(--mc-text-faint);
 }
 
-/* ---------- Drawer поверх терминалов ---------- */
-
-/* Оверлей не двигает раскладку: терминалы сохраняют размер под ним. */
-.git-drawer {
-  position: absolute;
-  top: 0;
-  /* Отступы как у поповера уведомлений: панель не липнет к краям окна.
-     height:auto обязателен — общий .dock-area > * { height: 100% } иначе
-     растягивает оверлей до самого низа, игнорируя bottom. */
-  height: auto;
-  right: 34px;
-  bottom: 24px;
-  /* Выше сэшей dockview (z-index 99): разделители не просвечивают сквозь
-     оверлей и не перехватывают мышь под ним. */
-  z-index: 120;
-  display: flex;
-  width: min(480px, calc(100% - 68px));
-  transition:
-    width 180ms cubic-bezier(0.2, 0, 0.13, 1),
-    right 180ms cubic-bezier(0.2, 0, 0.13, 1),
-    bottom 180ms cubic-bezier(0.2, 0, 0.13, 1);
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--mc-border);
-  border-radius: 8px;
-  background: var(--mc-surface-raised);
-  box-shadow: -14px 0 40px var(--mc-shadow);
-  animation: git-drawer-in 160ms cubic-bezier(0.2, 0, 0.13, 1);
-}
-
-/* Развёрнутый режим: почти во всю область терминалов, минимальные поля. */
-.git-drawer.is-maximized {
-  width: calc(100% - 16px);
-  right: 8px;
-  bottom: 8px;
-}
-
-.git-drawer.is-closing {
-  animation: git-drawer-out 150ms ease-in forwards;
-  pointer-events: none;
-}
-
-@keyframes git-drawer-in {
-  from {
-    opacity: 0.4;
-    transform: translateX(24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes git-drawer-out {
-  to {
-    opacity: 0;
-    transform: translateX(24px);
-  }
-}
-
-.git-drawer-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px 6px 12px;
-  border-bottom: 1px solid var(--mc-border);
-}
-
-.git-drawer-title {
-  flex: none;
-  color: var(--mc-text-bright);
-  font-size: 12px;
-  font-weight: 650;
-}
+/* ---------- Панель изменений в ящике ---------- */
 
 .git-drawer-branch {
   min-width: 0;
@@ -1300,21 +1225,9 @@
   white-space: nowrap;
 }
 
-.git-drawer-spacer {
-  flex: 1;
-}
-
 .git-drawer .git-changes-panel {
   flex: 1;
   min-height: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .git-drawer,
-  .git-drawer.is-closing {
-    animation: none;
-    transition: none;
-  }
 }
 
 /* ---------- Кнопка «±» в титлбаре ---------- */
