@@ -31,6 +31,7 @@ import {
   GitChangesPanelLazy,
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
+import { BrowserView } from "./panels/BrowserView";
 import { subscribeGitChanges, type GitChangesSummary } from "./git/gitChanges";
 import { aggregateCounts } from "./git/unifiedDiff";
 import { TerminalTab } from "./panels/TerminalTab";
@@ -569,6 +570,28 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [gitDrawerOpen]);
+  // Браузер проекта — такой же оверлей: страница видна прямо в приложении,
+  // и терминалы под ней остаются на своих местах.
+  const [browserDrawerOpen, setBrowserDrawerOpen] = useState(false);
+  const [browserDrawerMaximized, setBrowserDrawerMaximized] = useState(false);
+  const liveBrowserWorkspaceId = browserDrawerOpen ? activeProjectId : null;
+  const browserPresence = useAnimatedPresence(liveBrowserWorkspaceId, 160);
+  const renderedBrowserWorkspaceId =
+    liveBrowserWorkspaceId ?? browserPresence?.item ?? null;
+  const browserDrawerClosing =
+    liveBrowserWorkspaceId === null || Boolean(browserPresence?.closing);
+  useEffect(() => {
+    if (!browserDrawerOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setBrowserDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [browserDrawerOpen]);
   const sidebarWorkspaces = workspaces.list.map((workspace) => {
     const sessions = workspace.sessions.map((session) => ({
       id: session.id,
@@ -608,6 +631,8 @@ export default function App() {
         onNewTerminal={newTerminal}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
+        browserOpen={browserDrawerOpen}
+        onOpenBrowser={() => setBrowserDrawerOpen((open) => !open)}
         updater={updater}
         waiting={waitingPanels}
         onRevealPanel={revealPanel}
@@ -805,6 +830,49 @@ export default function App() {
                 </button>
               </div>
               <GitChangesViewLazy workspaceId={renderedGitDrawerWorkspaceId} />
+            </aside>
+          )}
+          {renderedBrowserWorkspaceId && (
+            <aside
+              className={`drawer browser-drawer ${
+                browserDrawerMaximized ? "is-maximized" : ""
+              } ${browserDrawerClosing ? "is-closing" : ""}`}
+              aria-label={t("browser.panelTitle")}
+            >
+              <div className="drawer-header">
+                <span className="drawer-title">
+                  {t("browser.panelTitle")}
+                </span>
+                <span className="drawer-spacer" />
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={t(
+                    browserDrawerMaximized
+                      ? "browser.restore"
+                      : "browser.maximize",
+                  )}
+                  aria-label={t(
+                    browserDrawerMaximized
+                      ? "browser.restore"
+                      : "browser.maximize",
+                  )}
+                  aria-pressed={browserDrawerMaximized}
+                  onClick={() => setBrowserDrawerMaximized((value) => !value)}
+                >
+                  <MaximizeIcon />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={t("browser.close")}
+                  aria-label={t("browser.close")}
+                  onClick={() => setBrowserDrawerOpen(false)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <BrowserView workspaceId={renderedBrowserWorkspaceId} />
             </aside>
           )}
         </main>

@@ -3,6 +3,7 @@ import { isMac, isTauri } from "../platform";
 import {
   BellIcon,
   DiffIcon,
+  GlobeIcon,
   PlusIcon,
   FolderIcon,
   SidebarIcon,
@@ -40,6 +41,8 @@ type TitlebarProps = {
   onNewTerminal: () => void;
   onOpenSettings: () => void;
   onOpenGitChanges: () => void;
+  onOpenBrowser: () => void;
+  browserOpen: boolean;
   updater: AppUpdaterController;
   // Панели, где агент ждёт ответа, и переход к одной из них.
   waiting: readonly WaitingPanel[];
@@ -267,6 +270,16 @@ export function Titlebar(props: TitlebarProps) {
           onClick={props.onNewTerminal}
         >
           <PlusIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          title={t("titlebar.browser")}
+          aria-label={t("titlebar.browser")}
+          aria-pressed={props.browserOpen}
+          onClick={props.onOpenBrowser}
+        >
+          <GlobeIcon />
         </button>
         {props.gitCounts && (
           <button

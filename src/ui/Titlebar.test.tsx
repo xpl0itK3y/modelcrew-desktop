@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import {
   fireEvent,
   render,
@@ -53,7 +54,10 @@ function controller(center: NotificationCenterState): AppUpdaterController {
   };
 }
 
-function titlebar(updater: AppUpdaterController) {
+function titlebar(
+  updater: AppUpdaterController,
+  overrides: Partial<ComponentProps<typeof Titlebar>> = {},
+) {
   return (
     <Titlebar
       workspaceName="modelcrew"
@@ -68,7 +72,10 @@ function titlebar(updater: AppUpdaterController) {
       onNewTerminal={vi.fn()}
       onOpenSettings={vi.fn()}
       onOpenGitChanges={vi.fn()}
+      browserOpen={false}
+      onOpenBrowser={vi.fn()}
       updater={updater}
+      {...overrides}
     />
   );
 }
@@ -285,5 +292,32 @@ describe("Titlebar notification center", () => {
     expect(
       document.querySelector(".update-live-region"),
     ).toHaveTextContent("Ожидаем системное подтверждение");
+  });
+});
+
+describe("Titlebar browser button", () => {
+  it("opens the browser from the top bar", () => {
+    const onOpenBrowser = vi.fn();
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), { onOpenBrowser }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Браузер проекта" }));
+
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+  });
+
+  it("stays available with no repository in the folder", () => {
+    // Кнопка изменений появляется только у репозитория; браузер от гита не
+    // зависит, и прятать его вместе с ней было бы неверно.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        gitCounts: null,
+      }),
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Браузер проекта" }),
+    ).toBeInTheDocument();
   });
 });
