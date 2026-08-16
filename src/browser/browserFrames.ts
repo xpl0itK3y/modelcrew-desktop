@@ -65,6 +65,7 @@ export function frameSource(image: string): string {
 export function watchBrowserFrame(
   workspaceId: string | null,
   onFrame: (frame: BrowserFrame) => void,
+  onTrouble: (error: unknown) => void = () => {},
 ): () => void {
   if (!isTauri || !workspaceId) {
     onFrame(NO_FRAME);
@@ -83,11 +84,13 @@ export function watchBrowserFrame(
         if (!stopped) {
           onFrame(frame);
         }
-      } catch {
-        // Браузер мог умереть между кадрами: это не ошибка работы человека,
-        // и всплывать поверх терминалов ей незачем — ящик покажет пустоту.
+      } catch (error) {
+        // Не поднятый браузер — это удачный ответ с пустым кадром, а сюда мы
+        // попадаем, когда что-то по-настоящему сломалось. Показав пустоту,
+        // ящик соврал бы «браузер не запущен» про живой, но не отвечающий:
+        // прошлый кадр остаётся на месте, а причина уходит наверх.
         if (!stopped) {
-          onFrame(NO_FRAME);
+          onTrouble(error);
         }
       }
     }

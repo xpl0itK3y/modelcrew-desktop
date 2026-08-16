@@ -37,20 +37,36 @@ function BrowserProjectView(props: { workspaceId: string }) {
   const { t } = useI18n();
   const [frame, setFrame] = useState<BrowserFrame>(NO_FRAME);
   const [address, setAddress] = useState("");
-  const [failure, setFailure] = useState<string | null>(null);
+  // Отказ на «Открыть» — про действие человека, и висит он до следующей
+  // попытки или до тех пор, пока страница куда-нибудь не уйдёт. Обрыв связи —
+  // про сам браузер, и снимается первым же дошедшим кадром.
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   // Поле трогали руками. Пока это так, адрес за страницей не следует: кадр
   // приходит раз в секунду и стирал бы набранное — достаточно было увести
   // курсор из поля, и от адреса ничего не оставалось.
   const typed = useRef(false);
+  // Где стояла страница, когда отказали. Ушла дальше — отказ уже не про то,
+  // что видно, и убирается сам.
+  const refusedAt = useRef<string | null>(null);
 
   useEffect(() => {
-    return watchBrowserFrame(props.workspaceId, (next) => {
-      setFrame(next);
-      if (!typed.current) {
-        setAddress(next.url);
-      }
-    });
+    return watchBrowserFrame(
+      props.workspaceId,
+      (next) => {
+        setFrame(next);
+        setTrouble(null);
+        if (!typed.current) {
+          setAddress(next.url);
+        }
+        if (refusedAt.current !== null && next.url !== refusedAt.current) {
+          refusedAt.current = null;
+          setRefusal(null);
+        }
+      },
+      (error) => setTrouble(localizeBackendError(error)),
+    );
   }, [props.workspaceId]);
 
   const submit = (event: React.FormEvent) => {
@@ -60,7 +76,8 @@ function BrowserProjectView(props: { workspaceId: string }) {
       return;
     }
     setOpening(true);
-    setFailure(null);
+    setRefusal(null);
+    refusedAt.current = null;
     openPage(props.workspaceId, url)
       // Открылось — снова следуем за страницей: она сама скажет, куда попала,
       // с поправкой на редиректы. Не открылось — набранное остаётся, его
@@ -68,10 +85,14 @@ function BrowserProjectView(props: { workspaceId: string }) {
       .then(() => {
         typed.current = false;
       })
-      .catch((error) => setFailure(localizeBackendError(error)))
+      .catch((error) => {
+        setRefusal(localizeBackendError(error));
+        refusedAt.current = frame.url;
+      })
       .finally(() => setOpening(false));
   };
 
+  const failure = refusal ?? trouble;
   const picture = frameSource(frame.image);
 
   return (

@@ -171,6 +171,55 @@ describe("BrowserView", () => {
     );
   });
 
+  it("takes the refusal away once the page moves on", async () => {
+    // Отказ висел вечно: страница давно ушла на другой адрес, а под адресной
+    // строкой всё ещё краснела прошлая неудача.
+    let url = "http://localhost:1420/";
+    invoke.mockImplementation((command: string) =>
+      command === "browser_go"
+        ? Promise.reject({ code: "browser_command_failed" })
+        : Promise.resolve(frame({ url, running: true })),
+    );
+
+    render(<BrowserView workspaceId="w1" />);
+    fireEvent.change(address(), { target: { value: "localhost:3000" } });
+    fireEvent.submit(address());
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    // Кадры того же адреса отказ не снимают: он всё ещё про то, что видно.
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBeInTheDocument();
+
+    url = "https://example.com/";
+    await waitFor(
+      () => expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+      { timeout: 3_000 },
+    );
+  });
+
+  it("does not call a living browser absent when a frame fails to arrive", async () => {
+    // Пустой кадр — это «браузер не запущен», и говорить так про живой, но
+    // не ответивший, значит отправить человека запускать запущенное.
+    let answer: () => Promise<unknown> = () =>
+      Promise.resolve(
+        frame({ image: PIXEL, url: "http://localhost:1420/", running: true }),
+      );
+    invoke.mockImplementation((command: string) =>
+      command === "browser_frame" ? answer() : Promise.resolve(),
+    );
+
+    render(<BrowserView workspaceId="w1" />);
+    expect(await screen.findByRole("img")).toBeInTheDocument();
+
+    answer = () => Promise.reject({ code: "browser_not_connected" });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Связь/);
+    // Прошлый кадр остаётся: он последнее, что известно о странице.
+    expect(screen.getByRole("img")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Браузер проекта ещё не запущен/),
+    ).not.toBeInTheDocument();
+  });
+
   it("says it is working while the browser starts up", async () => {
     // Первый запуск Chrome занимает секунды: без этой строки нажатие
     // выглядит как будто ничего не произошло, и человек жмёт ещё раз.

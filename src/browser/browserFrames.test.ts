@@ -115,16 +115,44 @@ describe("watchBrowserFrame", () => {
     stop();
   });
 
-  it("keeps quiet when the browser is gone", async () => {
+  it("tells the trouble apart from a browser that is simply not running", async () => {
     invoke.mockRejectedValue({ code: "browser_not_connected" });
     const seen: unknown[] = [];
+    const trouble: unknown[] = [];
 
-    const stop = watchBrowserFrame("workspace-1", (next) => seen.push(next));
+    const stop = watchBrowserFrame(
+      "workspace-1",
+      (next) => seen.push(next),
+      (error) => trouble.push(error),
+    );
     await vi.advanceTimersByTimeAsync(0);
 
-    // Умерший между кадрами браузер — не ошибка человека: ящик просто пустеет.
-    expect(seen).toEqual([NO_FRAME]);
+    // Не поднятый браузер — это удачный ответ с пустым кадром. Сюда мы
+    // попадаем, когда сломалась связь с живым, и пустой кадр вместо причины
+    // сказал бы человеку «браузер не запущен» про работающий.
+    expect(seen).toEqual([]);
+    expect(trouble).toEqual([{ code: "browser_not_connected" }]);
     stop();
+  });
+
+  it("asks for nothing while nobody is looking at the window", async () => {
+    invoke.mockResolvedValue(NO_FRAME);
+    const hidden = vi
+      .spyOn(document, "hidden", "get")
+      .mockReturnValue(true);
+
+    const stop = watchBrowserFrame("workspace-1", () => {});
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    // Снимок кадра стоит времени браузера: за свёрнутым окном он впустую.
+    expect(invoke).not.toHaveBeenCalled();
+
+    hidden.mockReturnValue(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    stop();
+    hidden.mockRestore();
   });
 
   it("stops asking once the drawer is closed", async () => {
