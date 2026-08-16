@@ -16,7 +16,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
 
@@ -297,17 +297,24 @@ pub fn launch(program: &Path, profile: &Path) -> CommandResult<BrowserInstance> 
 }
 
 /// Читает stderr до строки с портом.
-fn read_port(stderr: impl std::io::Read, wait: Duration) -> Option<u16> {
-    let deadline = Instant::now() + wait;
-    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-        if let Some(port) = devtools_port(&line) {
-            return Some(port);
+///
+/// Читаем в отдельном потоке, потому что ждать надо не строку, а время:
+/// молчащий Chrome не выдаёт ни одной строки, и чтение из трубы висит
+/// сколько угодно — срок, проверенный между строками, для такого случая не
+/// наступает никогда. Поток остаётся на трубе и уходит сам, когда вызывающий
+/// добьёт процесс и труба закроется.
+fn read_port(stderr: impl std::io::Read + Send + 'static, wait: Duration) -> Option<u16> {
+    let (found, port) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Some(port) = devtools_port(&line) {
+                let _ = found.send(port);
+                return;
+            }
         }
-        if Instant::now() >= deadline {
-            return None;
-        }
-    }
-    None
+    });
+    // Оборвался канал — процесс закрыл stderr, не назвав порта: ждать нечего.
+    port.recv_timeout(wait).ok()
 }
 
 /// Порт из строки, которую печатает Chrome:
@@ -324,6 +331,7 @@ pub fn devtools_port(line: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     /// Сколько проектов держат браузер. Публичного метода нет намеренно:
     /// счётчик понадобится интерфейсу на шаге 4, а заводить его заранее
@@ -354,6 +362,53 @@ mod tests {
         assert_eq!(
             devtools_port("DevTools listening on ws://[::1]:9333/devtools/browser/x"),
             Some(9333)
+        );
+    }
+
+    /// Труба, из которой никто ничего не пишет: чтение висит.
+    struct Silent;
+
+    impl std::io::Read for Silent {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            std::thread::sleep(Duration::from_secs(30));
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn takes_the_port_from_the_noise_around_it() {
+        let stderr: &[u8] =
+            b"Fontconfig warning\nDevTools listening on ws://127.0.0.1:7788/devtools/browser/x\n";
+        assert_eq!(
+            read_port(std::io::Cursor::new(stderr), Duration::from_secs(5)),
+            Some(7788)
+        );
+    }
+
+    #[test]
+    fn gives_up_on_a_browser_that_says_nothing() {
+        // Срок проверялся между строками, а молчащий Chrome не печатает ни
+        // одной: запуск вис на чтении, и ждать его было некому.
+        let started = Instant::now();
+
+        assert_eq!(read_port(Silent, Duration::from_millis(100)), None);
+
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "ждали дольше срока"
+        );
+    }
+
+    #[test]
+    fn gives_up_at_once_when_stderr_closes() {
+        // Процесс закрыл stderr, не назвав порта: досиживать срок незачем.
+        let started = Instant::now();
+
+        assert_eq!(read_port(std::io::empty(), Duration::from_secs(30)), None);
+
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "досидели до срока"
         );
     }
 
