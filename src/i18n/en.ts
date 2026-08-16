@@ -601,6 +601,7 @@ export const en: Record<MessageKey, string> = {
     "The browser started but never said which port to talk to it on",
   "error.browserNotConnected": "Lost the connection to the project browser",
   "error.browserCommandFailed": "The browser could not do that",
+  "error.browserCommandFailedReason": "The browser could not do that: {reason}",
   "error.browserUrlUnsupported":
     "That address cannot be opened — only http and https work",
   "error.unknown": "An unknown error occurred",

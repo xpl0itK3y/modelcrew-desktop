@@ -150,6 +150,27 @@ describe("BrowserView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/Chrome/);
   });
 
+  it("names the reason the page did not open, not just the failure", async () => {
+    // «Браузер не смог» без причины не подсказывает ничего, а причина здесь —
+    // ответ самого Chrome: дев-сервер не поднят, адрес набран с опечаткой.
+    invoke.mockImplementation((command: string) =>
+      command === "browser_go"
+        ? Promise.reject({
+            code: "browser_command_failed",
+            context: { reason: "net::ERR_CONNECTION_REFUSED" },
+          })
+        : Promise.resolve(frame()),
+    );
+
+    render(<BrowserView workspaceId="w1" />);
+    fireEvent.change(address(), { target: { value: "localhost:3000" } });
+    fireEvent.submit(address());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "net::ERR_CONNECTION_REFUSED",
+    );
+  });
+
   it("says it is working while the browser starts up", async () => {
     // Первый запуск Chrome занимает секунды: без этой строки нажатие
     // выглядит как будто ничего не произошло, и человек жмёт ещё раз.

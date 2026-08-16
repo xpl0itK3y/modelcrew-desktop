@@ -596,6 +596,7 @@ export const ru = {
     "Браузер запустился, но не сказал, по какому порту с ним говорить",
   "error.browserNotConnected": "Связь с браузером проекта потеряна",
   "error.browserCommandFailed": "Браузер не смог это выполнить",
+  "error.browserCommandFailedReason": "Браузер не смог это выполнить: {reason}",
   "error.browserUrlUnsupported":
     "Такой адрес открывать нельзя — годятся только http и https",
   "error.unknown": "Произошла неизвестная ошибка",

@@ -208,7 +208,12 @@ export function localizeBackendError(error: unknown): string {
   const key =
     parsed.code === "git_command_failed" && typeof reason === "string"
       ? (gitReasonKeys[reason] ?? "error.gitCommandFailed")
-      : (backendErrorKeys[parsed.code] ?? "error.unknown");
+      : // Причина отказа браузера — это ответ самого Chrome
+        // (`net::ERR_CONNECTION_REFUSED` у не поднятого дев-сервера), и без
+        // неё человеку остаётся «браузер не смог» без единой зацепки.
+        parsed.code === "browser_command_failed" && typeof reason === "string"
+        ? "error.browserCommandFailedReason"
+        : (backendErrorKeys[parsed.code] ?? "error.unknown");
   if (parsed.debug) {
     console.error("Backend error", parsed);
   }
