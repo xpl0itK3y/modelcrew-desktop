@@ -9,7 +9,7 @@
 
 use serde::Serialize;
 
-use crate::command_error::CommandResult;
+use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use crate::workspace_roots::WorkspaceRoots;
 
 /// Что показать в панели браузера.
@@ -54,17 +54,24 @@ pub async fn browser_frame(
         return Ok(BrowserFrame::idle());
     };
 
-    let mut cdp = crate::cdp::Cdp::connect(port)?;
-    let image = cdp.screenshot()?;
-    // Адрес и заголовок не критичны: без них панель покажет картинку без
-    // подписи, и это лучше, чем ошибка вместо страницы.
-    let (url, title) = cdp.location().unwrap_or_default();
-    Ok(BrowserFrame {
-        image,
-        url,
-        title,
-        running: true,
+    // Разговор с браузером блокирующий и в худшем случае длится до таймаута.
+    // На рантайме команд его держать нельзя — на нём же стоят в очереди
+    // остальные вызовы интерфейса, а за кадром сюда приходят каждую секунду.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cdp = crate::cdp::Cdp::connect(port)?;
+        let image = cdp.screenshot()?;
+        // Адрес и заголовок не критичны: без них панель покажет картинку без
+        // подписи, и это лучше, чем ошибка вместо страницы.
+        let (url, title) = cdp.location().unwrap_or_default();
+        Ok(BrowserFrame {
+            image,
+            url,
+            title,
+            running: true,
+        })
     })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::BrowserCommandFailed).with_debug(error))?
 }
 
 /// Открыть страницу по просьбе человека, а не агента.
@@ -79,6 +86,10 @@ pub async fn browser_go(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     // Здесь браузер как раз поднимаем: человек попросил открыть страницу.
+    // Запуск Chrome — секунды, ожидание загрузки — ещё сколько-то: и то, и
+    // другое блокирующее, и держать этим рантайм команд нельзя.
     let port = crate::mcp::browser_port(&app, &root)?;
-    crate::cdp::Cdp::connect(port)?.navigate(&url)
+    tauri::async_runtime::spawn_blocking(move || crate::cdp::Cdp::connect(port)?.navigate(&url))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::BrowserCommandFailed).with_debug(error))?
 }
