@@ -97,22 +97,25 @@ impl Cdp {
     }
 
     /// Адрес и заголовок текущей страницы — чтобы человеку было видно, где он.
+    ///
+    /// Спрашиваем браузер, а не страницу. `Runtime.evaluate` выполняется в
+    /// мире самой страницы, и она вольна ответить что угодно: подменив
+    /// `JSON.stringify`, недобрая страница написала бы в адресной строке
+    /// ModelCrew любой чужой адрес. А адресная строка здесь единственная —
+    /// своего окна у браузера нет, и сверить её человеку не с чем.
     pub fn location(&mut self) -> CommandResult<(String, String)> {
-        let answer = self.call(
-            "Runtime.evaluate",
-            json!({
-                "expression": "JSON.stringify({url: location.href, title: document.title})",
-                "returnByValue": true,
-            }),
-        )?;
-        let raw = answer
-            .pointer("/result/value")
-            .and_then(Value::as_str)
-            .unwrap_or("{}");
-        let parsed: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
+        let answer = self.call("Page.getNavigationHistory", json!({}))?;
+        let current = answer
+            .get("currentIndex")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize;
+        let entry = answer
+            .get("entries")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.get(current));
         Ok((
-            parsed["url"].as_str().unwrap_or_default().to_string(),
-            parsed["title"].as_str().unwrap_or_default().to_string(),
+            short(entry.and_then(|entry| entry.get("url"))),
+            short(entry.and_then(|entry| entry.get("title"))),
         ))
     }
 
@@ -180,6 +183,21 @@ impl Cdp {
             }
         }
     }
+}
+
+/// Сколько знаков подписи пускаем дальше.
+///
+/// Заголовок пишет страница, и длина его ничем не ограничена: без обрезки он
+/// уехал бы целиком и в подпись панели, и в ответ агенту.
+const MAX_LABEL: usize = 512;
+
+fn short(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .chars()
+        .take(MAX_LABEL)
+        .collect()
 }
 
 /// Переход внутри той же страницы — например, к якорю `#install`.
@@ -673,6 +691,59 @@ mod tests {
             failure.context.get("reason").map(String::as_str),
             Some("net::ERR_CONNECTION_REFUSED")
         );
+    }
+
+    #[test]
+    fn asks_the_browser_where_the_page_is_and_not_the_page_itself() {
+        // Адрес берём из истории браузера: страница, спрошенная о самой себе,
+        // назвала бы любой чужой адрес — и он оказался бы в единственной
+        // адресной строке, какая у этого браузера есть.
+        let mut cdp = talking_to(
+            scripted_page(
+                json!({
+                    "currentIndex": 1,
+                    "entries": [
+                        { "url": "about:blank", "title": "" },
+                        { "url": "https://example.com/docs", "title": "Документация" },
+                    ],
+                }),
+                &[],
+            ),
+            Duration::from_millis(300),
+        );
+
+        assert_eq!(
+            cdp.location().unwrap(),
+            ("https://example.com/docs".into(), "Документация".into())
+        );
+    }
+
+    #[test]
+    fn cuts_a_title_the_page_made_endless() {
+        let long: String = "я".repeat(5_000);
+        let mut cdp = talking_to(
+            scripted_page(
+                json!({ "currentIndex": 0, "entries": [{ "url": "https://e.com/", "title": long }] }),
+                &[],
+            ),
+            Duration::from_millis(300),
+        );
+
+        let (_, title) = cdp.location().unwrap();
+
+        assert_eq!(title.chars().count(), MAX_LABEL);
+    }
+
+    #[test]
+    fn survives_a_history_it_does_not_understand() {
+        // Пустая история бывает у только что открытой цели: подпись просто
+        // нечему взять, и это не повод ронять кадр.
+        let mut cdp = talking_to(
+            scripted_page(json!({ "currentIndex": 7, "entries": [] }), &[]),
+            Duration::from_millis(300),
+        );
+
+        assert_eq!(cdp.location().unwrap(), (String::new(), String::new()));
     }
 
     #[test]
