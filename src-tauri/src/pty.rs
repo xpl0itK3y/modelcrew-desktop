@@ -63,6 +63,9 @@ struct PtySession {
     // считаются от корня — иначе один и тот же файл выглядел бы разными
     // путями из разных панелей.
     root: PathBuf,
+    // Пропуск этой панели на сокет MCP. Пусто, когда сокета нет вовсе:
+    // тогда и предъявлять его некому.
+    mcp_token: String,
 }
 
 #[derive(Default)]
@@ -146,11 +149,20 @@ impl PtyManager {
                 cmd.env(key, value);
             }
         }
-        // Тем же путём — адрес сокета MCP. Шим наследует его вместе с id
-        // панели, поэтому приложение знает, кто позвал, и берёт корень
-        // проекта у себя, а не из аргументов вызова.
+        // Тем же путём — адрес сокета MCP и пропуск панели на него. Шим
+        // наследует то и другое, поэтому приложение знает, кто позвал, и берёт
+        // корень проекта у себя, а не из аргументов вызова. Пропуск случайный:
+        // id панели виден любому процессу пользователя, и по нему агент одной
+        // панели представился бы другой.
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut mcp_token = String::new();
+        #[cfg(unix)]
         if let Some(socket) = MCP_SOCKET.get() {
-            cmd.env(crate::mcp::SOCK_ENV, socket);
+            if let Some(token) = crate::mcp::new_token() {
+                cmd.env(crate::mcp::SOCK_ENV, socket);
+                cmd.env(crate::mcp::TOKEN_ENV, &token);
+                mcp_token = token;
+            }
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
@@ -188,6 +200,7 @@ impl PtyManager {
                 exit_rx: process_exit_rx,
                 epoch,
                 root: opts.cwd.clone(),
+                mcp_token,
             },
         );
         // Свежая сессия уже в карте — гасим прежний процесс того же id.
@@ -315,6 +328,23 @@ impl PtyManager {
             }
             None => Err(terminal_error(ErrorCode::TerminalNotFound, id)),
         }
+    }
+
+    /// Панель по её пропуску на сокет MCP: id — чтобы назвать её агенту,
+    /// корень — чтобы работать в её проекте.
+    ///
+    /// Пустой пропуск не считается ни за чью: он стоит у панелей, поднятых до
+    /// сокета, и совпал бы с любым таким же пустым.
+    pub fn panel_of_token(&self, token: &str) -> Option<(String, PathBuf)> {
+        if token.is_empty() {
+            return None;
+        }
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, session)| session.mcp_token == token)
+            .map(|(id, session)| (id.clone(), session.root.clone()))
     }
 
     /// Корень проекта панели: от него отсчитываются заявки на файлы.
@@ -1868,6 +1898,70 @@ mod tests {
         );
 
         let _ = manager.kill("t-env2");
+    }
+
+    /// Агент видит MCP только через окружение своей панели: адрес сокета и
+    /// пропуск. Ни того, ни другого в окружении — и инструментов у агента нет,
+    /// причём молча, ровно как если бы он решил ими не пользоваться.
+    #[cfg(unix)]
+    #[test]
+    fn the_panel_environment_carries_the_mcp_socket_and_its_own_pass() {
+        let socket = std::env::temp_dir().join("mc-pty-mcp-test.sock");
+        set_mcp_socket(socket.clone());
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-mcp".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        for line in Shell::evaluated_env_probe(&[crate::mcp::SOCK_ENV, crate::mcp::TOKEN_ENV]) {
+            manager.write("t-mcp", &line).expect("запись в PTY");
+        }
+        let output = wait_for_output(
+            &manager,
+            "t-mcp",
+            &out_rx,
+            Shell::EVALUATED_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+
+        assert!(
+            output.contains(&socket.display().to_string()),
+            "адрес сокета не дошёл до панели: {output}"
+        );
+        // Пропуск в окружении — тот самый, по которому приложение узнаёт эту
+        // панель: иначе агент стучался бы с бумажкой, которой никто не ждёт.
+        let (_, root) = manager
+            .panel_of_token(token_from(&output))
+            .expect("пропуск из окружения не сошёлся ни с одной панелью");
+        assert_eq!(root, test_cwd());
+
+        let _ = manager.kill("t-mcp");
+    }
+
+    /// Пропуск из вывода пробы: он идёт последним словом после адреса сокета.
+    #[cfg(unix)]
+    fn token_from(output: &str) -> &str {
+        output
+            .split(Shell::EVALUATED_PROBE)
+            .nth(1)
+            .and_then(|tail| tail.split_whitespace().next())
+            .and_then(|probe| probe.rsplit('_').next())
+            .expect("в выводе пробы нет пропуска")
     }
 
     /// id панели приходит из webview и попадает в значение переменной

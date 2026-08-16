@@ -28,6 +28,9 @@ pub const STDIO_FLAG: &str = "--mcp-stdio";
 /// Переменная окружения панели с путём до сокета.
 pub const SOCK_ENV: &str = "MODELCREW_MCP_SOCK";
 
+/// Переменная окружения панели с её пропуском на этот сокет.
+pub const TOKEN_ENV: &str = "MODELCREW_MCP_TOKEN";
+
 /// Имя файла сокета в каталоге данных приложения.
 #[cfg(unix)]
 const SOCK_NAME: &str = "mcp.sock";
@@ -41,7 +44,8 @@ const SOCK_PATH_LIMIT: usize = 100;
 /// Кого обслуживаем на этом соединении.
 ///
 /// Корень — не то, что прислал агент, а то, с чем реально запущена его панель.
-/// Подменить его вызовом нельзя: в запросе его попросту нет.
+/// Подменить его вызовом нельзя: в запросе его попросту нет, а панель
+/// находится по пропуску, который знает только она сама (см. `new_token`).
 pub struct PanelContext {
     pub panel_id: String,
     pub root: Option<PathBuf>,
@@ -51,6 +55,32 @@ impl PanelContext {
     pub fn new(panel_id: String, root: Option<PathBuf>) -> Self {
         Self { panel_id, root }
     }
+
+    /// Панель по пропуску не нашлась: её закрыли или пропуск не наш.
+    pub fn unknown() -> Self {
+        Self {
+            panel_id: String::new(),
+            root: None,
+        }
+    }
+}
+
+/// Пропуск панели на сокет: случайные 32 байта шестнадцатеричной строкой.
+///
+/// Именно случайный, а не id панели. Id знает любой процесс пользователя — он
+/// лежит в окружении соседних панелей и в файлах событий хуков, — и по нему
+/// агент одной панели представился бы другой: получил бы её проект и её
+/// браузер с её логинами. Пропуск не угадать и неоткуда взять.
+#[cfg(unix)]
+pub fn new_token() -> Option<String> {
+    use std::io::Read;
+
+    let mut bytes = [0_u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .ok()?
+        .read_exact(&mut bytes)
+        .ok()?;
+    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// То, что инструменты умеют делать по-настоящему.
@@ -192,12 +222,11 @@ fn ping_text(ctx: &PanelContext) -> String {
         ),
         // Панель не нашлась: агент запущен не из терминала ModelCrew либо
         // панель уже закрыта. Молчать нельзя — иначе это выглядит как
-        // «инструмент не работает».
-        None => format!(
-            "ModelCrew на связи, но панель {} не найдена: \
-             агент запущен не из терминала ModelCrew или панель уже закрыта.",
-            ctx.panel_id
-        ),
+        // «инструмент не работает». Имени панели здесь нет и быть не может:
+        // не нашлась она как раз потому, что пропуск ни с одной не сошёлся.
+        None => "ModelCrew на связи, но панель не найдена: \
+                 агент запущен не из терминала ModelCrew или панель уже закрыта."
+            .to_string(),
     }
 }
 
@@ -271,14 +300,14 @@ fn error(id: Value, code: i64, message: &str) -> String {
 /// Отдельной строкой, а не полем каждого запроса: шим — глупая труба, он не
 /// разбирает JSON-RPC и не должен, иначе протокол пришлось бы поддерживать
 /// в двух местах.
-pub fn panel_of_handshake(line: &str) -> Option<String> {
+pub fn token_of_handshake(line: &str) -> Option<String> {
     let value: Value = serde_json::from_str(line).ok()?;
-    let panel = value.get("panelId")?.as_str()?;
-    (!panel.is_empty()).then(|| panel.to_string())
+    let token = value.get("token")?.as_str()?;
+    (!token.is_empty()).then(|| token.to_string())
 }
 
-pub fn handshake(panel_id: &str) -> String {
-    json!({ "panelId": panel_id }).to_string()
+pub fn handshake(token: &str) -> String {
+    json!({ "token": token }).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +444,7 @@ pub fn serve(app: tauri::AppHandle) {
             // одна панель не должна ждать другую.
             std::thread::spawn(move || {
                 let tools = AppTools { app: app.clone() };
-                serve_connection(stream, &tools, &|panel_id| panel_root(&app, panel_id));
+                serve_connection(stream, &tools, &|token| panel_by_token(&app, token));
             });
         }
     });
@@ -426,14 +455,14 @@ pub fn serve(_app: tauri::AppHandle) {}
 
 /// Разговор на одном соединении.
 ///
-/// Корень панели берётся через переданную функцию, а не напрямую из
+/// Панель берётся по пропуску через переданную функцию, а не напрямую из
 /// `PtyManager`: так весь путь — рукопожатие, разбор строк, ответы — проверяется
 /// на живом сокете без поднятого приложения.
 #[cfg(unix)]
 fn serve_connection(
     stream: std::os::unix::net::UnixStream,
     tools: &dyn Tools,
-    root_of: &dyn Fn(&str) -> Option<PathBuf>,
+    panel_of: &dyn Fn(&str) -> Option<(String, PathBuf)>,
 ) {
     use std::io::{BufRead, BufReader, Write};
 
@@ -448,7 +477,7 @@ fn serve_connection(
     let Some(Ok(first)) = lines.next() else {
         return;
     };
-    let Some(panel_id) = panel_of_handshake(&first) else {
+    let Some(token) = token_of_handshake(&first) else {
         return;
     };
 
@@ -456,10 +485,13 @@ fn serve_connection(
         if line.trim().is_empty() {
             continue;
         }
-        // Корень перечитываем на каждый запрос, а не держим с рукопожатия:
-        // панель могли закрыть посреди сессии агента, и отвечать по
-        // устаревшему корню значило бы работать в чужом каталоге.
-        let ctx = PanelContext::new(panel_id.clone(), root_of(&panel_id));
+        // Панель перечитываем на каждый запрос, а не держим с рукопожатия:
+        // её могли закрыть посреди сессии агента, и отвечать по устаревшему
+        // корню значило бы работать в чужом каталоге.
+        let ctx = match panel_of(&token) {
+            Some((panel_id, root)) => PanelContext::new(panel_id, Some(root)),
+            None => PanelContext::unknown(),
+        };
         let Some(answer) = dispatch(&ctx, tools, &line) else {
             continue;
         };
@@ -473,9 +505,9 @@ fn serve_connection(
 }
 
 #[cfg(unix)]
-fn panel_root(app: &tauri::AppHandle, panel_id: &str) -> Option<PathBuf> {
+fn panel_by_token(app: &tauri::AppHandle, token: &str) -> Option<(String, PathBuf)> {
     use tauri::Manager;
-    app.state::<crate::pty::PtyManager>().session_root(panel_id)
+    app.state::<crate::pty::PtyManager>().panel_of_token(token)
 }
 
 #[cfg(test)]
@@ -629,9 +661,8 @@ mod tests {
 
     #[test]
     fn says_plainly_when_the_panel_is_gone() {
-        let orphan = PanelContext::new("panel-gone".into(), None);
         let answer = dispatch(
-            &orphan,
+            &PanelContext::unknown(),
             &StubTools::working(),
             r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"crew_ping"}}"#,
         )
@@ -642,7 +673,7 @@ mod tests {
         // прочитать причину, а не решить, что инструмент сломан.
         assert!(answer["error"].is_null());
         let text = answer["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("panel-gone"), "{text}");
+        assert!(text.contains("панель не найдена"), "{text}");
     }
 
     #[test]
@@ -714,8 +745,9 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            serve_connection(stream, &StubTools::working(), &|panel| {
-                (panel == "panel-a").then(|| PathBuf::from("/w/project"))
+            serve_connection(stream, &StubTools::working(), &|token| {
+                (token == "pass-of-panel-a")
+                    .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
             });
         });
 
@@ -729,7 +761,7 @@ mod tests {
             out.flush().unwrap();
         };
 
-        say(&mut out, &handshake("panel-a"));
+        say(&mut out, &handshake("pass-of-panel-a"));
         say(
             &mut out,
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
@@ -757,6 +789,93 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// Пропуск чужой панели не открывает её проект.
+    ///
+    /// Раньше в рукопожатии стоял id панели, а его знает любой процесс
+    /// пользователя: он лежит в окружении соседних панелей и в файлах событий
+    /// хуков. Назвавшись соседом, агент получал бы его проект и его браузер с
+    /// его логинами.
+    #[cfg(unix)]
+    #[test]
+    fn a_stranger_does_not_get_the_project_of_a_panel_it_names() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        let path = std::env::temp_dir().join(format!("mc-mcp-token-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve_connection(stream, &StubTools::working(), &|token| {
+                (token == "pass-of-panel-a")
+                    .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
+            });
+        });
+
+        let client = UnixStream::connect(&path).unwrap();
+        let mut out = client.try_clone().unwrap();
+        let mut back = BufReader::new(client).lines();
+
+        // Всё, что есть у соседа, — id панели: он и идёт в дело, что старым
+        // рукопожатием, что вместо пропуска. Ошибки записи здесь в порядке
+        // вещей: соединение к этому времени уже закрыто той стороной.
+        let _ = out.write_all(b"{\"panelId\":\"panel-a\"}\n");
+        let _ = out.write_all(format!("{}\n", handshake("panel-a")).as_bytes());
+        let _ = out.write_all(
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"crew_ping\"}}\n",
+        );
+        let _ = out.flush();
+
+        // Рукопожатие без пропуска — не рукопожатие: соединение закрыто молча,
+        // и второй строкой подсунутый пропуск читать уже некому.
+        let answered = back.next().and_then(Result::ok);
+        assert!(answered.is_none(), "ответили назвавшему чужой id");
+
+        let _ = out.shutdown(std::net::Shutdown::Write);
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Пропуск был, да панель закрылась: проект не подставляется чужой.
+    #[cfg(unix)]
+    #[test]
+    fn a_pass_of_a_closed_panel_opens_nothing() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        let path = std::env::temp_dir().join(format!("mc-mcp-stale-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve_connection(stream, &StubTools::working(), &|_| None);
+        });
+
+        let client = UnixStream::connect(&path).unwrap();
+        let mut out = client.try_clone().unwrap();
+        let mut back = BufReader::new(client).lines();
+
+        out.write_all(format!("{}\n", handshake("pass-of-a-closed-panel")).as_bytes())
+            .unwrap();
+        out.write_all(
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"crew_ping\"}}\n",
+        )
+        .unwrap();
+        out.flush().unwrap();
+
+        let answer: Value = serde_json::from_str(&back.next().unwrap().unwrap()).unwrap();
+        let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("панель не найдена"), "{text}");
+        // И пропуска в ответе нет: он секрет, а ответ уходит в лог агента.
+        assert!(!text.contains("pass-of-a-closed-panel"), "{text}");
+
+        out.shutdown(std::net::Shutdown::Write).unwrap();
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// Соединение без рукопожатия обслуживать некого: закрываем и не отвечаем.
     #[cfg(unix)]
     #[test]
@@ -771,7 +890,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             serve_connection(stream, &StubTools::working(), &|_| {
-                Some(PathBuf::from("/w/project"))
+                Some(("panel-a".to_string(), PathBuf::from("/w/project")))
             });
         });
 
@@ -830,9 +949,8 @@ mod tests {
     #[test]
     fn refuses_to_open_a_browser_for_a_panel_that_is_gone() {
         let tools = StubTools::working();
-        let orphan = PanelContext::new("panel-gone".into(), None);
         let answer = dispatch(
-            &orphan,
+            &PanelContext::unknown(),
             &tools,
             r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"browser_open"}}"#,
         )
@@ -886,14 +1004,28 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_panel_from_the_handshake() {
+    fn reads_the_pass_from_the_handshake() {
         assert_eq!(
-            panel_of_handshake(&handshake("panel-b")).as_deref(),
-            Some("panel-b")
+            token_of_handshake(&handshake("s3cr3t")).as_deref(),
+            Some("s3cr3t")
         );
-        // Пустое и битое рукопожатие — не панель: обслуживать некого.
-        assert!(panel_of_handshake(r#"{"panelId":""}"#).is_none());
-        assert!(panel_of_handshake("").is_none());
-        assert!(panel_of_handshake(r#"{"other":1}"#).is_none());
+        // Пустое и битое рукопожатие — не пропуск: обслуживать некого.
+        assert!(token_of_handshake(r#"{"token":""}"#).is_none());
+        assert!(token_of_handshake("").is_none());
+        assert!(token_of_handshake(r#"{"other":1}"#).is_none());
+        // Id панели больше не пропуск: его знает любой процесс пользователя.
+        assert!(token_of_handshake(r#"{"panelId":"panel-b"}"#).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mints_a_pass_that_cannot_be_guessed() {
+        let first = new_token().unwrap();
+        let second = new_token().unwrap();
+
+        // Длина — 32 случайных байта в шестнадцатеричном виде.
+        assert_eq!(first.len(), 64);
+        assert!(first.chars().all(|letter| letter.is_ascii_hexdigit()));
+        assert_ne!(first, second);
     }
 }

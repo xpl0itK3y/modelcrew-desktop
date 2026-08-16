@@ -7,15 +7,11 @@
 //! Шим намеренно глуп: он не разбирает JSON-RPC и ничего о нём не знает. Иначе
 //! протокол пришлось бы поддерживать в двух местах, и они разъехались бы при
 //! первой же правке. Своё у него ровно одно — рукопожатие: первой строкой он
-//! называет панель, из окружения которой запущен.
+//! предъявляет пропуск панели, из окружения которой запущен.
 
 use std::io::{BufRead, BufReader, Write};
 
 use crate::mcp;
-
-/// Переменная окружения панели с её номером. Ставится в `pty.rs` при запуске
-/// терминала и наследуется всем, что агент из него запустит.
-pub const PANEL_ENV: &str = "MODELCREW_PANEL_ID";
 
 /// Запуск шимом. `None` — запуск обычный, приложение должно подниматься.
 pub fn run_if_shim() -> Option<i32> {
@@ -45,17 +41,18 @@ fn run() -> i32 {
             mcp::SOCK_ENV
         ));
     };
-    let panel_id = std::env::var(PANEL_ENV).unwrap_or_default();
-    if panel_id.is_empty() {
+    let token = std::env::var(mcp::TOKEN_ENV).unwrap_or_default();
+    if token.is_empty() {
         return fail(&format!(
-            "{PANEL_ENV} не задана: непонятно, чья это панель."
+            "{} не задана: непонятно, чья это панель.",
+            mcp::TOKEN_ENV
         ));
     }
     let Ok(stream) = UnixStream::connect(&path) else {
         return fail(&format!("ModelCrew не отвечает на {path}."));
     };
 
-    pump(stream, &panel_id)
+    pump(stream, &token)
 }
 
 #[cfg(not(unix))]
@@ -69,14 +66,14 @@ fn run() -> i32 {
 /// обязательно по одному ответу на запрос — уведомления он может слать сам,
 /// а порядок ответов протокол не обещает.
 #[cfg(unix)]
-fn pump(stream: std::os::unix::net::UnixStream, panel_id: &str) -> i32 {
+fn pump(stream: std::os::unix::net::UnixStream, token: &str) -> i32 {
     let Ok(read_half) = stream.try_clone() else {
         return fail("не удалось раздвоить соединение.");
     };
     let mut to_app = stream;
 
     if to_app
-        .write_all(mcp::handshake(panel_id).as_bytes())
+        .write_all(mcp::handshake(token).as_bytes())
         .and_then(|()| to_app.write_all(b"\n"))
         .and_then(|()| to_app.flush())
         .is_err()
