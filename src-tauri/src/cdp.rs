@@ -139,9 +139,15 @@ impl Cdp {
                 continue;
             }
             if let Some(error) = message.get("error") {
+                // Причину читают и агент, и человек: из всего ответа им нужна
+                // фраза, а не служебный объект с кодом и полями протокола.
+                let reason = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| error.to_string(), str::to_string);
                 return Err(CommandError::new(ErrorCode::BrowserCommandFailed)
                     .with_context("method", method)
-                    .with_context("reason", error.to_string()));
+                    .with_context("reason", reason));
             }
             return Ok(message.get("result").cloned().unwrap_or_else(|| json!({})));
         }
@@ -770,6 +776,46 @@ mod tests {
         );
 
         assert_eq!(cdp.location().unwrap(), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn passes_on_the_words_of_a_protocol_refusal() {
+        // Отказ протокола приходит объектом с кодом и полями; человеку и
+        // агенту из него нужна фраза, а не весь объект целиком.
+        let port = {
+            let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                let Ok(mut socket) = tungstenite::accept(stream) else {
+                    return;
+                };
+                while let Ok(tungstenite::Message::Text(text)) = socket.read() {
+                    let request: Value = serde_json::from_str(&text).unwrap();
+                    let answer = json!({
+                        "id": request["id"],
+                        "error": { "code": -32000, "message": "Cannot navigate to invalid URL" },
+                    });
+                    if socket
+                        .send(tungstenite::Message::Text(answer.to_string().into()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+            port
+        };
+        let mut cdp = talking_to(port, Duration::from_millis(300));
+
+        let failure = cdp.navigate("https://example.com/").unwrap_err();
+
+        assert_eq!(
+            failure.context.get("reason").map(String::as_str),
+            Some("Cannot navigate to invalid URL")
+        );
     }
 
     #[test]
