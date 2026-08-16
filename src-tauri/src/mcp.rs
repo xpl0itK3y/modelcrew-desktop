@@ -427,6 +427,7 @@ pub fn serve(app: tauri::AppHandle) {
     use std::os::unix::net::UnixListener;
 
     let Some(path) = socket_path(&app) else {
+        eprintln!("ModelCrew MCP: некуда положить сокет — агенты останутся без инструментов.");
         return;
     };
     if let Some(parent) = path.parent() {
@@ -440,8 +441,18 @@ pub fn serve(app: tauri::AppHandle) {
     // за ним нет — процесс, который его создал, уже мёртв.
     let _ = std::fs::remove_file(&path);
 
-    let Ok(listener) = UnixListener::bind(&path) else {
-        return;
+    let listener = match UnixListener::bind(&path) {
+        Ok(listener) => listener,
+        Err(error) => {
+            // Молчание здесь неотличимо от «агент не захотел позвать»: без
+            // строки в журнале ни человеку, ни поддержке не понять, что MCP
+            // не поднялся вовсе.
+            eprintln!(
+                "ModelCrew MCP: не удалось открыть сокет {}: {error}",
+                path.display()
+            );
+            return;
+        }
     };
     // Сокет — вход в приложение: доступ только владельцу.
     let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));

@@ -98,6 +98,7 @@ fn pump(stream: std::os::unix::net::UnixStream, token: &str) -> i32 {
 
     // stdin → сокет. Конец ввода означает, что агент закончил: закрываем
     // запись, чтобы приложение увидело конец, и ждём остатки ответов.
+    let mut dropped = false;
     for line in BufReader::new(std::io::stdin())
         .lines()
         .map_while(Result::ok)
@@ -108,11 +109,21 @@ fn pump(stream: std::os::unix::net::UnixStream, token: &str) -> i32 {
             .and_then(|()| to_app.flush())
             .is_err()
         {
+            dropped = true;
             break;
         }
     }
     let _ = to_app.shutdown(std::net::Shutdown::Write);
     let _ = back.join();
+    // Соединение оборвалось на нашем запросе — приложение нас не признало
+    // (пропуск не сошёлся) или закрылось. Уйдя нулём, шим показал бы агенту
+    // сервер, который завершился успешно и молча, и понять из этого нечего.
+    if dropped {
+        return fail(
+            "ModelCrew закрыл соединение: панель не признана или приложение закрыто. \
+             Запустите агента заново из терминала ModelCrew.",
+        );
+    }
     0
 }
 
