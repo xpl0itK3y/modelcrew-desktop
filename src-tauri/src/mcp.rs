@@ -397,9 +397,17 @@ pub fn socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         return Some(path);
     }
     // Каталог данных оказался слишком глубоким для `sun_path` — уходим во
-    // временный, он короткий на всех системах. Своё имя процесса в нём, чтобы
-    // две копии приложения не дрались за один файл.
-    Some(std::env::temp_dir().join(format!("modelcrew-{}.sock", std::process::id())))
+    // временный, он короткий на всех системах.
+    //
+    // Не файлом прямо в нём: на Linux это общий `/tmp`, имя из pid угадывается
+    // наперёд, и чужой процесс, заняв его первым, тихо оставил бы приложение
+    // без MCP. Свой каталог со случайным именем и правами 0700 не занять и не
+    // прочитать: он и защищает сокет внутри.
+    let home = tempfile::Builder::new()
+        .prefix("modelcrew-mcp-")
+        .tempdir()
+        .ok()?;
+    Some(home.keep().join(SOCK_NAME))
 }
 
 #[cfg(not(unix))]
@@ -423,6 +431,10 @@ pub fn serve(app: tauri::AppHandle) {
     };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
+        // Каталог — первая и главная защита сокета: сам файл сокета создаётся
+        // с правами по umask и становится 0600 только следующей строкой, а до
+        // неё успевает пройти чужое соединение.
+        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
     // Файл прошлого запуска: bind поверх него не встанет, а живого слушателя
     // за ним нет — процесс, который его создал, уже мёртв.
