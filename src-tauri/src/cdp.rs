@@ -77,6 +77,9 @@ impl Cdp {
                 .with_context("url", url)
                 .with_context("reason", error));
         }
+        if same_document(&answer) {
+            return Ok(());
+        }
         self.await_event("Page.loadEventFired")
     }
 
@@ -177,6 +180,16 @@ impl Cdp {
             }
         }
     }
+}
+
+/// Переход внутри той же страницы — например, к якорю `#install`.
+///
+/// Загрузки при таком переходе нет, события `Page.loadEventFired` не будет, и
+/// ожидание его кончилось бы сроком: человеку — «браузер не смог», хотя
+/// страница послушно перешла куда просили. Признак от самого протокола:
+/// загрузчик не менялся, поэтому его идентификатора в ответе нет.
+fn same_document(answer: &Value) -> bool {
+    answer.get("loaderId").is_none()
 }
 
 /// Сколько осталось до срока. Истёк — дальше не ждём.
@@ -573,6 +586,92 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "ждали дольше срока"
+        );
+    }
+
+    /// Страница, отвечающая на каждую команду заданным результатом и
+    /// присылающая следом заданные события.
+    fn scripted_page(result: Value, events: &'static [&'static str]) -> u16 {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let Ok(mut socket) = tungstenite::accept(stream) else {
+                return;
+            };
+            while let Ok(message) = socket.read() {
+                let tungstenite::Message::Text(text) = message else {
+                    continue;
+                };
+                let Ok(request) = serde_json::from_str::<Value>(&text) else {
+                    continue;
+                };
+                let answer = json!({ "id": request["id"], "result": result });
+                if socket
+                    .send(tungstenite::Message::Text(answer.to_string().into()))
+                    .is_err()
+                {
+                    return;
+                }
+                for event in events {
+                    let line = json!({ "method": event, "params": {} }).to_string();
+                    if socket
+                        .send(tungstenite::Message::Text(line.into()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn does_not_wait_for_a_load_that_will_never_happen() {
+        // Переход к якорю Chrome делает без загрузки: события не будет, и
+        // ожидание его кончалось сроком — «браузер не смог» на удавшемся
+        // переходе. Признак — отсутствие loaderId в ответе.
+        let mut cdp = talking_to(
+            scripted_page(json!({ "frameId": "F" }), &[]),
+            Duration::from_millis(300),
+        );
+
+        assert!(cdp.navigate("https://example.com/docs#install").is_ok());
+    }
+
+    #[test]
+    fn waits_for_the_load_of_a_real_navigation() {
+        let mut cdp = talking_to(
+            scripted_page(
+                json!({ "frameId": "F", "loaderId": "L" }),
+                &["Page.frameStartedLoading", "Page.loadEventFired"],
+            ),
+            Duration::from_secs(5),
+        );
+
+        assert!(cdp.navigate("https://example.com/").is_ok());
+    }
+
+    #[test]
+    fn tells_why_the_page_did_not_open() {
+        // Chrome отвечает успехом и на страницу, которая не открылась: отказ
+        // лежит внутри ответа, и без него человек видел бы пустой кадр.
+        let mut cdp = talking_to(
+            scripted_page(
+                json!({ "frameId": "F", "errorText": "net::ERR_CONNECTION_REFUSED" }),
+                &[],
+            ),
+            Duration::from_millis(300),
+        );
+
+        let failure = cdp.navigate("http://localhost:3000/").unwrap_err();
+
+        assert_eq!(
+            failure.context.get("reason").map(String::as_str),
+            Some("net::ERR_CONNECTION_REFUSED")
         );
     }
 
