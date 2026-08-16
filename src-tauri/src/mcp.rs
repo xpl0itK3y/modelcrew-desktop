@@ -704,13 +704,29 @@ mod tests {
         let answer = dispatch(
             &ctx(),
             &StubTools::working(),
-            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"browser_navigate"}}"#,
+            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"browser_teleport"}}"#,
         )
         .unwrap();
         let answer = parse(&answer);
 
+        // Ошибка инструмента — не ошибка протокола: сессия продолжается, а
+        // агент читает причину и пробует что-то другое.
         assert_eq!(answer["result"]["isError"], true);
         assert!(answer["error"].is_null());
+        let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("browser_teleport"), "{text}");
+        // И без имени инструмента ответ такой же: разбирать нечего, ронять
+        // соединение всё равно не за что.
+        let nameless = parse(
+            &dispatch(
+                &ctx(),
+                &StubTools::working(),
+                r#"{"jsonrpc":"2.0","id":5,"method":"tools/call"}"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(nameless["result"]["isError"], true);
+        assert!(nameless["error"].is_null());
     }
 
     #[test]
@@ -807,6 +823,59 @@ mod tests {
 
         // Именно shutdown, а не drop: `out` — клон, и пока читающая половина
         // жива, сокет открыт, сервер ждёт следующую строку, а join висит.
+        out.shutdown(std::net::Shutdown::Write).unwrap();
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Панель закрылась посреди сессии агента — и следующий же запрос это
+    /// видит. Держи мы корень с рукопожатия, агент продолжал бы работать в
+    /// каталоге закрытой панели, которую человек уже отвязал от проекта.
+    #[cfg(unix)]
+    #[test]
+    fn looks_the_panel_up_again_on_every_request() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let path = std::env::temp_dir().join(format!("mc-mcp-again-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        static ALIVE: AtomicBool = AtomicBool::new(true);
+        ALIVE.store(true, Ordering::SeqCst);
+
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve_connection(stream, &StubTools::working(), &|_| {
+                ALIVE
+                    .load(Ordering::SeqCst)
+                    .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
+            });
+        });
+
+        let client = UnixStream::connect(&path).unwrap();
+        let mut out = client.try_clone().unwrap();
+        let mut back = BufReader::new(client).lines();
+        let ping = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"crew_ping\"}}\n";
+
+        out.write_all(format!("{}\n", handshake("pass")).as_bytes())
+            .unwrap();
+        out.write_all(ping).unwrap();
+        out.flush().unwrap();
+        let first: Value = serde_json::from_str(&back.next().unwrap().unwrap()).unwrap();
+        assert!(first["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("/w/project"));
+
+        // Панель закрыли, соединение агента живо.
+        ALIVE.store(false, Ordering::SeqCst);
+        out.write_all(ping).unwrap();
+        out.flush().unwrap();
+        let second: Value = serde_json::from_str(&back.next().unwrap().unwrap()).unwrap();
+        let text = second["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("панель не найдена"), "{text}");
+
         out.shutdown(std::net::Shutdown::Write).unwrap();
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
