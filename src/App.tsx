@@ -563,7 +563,10 @@ export default function App() {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // Один нажим — один слой. Escape, уже разобранный тем, что лежит выше
+      // (поповер уведомлений, окно поверх ящика), сюда доходит помеченным:
+      // иначе вместе с верхним слоем закрывался бы и ящик под ним.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         setGitDrawerOpen(false);
       }
     };
@@ -585,7 +588,8 @@ export default function App() {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // Как и у ящика изменений: закрываем только верхний слой.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         setBrowserDrawerOpen(false);
       }
     };
