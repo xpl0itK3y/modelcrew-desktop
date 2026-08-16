@@ -10,14 +10,18 @@
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use crate::command_error::{CommandError, CommandResult, ErrorCode};
 
-/// Сколько ждём ответа на команду. Навигация укладывается с запасом, а
+/// Сколько ждём ответа на команду целиком. Навигация укладывается с запасом, а
 /// зависший браузер не должен держать агента дольше.
+///
+/// Срок именно на команду, а не на одно чтение: в сокет валятся чужие события,
+/// и страница, которая сыплет ими без остановки, продлевала бы ожидание своего
+/// ответа бесконечно.
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Сколько ждём отклика от самого порта.
@@ -33,6 +37,9 @@ const ALLOWED_SCHEMES: [&str; 2] = ["http://", "https://"];
 pub struct Cdp {
     socket: tungstenite::WebSocket<std::net::TcpStream>,
     next_id: u64,
+    /// Срок на одну команду. Полем, а не константой на месте, чтобы разговор с
+    /// зависшим браузером проверялся тестом за доли секунды.
+    budget: Duration,
 }
 
 impl Cdp {
@@ -48,7 +55,11 @@ impl Cdp {
         let (socket, _) = tungstenite::client::client(&ws_url, stream)
             .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
 
-        let mut cdp = Self { socket, next_id: 0 };
+        let mut cdp = Self {
+            socket,
+            next_id: 0,
+            budget: CALL_TIMEOUT,
+        };
         // Без этого страница не присылает событий загрузки, и навигация не с
         // чем было бы сопоставить.
         cdp.call("Page.enable", json!({}))?;
@@ -115,8 +126,9 @@ impl Cdp {
             })?;
 
         // В сокет валятся и события, и ответы на другие команды: ждём свой id.
+        let deadline = Instant::now() + self.budget;
         loop {
-            let message = self.read()?;
+            let message = self.read(deadline)?;
             if message.get("id").and_then(Value::as_u64) != Some(id) {
                 continue;
             }
@@ -130,16 +142,23 @@ impl Cdp {
     }
 
     fn await_event(&mut self, name: &str) -> CommandResult<()> {
+        let deadline = Instant::now() + self.budget;
         loop {
-            let message = self.read()?;
+            let message = self.read(deadline)?;
             if message.get("method").and_then(Value::as_str) == Some(name) {
                 return Ok(());
             }
         }
     }
 
-    fn read(&mut self) -> CommandResult<Value> {
+    fn read(&mut self, deadline: Instant) -> CommandResult<Value> {
         loop {
+            // Ждём не дольше, чем осталось от срока команды: иначе поток агента
+            // остался бы в этом цикле, пока страница присылает хоть что-нибудь.
+            let _ = self
+                .socket
+                .get_ref()
+                .set_read_timeout(Some(left(deadline)?));
             let message = self.socket.read().map_err(|error| {
                 CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error)
             })?;
@@ -158,6 +177,16 @@ impl Cdp {
             }
         }
     }
+}
+
+/// Сколько осталось до срока. Истёк — дальше не ждём.
+fn left(deadline: Instant) -> CommandResult<Duration> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(CommandError::new(ErrorCode::BrowserNotConnected)
+            .with_context("reason", "браузер не ответил вовремя"));
+    }
+    Ok(left)
 }
 
 fn connect_stream(port: u16) -> CommandResult<TcpStream> {
@@ -240,6 +269,9 @@ fn fetch_within(port: u16, path: &str, timeout: Duration) -> CommandResult<Value
     // `Connection: close` браузер игнорирует и соединение держит открытым.
     // Чтение «до EOF» упиралось бы в таймаут и всякий раз кончалось отказом,
     // хотя ответ уже пришёл целиком.
+    // Срок общий на весь ответ: браузер, отдающий по байту, иначе держал бы
+    // нас ровно столько, сколько ему вздумается капать.
+    let deadline = Instant::now() + timeout;
     let mut raw = Vec::new();
     let mut chunk = [0_u8; 4096];
     loop {
@@ -250,6 +282,7 @@ fn fetch_within(port: u16, path: &str, timeout: Duration) -> CommandResult<Value
                     .with_debug(error)
             });
         }
+        let _ = stream.set_read_timeout(Some(left(deadline)?));
         let read = stream
             .read(&mut chunk)
             .map_err(|error| CommandError::new(ErrorCode::BrowserNotConnected).with_debug(error))?;
@@ -438,6 +471,121 @@ mod tests {
             complete_body(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]HTTP/1.1 200 OK"),
             Some("[]")
         );
+    }
+
+    /// Браузер, который отвечает по капле и обещанной длины не дотягивает
+    /// никогда. Возвращает свой порт.
+    fn dribbling_browser() -> u16 {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            if stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n[")
+                .is_err()
+            {
+                return;
+            }
+            for _ in 0..60 {
+                if stream.write_all(b" ").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn gives_up_on_a_browser_that_answers_by_the_drop() {
+        let started = Instant::now();
+
+        // Срок стоял на одном чтении, а не на ответе: каждая пришедшая капля
+        // начинала ожидание заново, и такое соединение держало поток агента
+        // столько, сколько браузеру вздумается капать.
+        assert!(fetch_within(
+            dribbling_browser(),
+            "/json/list",
+            Duration::from_millis(200)
+        )
+        .is_err());
+
+        // Капли идут почти две секунды: уложились в одну — значит ушли по
+        // сроку, а не дождались, пока капающему надоест.
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "ждали дольше срока"
+        );
+    }
+
+    /// Страница, которая без остановки шлёт чужие события. `answer` — то, что
+    /// она пришлёт среди них, если пришлёт вообще.
+    fn talking_page(answer: Option<&'static str>) -> u16 {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let Ok(mut socket) = tungstenite::accept(stream) else {
+                return;
+            };
+            for step in 0..400 {
+                let line = match (step, answer) {
+                    (5, Some(answer)) => answer.to_string(),
+                    _ => json!({ "method": "Page.frameNavigated" }).to_string(),
+                };
+                if socket
+                    .send(tungstenite::Message::Text(line.into()))
+                    .is_err()
+                {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        port
+    }
+
+    fn talking_to(port: u16, budget: Duration) -> Cdp {
+        let stream = connect_within(port, Duration::from_secs(2), Duration::from_secs(2)).unwrap();
+        let (socket, _) =
+            tungstenite::client::client(format!("ws://127.0.0.1:{port}/page"), stream).unwrap();
+        Cdp {
+            socket,
+            next_id: 0,
+            budget,
+        }
+    }
+
+    #[test]
+    fn gives_up_on_a_page_that_never_stops_talking() {
+        let mut cdp = talking_to(talking_page(None), Duration::from_millis(200));
+        let started = Instant::now();
+
+        // Срок стоял на одном чтении: страница, сыплющая событиями, продлевала
+        // ожидание своего ответа бесконечно — и держала поток агента с собой.
+        assert!(cdp.await_event("Page.loadEventFired").is_err());
+
+        // Болтовня длится две секунды: уложились в одну — значит ушли по сроку.
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "ждали дольше срока"
+        );
+    }
+
+    #[test]
+    fn hears_the_event_among_the_noise() {
+        // Обратная сторона срока: событие приходит не первым, и до него надо
+        // досидеть, а не бросить разговор на первом же чужом сообщении.
+        let mut cdp = talking_to(
+            talking_page(Some(r#"{"method":"Page.loadEventFired"}"#)),
+            Duration::from_secs(5),
+        );
+
+        assert!(cdp.await_event("Page.loadEventFired").is_ok());
     }
 
     #[test]
