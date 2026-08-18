@@ -11,7 +11,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const APP: &str = env!("CARGO_BIN_EXE_modelcrew-desktop");
@@ -39,6 +39,86 @@ fn shim(socket: &PathBuf, token: Option<&str>) -> std::process::Child {
     command
         .spawn()
         .expect("шим обязан запускаться как программа")
+}
+
+/// Подставной домашний каталог с сокетом там, где его кладёт приложение.
+/// Короткий и в `/tmp` намеренно: `sun_path` — 104 байта на macOS, а обычный
+/// временный каталог там начинается с `/var/folders/…` и один только префикс
+/// съедает половину.
+fn fake_home(name: &str) -> PathBuf {
+    let home = PathBuf::from(format!("/tmp/mc-home-{name}-{}", std::process::id()));
+    let data = home
+        .join(if cfg!(target_os = "macos") {
+            "Library/Application Support"
+        } else {
+            ".local/share"
+        })
+        .join("com.modelcrew.desktop");
+    std::fs::create_dir_all(&data).unwrap();
+    home
+}
+
+fn well_known_socket(home: &Path) -> PathBuf {
+    home.join(if cfg!(target_os = "macos") {
+        "Library/Application Support"
+    } else {
+        ".local/share"
+    })
+    .join("com.modelcrew.desktop")
+    .join("mcp.sock")
+}
+
+#[test]
+fn finds_the_socket_itself_when_nobody_told_it_the_address() {
+    // cursor чистит окружение перед запуском MCP-сервера: ни адреса, ни
+    // пропуска шим не получает. Адрес он обязан вычислить сам, иначе
+    // постоянная регистрация у такого агента не заработает вовсе.
+    let home = fake_home("plain");
+    let socket = well_known_socket(&home);
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).unwrap();
+
+    let served = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut out = stream.try_clone().unwrap();
+        let mut lines = BufReader::new(stream).lines();
+        let handshake = lines.next().unwrap().unwrap();
+        let _request = lines.next().unwrap().unwrap();
+        out.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n")
+            .unwrap();
+        out.flush().unwrap();
+        handshake
+    });
+
+    let mut child = Command::new(APP)
+        .arg("--mcp-stdio")
+        .env("HOME", &home)
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("MODELCREW_MCP_SOCK")
+        .env("MODELCREW_MCP_TOKEN", "pass-of-panel-a")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
+        .unwrap();
+    stdin.flush().unwrap();
+
+    let answer = BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .next()
+        .expect("шим обязан вернуть ответ на stdout")
+        .unwrap();
+    drop(stdin);
+    child.wait().unwrap();
+
+    assert_eq!(served.join().unwrap(), r#"{"token":"pass-of-panel-a"}"#);
+    assert!(answer.contains("\"ok\":true"), "{answer}");
+
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]

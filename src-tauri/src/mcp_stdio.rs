@@ -35,12 +35,21 @@ where
 fn run() -> i32 {
     use std::os::unix::net::UnixStream;
 
-    let Ok(path) = std::env::var(mcp::SOCK_ENV) else {
+    // Окружение — первый и точный источник: только оно знает адрес, если сокет
+    // ушёл во временный каталог. Но полагаться на него одно нельзя: cursor
+    // чистит окружение перед запуском MCP-сервера, и тогда адрес приходится
+    // вычислять самим.
+    let Some(path) = std::env::var_os(mcp::SOCK_ENV)
+        .map(std::path::PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .or_else(mcp::well_known_socket_path)
+    else {
         return fail(&format!(
-            "{} не задана: агент запущен не из терминала ModelCrew.",
+            "{} не задана и домашний каталог неизвестен: не найти, куда стучаться.",
             mcp::SOCK_ENV
         ));
     };
+    let path = path.display().to_string();
     let token = std::env::var(mcp::TOKEN_ENV).unwrap_or_default();
     if token.is_empty() {
         return fail(&format!(

@@ -35,6 +35,14 @@ pub const TOKEN_ENV: &str = "MODELCREW_MCP_TOKEN";
 #[cfg(unix)]
 const SOCK_NAME: &str = "mcp.sock";
 
+/// Идентификатор пакета — им же назван каталог данных приложения.
+///
+/// Продублирован из `tauri.conf.json`, потому что шиму неоткуда взять
+/// настоящий: он поднимается без Tauri. Тест ниже сверяет их дословно, чтобы
+/// переименование пакета не оставило шим искать сокет по старому адресу.
+#[cfg(unix)]
+const APP_IDENTIFIER: &str = "com.modelcrew.desktop";
+
 /// Длина `sun_path` в `sockaddr_un`: 104 на macOS, 108 на Linux. Берём
 /// меньшее и с запасом — длинное имя пользователя способно вытолкнуть путь
 /// за предел, и тогда bind падает с невнятной ошибкой.
@@ -410,6 +418,38 @@ pub fn socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     Some(home.keep().join(SOCK_NAME))
 }
 
+/// Тот же путь, но вычисленный без приложения — так его находит шим.
+///
+/// Переменной окружения не всегда достаточно: **cursor чистит окружение перед
+/// запуском MCP-сервера**, и шим не получает ни адреса, ни пропуска (проверено
+/// 2026-08-17). Адрес — не секрет: сокет защищён правами каталога и тем, что
+/// приложение само выясняет, кто позвал.
+///
+/// Совпадает с `socket_path`, пока каталог данных не оказался слишком глубоким
+/// для `sun_path`: в том редком случае сокет уходит во временный каталог, и
+/// найти его можно только по переменной окружения.
+#[cfg(unix)]
+pub fn well_known_socket_path() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let xdg = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from);
+    Some(data_dir_of(&home, xdg).join(SOCK_NAME))
+}
+
+/// Куда Tauri кладёт данные приложения: `dirs::data_dir()` плюс идентификатор.
+#[cfg(unix)]
+fn data_dir_of(home: &Path, xdg: Option<PathBuf>) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        // На macOS Tauri берёт `~/Library/Application Support` и XDG не
+        // смотрит — здесь тоже, иначе адреса разойдутся.
+        home.join("Library/Application Support")
+            .join(APP_IDENTIFIER)
+    } else {
+        xdg.filter(|path| path.is_absolute())
+            .unwrap_or_else(|| home.join(".local/share"))
+            .join(APP_IDENTIFIER)
+    }
+}
+
 #[cfg(not(unix))]
 pub fn socket_path(_app: &tauri::AppHandle) -> Option<PathBuf> {
     // На Windows нужен именованный канал: у него другое API и другая модель
@@ -540,6 +580,45 @@ mod tests {
 
     fn ctx() -> PanelContext {
         PanelContext::new("panel-a".into(), Some(PathBuf::from("/w/project")))
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_name_of_the_data_directory_is_the_one_the_package_really_has() {
+        // Шим вычисляет адрес сокета сам и берёт это имя на веру. Переименуют
+        // пакет — он молча уйдёт стучаться не туда, а выглядеть это будет как
+        // «агент не видит инструментов».
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            conf.get("identifier").and_then(Value::as_str),
+            Some(APP_IDENTIFIER)
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_shim_looks_for_the_socket_where_the_application_puts_it() {
+        let path = data_dir_of(Path::new("/home/tester"), None).join(SOCK_NAME);
+        let expected = if cfg!(target_os = "macos") {
+            "/home/tester/Library/Application Support/com.modelcrew.desktop/mcp.sock"
+        } else {
+            "/home/tester/.local/share/com.modelcrew.desktop/mcp.sock"
+        };
+        assert_eq!(path, Path::new(expected));
+    }
+
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn a_relative_xdg_home_is_ignored_rather_than_joined_to_nothing() {
+        // Спецификация XDG велит относительный путь игнорировать. Иначе сокет
+        // искался бы относительно текущего каталога агента — то есть где угодно.
+        let path = data_dir_of(Path::new("/home/tester"), Some(PathBuf::from("share")));
+        assert_eq!(
+            path,
+            Path::new("/home/tester/.local/share/com.modelcrew.desktop")
+        );
+        let path = data_dir_of(Path::new("/home/tester"), Some(PathBuf::from("/data")));
+        assert_eq!(path, Path::new("/data/com.modelcrew.desktop"));
     }
 
     #[test]
