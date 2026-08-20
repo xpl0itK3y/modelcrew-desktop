@@ -85,6 +85,18 @@ export const en: Record<MessageKey, string> = {
   "git.detachedNote":
     "You are looking at commit {hash}, not at a branch. New commits would not belong to any branch.",
   "git.detachedReturn": "Back to ‘{name}’",
+  "git.operationMerge": "Merge is not finished",
+  "git.operationRebase": "Rebase is not finished",
+  "git.operationCherryPick": "Cherry-pick is not finished",
+  "git.operationRevert": "Revert is not finished",
+  "git.operationConflicts": "Conflicts left to settle: {count}",
+  "git.operationReady": "No conflicts left — you can carry on",
+  "git.operationCommitHint":
+    "An ordinary commit finishes the merge: write a message and press Commit",
+  "git.operationContinue": "Continue",
+  "git.operationAbort": "Cancel",
+  "git.operationAbortConfirm":
+    "Put the repository back the way it was before this started? Everything already resolved by hand will be lost.",
   "git.remoteBranches": "On the server",
   "git.remoteBranchHint":
     "This branch only exists on the server: switching creates a tracking local copy",
@@ -586,6 +598,11 @@ export const en: Record<MessageKey, string> = {
     "The merge stopped on a conflict. Resolve it and finish (git merge --continue) or cancel it (git merge --abort)",
   "error.gitRebaseConflict":
     "The rebase stopped on a conflict. Resolve it and continue (git rebase --continue) or cancel it (git rebase --abort)",
+  "error.gitUnresolvedConflicts":
+    "‘{path}’ still carries conflict markers — clear them out, or they go into history",
+  "error.gitNoOperation": "There is no unfinished operation any more",
+  "error.gitOperationNeedsCommit":
+    "An ordinary commit finishes the merge: write a message and press Commit",
   "error.gitUpstreamExists": "This branch already has a copy on the server",
   "error.gitRemoteMissing": "Remote ‘{remote}’ was not found",
   "error.gitRemoteAmbiguous":

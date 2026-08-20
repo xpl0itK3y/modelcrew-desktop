@@ -28,6 +28,7 @@ import {
   SyncStatus,
 } from "./git/BranchBar";
 import { HistoryView } from "./git/HistoryView";
+import { OperationBanner } from "./git/OperationBanner";
 import { GitErrorDialog } from "./git/GitErrorDialog";
 import { loadGithubCommitAvatars } from "../git/githubAvatars";
 
@@ -570,6 +571,19 @@ function GitChangesWorkspaceView(props: {
             <div className="git-commit-error" role="alert">
               {branchError.message}
             </div>
+          )}
+          {/* Выше вкладок: незавершённая операция касается всего репозитория,
+              а не только того, что открыто сейчас. */}
+          {summary.operation && (
+            <OperationBanner
+              workspaceId={workspaceId}
+              operation={summary.operation}
+              conflicts={
+                summary.files.filter((file) => file.status === "conflicted")
+                  .length
+              }
+              onError={setBranchError}
+            />
           )}
           {summary.branch === undefined && summary.headHash && (
             <DetachedHeadBanner

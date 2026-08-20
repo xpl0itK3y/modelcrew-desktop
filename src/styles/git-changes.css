@@ -2143,3 +2143,74 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* Незавершённая операция. Форма та же, что у отделённого HEAD, но тон
+   тревожнее: там состояние просто необычное, здесь репозиторий стоит на
+   середине действия и сам из него не выйдет. */
+.git-operation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 8px 6px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, #e2564d 48%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, #e2564d 13%, transparent);
+  color: var(--mc-text-bright);
+  font-size: 11.5px;
+}
+
+.git-operation-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.git-operation-title {
+  color: #e2564d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.git-operation-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.git-operation-go,
+.git-operation-drop {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.git-operation-go {
+  background: var(--mc-accent);
+  color: #fff;
+}
+
+.git-operation-drop {
+  border: 1px solid var(--mc-border);
+  background: transparent;
+  color: var(--mc-text);
+}
+
+.git-operation-drop:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #e2564d 60%, transparent);
+  color: #e2564d;
+}
+
+.git-operation-go:disabled,
+.git-operation-drop:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

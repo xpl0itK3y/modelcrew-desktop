@@ -84,6 +84,18 @@ export const ru = {
   "git.detachedNote":
     "Вы смотрите коммит {hash}, а не ветку. Новые коммиты не попадут ни в одну ветку.",
   "git.detachedReturn": "Вернуться на «{name}»",
+  "git.operationMerge": "Слияние не завершено",
+  "git.operationRebase": "Перенос коммитов не завершён",
+  "git.operationCherryPick": "Перенос коммита не завершён",
+  "git.operationRevert": "Откат коммита не завершён",
+  "git.operationConflicts": "Осталось развести конфликты: {count}",
+  "git.operationReady": "Конфликтов не осталось — можно продолжать",
+  "git.operationCommitHint":
+    "Слияние завершит обычный коммит: напишите сообщение и нажмите «Коммит»",
+  "git.operationContinue": "Продолжить",
+  "git.operationAbort": "Отменить",
+  "git.operationAbortConfirm":
+    "Вернуть репозиторий в состояние до начала операции? Всё, что уже разрешено вручную, будет потеряно.",
   "git.remoteBranches": "На сервере",
   "git.remoteBranchHint":
     "Ветка есть только на сервере: переключение создаст локальную копию со слежением",
@@ -581,6 +593,11 @@ export const ru = {
     "Слияние остановлено на конфликте. Разрешите его и завершите (git merge --continue) или отмените (git merge --abort)",
   "error.gitRebaseConflict":
     "Перенос остановлен на конфликте. Разрешите его и продолжите (git rebase --continue) или отмените (git rebase --abort)",
+  "error.gitUnresolvedConflicts":
+    "В файле «{path}» ещё стоят маркеры конфликта — уберите их, иначе они уйдут в историю",
+  "error.gitNoOperation": "Незавершённых операций больше нет",
+  "error.gitOperationNeedsCommit":
+    "Слияние завершает обычный коммит: напишите сообщение и нажмите «Коммит»",
   "error.gitUpstreamExists": "У ветки уже есть серверная копия",
   "error.gitRemoteMissing": "Remote «{remote}» не найден",
   "error.gitRemoteAmbiguous":

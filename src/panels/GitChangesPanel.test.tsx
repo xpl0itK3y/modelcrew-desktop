@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localizeBackendError, setLocale } from "../i18n";
 import type { GitChangesSummary } from "../git/gitChanges";
@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   summaries: new Map<string, GitChangesSummary>(),
   listeners: new Map<string, Set<(summary: GitChangesSummary) => void>>(),
   commitAll: vi.fn(async () => {}),
+  continueOperation: vi.fn(async () => {}),
+  abortOperation: vi.fn(async () => {}),
   createBranch: vi.fn(async () => {}),
   renameBranch: vi.fn(async () => {}),
   deleteBranch: vi.fn(async () => {}),
@@ -55,6 +57,8 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
       },
     ),
     commitAll: mocks.commitAll,
+    continueOperation: mocks.continueOperation,
+    abortOperation: mocks.abortOperation,
     refreshGitChanges: mocks.refreshGitChanges,
   };
 });
@@ -1007,6 +1011,85 @@ describe("Git action errors", () => {
     ).toBe(
       "Не удалось определить корректную серверную ветку для синхронизации",
     );
+  });
+});
+
+describe("unfinished repository operation", () => {
+  // Приложение само заводит репозиторий в это состояние — «Забрать с rebase»
+  // намеренно оставляет перенос на явный continue/abort. Раньше об этом не
+  // говорил никто: был только статус «Конфликт» у отдельных файлов.
+  function stuck(
+    operation: GitChangesSummary["operation"],
+    conflicts: number,
+  ): GitChangesSummary {
+    return {
+      isRepo: true,
+      branch: "main",
+      headHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      operation,
+      files: Array.from({ length: conflicts }, (_, index) => ({
+        path: `clash-${index}.txt`,
+        status: "conflicted" as const,
+        additions: 1,
+        deletions: 1,
+      })),
+    };
+  }
+
+  it("names the operation and counts what is left to settle", () => {
+    mocks.summaries.set("project-a", stuck("rebase", 2));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    expect(screen.getByText("Перенос коммитов не завершён")).toBeInTheDocument();
+    expect(screen.getByText("Осталось развести конфликты: 2")).toBeInTheDocument();
+  });
+
+  it("offers to carry on once nothing conflicts any more", async () => {
+    mocks.summaries.set("project-a", stuck("rebase", 0));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    expect(screen.getByText("Конфликтов не осталось — можно продолжать")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    await waitFor(() =>
+      expect(mocks.continueOperation).toHaveBeenCalledWith("project-a"),
+    );
+  });
+
+  it("leaves the merge to the commit box instead of a second button", () => {
+    mocks.summaries.set("project-a", stuck("merge", 0));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    // У слияния есть поле сообщения и правильный автор — своё «продолжить»
+    // было бы худшей копией того, что уже стоит рядом.
+    expect(screen.getByText("Слияние не завершено")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Продолжить" })).toBeNull();
+    expect(
+      screen.getByText(
+        "Слияние завершит обычный коммит: напишите сообщение и нажмите «Коммит»",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("asks before throwing away a hand-resolved conflict", async () => {
+    mocks.summaries.set("project-a", stuck("cherryPick", 1));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Отменить" }));
+    expect(mocks.abortOperation).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Отменить" }),
+    );
+    await waitFor(() =>
+      expect(mocks.abortOperation).toHaveBeenCalledWith("project-a"),
+    );
+  });
+
+  it("stays out of the way while nothing is half-done", () => {
+    render(<GitChangesView workspaceId="project-a" />);
+    expect(screen.queryByText("Слияние не завершено")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить" })).toBeNull();
   });
 });
 

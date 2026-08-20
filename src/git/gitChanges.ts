@@ -23,6 +23,11 @@ export type GitChangedFile = {
   deletions?: number;
 };
 
+// Незавершённая операция репозитория. Приложение само умеет в неё завести
+// («Забрать с rebase» намеренно оставляет rebase на явный continue/abort),
+// поэтому состояние должно быть видно, а не угадываться по статусам файлов.
+export type GitOperation = "merge" | "rebase" | "cherryPick" | "revert";
+
 export type GitChangesSummary = {
   isRepo: boolean;
   // В системе нет самого git: панель есть, но показать ей нечего.
@@ -36,6 +41,7 @@ export type GitChangesSummary = {
   previousBranch?: string;
   ahead?: number;
   behind?: number;
+  operation?: GitOperation;
   files: GitChangedFile[];
 };
 
@@ -220,6 +226,16 @@ export function commitAll(
   message: string,
 ): Promise<void> {
   return invoke("git_commit", { workspaceId, message });
+}
+
+// Продолжение доступно у переноса, cherry-pick и отката: у них нет своего
+// поля сообщения. Слияние завершается обычным коммитом из панели.
+export function continueOperation(workspaceId: string): Promise<void> {
+  return invoke("git_continue_operation", { workspaceId });
+}
+
+export function abortOperation(workspaceId: string): Promise<void> {
+  return invoke("git_abort_operation", { workspaceId });
 }
 
 export function revertFile(
