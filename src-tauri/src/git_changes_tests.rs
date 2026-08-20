@@ -1384,3 +1384,88 @@ fn a_file_that_merely_mentions_a_marker_is_not_taken_for_a_conflict() {
     assert!(ensure_conflicts_resolved(root).is_ok());
     commit_all(root, "пустой коммит не пройдёт").unwrap_err();
 }
+
+#[test]
+fn finds_the_operation_of_a_linked_worktree_not_of_the_main_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::write(root.join("общий.txt"), "исходная\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "основа"]);
+    git(&["checkout", "--quiet", "-b", "side"]);
+    std::fs::write(root.join("общий.txt"), "из side\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правка в side"]);
+    git(&["checkout", "--quiet", "main"]);
+    std::fs::write(root.join("общий.txt"), "из main\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правка в main"]);
+
+    // У связанного рабочего дерева свой каталог git внутри .git/worktrees, и
+    // MERGE_HEAD лежит там, а не в общем. Здесь же `.git` — файл, а не папка.
+    let linked = dir.path().parent().unwrap().join("mc-linked-worktree");
+    let _ = std::fs::remove_dir_all(&linked);
+    git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        linked.to_str().unwrap(),
+        "side",
+    ]);
+    let merge = Command::new("git")
+        .args(["merge", "main"])
+        .current_dir(&linked)
+        .output()
+        .unwrap();
+    assert!(
+        !merge.status.success(),
+        "слияние должно упереться в конфликт"
+    );
+
+    // Незавершённое слияние видно там, где оно идёт, и только там.
+    assert_eq!(repository_operation(&linked).unwrap(), Some("merge"));
+    assert_eq!(repository_operation(root).unwrap(), None);
+    assert_eq!(collect_summary(&linked).unwrap().operation, Some("merge"));
+    assert_eq!(collect_summary(root).unwrap().operation, None);
+
+    let refused = commit_all(&linked, "слить").unwrap_err();
+    assert_eq!(reason_of(&refused), "unresolved-conflicts");
+    // Главное дерево коммитить никто не мешает.
+    std::fs::write(root.join("новый.txt"), "спокойно\n").unwrap();
+    commit_all(root, "работа в главном дереве").unwrap();
+
+    std::fs::write(linked.join("общий.txt"), "из main и из side\n").unwrap();
+    commit_all(&linked, "слить").unwrap();
+    assert_eq!(repository_operation(&linked).unwrap(), None);
+
+    git(&["worktree", "remove", "--force", linked.to_str().unwrap()]);
+}
+
+#[test]
+fn a_file_deleted_on_one_side_has_no_markers_to_clear() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::write(root.join("уйдёт.txt"), "исходная\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "основа"]);
+    git(&["checkout", "--quiet", "-b", "side"]);
+    std::fs::remove_file(root.join("уйдёт.txt")).unwrap();
+    git(&["commit", "--quiet", "-am", "удалили в side"]);
+    git(&["checkout", "--quiet", "main"]);
+    std::fs::write(root.join("уйдёт.txt"), "правка в main\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правили в main"]);
+    let merge = Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!merge.status.success(), "конфликт правки и удаления");
+
+    // Файл несведён, но маркеров в нём нет и быть не может: спорят не строки,
+    // а само существование файла. Запрещать коммит тут значило бы запереть
+    // пользователя в состоянии, из которого панель не выпускает.
+    assert_eq!(unmerged_paths(root).unwrap(), vec!["уйдёт.txt".to_owned()]);
+    ensure_conflicts_resolved(root).unwrap();
+    commit_all(root, "оставили файл").unwrap();
+    assert_eq!(repository_operation(root).unwrap(), None);
+}
