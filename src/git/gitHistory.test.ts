@@ -10,7 +10,6 @@ import {
   amendCommit,
   commitAction,
   dropCommit,
-  resetToCommit,
   squashCommit,
 } from "./gitHistory";
 
@@ -37,17 +36,6 @@ describe("history rewriting IPC", () => {
       workspaceId: "ws-1",
       expectedHead: "a".repeat(40),
       message: undefined,
-    });
-  });
-
-  it("passes the reset mode and the confirmed head", async () => {
-    await resetToCommit("ws-1", "b".repeat(40), "hard", "a".repeat(40));
-
-    expect(mocks.invoke).toHaveBeenCalledWith("git_reset_to_commit", {
-      workspaceId: "ws-1",
-      hash: "b".repeat(40),
-      mode: "hard",
-      expectedHead: "a".repeat(40),
     });
   });
 

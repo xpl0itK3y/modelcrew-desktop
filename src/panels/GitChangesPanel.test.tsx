@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => ({
   amendCommit: vi.fn(async () => {}),
   squashCommit: vi.fn(async () => {}),
   dropCommit: vi.fn(async () => {}),
-  resetToCommit: vi.fn(async () => {}),
   deleteTag: vi.fn(async () => {}),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
   mergeRef: vi.fn(async () => {}),
@@ -96,7 +95,6 @@ vi.mock("../git/gitHistory", async (importOriginal) => ({
   amendCommit: mocks.amendCommit,
   squashCommit: mocks.squashCommit,
   dropCommit: mocks.dropCommit,
-  resetToCommit: mocks.resetToCommit,
   deleteTag: mocks.deleteTag,
 }));
 

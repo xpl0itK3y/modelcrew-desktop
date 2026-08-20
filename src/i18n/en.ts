@@ -123,16 +123,6 @@ export const en: Record<MessageKey, string> = {
   "git.actionDrop": "Remove commit from history",
   "git.actionDropConfirm":
     "Remove this commit from history? Newer commits are replayed on top and the working folder must be clean.",
-  "git.actionResetHere": "Move the branch here",
-  "git.actionResetSoft": "Keep changes staged",
-  "git.actionResetSoftConfirm":
-    "Move the branch to this commit? Everything from the newer commits stays staged.",
-  "git.actionResetMixed": "Keep changes in the files",
-  "git.actionResetMixedConfirm":
-    "Move the branch to this commit? The changes stay in your files but are no longer staged.",
-  "git.actionResetHard": "Discard every change",
-  "git.actionResetHardConfirm":
-    "Move the branch to this commit and delete every newer change together with unsaved work? The commits stay in the reflog.",
   "git.actionOpenGithub": "Open on GitHub",
   "git.actionOpenGithubMissing":
     "Cannot build the link: this repository has no GitHub remote",

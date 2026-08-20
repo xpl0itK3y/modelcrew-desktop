@@ -122,16 +122,6 @@ export const ru = {
   "git.actionDrop": "Удалить коммит из истории",
   "git.actionDropConfirm":
     "Убрать этот коммит из истории? Более новые коммиты будут перенесены, рабочая папка должна быть чистой.",
-  "git.actionResetHere": "Сбросить ветку сюда",
-  "git.actionResetSoft": "Оставить правки подготовленными",
-  "git.actionResetSoftConfirm":
-    "Перенести ветку на этот коммит? Все изменения более новых коммитов останутся подготовленными.",
-  "git.actionResetMixed": "Оставить правки в файлах",
-  "git.actionResetMixedConfirm":
-    "Перенести ветку на этот коммит? Изменения останутся в файлах, но не будут подготовлены.",
-  "git.actionResetHard": "Стереть все правки",
-  "git.actionResetHardConfirm":
-    "Перенести ветку на этот коммит и удалить все более новые изменения вместе с несохранённой работой? Коммиты останутся в reflog.",
   "git.actionOpenGithub": "Открыть на GitHub",
   "git.actionOpenGithubMissing":
     "Не удалось составить ссылку: у репозитория нет remote на GitHub",

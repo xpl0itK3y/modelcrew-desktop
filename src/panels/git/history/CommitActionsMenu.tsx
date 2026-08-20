@@ -17,7 +17,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { describeBackendError, useI18n, type BackendFailure } from "../../../i18n";
 import { refreshGitChanges } from "../../../git/gitChanges";
 import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
-import { amendCommit, commitAction, deleteTag, dropCommit, resetToCommit, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
+import { amendCommit, commitAction, deleteTag, dropCommit, squashCommit, type CommitAction } from "../../../git/gitHistory";
 
 export function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;
@@ -30,16 +30,7 @@ type CommitMenuAction =
   | "amend"
   | "squash"
   | "fixup"
-  | "drop"
-  | "resetSoft"
-  | "resetMixed"
-  | "resetHard";
-
-const RESET_MODES: Record<string, GitResetMode> = {
-  resetSoft: "soft",
-  resetMixed: "mixed",
-  resetHard: "hard",
-};
+  | "drop";
 
 const CONFIRM_TEXT = {
   checkout: "git.actionCheckoutConfirm",
@@ -49,9 +40,6 @@ const CONFIRM_TEXT = {
   squash: "git.actionSquashConfirm",
   fixup: "git.actionFixupConfirm",
   drop: "git.actionDropConfirm",
-  resetSoft: "git.actionResetSoftConfirm",
-  resetMixed: "git.actionResetMixedConfirm",
-  resetHard: "git.actionResetHardConfirm",
 } as const;
 
 export function CommitActionsMenu(props: {
@@ -89,7 +77,6 @@ export function CommitActionsMenu(props: {
   // непрерывный локальный first-parent суффикс собственных коммитов.
   const canAmend = onBranch && props.commit.isHead && canReword;
   const canRewrite = onBranch && canReword && props.commit.parents.length === 1;
-  const canReset = onBranch && !props.commit.isHead;
   // Черта отделяет одну группу пунктов от другой, а не висит сама по себе. У
   // отправленного и у чужого коммита правки истории нет вовсе, и без этой
   // проверки две черты вставали подряд — читалось как пустая строка меню.
@@ -137,8 +124,6 @@ export function CommitActionsMenu(props: {
         await squashCommit(props.workspaceId, hash, action, head);
       } else if (action === "drop") {
         await dropCommit(props.workspaceId, hash, head);
-      } else if (action in RESET_MODES) {
-        await resetToCommit(props.workspaceId, hash, RESET_MODES[action], head);
       } else if (action === "deleteTag") {
         await deleteTag(props.workspaceId, name ?? "");
       } else {
@@ -432,41 +417,6 @@ export function CommitActionsMenu(props: {
             >
               {t("git.actionDrop")}
             </button>
-          )}
-          {canReset && (
-            <>
-              <div className="git-actions-sep" aria-hidden="true" />
-              <div className="git-actions-label">
-                {t("git.actionResetHere")}
-              </div>
-              <button
-                type="button"
-                role="menuitem"
-                className="git-actions-item"
-                disabled={busy}
-                onClick={() => setConfirm("resetSoft")}
-              >
-                {t("git.actionResetSoft")}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="git-actions-item"
-                disabled={busy}
-                onClick={() => setConfirm("resetMixed")}
-              >
-                {t("git.actionResetMixed")}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="git-actions-item is-danger"
-                disabled={busy}
-                onClick={() => setConfirm("resetHard")}
-              >
-                {t("git.actionResetHard")}
-              </button>
-            </>
           )}
         </>
       )}

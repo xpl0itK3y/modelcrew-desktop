@@ -2050,16 +2050,6 @@
   }
 }
 
-/* Заголовок группы внутри меню коммита: «Сбросить ветку сюда» и её режимы. */
-.git-actions-label {
-  padding: 5px 10px 2px;
-  color: var(--mc-text-faint);
-  font-size: 10.5px;
-  font-weight: 650;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
 /* Поиск по истории: поле выбора и строка запроса под панелью режимов. */
 .git-history-search {
   display: flex;
