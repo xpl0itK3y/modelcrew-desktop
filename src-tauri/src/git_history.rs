@@ -1,6 +1,6 @@
-//! Правка локальной истории: сообщение коммита, uncommit/amend/squash/fixup,
-//! удаление и сброс, сравнение двух состояний, теги и патчи, а также действия
-//! над коммитом из меню панели (переход, ветка отсюда, cherry-pick, revert).
+//! Правка локальной истории: сообщение коммита, отмена последнего коммита,
+//! удаление коммита, удаление тегов, а также действия над коммитом из меню
+//! панели (переход, ветка отсюда, cherry-pick, revert).
 //!
 //! Вертикаль отделена от статусов, диффов и веток: у неё своя цена ошибки —
 //! эти операции перезаписывают историю, поэтому каждая сначала проверяет, что
@@ -14,7 +14,6 @@ use crate::git_branches::{
     validate_namespaced_ref,
 };
 use crate::git_changes::*;
-use crate::git_log::GitCommitFile;
 use crate::workspace_roots::WorkspaceRoots;
 
 // ---------- Редактирование сообщения локального коммита ----------
@@ -311,150 +310,6 @@ pub(crate) fn validated_message(message: &str) -> CommandResult<&str> {
     Ok(message)
 }
 
-// Добавляет подготовленные в индексе правки в последний локальный коммит.
-// Индекс после этого совпадает с новым коммитом, а незастейдженные правки
-// остаются нетронутыми — ровно как у `git commit --amend`.
-pub fn amend_commit(root: &Path, expected_head: &str, message: Option<&str>) -> CommandResult<()> {
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let (branch, head) = ensure_history_snapshot(&toplevel, expected_head)?;
-    editable_chain(&toplevel, &head, &head)?;
-
-    let tree = run_git(&toplevel, &["write-tree"])
-        .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
-    let meta = read_commit_meta(&toplevel, &head)?;
-    let message = match message {
-        Some(text) => validated_message(text)?.as_bytes().to_vec(),
-        None => meta.message.clone(),
-    };
-    let amended = create_commit(&toplevel, &tree, &meta.parents, &meta, &message)?;
-    move_branch(
-        &toplevel,
-        &branch,
-        "modelcrew: amend commit",
-        &amended,
-        &head,
-    )
-}
-
-// Переставляет текущую ветку на выбранный коммит. soft двигает только ссылку,
-// mixed дополнительно сбрасывает индекс, hard — ещё и рабочую папку.
-pub fn reset_to_commit(
-    root: &Path,
-    hash: &str,
-    mode: &str,
-    expected_head: &str,
-) -> CommandResult<()> {
-    if !is_safe_hash(hash) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
-    }
-    if !matches!(mode, "soft" | "mixed" | "hard") {
-        return Err(
-            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "reset-mode")
-        );
-    }
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let (branch, head) = ensure_history_snapshot(&toplevel, expected_head)?;
-    let target = run_git(
-        &toplevel,
-        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
-    )
-    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
-    if !is_safe_hash(&target) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
-    }
-
-    if mode == "soft" {
-        // Ссылка двигается атомарно, индекс и рабочая папка не трогаются вовсе:
-        // параллельный `git add` в терминале ничего не теряет.
-        return move_branch(
-            &toplevel,
-            &branch,
-            "modelcrew: reset branch to commit",
-            &target,
-            &head,
-        );
-    }
-    let flag = format!("--{mode}");
-    run_git(
-        &toplevel,
-        &["reset", &flag, "--quiet", &format!("{target}^{{commit}}")],
-    )
-    .map(|_| ())
-}
-
-// Склеивает коммит с его родителем. Дерево результата совпадает с деревом
-// цели, поэтому все потомки просто перецепляются и конфликтов не бывает.
-// mode: "squash" — сообщения объединяются, "fixup" — остаётся родительское.
-pub fn squash_commit(
-    root: &Path,
-    hash: &str,
-    mode: &str,
-    expected_head: &str,
-) -> CommandResult<()> {
-    if !is_safe_hash(hash) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
-    }
-    if !matches!(mode, "squash" | "fixup") {
-        return Err(
-            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "squash-mode")
-        );
-    }
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let (branch, head) = ensure_history_snapshot(&toplevel, expected_head)?;
-    let target = run_git(
-        &toplevel,
-        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
-    )
-    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
-    let descendants = editable_chain(&toplevel, &target, &head)?;
-
-    let target_meta = read_commit_meta(&toplevel, &target)?;
-    let [parent] = target_meta.parents.as_slice() else {
-        // Корневой коммит склеивать не с чем.
-        return Err(
-            CommandError::new(ErrorCode::GitCommandFailed).with_context("reason", "parent-count")
-        );
-    };
-    let local_email = run_git(&toplevel, &["config", "user.email"])
-        .map(|raw| String::from_utf8_lossy(&raw).trim().to_lowercase())
-        .unwrap_or_default();
-    // Родитель не входит в цепочку от цели до HEAD, но именно он остаётся жить
-    // после склейки, поэтому проверяем его теми же правилами.
-    ensure_rewritable(&toplevel, parent, &local_email)?;
-    let parent_meta = read_commit_meta(&toplevel, parent)?;
-
-    let mut message = parent_meta.message.clone();
-    if mode == "squash" {
-        while message.last() == Some(&b'\n') {
-            message.pop();
-        }
-        message.extend_from_slice(b"\n\n");
-        message.extend_from_slice(&target_meta.message);
-    }
-    // Дерево берём у цели: оно уже содержит изменения обоих коммитов.
-    let squashed = create_commit(
-        &toplevel,
-        &target_meta.tree,
-        &parent_meta.parents,
-        &parent_meta,
-        &message,
-    )?;
-    let tip = replay_descendants(&toplevel, &descendants, squashed)?;
-    move_branch(
-        &toplevel,
-        &branch,
-        "modelcrew: squash commit into its parent",
-        &tip,
-        &head,
-    )
-}
-
 // Трёхсторонний merge без рабочей папки: возвращает дерево «ours + правки
 // theirs относительно base». Это семантика cherry-pick, но ни индекс, ни файлы
 // на диске не затрагиваются, поэтому параллельная работа в терминале цела.
@@ -546,104 +401,7 @@ pub fn drop_commit(root: &Path, hash: &str, expected_head: &str) -> CommandResul
     .map(|_| ())
 }
 
-// ---------- Сравнение двух состояний ----------
-
-// Сторона сравнения: конкретный коммит или, если хеш не задан, текущее рабочее
-// дерево. Суффикс `^{commit}` не даёт git выбрать одноимённую ветку или тег.
-fn compare_side(hash: Option<&str>) -> CommandResult<Option<String>> {
-    match hash {
-        None => Ok(None),
-        Some(hash) if is_safe_hash(hash) => Ok(Some(format!("{hash}^{{commit}}"))),
-        Some(hash) => {
-            Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash))
-        }
-    }
-}
-
-// Файлы, различающиеся между двумя коммитами (или коммитом и рабочей папкой).
-pub fn compare_files(
-    root: &Path,
-    from: &str,
-    to: Option<&str>,
-) -> CommandResult<Vec<GitCommitFile>> {
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let from = compare_side(Some(from))?.unwrap_or_default();
-    let to = compare_side(to)?;
-    let mut args = vec!["diff", "--numstat", "-z", from.as_str()];
-    if let Some(to) = to.as_deref() {
-        args.push(to);
-    }
-    let raw = run_git(&toplevel, &args)?;
-    Ok(parse_numstat(&raw)
-        .into_iter()
-        .map(|(path, additions, deletions)| GitCommitFile {
-            path,
-            additions,
-            deletions,
-        })
-        .collect())
-}
-
-pub fn compare_file_diff(
-    root: &Path,
-    from: &str,
-    to: Option<&str>,
-    path: &str,
-) -> CommandResult<GitFileDiff> {
-    if !is_safe_repo_path(path) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
-    }
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let from = compare_side(Some(from))?.unwrap_or_default();
-    let to = compare_side(to)?;
-    let mut args = vec!["diff", from.as_str()];
-    if let Some(to) = to.as_deref() {
-        args.push(to);
-    }
-    args.push("--");
-    args.push(path);
-    let raw = run_git(&toplevel, &args)?;
-    Ok(diff_payload(path, &raw, true))
-}
-
-#[tauri::command]
-pub async fn git_compare_files(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    from: String,
-    to: Option<String>,
-) -> CommandResult<Vec<GitCommitFile>> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || compare_files(&root, &from, to.as_deref()))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
-#[tauri::command]
-pub async fn git_compare_file_diff(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    from: String,
-    to: Option<String>,
-    path: String,
-) -> CommandResult<GitFileDiff> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        compare_file_diff(&root, &from, to.as_deref(), &path)
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
-// ---------- Теги и патчи ----------
+// ---------- Теги ----------
 
 // Имя тега уходит в `git tag` позиционным аргументом, поэтому ведущий дефис
 // отсекаем до вызова: иначе имя стало бы опцией команды.
@@ -654,39 +412,6 @@ pub(crate) fn validated_tag_ref(root: &Path, name: &str) -> CommandResult<String
             .with_context("tag", name));
     }
     validate_namespaced_ref(root, "tags", name, "tag-invalid")
-}
-
-// Создаёт локальный тег на коммите. С сообщением тег будет аннотированным
-// (собственный объект с автором и датой), без него — лёгким указателем.
-pub fn create_tag(root: &Path, name: &str, hash: &str, message: Option<&str>) -> CommandResult<()> {
-    if !is_safe_hash(hash) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
-    }
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let reference = validated_tag_ref(&toplevel, name)?;
-    if run_git(&toplevel, &["show-ref", "--verify", "--quiet", &reference]).is_ok() {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed)
-            .with_context("reason", "tag-exists")
-            .with_context("tag", name));
-    }
-    let commit = run_git(
-        &toplevel,
-        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
-    )
-    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
-    if !is_safe_hash(&commit) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
-    }
-    match message.map(str::trim).filter(|text| !text.is_empty()) {
-        Some(text) => {
-            validated_message(text)?;
-            run_git(&toplevel, &["tag", "-a", "-m", text, name, &commit])
-        }
-        None => run_git(&toplevel, &["tag", name, &commit]),
-    }
-    .map(|_| ())
 }
 
 // Удаляет локальный тег. Тег на сервере не трогаем: это уже изменение общего
@@ -719,57 +444,6 @@ pub fn delete_tag(root: &Path, name: &str) -> CommandResult<()> {
     .map(|_| ())
 }
 
-// Патч коммита в формате `git format-patch` — его можно применить через
-// `git am`. У merge-коммита правок относительно одного родителя нет, поэтому
-// для него отдаём обычный `git show`.
-pub fn commit_patch(root: &Path, hash: &str) -> CommandResult<String> {
-    if !is_safe_hash(hash) {
-        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("hash", hash));
-    }
-    let Some(toplevel) = repo_toplevel(root)? else {
-        return Err(CommandError::new(ErrorCode::GitNotARepository));
-    };
-    let commit = run_git(
-        &toplevel,
-        &["rev-parse", "--verify", &format!("{hash}^{{commit}}")],
-    )
-    .map(|raw| String::from_utf8_lossy(&raw).trim().to_owned())?;
-    let revision = format!("{commit}^{{commit}}");
-    // format-patch по умолчанию пропускает merge-коммиты и молча выдаёт патч
-    // предыдущего обычного коммита, поэтому merge отправляем сразу в `show`.
-    // `--root` нужен, иначе у самого первого коммита патча бы не оказалось.
-    let raw = if read_commit_meta(&toplevel, &commit)?.parents.len() > 1 {
-        run_git(
-            &toplevel,
-            &["show", "--patch", "--format=fuller", &revision],
-        )?
-    } else {
-        run_git(
-            &toplevel,
-            &["format-patch", "-1", "--root", "--stdout", &revision],
-        )?
-    };
-    Ok(String::from_utf8_lossy(&raw).into_owned())
-}
-
-#[tauri::command]
-pub async fn git_create_tag(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    name: String,
-    hash: String,
-    message: Option<String>,
-) -> CommandResult<()> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        create_tag(&root, &name, &hash, message.as_deref())
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
 #[tauri::command]
 pub async fn git_delete_tag(
     window: tauri::WebviewWindow,
@@ -780,108 +454,6 @@ pub async fn git_delete_tag(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     tauri::async_runtime::spawn_blocking(move || delete_tag(&root, &name))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
-#[tauri::command]
-pub async fn git_commit_patch(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    hash: String,
-) -> CommandResult<String> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || commit_patch(&root, &hash))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
-// Сохраняет патч в выбранный пользователем файл. Возвращает false, если диалог
-// закрыли без выбора — это не ошибка и показывать её не нужно.
-#[tauri::command]
-pub async fn git_save_commit_patch(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    hash: String,
-    file_name: String,
-) -> CommandResult<bool> {
-    use tauri_plugin_dialog::DialogExt;
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    let patch = {
-        let root = root.clone();
-        let hash = hash.clone();
-        tauri::async_runtime::spawn_blocking(move || commit_patch(&root, &hash))
-            .await
-            .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))??
-    };
-    let Some(target) = window
-        .dialog()
-        .file()
-        .set_file_name(file_name)
-        .add_filter("patch", &["patch"])
-        .blocking_save_file()
-    else {
-        return Ok(false);
-    };
-    let path = target
-        .into_path()
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?;
-    std::fs::write(path, patch)
-        .map(|_| true)
-        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))
-}
-
-#[tauri::command]
-pub async fn git_amend_commit(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    expected_head: String,
-    message: Option<String>,
-) -> CommandResult<()> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        amend_commit(&root, &expected_head, message.as_deref())
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
-#[tauri::command]
-pub async fn git_reset_to_commit(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    hash: String,
-    mode: String,
-    expected_head: String,
-) -> CommandResult<()> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        reset_to_commit(&root, &hash, &mode, &expected_head)
-    })
-    .await
-    .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
-}
-
-#[tauri::command]
-pub async fn git_squash_commit(
-    window: tauri::WebviewWindow,
-    roots: tauri::State<'_, WorkspaceRoots>,
-    workspace_id: String,
-    hash: String,
-    mode: String,
-    expected_head: String,
-) -> CommandResult<()> {
-    super::ensure_main_window(&window)?;
-    let root = roots.resolve(&workspace_id)?;
-    tauri::async_runtime::spawn_blocking(move || squash_commit(&root, &hash, &mode, &expected_head))
         .await
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }

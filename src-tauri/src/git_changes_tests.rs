@@ -632,10 +632,6 @@ fn panel_never_touches_a_file_outside_the_repository() {
             "commit diff {path}"
         );
         assert!(
-            compare_file_diff(root, &head, None, path).is_err(),
-            "compare {path}"
-        );
-        assert!(
             list_log(
                 root,
                 20,
@@ -717,16 +713,6 @@ fn revision_arguments_must_be_hashes_not_git_expressions() {
             commit_file_diff(root, hash, "a.txt").is_err(),
             "diff {hash}"
         );
-        assert!(commit_patch(root, hash).is_err(), "patch {hash}");
-        assert!(compare_files(root, hash, None).is_err(), "compare {hash}");
-        assert!(
-            compare_file_diff(root, hash, None, "a.txt").is_err(),
-            "compare diff {hash}"
-        );
-        assert!(
-            compare_files(root, &head, Some(hash)).is_err(),
-            "compare to {hash}"
-        );
         assert!(
             commit_action(root, "checkout", hash, None).is_err(),
             "checkout {hash}"
@@ -739,16 +725,7 @@ fn revision_arguments_must_be_hashes_not_git_expressions() {
             commit_action(root, "revert", hash, None).is_err(),
             "revert {hash}"
         );
-        assert!(create_tag(root, "v1", hash, None).is_err(), "tag {hash}");
         assert!(reword_commit(root, hash, "new").is_err(), "reword {hash}");
-        assert!(
-            reset_to_commit(root, hash, "hard", &head).is_err(),
-            "reset {hash}"
-        );
-        assert!(
-            squash_commit(root, hash, "squash", &head).is_err(),
-            "squash {hash}"
-        );
         assert!(drop_commit(root, hash, &head).is_err(), "drop {hash}");
     }
 
@@ -1016,12 +993,6 @@ fn read_only_panel_entry_points_never_run_repository_hooks() {
         .unwrap()
         .diff
         .contains("+one"));
-    assert!(commit_patch(root, &head).unwrap().contains("+one"));
-    assert_eq!(compare_files(root, &head, None).unwrap().len(), 1);
-    assert!(compare_file_diff(root, &head, None, "a.txt")
-        .unwrap()
-        .diff
-        .contains("+two"));
 
     for name in names {
         assert!(
@@ -1093,10 +1064,6 @@ fn an_embedded_nul_in_a_path_never_reaches_another_file() {
         assert!(
             commit_file_diff(root, &head, path).is_err(),
             "commit diff {path:?}"
-        );
-        assert!(
-            compare_file_diff(root, &head, None, path).is_err(),
-            "compare {path:?}"
         );
         assert!(
             write_repo_file(root, path, "OVERWRITTEN").is_err(),
