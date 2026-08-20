@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computeCommitGraph, type GraphInput } from "./commitGraph";
+import {
+  computeCommitGraph,
+  traceCurrentBranch,
+  type GraphInput,
+} from "./commitGraph";
 import {
   GRAPH_LOCAL_REF_COLOR,
   GRAPH_REMOTE_REF_COLOR,
@@ -366,6 +370,90 @@ describe("computeCommitGraph", () => {
       checked(commits);
     }
   }, 10_000);
+});
+
+describe("traceCurrentBranch", () => {
+  const trace = (commits: GraphInput[]) =>
+    traceCurrentBranch(checked(commits), commits);
+
+  it("follows the first-parent chain down from HEAD", () => {
+    const trail = trace([
+      { hash: "a", parents: ["b"], isHead: true },
+      { hash: "b", parents: ["c"] },
+      { hash: "c", parents: [] },
+    ]);
+
+    expect(trail).toEqual([
+      { through: null, top: null, bottom: 0 },
+      { through: null, top: 0, bottom: 0 },
+      { through: null, top: 0, bottom: null },
+    ]);
+  });
+
+  it("marks nothing above HEAD", () => {
+    // * x(a)   вершина соседней ветки — она нарисована выше, но не текущая
+    // * a(b)   <- HEAD
+    // * b()
+    const trail = trace([
+      { hash: "x", parents: ["a"] },
+      { hash: "a", parents: ["b"], isHead: true },
+      { hash: "b", parents: [] },
+    ]);
+
+    expect(trail).toEqual([
+      { through: null, top: null, bottom: null },
+      { through: null, top: null, bottom: 0 },
+      { through: null, top: 0, bottom: null },
+    ]);
+  });
+
+  it("passes through rows that belong to other branches", () => {
+    // * a(c)   <- HEAD
+    // | * b(c)
+    // |/
+    // * c()
+    const trail = trace([
+      { hash: "a", parents: ["c"], isHead: true },
+      { hash: "b", parents: ["c"] },
+      { hash: "c", parents: [] },
+    ]);
+
+    expect(trail).toEqual([
+      { through: null, top: null, bottom: 0 },
+      { through: 0, top: null, bottom: null },
+      { through: null, top: 0, bottom: null },
+    ]);
+  });
+
+  it("keeps to the first parent at a merge", () => {
+    // *   a(b,d)  <- HEAD
+    // |\
+    // | * d(b)
+    // |/
+    // * b()
+    const trail = trace([
+      { hash: "a", parents: ["b", "d"], isHead: true },
+      { hash: "d", parents: ["b"] },
+      { hash: "b", parents: [] },
+    ]);
+
+    // Второй родитель уводит в сторону: линия ветки идёт только за первым.
+    expect(trail[0]).toEqual({ through: null, top: null, bottom: 0 });
+    expect(trail[1]).toEqual({ through: 0, top: null, bottom: null });
+    expect(trail[2]).toEqual({ through: null, top: 0, bottom: null });
+  });
+
+  it("marks nothing when HEAD is outside the loaded history", () => {
+    const trail = trace([
+      { hash: "a", parents: ["b"] },
+      { hash: "b", parents: [] },
+    ]);
+
+    expect(trail).toEqual([
+      { through: null, top: null, bottom: null },
+      { through: null, top: null, bottom: null },
+    ]);
+  });
 });
 
 function checked(

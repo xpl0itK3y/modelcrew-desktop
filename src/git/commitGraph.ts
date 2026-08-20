@@ -46,6 +46,17 @@ export type GraphRow = {
   lanesBelow: GraphLane[];
 };
 
+/// Рёбра строки, лежащие на линии текущей ветки, — по индексу в своём массиве.
+///
+/// Больше одного ребра каждого рода на строке быть не может: дорожка либо
+/// проходит мимо коммита, либо входит в его точку и выходит из неё к первому
+/// родителю. Поэтому здесь индекс, а не список.
+export type GraphTrailRow = {
+  through: number | null;
+  top: number | null;
+  bottom: number | null;
+};
+
 export type GraphInput = {
   hash: string;
   parents: string[];
@@ -98,6 +109,54 @@ function inferUpstreamBranch(
   // же именем уже отсеяна точным сравнением.
   const suffix = `/${currentBranch}`;
   return [...refs].find((ref) => ref.endsWith(suffix));
+}
+
+/// Линия текущей ветки: цепочка первых родителей вниз от HEAD.
+///
+/// Цвет дорожки на этот вопрос не отвечает: у ветки и её upstream он один и
+/// тот же, а после перехода на другую ветку прежняя дорожка остаётся на месте
+/// и того же цвета. Меняется только то, откуда идёт HEAD, — её и ведём.
+///
+/// Выше HEAD в графе лежат коммиты соседних веток: там подсвечивать нечего,
+/// поэтому обход молчит, пока не встретит его строку. Если дорожка по пути
+/// схлопнулась с соседней (сходятся к общему родителю), ведение прекращается —
+/// лучше оборвать линию, чем увести её на чужую ветку.
+export function traceCurrentBranch(
+  rows: readonly GraphRow[],
+  commits: readonly GraphInput[],
+): GraphTrailRow[] {
+  const trail: GraphTrailRow[] = rows.map(() => ({
+    through: null,
+    top: null,
+    bottom: null,
+  }));
+
+  // Колонка дорожки, уносящей текущую ветку вниз из предыдущей строки.
+  let col: number | null = null;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const mark = trail[index];
+    const from = col;
+    if (from === null) {
+      if (!commits[index]?.isHead) {
+        continue;
+      }
+    } else {
+      const enters = row.top.findIndex((edge) => edge.fromCol === from);
+      if (enters === -1) {
+        const passes = row.through.findIndex((edge) => edge.fromCol === from);
+        mark.through = passes === -1 ? null : passes;
+        col = passes === -1 ? null : row.through[passes].toCol;
+        continue;
+      }
+      mark.top = enters;
+    }
+    const leaves = row.bottom.findIndex((edge) => edge.parentIndex === 0);
+    mark.bottom = leaves === -1 ? null : leaves;
+    col = leaves === -1 ? null : row.bottom[leaves].toCol;
+  }
+
+  return trail;
 }
 
 export function computeCommitGraph(

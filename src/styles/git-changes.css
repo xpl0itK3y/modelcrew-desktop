@@ -1945,10 +1945,26 @@
   filter: brightness(1.18);
 }
 
-/* Текущая ветка — некликабельная отметка с обводкой. */
+/* Текущая ветка отвечает на вопрос «где я сейчас», а не просто называет ссылку:
+   сплошная заливка вместо приглушённой и точка-маркер перед именем. Соседние
+   бейджи остаются полупрозрачными, поэтому она видна одним взглядом даже там,
+   где на строке несколько веток. Кликать по ней нечего — переходить некуда. */
 .git-commit-ref.is-current {
   cursor: default;
-  box-shadow: inset 0 0 0 1px currentColor;
+  background: var(--mc-accent);
+  color: var(--mc-bg);
+  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+}
+
+.git-commit-ref.is-current::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
 }
 
 .git-commit-ref.is-current:hover {

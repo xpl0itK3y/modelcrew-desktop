@@ -22,6 +22,13 @@ export const GRAPH_ROW_HEIGHT = 22;
 export const GRAPH_CURVE_RADIUS = 5;
 export const GRAPH_STROKE_WIDTH = 1;
 
+// Линия текущей ветки. Толщина отличает её от соседних дорожек, ореол —
+// поднимает над ними: перекрашивать граф ради «вы здесь» нельзя, цвет дорожки
+// уже занят смыслом (ветка и её upstream).
+export const GRAPH_CURRENT_STROKE_WIDTH = 2;
+export const GRAPH_CURRENT_HALO_WIDTH = 5;
+export const GRAPH_CURRENT_HALO_OPACITY = 0.28;
+
 export const GRAPH_DOT_RADIUS = 5;
 export const GRAPH_NODE_STROKE_WIDTH = 2;
 export const GRAPH_MERGE_OUTER_RADIUS = 6;
