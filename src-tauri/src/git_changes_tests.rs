@@ -1224,3 +1224,196 @@ fn summary_does_not_follow_a_symlinked_directory_or_open_a_pipe() {
     // Симлинк на каталог — не редактируемый файл.
     assert!(read_repo_file(root, "dirlink").is_err());
 }
+
+// Готовит репозиторий, застрявший на конфликте слияния: файл «общий.txt»
+// разошёлся в main и в side, обе ветки его правили.
+fn repo_in_conflicted_merge(root: &Path) -> impl Fn(&[&str]) -> Vec<u8> + '_ {
+    let git = history_repo(root);
+    std::fs::write(root.join("общий.txt"), "исходная\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "основа"]);
+    git(&["checkout", "--quiet", "-b", "side"]);
+    std::fs::write(root.join("общий.txt"), "из side\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правка в side"]);
+    git(&["checkout", "--quiet", "main"]);
+    std::fs::write(root.join("общий.txt"), "из main\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правка в main"]);
+    let merge = Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        !merge.status.success(),
+        "слияние должно упереться в конфликт"
+    );
+    git
+}
+
+fn reason_of(error: &CommandError) -> &str {
+    error.context.get("reason").map_or("", String::as_str)
+}
+
+#[test]
+fn commit_refuses_while_conflict_markers_are_still_in_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = repo_in_conflicted_merge(root);
+
+    // Состояние видно снаружи: и отдельной проверкой, и в сводке панели.
+    assert_eq!(repository_operation(root).unwrap(), Some("merge"));
+    let summary = collect_summary(root).unwrap();
+    assert_eq!(summary.operation, Some("merge"));
+    assert_eq!(by_path_in(&summary, "общий.txt").status, "conflicted");
+    assert_eq!(unmerged_paths(root).unwrap(), vec!["общий.txt".to_owned()]);
+
+    // Без проверки `git add -A` проиндексировал бы файл с маркерами, а
+    // `git commit` закрыл бы им слияние — снаружи как будто всё удалось.
+    let refused = commit_all(root, "слить").unwrap_err();
+    assert_eq!(refused.code, ErrorCode::GitCommandFailed);
+    assert_eq!(reason_of(&refused), "unresolved-conflicts");
+    assert_eq!(
+        refused.context.get("path").map(String::as_str),
+        Some("общий.txt")
+    );
+
+    // Слияние не тронуто: коммита нет, MERGE_HEAD на месте.
+    assert_eq!(repository_operation(root).unwrap(), Some("merge"));
+    assert_eq!(
+        subjects(root).first().map(String::as_str),
+        Some("правка в main")
+    );
+
+    // Развели руками — и тот же коммит проходит, завершая слияние.
+    std::fs::write(root.join("общий.txt"), "из main и из side\n").unwrap();
+    commit_all(root, "слить").unwrap();
+    assert_eq!(repository_operation(root).unwrap(), None);
+    assert_eq!(collect_summary(root).unwrap().operation, None);
+    let parents = String::from_utf8_lossy(&git(&["rev-list", "--parents", "-n1", "HEAD"]))
+        .split_whitespace()
+        .count();
+    assert_eq!(parents, 3, "коммит слияния: сам и два родителя");
+    let stored = String::from_utf8_lossy(&git(&["show", "HEAD:общий.txt"])).into_owned();
+    assert!(
+        !stored.contains("<<<<<<<"),
+        "маркеры не должны попасть в историю"
+    );
+}
+
+#[test]
+fn merge_is_finished_by_a_commit_and_undone_by_abort() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = repo_in_conflicted_merge(root);
+    let before = head_of(&git);
+
+    // У слияния своего «продолжить» нет: его завершает обычный коммит.
+    let refused = continue_operation(root).unwrap_err();
+    assert_eq!(reason_of(&refused), "operation-needs-commit");
+
+    abort_operation(root).unwrap();
+    assert_eq!(repository_operation(root).unwrap(), None);
+    assert_eq!(head_of(&git), before, "отмена возвращает вершину на место");
+    assert!(collect_summary(root).unwrap().files.is_empty());
+
+    // Отменять больше нечего — и это не выдаётся за сбой git.
+    let stale = abort_operation(root).unwrap_err();
+    assert_eq!(reason_of(&stale), "no-operation");
+}
+
+#[test]
+fn rebase_continues_only_once_the_conflict_is_out_of_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::write(root.join("общий.txt"), "исходная\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "основа"]);
+    git(&["checkout", "--quiet", "-b", "feat"]);
+    std::fs::write(root.join("общий.txt"), "из feat\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правка в feat"]);
+    git(&["checkout", "--quiet", "main"]);
+    std::fs::write(root.join("общий.txt"), "из main\n").unwrap();
+    git(&["commit", "--quiet", "-am", "правка в main"]);
+    git(&["checkout", "--quiet", "feat"]);
+    let rebase = Command::new("git")
+        .args(["rebase", "main"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        !rebase.status.success(),
+        "перенос должен упереться в конфликт"
+    );
+
+    assert_eq!(repository_operation(root).unwrap(), Some("rebase"));
+    assert_eq!(collect_summary(root).unwrap().operation, Some("rebase"));
+
+    let refused = continue_operation(root).unwrap_err();
+    assert_eq!(reason_of(&refused), "unresolved-conflicts");
+    assert_eq!(repository_operation(root).unwrap(), Some("rebase"));
+
+    std::fs::write(root.join("общий.txt"), "из main и из feat\n").unwrap();
+    continue_operation(root).unwrap();
+    // Ссылка REBASE_HEAD переживает `--continue` и лежит до следующего
+    // переноса. Считать её признаком незавершённости нельзя: репозиторий
+    // остался бы «вечно занятым» после каждого разрешённого конфликта.
+    assert!(root.join(".git/REBASE_HEAD").exists());
+    assert_eq!(repository_operation(root).unwrap(), None);
+    assert!(!repository_operation_in_progress(root).unwrap());
+    assert_eq!(
+        subjects(root),
+        vec![
+            "правка в feat".to_owned(),
+            "правка в main".to_owned(),
+            "основа".to_owned()
+        ],
+        "коммит feat лёг поверх main"
+    );
+}
+
+#[test]
+fn a_settled_repository_reports_no_operation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::write(root.join("a.txt"), "раз\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "первый"]);
+
+    assert_eq!(repository_operation(root).unwrap(), None);
+    assert!(!repository_operation_in_progress(root).unwrap());
+    assert!(unmerged_paths(root).unwrap().is_empty());
+    assert!(ensure_conflicts_resolved(root).is_ok());
+
+    // Успешное слияние и успешный перенос не оставляют за собой меток —
+    // иначе баннер о незавершённой операции повис бы навсегда.
+    git(&["checkout", "--quiet", "-b", "side"]);
+    std::fs::write(root.join("b.txt"), "два\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "второй"]);
+    git(&["checkout", "--quiet", "main"]);
+    git(&["merge", "--quiet", "--no-edit", "side"]);
+    assert_eq!(repository_operation(root).unwrap(), None);
+    git(&["rebase", "--quiet", "side"]);
+    assert_eq!(repository_operation(root).unwrap(), None);
+}
+
+#[test]
+fn a_file_that_merely_mentions_a_marker_is_not_taken_for_a_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    // Текст про конфликты — обычное дело в документации. Разбирать её как
+    // незавершённое слияние нельзя: закрытого маркера тут нет.
+    std::fs::write(
+        root.join("docs.md"),
+        "Строка «<<<<<<< HEAD» означает начало конфликта.\n",
+    )
+    .unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "документация"]);
+
+    assert!(ensure_conflicts_resolved(root).is_ok());
+    commit_all(root, "пустой коммит не пройдёт").unwrap_err();
+}

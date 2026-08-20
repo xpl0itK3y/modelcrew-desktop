@@ -53,6 +53,11 @@ pub struct GitChangesSummary {
     pub ahead: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<i64>,
+    // Незавершённые слияние, перенос, cherry-pick или откат. Про них знал
+    // только бэкенд, и интерфейс оставлял пользователя в этом состоянии без
+    // единого слова — хотя приложение само туда и приводит.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<&'static str>,
     pub files: Vec<GitChangedFile>,
 }
 
@@ -67,6 +72,7 @@ impl GitChangesSummary {
             previous_branch: None,
             ahead: None,
             behind: None,
+            operation: None,
             files: Vec::new(),
         }
     }
@@ -142,24 +148,93 @@ pub(crate) fn is_safe_hash(hash: &str) -> bool {
     (4..=64).contains(&hash.len()) && hash.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
-pub(crate) fn git_internal_path_exists(root: &Path, name: &str) -> CommandResult<bool> {
-    let raw = run_git(root, &["rev-parse", "--git-path", name])?;
-    let path = PathBuf::from(String::from_utf8_lossy(&raw).trim().to_owned());
-    Ok(if path.is_absolute() {
-        path.exists()
-    } else {
-        root.join(path).exists()
-    })
+// Незавершённая операция узнаётся по служебным файлам в каталоге git. Все они
+// принадлежат рабочему дереву, а не общему репозиторию, поэтому у связанного
+// worktree свои: `--absolute-git-dir` возвращает именно его каталог.
+//
+// Порядок важен: rebase проверяем первым. Перенос коммитов внутри себя
+// пользуется тем же механизмом, что и cherry-pick, и оставляет обе метки.
+//
+// REBASE_HEAD в списке нет намеренно, хотя напрашивается. Это не признак
+// незавершённости, а ссылка на коммит, который переносили, и после
+// `rebase --continue` она остаётся лежать до следующего переноса. Проверка по
+// ней держала бы репозиторий «вечно занятым»: правка истории, pull и push
+// отказывали бы после каждого разрешённого вручную конфликта. Идёт ли перенос
+// сейчас, честно говорят только каталоги rebase-merge и rebase-apply.
+const OPERATION_MARKERS: [(&str, &str); 6] = [
+    ("rebase-merge", "rebase"),
+    ("rebase-apply", "rebase"),
+    ("MERGE_HEAD", "merge"),
+    ("CHERRY_PICK_HEAD", "cherryPick"),
+    ("REVERT_HEAD", "revert"),
+    ("sequencer", "cherryPick"),
+];
+
+pub(crate) fn repository_operation(root: &Path) -> CommandResult<Option<&'static str>> {
+    let raw = run_git(root, &["rev-parse", "--absolute-git-dir"])?;
+    let dir = PathBuf::from(String::from_utf8_lossy(&raw).trim().to_owned());
+    Ok(OPERATION_MARKERS
+        .iter()
+        .find(|(name, _)| dir.join(name).exists())
+        .map(|(_, kind)| *kind))
 }
 
 pub(crate) fn repository_operation_in_progress(root: &Path) -> CommandResult<bool> {
-    Ok(git_internal_path_exists(root, "MERGE_HEAD")?
-        || git_internal_path_exists(root, "CHERRY_PICK_HEAD")?
-        || git_internal_path_exists(root, "REVERT_HEAD")?
-        || git_internal_path_exists(root, "REBASE_HEAD")?
-        || git_internal_path_exists(root, "rebase-merge")?
-        || git_internal_path_exists(root, "rebase-apply")?
-        || git_internal_path_exists(root, "sequencer")?)
+    Ok(repository_operation(root)?.is_some())
+}
+
+// Пути, по которым слияние ещё не сведено: в индексе у них несколько стадий.
+// Формат `ls-files --unmerged -z` — «<режим> <хеш> <стадия>\t<путь>\0», путь
+// повторяется для каждой стадии, поэтому одинаковые отбрасываем.
+pub(crate) fn unmerged_paths(root: &Path) -> CommandResult<Vec<String>> {
+    let raw = run_git(root, &["ls-files", "--unmerged", "-z"])?;
+    let mut paths: Vec<String> = Vec::new();
+    for entry in raw.split(|byte| *byte == 0) {
+        let Some(tab) = entry.iter().position(|byte| *byte == b'\t') else {
+            continue;
+        };
+        let path = String::from_utf8_lossy(&entry[tab + 1..]).into_owned();
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
+}
+
+// Явной отметки «конфликт разрешён» в панели нет — вместо неё смотрим сам
+// файл. Открывающий и закрывающий маркеры вместе встречаются в осмысленном
+// тексте редко, а требование обоих сразу отсекает случайные совпадения.
+fn conflict_markers_remain(root: &Path, path: &str) -> bool {
+    let Ok(content) = std::fs::read(root.join(path)) else {
+        // Файла нет вовсе — конфликт «удалён у одной стороны», разрешать
+        // в тексте нечего.
+        return false;
+    };
+    let mut opened = false;
+    let mut closed = false;
+    for line in content.split(|byte| *byte == b'\n') {
+        opened = opened || line.starts_with(b"<<<<<<< ");
+        closed = closed || line.starts_with(b">>>>>>> ");
+    }
+    opened && closed
+}
+
+// `git add -A` не разбирает конфликты: файл с маркерами он проиндексирует как
+// обычный, а `git commit` посреди слияния закроет его merge-коммитом и уберёт
+// MERGE_HEAD. Со стороны это выглядит как удачное слияние, и маркеры уезжают
+// в историю. Поэтому всё, что индексирует всё подряд, сначала спрашивает тут.
+pub(crate) fn ensure_conflicts_resolved(root: &Path) -> CommandResult<()> {
+    let pending: Vec<String> = unmerged_paths(root)?
+        .into_iter()
+        .filter(|path| conflict_markers_remain(root, path))
+        .collect();
+    let Some(first) = pending.first() else {
+        return Ok(());
+    };
+    Err(CommandError::new(ErrorCode::GitCommandFailed)
+        .with_context("reason", "unresolved-conflicts")
+        .with_context("path", first)
+        .with_context("count", pending.len()))
 }
 
 // ---------- Парсер `git status --porcelain=v2 --branch -z` ----------
@@ -451,6 +526,7 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
         previous_branch: previous_branch.flatten(),
         ahead: status.ahead,
         behind: status.behind,
+        operation: repository_operation(&toplevel)?,
         files,
     })
 }
@@ -682,6 +758,9 @@ fn commit_all_with_identity(
     let Some(toplevel) = repo_toplevel(root)? else {
         return Err(CommandError::new(ErrorCode::GitNotARepository));
     };
+    // Коммит посреди слияния — законный способ его завершить, поэтому саму
+    // операцию не запрещаем. Отказываем только пока конфликты не сведены.
+    ensure_conflicts_resolved(&toplevel)?;
     run_git(&toplevel, &["add", "-A"])?;
     if let Some(identity) = identity {
         let environment = [
@@ -694,6 +773,59 @@ fn commit_all_with_identity(
     } else {
         run_git(&toplevel, &["commit", "-m", message])?;
     }
+    Ok(())
+}
+
+// ---------- Незавершённая операция: продолжить или отменить ----------
+
+// Имя подкоманды git для операции, которую видит пользователь.
+fn operation_command(operation: &str) -> &'static str {
+    match operation {
+        "rebase" => "rebase",
+        "cherryPick" => "cherry-pick",
+        "revert" => "revert",
+        _ => "merge",
+    }
+}
+
+fn current_operation(root: &Path) -> CommandResult<(PathBuf, &'static str)> {
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Err(CommandError::new(ErrorCode::GitNotARepository));
+    };
+    match repository_operation(&toplevel)? {
+        Some(operation) => Ok((toplevel, operation)),
+        // Пока фронтенд собирался с мыслями, операцию могли завершить в
+        // терминале. Отдельная причина, чтобы не выдавать это за сбой git.
+        None => {
+            Err(CommandError::new(ErrorCode::GitCommandFailed)
+                .with_context("reason", "no-operation"))
+        }
+    }
+}
+
+pub fn continue_operation(root: &Path) -> CommandResult<()> {
+    let (toplevel, operation) = current_operation(root)?;
+    // Слияние завершается обычным коммитом: у него есть поле сообщения и своя
+    // личность автора, и повторять это отдельной кнопкой незачем.
+    if operation == "merge" {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed)
+            .with_context("reason", "operation-needs-commit"));
+    }
+    ensure_conflicts_resolved(&toplevel)?;
+    run_git(&toplevel, &["add", "-A"])?;
+    // Продолжение открыло бы редактор сообщения. Своего редактора у панели
+    // нет, а git ждал бы ввода вечно; `true` принимает заготовку и выходит.
+    run_git_with_env(
+        &toplevel,
+        &[operation_command(operation), "--continue"],
+        &[("GIT_EDITOR", "true")],
+    )?;
+    Ok(())
+}
+
+pub fn abort_operation(root: &Path) -> CommandResult<()> {
+    let (toplevel, operation) = current_operation(root)?;
+    run_git(&toplevel, &[operation_command(operation), "--abort"])?;
     Ok(())
 }
 
@@ -747,6 +879,32 @@ pub async fn git_commit(
     })
     .await
     .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_continue_operation(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || continue_operation(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_abort_operation(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || abort_operation(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
 
 #[tauri::command]

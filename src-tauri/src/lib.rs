@@ -46,8 +46,9 @@ use git_branches::{
     git_rename_branch, git_switch_branch,
 };
 use git_changes::{
-    git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit, git_file_diff,
-    git_read_file, git_revert_file, git_write_file, GitWatchState,
+    git_abort_operation, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
+    git_continue_operation, git_file_diff, git_read_file, git_revert_file, git_write_file,
+    GitWatchState,
 };
 use git_history::{
     git_amend_commit, git_commit_action, git_commit_patch, git_compare_file_diff,
@@ -978,6 +979,8 @@ pub fn run() {
             git_changes_watch,
             git_changes_unwatch,
             git_commit,
+            git_continue_operation,
+            git_abort_operation,
             git_revert_file,
             git_read_file,
             git_write_file,
@@ -1099,6 +1102,7 @@ mod tests {
         "app_set_badge",
         "app_set_locale",
         "crew_claims",
+        "git_abort_operation",
         "git_amend_commit",
         "git_bash_install",
         "git_bash_status",
@@ -1113,6 +1117,7 @@ mod tests {
         "git_commit_patch",
         "git_compare_file_diff",
         "git_compare_files",
+        "git_continue_operation",
         "git_create_branch",
         "git_create_tag",
         "git_delete_branch",
