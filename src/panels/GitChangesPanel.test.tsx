@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({
   gitPullRebase: vi.fn(async () => {}),
   gitResetToUpstream: vi.fn(async () => {}),
   rewordCommit: vi.fn(async () => {}),
-  amendCommit: vi.fn(async () => {}),
   dropCommit: vi.fn(async () => {}),
   deleteTag: vi.fn(async () => {}),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
@@ -91,7 +90,6 @@ vi.mock("../git/gitLog", async (importOriginal) => ({
 vi.mock("../git/gitHistory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../git/gitHistory")>()),
   rewordCommit: mocks.rewordCommit,
-  amendCommit: mocks.amendCommit,
   dropCommit: mocks.dropCommit,
   deleteTag: mocks.deleteTag,
 }));
@@ -483,28 +481,31 @@ describe("GitChangesView workspace lifecycle", () => {
   });
 
   it("rewrites history only against the head the panel showed", async () => {
+    // Цель действия и вершина ветки нарочно разные: пока они совпадают,
+    // проверка не отличает подтверждённый head от хеша самого коммита.
     const head = "7777777777777777777777777777777777777777";
+    const target = "6666666666666666666666666666666666666666";
     mocks.summaries.set("project-a", {
       ...summary("main", "from-a.txt"),
       headHash: head,
     });
     mocks.fetchLog.mockResolvedValue([
       {
-        hash: head,
-        shortHash: "7777777",
-        subject: "local tip",
+        hash: target,
+        shortHash: "6666666",
+        subject: "local commit",
         author: "Denis",
         authorEmail: "denis@example.com",
         epochMs: Date.now(),
         unpushed: true,
         localOnly: true,
         editable: true,
-        isHead: true,
+        isHead: false,
         parents: ["5555555555555555555555555555555555555555"],
         refs: [],
         refDetails: [],
         remoteRefs: [],
-        fullMessage: "local tip",
+        fullMessage: "local commit",
       },
     ]);
     render(<GitChangesView workspaceId="project-a" />);
@@ -512,12 +513,12 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
     fireEvent.click(
-      screen.getByRole("menuitem", { name: "Дополнить последний коммит" }),
+      screen.getByRole("menuitem", { name: "Удалить коммит из истории" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
     await waitFor(() =>
-      expect(mocks.amendCommit).toHaveBeenCalledWith("project-a", head),
+      expect(mocks.dropCommit).toHaveBeenCalledWith("project-a", target, head),
     );
   });
 
@@ -551,8 +552,8 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
 
     for (const name of [
-      "Дополнить последний коммит",
-      "Объединить с предыдущим",
+      "Изменить сообщение",
+      "Отменить последний локальный коммит",
       "Удалить коммит из истории",
     ]) {
       expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();

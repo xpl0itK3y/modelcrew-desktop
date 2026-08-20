@@ -1,4 +1,4 @@
-// Правка истории: действия над коммитом из меню, сообщение коммита, amend,
+// Правка истории: действия над коммитом из меню, сообщение коммита,
 // удаление коммита и удаление тега.
 //
 // Почти каждая команда переписывает прошлое, поэтому получает ожидаемый HEAD:
@@ -36,17 +36,9 @@ export function rewordCommit(
   return invoke("git_reword_commit", { workspaceId, hash, message });
 }
 
-// Правка локальной истории. Каждая команда получает вершину ветки, которую
+// Правка локальной истории. Команда получает вершину ветки, которую
 // пользователь видел в панели: если её успели сдвинуть, бэкенд откажет вместо
 // того, чтобы переписать чужой коммит.
-export function amendCommit(
-  workspaceId: string,
-  expectedHead: string,
-  message?: string,
-): Promise<void> {
-  return invoke("git_amend_commit", { workspaceId, expectedHead, message });
-}
-
 export function dropCommit(
   workspaceId: string,
   hash: string,

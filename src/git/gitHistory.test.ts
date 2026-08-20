@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 
 import {
-  amendCommit,
   commitAction,
   dropCommit,
 } from "./gitHistory";
@@ -25,16 +24,6 @@ describe("history rewriting IPC", () => {
       workspaceId: "ws-4",
       action: "uncommit",
       hash: "abcdef123456",
-    });
-  });
-
-  it("amends the last commit against the confirmed head", async () => {
-    await amendCommit("ws-1", "a".repeat(40));
-
-    expect(mocks.invoke).toHaveBeenCalledWith("git_amend_commit", {
-      workspaceId: "ws-1",
-      expectedHead: "a".repeat(40),
-      message: undefined,
     });
   });
 

@@ -17,7 +17,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { describeBackendError, useI18n, type BackendFailure } from "../../../i18n";
 import { refreshGitChanges } from "../../../git/gitChanges";
 import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
-import { amendCommit, commitAction, deleteTag, dropCommit, type CommitAction } from "../../../git/gitHistory";
+import { commitAction, deleteTag, dropCommit, type CommitAction } from "../../../git/gitHistory";
 
 export function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;
@@ -27,14 +27,12 @@ export function fullCommitMessage(commit: GitCommitInfo): string {
 
 type CommitMenuAction =
   | Exclude<CommitAction, "branch" | "cherryPick">
-  | "amend"
   | "drop";
 
 const CONFIRM_TEXT = {
   checkout: "git.actionCheckoutConfirm",
   revert: "git.actionRevertConfirm",
   uncommit: "git.actionUncommitConfirm",
-  amend: "git.actionAmendConfirm",
   drop: "git.actionDropConfirm",
 } as const;
 
@@ -71,12 +69,11 @@ export function CommitActionsMenu(props: {
     props.commit.parents.length === 1;
   // Переписывать историю можно только там, где это уже разрешил бэкенд:
   // непрерывный локальный first-parent суффикс собственных коммитов.
-  const canAmend = onBranch && props.commit.isHead && canReword;
   const canRewrite = onBranch && canReword && props.commit.parents.length === 1;
   // Черта отделяет одну группу пунктов от другой, а не висит сама по себе. У
   // отправленного и у чужого коммита правки истории нет вовсе, и без этой
   // проверки две черты вставали подряд — читалось как пустая строка меню.
-  const canRewriteHistory = canReword || canAmend || canRewrite;
+  const canRewriteHistory = canReword || canRewrite;
   const isMerge = props.commit.parents.length > 1;
   const [confirm, setConfirm] = useState<null | CommitMenuAction>(null);
   // Имя новой ветки вводят прямо в меню, не открывая отдельного окна.
@@ -114,9 +111,7 @@ export function CommitActionsMenu(props: {
     const hash = props.commit.hash;
     const head = props.headHash ?? "";
     try {
-      if (action === "amend") {
-        await amendCommit(props.workspaceId, head);
-      } else if (action === "drop") {
+      if (action === "drop") {
         await dropCommit(props.workspaceId, hash, head);
       } else if (action === "deleteTag") {
         await deleteTag(props.workspaceId, name ?? "");
@@ -310,17 +305,6 @@ export function CommitActionsMenu(props: {
               }}
             >
               {t("git.actionReword")}
-            </button>
-          )}
-          {canAmend && (
-            <button
-              type="button"
-              role="menuitem"
-              className="git-actions-item"
-              disabled={busy}
-              onClick={() => setConfirm("amend")}
-            >
-              {t("git.actionAmend")}
             </button>
           )}
           <div className="git-actions-sep" aria-hidden="true" />

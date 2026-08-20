@@ -111,9 +111,6 @@ export const en: Record<MessageKey, string> = {
   "git.actionUncommit": "Undo last local commit",
   "git.actionUncommitConfirm":
     "Remove the last local commit from history? Its changes will remain staged and ready to commit again.",
-  "git.actionAmend": "Add changes to the last commit",
-  "git.actionAmendConfirm":
-    "Add the staged changes to the last commit? Unstaged changes stay untouched.",
   "git.actionDrop": "Remove commit from history",
   "git.actionDropConfirm":
     "Remove this commit from history? Newer commits are replayed on top and the working folder must be clean.",
