@@ -90,6 +90,10 @@ export function CommitActionsMenu(props: {
   const canAmend = onBranch && props.commit.isHead && canReword;
   const canRewrite = onBranch && canReword && props.commit.parents.length === 1;
   const canReset = onBranch && !props.commit.isHead;
+  // Черта отделяет одну группу пунктов от другой, а не висит сама по себе. У
+  // отправленного и у чужого коммита правки истории нет вовсе, и без этой
+  // проверки две черты вставали подряд — читалось как пустая строка меню.
+  const canRewriteHistory = canReword || canAmend || canRewrite;
   const isMerge = props.commit.parents.length > 1;
   const [confirm, setConfirm] = useState<null | CommitMenuAction>(null);
   // Имя новой ветки вводят прямо в меню, не открывая отдельного окна.
@@ -313,7 +317,9 @@ export function CommitActionsMenu(props: {
               {t("git.actionOpenGithub")}
             </button>
           )}
-          <div className="git-actions-sep" aria-hidden="true" />
+          {canRewriteHistory && (
+            <div className="git-actions-sep" aria-hidden="true" />
+          )}
           {canReword && (
             <button
               type="button"

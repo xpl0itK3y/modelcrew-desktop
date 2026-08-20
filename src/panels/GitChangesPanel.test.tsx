@@ -659,6 +659,20 @@ describe("GitChangesView workspace lifecycle", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("draws one divider where a published commit has nothing to rewrite", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    const { container } = render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
+
+    // Правки истории у отправленного коммита нет, и две черты вставали
+    // подряд — в меню это читалось как пустая строка.
+    expect(
+      container.querySelectorAll(".git-actions-menu .git-actions-sep"),
+    ).toHaveLength(1);
+  });
+
   it("explains that a commit link needs a GitHub remote", async () => {
     mocks.fetchLog.mockResolvedValue([taggableCommit()]);
     mocks.githubCommitUrl.mockResolvedValue(null);
