@@ -2,6 +2,8 @@ import type { MessageKey } from "./ru";
 
 export const en: Record<MessageKey, string> = {
   "common.cancel": "Cancel",
+  "common.ok": "Got it",
+  "common.copy": "Copy",
   "common.close": "Close",
   "common.delete": "Delete",
   "common.beta": "Beta",

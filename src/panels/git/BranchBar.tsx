@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { localizeBackendError, useI18n } from "../../i18n";
+import { describeBackendError, useI18n, type BackendFailure } from "../../i18n";
 import { refreshGitChanges } from "../../git/gitChanges";
 import { createBranch, deleteBranch, fetchBranches, mergeRef, rebaseOnto, renameBranch, switchBranch, type GitBranchInfo } from "../../git/gitBranches";
 import { gitPull, gitPullRebase, gitPush, gitResetToUpstream, publishBranch } from "../../git/gitSync";
@@ -16,7 +16,7 @@ export function BranchSwitcher(props: {
   workspaceId: string;
   currentBranch?: string;
   headHash?: string;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -119,7 +119,7 @@ export function BranchSwitcher(props: {
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       // Типично: незакоммиченные изменения конфликтуют с целевой веткой.
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -159,7 +159,7 @@ export function BranchSwitcher(props: {
     } catch (error) {
       await reloadBranches();
       void refreshGitChanges(props.workspaceId);
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -183,7 +183,7 @@ export function BranchSwitcher(props: {
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       setIntegrate(null);
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -209,7 +209,7 @@ export function BranchSwitcher(props: {
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       setDeleteTarget(null);
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -456,7 +456,7 @@ export function DetachedHeadBanner(props: {
   workspaceId: string;
   headHash: string;
   previousBranch?: string;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -466,7 +466,7 @@ export function DetachedHeadBanner(props: {
       await switchBranch(props.workspaceId, branch, "local");
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -500,7 +500,7 @@ export function PublishBranch(props: {
   workspaceId: string;
   branch: string;
   headHash: string;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -515,7 +515,7 @@ export function PublishBranch(props: {
       await publishBranch(props.workspaceId, props.branch, props.headHash);
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -553,7 +553,7 @@ export function SyncStatus(props: {
   behind?: number;
   // Ветки ещё нет на сервере — можно предложить первую отправку.
   canPublish?: boolean;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { t } = useI18n();
   const { ahead, behind } = props;
@@ -675,7 +675,7 @@ export function SyncStatus(props: {
       }
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }

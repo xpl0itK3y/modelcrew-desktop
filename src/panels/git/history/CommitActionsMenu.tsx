@@ -1,6 +1,6 @@
 // Плавающее меню действий над коммитом: копирование, ветка отсюда, checkout,
-// cherry-pick, revert и безопасная отмена последнего локального коммита.
-// Открывается по ⋯ или правому клику.
+// revert и безопасная отмена последнего локального коммита. Открывается по ⋯
+// или правому клику.
 //
 // Почти каждое действие переписывает историю, поэтому идёт через подтверждение
 // с текстом о последствиях, а недоступные для запушенного или для отделённого
@@ -14,7 +14,7 @@ import {
   type CSSProperties,
 } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { localizeBackendError, useI18n } from "../../../i18n";
+import { describeBackendError, useI18n, type BackendFailure } from "../../../i18n";
 import { refreshGitChanges } from "../../../git/gitChanges";
 import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
 import { amendCommit, commitAction, deleteTag, dropCommit, resetToCommit, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
@@ -63,7 +63,7 @@ export function CommitActionsMenu(props: {
   x: number;
   y: number;
   onClose: () => void;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
   onDone: () => void;
   onReword: (commit: GitCommitInfo) => void;
 }) {
@@ -153,7 +153,7 @@ export function CommitActionsMenu(props: {
       props.onDone();
       props.onClose();
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
       props.onClose();
     } finally {
       setBusy(false);
@@ -168,7 +168,7 @@ export function CommitActionsMenu(props: {
       setCopied(kind);
       window.setTimeout(() => props.onClose(), 650);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
       props.onClose();
     }
   };
@@ -180,10 +180,10 @@ export function CommitActionsMenu(props: {
       if (url) {
         await openUrl(url);
       } else {
-        props.onError(t("git.actionOpenGithubMissing"));
+        props.onError({ message: t("git.actionOpenGithubMissing") });
       }
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
       props.onClose();

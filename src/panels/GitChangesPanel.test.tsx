@@ -255,6 +255,49 @@ describe("GitChangesView workspace lifecycle", () => {
     );
   });
 
+  it("shows what git said when it refuses without a reason we know", async () => {
+    const stderr =
+      "error: Your local changes to the following files would be overwritten by checkout:\n" +
+      "\tdocs/PLAN.md\n" +
+      "Please commit your changes or stash them before you switch branches.\n" +
+      "Aborting";
+    mocks.commitAll.mockRejectedValueOnce({
+      code: "git_command_failed",
+      context: { exitCode: "1" },
+      debug: stderr,
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
+      target: { value: "wip" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
+
+    // «Команда git не выполнилась» само по себе не говорит ничего; ответ на
+    // вопрос «что случилось» лежит в словах git, и показать надо именно их.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("docs/PLAN.md");
+    expect(dialog).toHaveTextContent("stash them before you switch branches");
+  });
+
+  it("keeps a reason it can name to a single line", async () => {
+    mocks.commitAll.mockRejectedValueOnce({
+      code: "git_command_failed",
+      context: { reason: "dirty-tree" },
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
+      target: { value: "wip" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
+
+    // Причину мы уже назвали своей фразой — окно поверх панели ради одной
+    // строки было бы платой ни за что.
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
   it("ignores an older history response that finishes after a refresh", async () => {
     let resolveOld!: (commits: GitCommitInfo[]) => void;
     let resolveNew!: (commits: GitCommitInfo[]) => void;

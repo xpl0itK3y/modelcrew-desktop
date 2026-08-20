@@ -1,6 +1,8 @@
 // Russian catalog — the source of truth for MessageKey.
 export const ru = {
   "common.cancel": "Отмена",
+  "common.ok": "Понятно",
+  "common.copy": "Скопировать",
   "common.close": "Закрыть",
   "common.delete": "Удалить",
   "common.beta": "Бета",

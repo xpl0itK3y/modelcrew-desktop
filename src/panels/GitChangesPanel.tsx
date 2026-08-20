@@ -6,7 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import { IDockviewPanelProps } from "dockview";
-import { localizeBackendError, useI18n } from "../i18n";
+import { describeBackendError, useI18n, type BackendFailure } from "../i18n";
 import {
   commitAll,
   fetchFileDiff,
@@ -28,6 +28,7 @@ import {
   SyncStatus,
 } from "./git/BranchBar";
 import { HistoryView } from "./git/HistoryView";
+import { GitErrorDialog } from "./git/GitErrorDialog";
 import { loadGithubCommitAvatars } from "../git/githubAvatars";
 
 const STATUS_LETTER: Record<GitChangedFile["status"], string> = {
@@ -436,7 +437,7 @@ function GitChangesWorkspaceView(props: {
     }
   }, [workspaceId]);
 
-  const [branchError, setBranchError] = useState<string | null>(null);
+  const [branchError, setBranchError] = useState<BackendFailure | null>(null);
 
   // Файлы, появившиеся в списке уже при открытой панели, въезжают с
   // анимацией; исходный состав показывается сразу.
@@ -455,9 +456,10 @@ function GitChangesWorkspaceView(props: {
     }
   }
 
-  // Ошибка переключения ветки гаснет сама.
+  // Ошибка переключения ветки гаснет сама — но только короткая. Ту, где git
+  // объяснился сам, показывает окно, и закрывает его человек.
   useEffect(() => {
-    if (!branchError) {
+    if (!branchError || branchError.details) {
       return;
     }
     const timer = window.setTimeout(() => setBranchError(null), 6_000);
@@ -468,7 +470,7 @@ function GitChangesWorkspaceView(props: {
   const commitSubject = props.draft.subject;
   const commitDescription = props.draft.description;
   const [committing, setCommitting] = useState(false);
-  const [commitError, setCommitError] = useState<string | null>(null);
+  const [commitError, setCommitError] = useState<BackendFailure | null>(null);
   const commitMessage = joinCommitMessage(commitSubject, commitDescription);
   const commitMessageLength = Array.from(commitMessage).length;
   const updateCommitText = (nextSubject: string, nextDescription: string) => {
@@ -492,7 +494,7 @@ function GitChangesWorkspaceView(props: {
       props.onDraftChange({ subject: "", description: "" });
       void refreshGitChanges(workspaceId);
     } catch (error) {
-      setCommitError(localizeBackendError(error));
+      setCommitError(describeBackendError(error));
     } finally {
       setCommitting(false);
     }
@@ -564,9 +566,9 @@ function GitChangesWorkspaceView(props: {
               />
             </div>
           </div>
-          {branchError && (
+          {branchError && !branchError.details && (
             <div className="git-commit-error" role="alert">
-              {branchError}
+              {branchError.message}
             </div>
           )}
           {summary.branch === undefined && summary.headHash && (
@@ -650,9 +652,9 @@ function GitChangesWorkspaceView(props: {
                     {t("git.commitButton")}
                   </button>
                 </div>
-                {commitError && (
+                {commitError && !commitError.details && (
                   <div className="git-commit-error" role="alert">
-                    {commitError}
+                    {commitError.message}
                   </div>
                 )}
                 <div className="git-file-list">
@@ -670,6 +672,20 @@ function GitChangesWorkspaceView(props: {
           </div>
         </>
       )}
+      {/* Одно окно на панель: два отказа сразу не случаются — ветка и коммит
+          переключаются по очереди, — а второй backdrop поверх первого выглядел
+          бы поломкой. */}
+      {branchError?.details ? (
+        <GitErrorDialog
+          failure={branchError}
+          onClose={() => setBranchError(null)}
+        />
+      ) : commitError?.details ? (
+        <GitErrorDialog
+          failure={commitError}
+          onClose={() => setCommitError(null)}
+        />
+      ) : null}
     </div>
   );
 }
