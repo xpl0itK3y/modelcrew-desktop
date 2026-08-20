@@ -10,7 +10,6 @@ import {
   amendCommit,
   commitAction,
   dropCommit,
-  squashCommit,
 } from "./gitHistory";
 
 describe("history rewriting IPC", () => {
@@ -36,17 +35,6 @@ describe("history rewriting IPC", () => {
       workspaceId: "ws-1",
       expectedHead: "a".repeat(40),
       message: undefined,
-    });
-  });
-
-  it("separates squash from fixup", async () => {
-    await squashCommit("ws-1", "b".repeat(40), "fixup", "a".repeat(40));
-
-    expect(mocks.invoke).toHaveBeenCalledWith("git_squash_commit", {
-      workspaceId: "ws-1",
-      hash: "b".repeat(40),
-      mode: "fixup",
-      expectedHead: "a".repeat(40),
     });
   });
 

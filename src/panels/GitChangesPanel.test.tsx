@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   gitResetToUpstream: vi.fn(async () => {}),
   rewordCommit: vi.fn(async () => {}),
   amendCommit: vi.fn(async () => {}),
-  squashCommit: vi.fn(async () => {}),
   dropCommit: vi.fn(async () => {}),
   deleteTag: vi.fn(async () => {}),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
@@ -93,7 +92,6 @@ vi.mock("../git/gitHistory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../git/gitHistory")>()),
   rewordCommit: mocks.rewordCommit,
   amendCommit: mocks.amendCommit,
-  squashCommit: mocks.squashCommit,
   dropCommit: mocks.dropCommit,
   deleteTag: mocks.deleteTag,
 }));

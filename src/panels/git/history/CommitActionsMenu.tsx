@@ -17,7 +17,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { describeBackendError, useI18n, type BackendFailure } from "../../../i18n";
 import { refreshGitChanges } from "../../../git/gitChanges";
 import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
-import { amendCommit, commitAction, deleteTag, dropCommit, squashCommit, type CommitAction } from "../../../git/gitHistory";
+import { amendCommit, commitAction, deleteTag, dropCommit, type CommitAction } from "../../../git/gitHistory";
 
 export function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;
@@ -28,8 +28,6 @@ export function fullCommitMessage(commit: GitCommitInfo): string {
 type CommitMenuAction =
   | Exclude<CommitAction, "branch" | "cherryPick">
   | "amend"
-  | "squash"
-  | "fixup"
   | "drop";
 
 const CONFIRM_TEXT = {
@@ -37,8 +35,6 @@ const CONFIRM_TEXT = {
   revert: "git.actionRevertConfirm",
   uncommit: "git.actionUncommitConfirm",
   amend: "git.actionAmendConfirm",
-  squash: "git.actionSquashConfirm",
-  fixup: "git.actionFixupConfirm",
   drop: "git.actionDropConfirm",
 } as const;
 
@@ -120,8 +116,6 @@ export function CommitActionsMenu(props: {
     try {
       if (action === "amend") {
         await amendCommit(props.workspaceId, head);
-      } else if (action === "squash" || action === "fixup") {
-        await squashCommit(props.workspaceId, hash, action, head);
       } else if (action === "drop") {
         await dropCommit(props.workspaceId, hash, head);
       } else if (action === "deleteTag") {
@@ -328,28 +322,6 @@ export function CommitActionsMenu(props: {
             >
               {t("git.actionAmend")}
             </button>
-          )}
-          {canRewrite && (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                className="git-actions-item"
-                disabled={busy}
-                onClick={() => setConfirm("squash")}
-              >
-                {t("git.actionSquash")}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="git-actions-item"
-                disabled={busy}
-                onClick={() => setConfirm("fixup")}
-              >
-                {t("git.actionFixup")}
-              </button>
-            </>
           )}
           <div className="git-actions-sep" aria-hidden="true" />
           <button

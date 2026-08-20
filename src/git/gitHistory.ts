@@ -1,5 +1,5 @@
 // Правка истории: действия над коммитом из меню, сообщение коммита, amend,
-// squash/fixup, удаление коммита и удаление тега.
+// удаление коммита и удаление тега.
 //
 // Почти каждая команда переписывает прошлое, поэтому получает ожидаемый HEAD:
 // панель подтверждает то состояние, которое показала пользователю.
@@ -45,23 +45,6 @@ export function amendCommit(
   message?: string,
 ): Promise<void> {
   return invoke("git_amend_commit", { workspaceId, expectedHead, message });
-}
-
-// squash объединяет оба сообщения, fixup оставляет сообщение родителя.
-export type GitSquashMode = "squash" | "fixup";
-
-export function squashCommit(
-  workspaceId: string,
-  hash: string,
-  mode: GitSquashMode,
-  expectedHead: string,
-): Promise<void> {
-  return invoke("git_squash_commit", {
-    workspaceId,
-    hash,
-    mode,
-    expectedHead,
-  });
 }
 
 export function dropCommit(

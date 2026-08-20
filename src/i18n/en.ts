@@ -114,12 +114,6 @@ export const en: Record<MessageKey, string> = {
   "git.actionAmend": "Add changes to the last commit",
   "git.actionAmendConfirm":
     "Add the staged changes to the last commit? Unstaged changes stay untouched.",
-  "git.actionSquash": "Combine with the previous commit",
-  "git.actionSquashConfirm":
-    "Combine this commit with the previous one? Both messages are kept and the content stays the same.",
-  "git.actionFixup": "Merge into the previous commit",
-  "git.actionFixupConfirm":
-    "Combine this commit with the previous one, keeping only the previous message?",
   "git.actionDrop": "Remove commit from history",
   "git.actionDropConfirm":
     "Remove this commit from history? Newer commits are replayed on top and the working folder must be clean.",
