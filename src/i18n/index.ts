@@ -206,11 +206,12 @@ export type BackendFailure = {
 /// Наружу выпускаем только вывод git: он написан для человека и говорит о его
 /// репозитории. Диагностика прочих подсистем остаётся в консоли — в ответах
 /// GitHub, например, ходит токен.
-const detailedCodes = new Set([
-  "git_command_failed",
-  "git_unavailable",
-  "git_not_a_repository",
-]);
+///
+/// Здесь ровно один код, и это не упущение. У `git_not_a_repository` debug не
+/// заполняется вовсе, а у `git_unavailable` там лежит текст ошибки запуска
+/// процесса: под заголовком «git не найден» пользователь читал бы
+/// «No such file or directory (os error 2)» — шум вместо объяснения.
+const detailedCodes = new Set(["git_command_failed"]);
 
 /// Хвост длиной в экран читать некому: важное git говорит первыми строками.
 const MAX_DETAILS = 2_000;

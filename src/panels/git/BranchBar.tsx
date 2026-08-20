@@ -22,7 +22,10 @@ export function BranchSwitcher(props: {
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  // Не просто «не вышло»: причина отказа приходит с бэкенда, и раньше объект
+  // ошибки выбрасывался в пустой catch. Показываем её прямо в списке —
+  // выпадающее меню открывают часто, отдельное окно поверх было бы навязчиво.
+  const [loadFailure, setLoadFailure] = useState<BackendFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [editor, setEditor] = useState<
     | { kind: "create" }
@@ -46,7 +49,7 @@ export function BranchSwitcher(props: {
     }
     const request = ++branchesRequestRef.current;
     setLoading(true);
-    setLoadFailed(false);
+    setLoadFailure(null);
     setBranches([]);
     fetchBranches(props.workspaceId)
       .then((next) => {
@@ -54,10 +57,10 @@ export function BranchSwitcher(props: {
           setBranches(next);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (branchesRequestRef.current === request) {
           setBranches([]);
-          setLoadFailed(true);
+          setLoadFailure(describeBackendError(error));
         }
       })
       .finally(() => {
@@ -94,11 +97,11 @@ export function BranchSwitcher(props: {
       const next = await fetchBranches(props.workspaceId);
       if (branchesRequestRef.current === request) {
         setBranches(next);
-        setLoadFailed(false);
+        setLoadFailure(null);
       }
-    } catch {
+    } catch (error) {
       if (branchesRequestRef.current === request) {
-        setLoadFailed(true);
+        setLoadFailure(describeBackendError(error));
       }
     }
   };
@@ -400,12 +403,12 @@ export function BranchSwitcher(props: {
             {loading && (
               <div className="git-branch-empty">{t("git.loading")}</div>
             )}
-            {!loading && loadFailed && (
+            {!loading && loadFailure && (
               <div className="git-branch-empty is-error">
-                {t("git.branchesLoadFailed")}
+                {loadFailure.message}
               </div>
             )}
-            {!loading && !loadFailed && branches.length === 0 && (
+            {!loading && !loadFailure && branches.length === 0 && (
               <div className="git-branch-empty">{t("git.branchesEmpty")}</div>
             )}
           </div>

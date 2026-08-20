@@ -67,7 +67,6 @@ export const en: Record<MessageKey, string> = {
     "Delete local branch “{name}”? Its server branch will remain.",
   "git.branchForceDeleteConfirm":
     "Branch “{name}” is not merged into the current branch. Force-delete its local copy? Unique commits will remain only in the reflog; the server branch will not be deleted.",
-  "git.branchesLoadFailed": "Could not load branches",
   "git.branchesEmpty": "No local branches yet",
   "git.branchMerge": "Merge into current",
   "git.branchMergeNamed": "Merge branch ‘{name}’ into the current one",
