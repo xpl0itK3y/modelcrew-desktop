@@ -43,7 +43,7 @@ export function HistoryView(props: {
   const [marked, setMarked] = useState<GitCommitInfo | null>(null);
   const [comparing, setComparing] = useState<{
     from: GitCommitInfo;
-    to: GitCommitInfo | null;
+    to: GitCommitInfo;
   } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");

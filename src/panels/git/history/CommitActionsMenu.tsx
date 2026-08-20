@@ -17,7 +17,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { localizeBackendError, useI18n } from "../../../i18n";
 import { refreshGitChanges } from "../../../git/gitChanges";
 import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
-import { amendCommit, commitAction, commitPatch, createTag, deleteTag, dropCommit, resetToCommit, saveCommitPatch, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
+import { amendCommit, commitAction, createTag, deleteTag, dropCommit, resetToCommit, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
 
 export function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;
@@ -71,19 +71,25 @@ export function CommitActionsMenu(props: {
   // закрывается после каждого действия.
   marked: GitCommitInfo | null;
   onMark: (commit: GitCommitInfo | null) => void;
-  onCompare: (from: GitCommitInfo, to: GitCommitInfo | null) => void;
+  onCompare: (from: GitCommitInfo, to: GitCommitInfo) => void;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
   // GitHub-авторизация здесь не нужна: бэкенд сверяет автора с локальным
   // `git config user.email` и разрешает переписывать только локальную историю.
-  const canReword = props.commit.editable;
+  //
+  // Про localOnly сказано ещё раз и здесь, хотя бэкенд уже вложил его в
+  // editable: правка и удаление коммита меняют хеш, а у ушедшего на сервер
+  // коммита это ломает историю всем, кто его уже забрал. Такое правило лучше
+  // видеть на месте, чем угадывать по флагу с другим именем.
+  const isLocal = props.commit.localOnly === true;
+  const canReword = props.commit.editable && isLocal;
   const onBranch = Boolean(props.currentBranch) && Boolean(props.headHash);
   const canUncommit =
     onBranch &&
     props.commit.isHead &&
-    props.commit.localOnly === true &&
+    isLocal &&
     props.commit.parents.length === 1;
   // Переписывать историю можно только там, где это уже разрешил бэкенд:
   // непрерывный локальный first-parent суффикс собственных коммитов.
@@ -96,9 +102,7 @@ export function CommitActionsMenu(props: {
   const [naming, setNaming] = useState<null | "branch" | "tag">(null);
   const [nameValue, setNameValue] = useState("");
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
-  const [copied, setCopied] = useState<null | "hash" | "message" | "patch">(
-    null,
-  );
+  const [copied, setCopied] = useState<null | "hash" | "message">(null);
   const tags = props.commit.refDetails.filter((ref) => ref.kind === "tag");
 
   // Закрытие по клику вне и по Esc.
@@ -160,35 +164,15 @@ export function CommitActionsMenu(props: {
     }
   };
 
-  const copy = async (kind: "hash" | "message" | "patch") => {
+  const copy = async (kind: "hash" | "message") => {
     try {
       const text =
-        kind === "hash"
-          ? props.commit.hash
-          : kind === "message"
-            ? fullCommitMessage(props.commit)
-            : await commitPatch(props.workspaceId, props.commit.hash);
+        kind === "hash" ? props.commit.hash : fullCommitMessage(props.commit);
       await navigator.clipboard.writeText(text);
       setCopied(kind);
       window.setTimeout(() => props.onClose(), 650);
     } catch (error) {
       props.onError(localizeBackendError(error));
-      props.onClose();
-    }
-  };
-
-  const savePatch = async () => {
-    setBusy(true);
-    try {
-      await saveCommitPatch(
-        props.workspaceId,
-        props.commit.hash,
-        `${props.commit.shortHash}.patch`,
-      );
-    } catch (error) {
-      props.onError(localizeBackendError(error));
-    } finally {
-      setBusy(false);
       props.onClose();
     }
   };
@@ -330,45 +314,20 @@ export function CommitActionsMenu(props: {
               ? t("git.copied")
               : t("git.actionCopyMessage")}
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            disabled={busy}
-            onClick={() => void copy("patch")}
-          >
-            {copied === "patch" ? t("git.copied") : t("git.actionCopyPatch")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            disabled={busy}
-            onClick={() => void savePatch()}
-          >
-            {t("git.actionSavePatch")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            disabled={busy}
-            onClick={() => void openOnGithub()}
-          >
-            {t("git.actionOpenGithub")}
-          </button>
+          {/* Ссылка на GitHub есть только у коммита, который там есть: у
+              локального она вела бы на страницу «commit not found». */}
+          {!isLocal && (
+            <button
+              type="button"
+              role="menuitem"
+              className="git-actions-item"
+              disabled={busy}
+              onClick={() => void openOnGithub()}
+            >
+              {t("git.actionOpenGithub")}
+            </button>
+          )}
           <div className="git-actions-sep" aria-hidden="true" />
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            onClick={() => {
-              props.onCompare(props.commit, null);
-              props.onClose();
-            }}
-          >
-            {t("git.compareWithWorkingTree")}
-          </button>
           <button
             type="button"
             role="menuitem"

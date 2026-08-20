@@ -132,8 +132,6 @@ export const ru = {
   "git.actionResetHard": "Стереть все правки",
   "git.actionResetHardConfirm":
     "Перенести ветку на этот коммит и удалить все более новые изменения вместе с несохранённой работой? Коммиты останутся в reflog.",
-  "git.actionCopyPatch": "Скопировать патч",
-  "git.actionSavePatch": "Сохранить патч в файл…",
   "git.actionOpenGithub": "Открыть на GitHub",
   "git.actionOpenGithubMissing":
     "Не удалось составить ссылку: у репозитория нет remote на GitHub",
@@ -144,9 +142,7 @@ export const ru = {
   "git.tagDeleteConfirm":
     "Удалить локальный тег «{name}»? Тег на сервере останется.",
   "git.compareTitle": "Сравнение",
-  "git.compareWorkingTree": "рабочая папка",
   "git.compareIdentical": "Различий нет",
-  "git.compareWithWorkingTree": "Сравнить с рабочей папкой",
   "git.compareMark": "Отметить для сравнения",
   "git.compareUnmark": "Снять отметку сравнения",
   "git.compareWithMarked": "Сравнить с {name}",

@@ -19,8 +19,7 @@ import { fullCommitMessage } from "./CommitActionsMenu";
 export function CompareView(props: {
   workspaceId: string;
   from: GitCommitInfo;
-  // null — текущая рабочая папка.
-  to: GitCommitInfo | null;
+  to: GitCommitInfo;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -31,7 +30,7 @@ export function CompareView(props: {
 
   useEffect(() => {
     let cancelled = false;
-    compareFiles(props.workspaceId, props.from.hash, props.to?.hash)
+    compareFiles(props.workspaceId, props.from.hash, props.to.hash)
       .then((next) => {
         if (!cancelled) {
           setFiles(next);
@@ -45,7 +44,7 @@ export function CompareView(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.workspaceId, props.from.hash, props.to?.hash]);
+  }, [props.workspaceId, props.from.hash, props.to.hash]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -57,7 +56,7 @@ export function CompareView(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [props]);
 
-  const target = props.to?.shortHash ?? t("git.compareWorkingTree");
+  const target = props.to.shortHash;
   return (
     <div className="git-reword-backdrop" onPointerDown={props.onClose}>
       <div
@@ -112,7 +111,7 @@ export function CompareView(props: {
                   <CompareFileDiff
                     workspaceId={props.workspaceId}
                     from={props.from.hash}
-                    to={props.to?.hash}
+                    to={props.to.hash}
                     path={file.path}
                     view={view}
                   />

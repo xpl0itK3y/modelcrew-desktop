@@ -24,8 +24,6 @@ const mocks = vi.hoisted(() => ({
   resetToCommit: vi.fn(async () => {}),
   createTag: vi.fn(async () => {}),
   deleteTag: vi.fn(async () => {}),
-  commitPatch: vi.fn(async () => "PATCH BODY"),
-  saveCommitPatch: vi.fn(async () => true),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
   mergeRef: vi.fn(async () => {}),
   rebaseOnto: vi.fn(async () => {}),
@@ -111,8 +109,6 @@ vi.mock("../git/gitHistory", async (importOriginal) => ({
   resetToCommit: mocks.resetToCommit,
   createTag: mocks.createTag,
   deleteTag: mocks.deleteTag,
-  commitPatch: mocks.commitPatch,
-  saveCommitPatch: mocks.saveCommitPatch,
   compareFiles: mocks.compareFiles,
   compareFileDiff: mocks.compareFileDiff,
 }));

@@ -136,24 +136,3 @@ export function createTag(
 export function deleteTag(workspaceId: string, name: string): Promise<void> {
   return invoke("git_delete_tag", { workspaceId, name });
 }
-
-// Патч коммита в формате `git format-patch` — его принимает `git am`.
-export function commitPatch(
-  workspaceId: string,
-  hash: string,
-): Promise<string> {
-  return invoke<string>("git_commit_patch", { workspaceId, hash });
-}
-
-// false означает, что диалог сохранения закрыли без выбора файла.
-export function saveCommitPatch(
-  workspaceId: string,
-  hash: string,
-  fileName: string,
-): Promise<boolean> {
-  return invoke<boolean>("git_save_commit_patch", {
-    workspaceId,
-    hash,
-    fileName,
-  });
-}
