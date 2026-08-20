@@ -1,23 +1,16 @@
 // Правка истории: действия над коммитом из меню, сообщение коммита, amend,
-// squash/fixup, удаление и сброс, сравнение двух состояний, теги и патчи.
+// squash/fixup, удаление и сброс, удаление тега.
 //
 // Почти каждая команда переписывает прошлое, поэтому получает ожидаемый HEAD:
 // панель подтверждает то состояние, которое показала пользователю.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { GitFileDiff } from "./gitChanges";
-import type { GitCommitFile } from "./gitLog";
 
 // Действия над коммитом истории: checkout (отделить HEAD), branch (создать
-// ветку от коммита), cherryPick (применить поверх текущей), revert (отменить
-// коммит новым), uncommit (снять локальный HEAD, сохранив изменения). Ошибки
-// git поднимаются наверх и показываются в панели.
-export type CommitAction =
-  | "checkout"
-  | "branch"
-  | "cherryPick"
-  | "revert"
-  | "uncommit";
+// ветку от коммита), revert (отменить коммит новым), uncommit (снять локальный
+// HEAD, сохранив изменения). Ошибки git поднимаются наверх и показываются в
+// панели.
+export type CommitAction = "checkout" | "branch" | "revert" | "uncommit";
 
 export function commitAction(
   workspaceId: string,
@@ -96,43 +89,8 @@ export function dropCommit(
   return invoke("git_drop_commit", { workspaceId, hash, expectedHead });
 }
 
-// Сравнение двух состояний. `to` не задан — сравниваем с рабочей папкой.
-export function compareFiles(
-  workspaceId: string,
-  from: string,
-  to?: string,
-): Promise<GitCommitFile[]> {
-  return invoke<GitCommitFile[]>("git_compare_files", {
-    workspaceId,
-    from,
-    to,
-  });
-}
-
-export function compareFileDiff(
-  workspaceId: string,
-  from: string,
-  path: string,
-  to?: string,
-): Promise<GitFileDiff> {
-  return invoke<GitFileDiff>("git_compare_file_diff", {
-    workspaceId,
-    from,
-    to,
-    path,
-  });
-}
-
-// Локальные теги. Тег на сервере не трогаем: это уже общий репозиторий.
-export function createTag(
-  workspaceId: string,
-  name: string,
-  hash: string,
-  message?: string,
-): Promise<void> {
-  return invoke("git_create_tag", { workspaceId, name, hash, message });
-}
-
+// Удаление локального тега. Тег на сервере не трогаем: это уже общий
+// репозиторий.
 export function deleteTag(workspaceId: string, name: string): Promise<void> {
   return invoke("git_delete_tag", { workspaceId, name });
 }

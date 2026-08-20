@@ -17,7 +17,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { localizeBackendError, useI18n } from "../../../i18n";
 import { refreshGitChanges } from "../../../git/gitChanges";
 import { githubCommitUrl, type GitCommitInfo } from "../../../git/gitLog";
-import { amendCommit, commitAction, createTag, deleteTag, dropCommit, resetToCommit, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
+import { amendCommit, commitAction, deleteTag, dropCommit, resetToCommit, squashCommit, type CommitAction, type GitResetMode } from "../../../git/gitHistory";
 
 export function fullCommitMessage(commit: GitCommitInfo): string {
   return commit.fullMessage;
@@ -26,7 +26,7 @@ export function fullCommitMessage(commit: GitCommitInfo): string {
 // Предупреждение об отделённом HEAD. Из списка веток вернуться можно и так, но
 
 type CommitMenuAction =
-  | Exclude<CommitAction, "branch">
+  | Exclude<CommitAction, "branch" | "cherryPick">
   | "amend"
   | "squash"
   | "fixup"
@@ -43,7 +43,6 @@ const RESET_MODES: Record<string, GitResetMode> = {
 
 const CONFIRM_TEXT = {
   checkout: "git.actionCheckoutConfirm",
-  cherryPick: "git.actionCherryConfirm",
   revert: "git.actionRevertConfirm",
   uncommit: "git.actionUncommitConfirm",
   amend: "git.actionAmendConfirm",
@@ -67,11 +66,6 @@ export function CommitActionsMenu(props: {
   onError: (message: string) => void;
   onDone: () => void;
   onReword: (commit: GitCommitInfo) => void;
-  // Отмеченный для сравнения коммит живёт в истории, а не в меню: меню
-  // закрывается после каждого действия.
-  marked: GitCommitInfo | null;
-  onMark: (commit: GitCommitInfo | null) => void;
-  onCompare: (from: GitCommitInfo, to: GitCommitInfo) => void;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -98,8 +92,8 @@ export function CommitActionsMenu(props: {
   const canReset = onBranch && !props.commit.isHead;
   const isMerge = props.commit.parents.length > 1;
   const [confirm, setConfirm] = useState<null | CommitMenuAction>(null);
-  // Ветка и тег вводят имя в одном и том же поле меню.
-  const [naming, setNaming] = useState<null | "branch" | "tag">(null);
+  // Имя новой ветки вводят прямо в меню, не открывая отдельного окна.
+  const [naming, setNaming] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const [copied, setCopied] = useState<null | "hash" | "message">(null);
@@ -126,7 +120,7 @@ export function CommitActionsMenu(props: {
   }, [props]);
 
   const run = async (
-    action: CommitMenuAction | "branch" | "tag" | "deleteTag",
+    action: CommitMenuAction | "branch" | "deleteTag",
     name?: string,
   ) => {
     setBusy(true);
@@ -141,8 +135,6 @@ export function CommitActionsMenu(props: {
         await dropCommit(props.workspaceId, hash, head);
       } else if (action in RESET_MODES) {
         await resetToCommit(props.workspaceId, hash, RESET_MODES[action], head);
-      } else if (action === "tag") {
-        await createTag(props.workspaceId, name ?? "", hash);
       } else if (action === "deleteTag") {
         await deleteTag(props.workspaceId, name ?? "");
       } else {
@@ -214,12 +206,8 @@ export function CommitActionsMenu(props: {
           <input
             autoFocus
             className="git-actions-input"
-            aria-label={
-              naming === "branch" ? t("git.actionBranchName") : t("git.tagName")
-            }
-            placeholder={
-              naming === "branch" ? t("git.actionBranchName") : t("git.tagName")
-            }
+            aria-label={t("git.actionBranchName")}
+            placeholder={t("git.actionBranchName")}
             value={nameValue}
             spellCheck={false}
             disabled={busy}
@@ -229,9 +217,9 @@ export function CommitActionsMenu(props: {
                 return;
               }
               if (event.key === "Enter" && nameValue.trim()) {
-                void run(naming, nameValue.trim());
+                void run("branch", nameValue.trim());
               } else if (event.key === "Escape") {
-                setNaming(null);
+                setNaming(false);
               }
             }}
           />
@@ -239,11 +227,9 @@ export function CommitActionsMenu(props: {
             type="button"
             className="git-actions-go"
             disabled={busy || !nameValue.trim()}
-            onClick={() => void run(naming, nameValue.trim())}
+            onClick={() => void run("branch", nameValue.trim())}
           >
-            {naming === "branch"
-              ? t("git.actionBranchCreate")
-              : t("git.tagCreateGo")}
+            {t("git.actionBranchCreate")}
           </button>
         </div>
       ) : deletingTag ? (
@@ -328,34 +314,6 @@ export function CommitActionsMenu(props: {
             </button>
           )}
           <div className="git-actions-sep" aria-hidden="true" />
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            onClick={() => {
-              props.onMark(
-                props.marked?.hash === props.commit.hash ? null : props.commit,
-              );
-              props.onClose();
-            }}
-          >
-            {props.marked?.hash === props.commit.hash
-              ? t("git.compareUnmark")
-              : t("git.compareMark")}
-          </button>
-          {props.marked && props.marked.hash !== props.commit.hash && (
-            <button
-              type="button"
-              role="menuitem"
-              className="git-actions-item"
-              onClick={() => {
-                props.onCompare(props.marked!, props.commit);
-                props.onClose();
-              }}
-            >
-              {t("git.compareWithMarked", { name: props.marked.shortHash })}
-            </button>
-          )}
           {canReword && (
             <button
               type="button"
@@ -409,23 +367,11 @@ export function CommitActionsMenu(props: {
             className="git-actions-item"
             disabled={busy}
             onClick={() => {
-              setNaming("branch");
+              setNaming(true);
               setNameValue("");
             }}
           >
             {t("git.actionBranch")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="git-actions-item"
-            disabled={busy}
-            onClick={() => {
-              setNaming("tag");
-              setNameValue("");
-            }}
-          >
-            {t("git.tagCreate")}
           </button>
           {tags.map((tag) => (
             <button
@@ -448,17 +394,6 @@ export function CommitActionsMenu(props: {
           >
             {t("git.actionCheckout")}
           </button>
-          {!isMerge && (
-            <button
-              type="button"
-              role="menuitem"
-              className="git-actions-item"
-              disabled={busy}
-              onClick={() => setConfirm("cherryPick")}
-            >
-              {t("git.actionCherryPick")}
-            </button>
-          )}
           {!isMerge && (
             <button
               type="button"

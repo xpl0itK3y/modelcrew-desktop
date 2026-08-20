@@ -22,21 +22,11 @@ const mocks = vi.hoisted(() => ({
   squashCommit: vi.fn(async () => {}),
   dropCommit: vi.fn(async () => {}),
   resetToCommit: vi.fn(async () => {}),
-  createTag: vi.fn(async () => {}),
   deleteTag: vi.fn(async () => {}),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
   mergeRef: vi.fn(async () => {}),
   rebaseOnto: vi.fn(async () => {}),
   publishBranch: vi.fn(async () => {}),
-  compareFiles: vi.fn(async () => [
-    { path: "src/a.ts", additions: 3, deletions: 1 },
-  ]),
-  compareFileDiff: vi.fn(async () => ({
-    path: "src/a.ts",
-    isBinary: false,
-    truncated: false,
-    diff: "@@ -1 +1,2 @@\n one\n+two\n",
-  })),
   fetchCommitFiles: vi.fn(async () => [
     { path: "src/a.ts", additions: 1, deletions: 1 },
   ]),
@@ -107,10 +97,7 @@ vi.mock("../git/gitHistory", async (importOriginal) => ({
   squashCommit: mocks.squashCommit,
   dropCommit: mocks.dropCommit,
   resetToCommit: mocks.resetToCommit,
-  createTag: mocks.createTag,
   deleteTag: mocks.deleteTag,
-  compareFiles: mocks.compareFiles,
-  compareFileDiff: mocks.compareFileDiff,
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
@@ -571,48 +558,6 @@ describe("GitChangesView workspace lifecycle", () => {
     expect(screen.getByRole("button", { name: "Граф" })).toBeEnabled();
   });
 
-  it("compares two marked commits and shows the file diff", async () => {
-    const older = taggableCommit();
-    const newer = {
-      ...taggableCommit(),
-      hash: "1111111111111111111111111111111111111111",
-      shortHash: "1111111",
-      subject: "newer",
-      fullMessage: "newer",
-    };
-    mocks.fetchLog.mockResolvedValue([newer, older]);
-    render(<GitChangesView workspaceId="project-a" />);
-
-    fireEvent.click(screen.getByRole("tab", { name: "История" }));
-    const menus = await screen.findAllByTitle("Действия над коммитом");
-    fireEvent.click(menus[1]);
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Отметить для сравнения" }),
-    );
-    fireEvent.click(screen.getAllByTitle("Действия над коммитом")[0]);
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Сравнить с 9999999" }),
-    );
-
-    await waitFor(() =>
-      expect(mocks.compareFiles).toHaveBeenCalledWith(
-        "project-a",
-        older.hash,
-        newer.hash,
-      ),
-    );
-    fireEvent.click(await screen.findByText("src/a.ts"));
-    await waitFor(() =>
-      expect(mocks.compareFileDiff).toHaveBeenCalledWith(
-        "project-a",
-        older.hash,
-        "src/a.ts",
-        newer.hash,
-      ),
-    );
-    expect(await screen.findByText("+two".slice(1))).toBeInTheDocument();
-  });
-
   it("opens a file from a commit in history with before and after side by side", async () => {
     const commit = taggableCommit();
     mocks.fetchLog.mockResolvedValue([commit]);
@@ -712,27 +657,6 @@ describe("GitChangesView workspace lifecycle", () => {
     expect(
       screen.queryByText("Папка не является git-репозиторием"),
     ).not.toBeInTheDocument();
-  });
-
-  it("tags the commit the menu was opened on", async () => {
-    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
-    render(<GitChangesView workspaceId="project-a" />);
-
-    fireEvent.click(screen.getByRole("tab", { name: "История" }));
-    fireEvent.click(await screen.findByTitle("Действия над коммитом"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Создать тег…" }));
-    fireEvent.change(screen.getByLabelText("имя тега"), {
-      target: { value: "v2.0" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
-
-    await waitFor(() =>
-      expect(mocks.createTag).toHaveBeenCalledWith(
-        "project-a",
-        "v2.0",
-        "9999999999999999999999999999999999999999",
-      ),
-    );
   });
 
   it("explains that a commit link needs a GitHub remote", async () => {

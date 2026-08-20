@@ -17,7 +17,7 @@ import { AuthorAvatar } from "./history/AuthorAvatar";
 import { CommitActionsMenu } from "./history/CommitActionsMenu";
 import { CommitDetails, RevealHeight } from "./history/CommitDetails";
 import { CommitGraph, RefBadge } from "./history/CommitGraph";
-import { CompareView, RewordEditor } from "./history/CompareView";
+import { RewordEditor } from "./history/RewordEditor";
 
 export function HistoryView(props: {
   workspaceId: string;
@@ -40,11 +40,6 @@ export function HistoryView(props: {
   const [searchField, setSearchField] = useState<"text" | "author" | "path">(
     "text",
   );
-  const [marked, setMarked] = useState<GitCommitInfo | null>(null);
-  const [comparing, setComparing] = useState<{
-    from: GitCommitInfo;
-    to: GitCommitInfo;
-  } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => {
@@ -432,17 +427,6 @@ export function HistoryView(props: {
           onError={setActionError}
           onDone={() => setReloadNonce((value) => value + 1)}
           onReword={setRewording}
-          marked={marked}
-          onMark={setMarked}
-          onCompare={(from, to) => setComparing({ from, to })}
-        />
-      )}
-      {comparing && (
-        <CompareView
-          workspaceId={props.workspaceId}
-          from={comparing.from}
-          to={comparing.to}
-          onClose={() => setComparing(null)}
         />
       )}
       {rewording && (
