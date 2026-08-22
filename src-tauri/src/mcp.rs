@@ -414,8 +414,7 @@ pub fn browser_port(
 /// Путь сокета. Рядом с каталогом событий хуков — то же место, та же уборка.
 #[cfg(unix)]
 pub fn socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    use tauri::Manager;
-    let path = app.path().app_data_dir().ok()?.join(SOCK_NAME);
+    let path = data_dir_socket_path(app)?;
     if path.as_os_str().len() <= SOCK_PATH_LIMIT {
         return Some(path);
     }
@@ -431,6 +430,14 @@ pub fn socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         .tempdir()
         .ok()?;
     Some(home.keep().join(SOCK_NAME))
+}
+
+/// Место сокета по умолчанию — в каталоге данных приложения. Ничего не
+/// создаёт, поэтому годится и там, где путь нужен только для уборки.
+#[cfg(unix)]
+fn data_dir_socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    Some(app.path().app_data_dir().ok()?.join(SOCK_NAME))
 }
 
 /// Тот же путь, но вычисленный без приложения — так его находит шим.
@@ -490,6 +497,16 @@ static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 #[cfg(unix)]
 pub fn serve(app: tauri::AppHandle) {
     if !crate::mcp_settings::enabled(&app) {
+        // Файл прошлого запуска, когда сервер был включён. Оставить его —
+        // значит держать на диске вход, за которым никого нет: агент упрётся
+        // в отказ соединения вместо честного «сервера тут не бывает».
+        //
+        // Не через `socket_path`: тот на слишком глубоком каталоге данных
+        // заводит временный, и каждый запуск с выключенным MCP оставлял бы по
+        // пустому каталогу.
+        if let Some(path) = data_dir_socket_path(&app) {
+            let _ = std::fs::remove_file(path);
+        }
         return;
     }
     start(app);
