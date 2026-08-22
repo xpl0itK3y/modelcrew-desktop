@@ -25,13 +25,21 @@ pub fn set_agent_events_dir(dir: PathBuf) {
 }
 
 /// Сокет MCP: тем же путём, что и каталог событий. Пусто там, где слушателя
-/// нет (Windows) — тогда панель не получает переменной вовсе, и агент не
-/// видит инструмента вместо того, чтобы видеть его и упираться в мёртвый
-/// сокет.
-static MCP_SOCKET: OnceLock<PathBuf> = OnceLock::new();
+/// нет (Windows или выключенный в настройках MCP) — тогда панель не получает
+/// переменной вовсе, и агент не видит инструмента вместо того, чтобы видеть
+/// его и упираться в мёртвый сокет.
+///
+/// Не `OnceLock`, как каталог событий: выключатель в настройках снимает
+/// слушателя посреди работы, и адрес обязан уметь исчезать.
+static MCP_SOCKET: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 pub fn set_mcp_socket(path: PathBuf) {
-    let _ = MCP_SOCKET.set(path);
+    *MCP_SOCKET.lock().unwrap() = Some(path);
+}
+
+/// Слушателя сняли: новые панели не должны получить адрес, которого нет.
+pub fn clear_mcp_socket() {
+    *MCP_SOCKET.lock().unwrap() = None;
 }
 
 pub struct SpawnOptions {
@@ -157,7 +165,7 @@ impl PtyManager {
         #[cfg_attr(not(unix), allow(unused_mut))]
         let mut mcp_token = String::new();
         #[cfg(unix)]
-        if let Some(socket) = MCP_SOCKET.get() {
+        if let Some(socket) = MCP_SOCKET.lock().unwrap().clone() {
             if let Some(token) = crate::mcp::new_token() {
                 cmd.env(crate::mcp::SOCK_ENV, socket);
                 cmd.env(crate::mcp::TOKEN_ENV, &token);
@@ -1949,8 +1957,51 @@ mod tests {
             .panel_of_token(token_from(&output))
             .expect("пропуск из окружения не сошёлся ни с одной панелью");
         assert_eq!(root, test_cwd());
-
         let _ = manager.kill("t-mcp");
+
+        // Вторая половина той же истории: выключатель в настройках снимает
+        // слушателя, и панель, открытая после этого, не получает ни адреса,
+        // ни пропуска. Для агента это не «сервер сломался», а «сервера нет».
+        //
+        // Тем же тестом намеренно: обе половины трогают один глобальный
+        // адрес, и порознь они гонялись бы друг с другом.
+        clear_mcp_socket();
+        let (off_tx, off_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-mcp-off".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                move |bytes| {
+                    let _ = off_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        for line in Shell::evaluated_env_probe(&[crate::mcp::SOCK_ENV, crate::mcp::TOKEN_ENV]) {
+            manager.write("t-mcp-off", &line).expect("запись в PTY");
+        }
+        let output = wait_for_output(
+            &manager,
+            "t-mcp-off",
+            &off_rx,
+            Shell::EVALUATED_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+
+        assert!(
+            output.contains("PROBE_OK_clean_clean"),
+            "после выключения обе переменные обязаны быть пустыми: {output}"
+        );
+
+        let _ = manager.kill("t-mcp-off");
     }
 
     /// Пропуск из вывода пробы: он идёт последним словом после адреса сокета.

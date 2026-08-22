@@ -71,6 +71,7 @@ pub enum ErrorCode {
     BrowserNotConnected,
     BrowserCommandFailed,
     BrowserUrlUnsupported,
+    McpSettingsWriteFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

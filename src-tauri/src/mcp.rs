@@ -146,6 +146,21 @@ fn initialize_result() -> Value {
     })
 }
 
+/// Имена инструментов — для настроек: там показывают, что именно даёт сервер.
+/// Берутся из того же списка, что уходит агенту, поэтому разъехаться не могут.
+pub fn tool_names() -> Vec<String> {
+    tool_list()
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn tool_list() -> Value {
     json!([
         {
@@ -459,12 +474,73 @@ pub fn socket_path(_app: &tauri::AppHandle) -> Option<PathBuf> {
     None
 }
 
-/// Поднимает слушателя. Ошибки не фатальны: без MCP приложение работает как
-/// работало, просто агенты не видят инструментов.
+/// Живой слушатель: адрес нужен, чтобы разбудить `accept` при выключении.
+#[cfg(unix)]
+static LISTENING: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Номер поколения слушателя. По нему поток `accept` понимает, что снят: путь
+/// для этого не годится — после выключения и включения он тот же самый, и
+/// старый поток принял бы себя за нового.
+#[cfg(unix)]
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Поднимает слушателя, если MCP не выключен в настройках. Ошибки не фатальны:
+/// без MCP приложение работает как работало, просто агенты не видят
+/// инструментов.
 #[cfg(unix)]
 pub fn serve(app: tauri::AppHandle) {
+    if !crate::mcp_settings::enabled(&app) {
+        return;
+    }
+    start(app);
+}
+
+/// Снимает слушателя. После этого агент не видит сервер вовсе: сокета нет,
+/// адреса новым панелям не выдаём, и шиму некуда стучаться.
+#[cfg(unix)]
+pub fn stop() {
+    use std::sync::atomic::Ordering;
+
+    // Поколение меняем первым: поток, разбуженный следующей строкой, обязан
+    // увидеть уже новое число, иначе он примет наш стук за живого агента.
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    crate::pty::clear_mcp_socket();
+    let Some(path) = LISTENING.lock().unwrap().take() else {
+        return;
+    };
+    // Разбудить `accept`: без соединения поток спит на нём до конца жизни
+    // приложения и держит слушателя, даже когда файл сокета уже удалён.
+    let _ = std::os::unix::net::UnixStream::connect(&path);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[cfg(not(unix))]
+pub fn stop() {}
+
+/// Включён ли сервер прямо сейчас — то, что видит агент, а не то, что записано
+/// в настройках.
+pub fn listening() -> bool {
+    #[cfg(unix)]
+    {
+        LISTENING.lock().unwrap().is_some()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+#[cfg(unix)]
+fn start(app: tauri::AppHandle) {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
+    use std::sync::atomic::Ordering;
+
+    // Второй слушатель поверх первого забрал бы адрес себе, а первый остался
+    // бы висеть в `accept` навсегда.
+    if listening() {
+        return;
+    }
 
     let Some(path) = socket_path(&app) else {
         eprintln!("ModelCrew MCP: некуда положить сокет — агенты останутся без инструментов.");
@@ -498,10 +574,17 @@ pub fn serve(app: tauri::AppHandle) {
     let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     // Панели узнают адрес только теперь, когда слушатель уже стоит: иначе
     // агент, запущенный сразу после старта, постучался бы в пустоту.
+    let generation = GENERATION.load(Ordering::SeqCst);
+    *LISTENING.lock().unwrap() = Some(path.clone());
     crate::pty::set_mcp_socket(path);
 
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
+            // Нас сняли, пока мы спали в `accept`: это соединение — стук
+            // выключателя, а не агент. Уходим, отпуская слушателя.
+            if GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             let app = app.clone();
             // Поток на соединение: сессия агента живёт, пока жив он сам, и
             // одна панель не должна ждать другую.
@@ -512,6 +595,16 @@ pub fn serve(app: tauri::AppHandle) {
         }
     });
 }
+
+/// Включает сервер обратно. Отдельно от `serve`, потому что тот смотрит в
+/// настройки, а сюда приходят уже с принятым решением.
+#[cfg(unix)]
+pub fn resume(app: tauri::AppHandle) {
+    start(app);
+}
+
+#[cfg(not(unix))]
+pub fn resume(_app: tauri::AppHandle) {}
 
 #[cfg(not(unix))]
 pub fn serve(_app: tauri::AppHandle) {}

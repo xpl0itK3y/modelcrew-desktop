@@ -28,6 +28,7 @@ mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod mcp;
+mod mcp_settings;
 mod mcp_stdio;
 mod panel_snapshots;
 mod pty;
@@ -73,6 +74,7 @@ use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
     LinuxUpdaterState,
 };
+use mcp_settings::{mcp_set_enabled, mcp_status};
 use panel_snapshots::{panel_snapshot_restore, panel_snapshots};
 use pty::{GitBashAvailability, PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
@@ -997,6 +999,8 @@ pub fn run() {
             crew_claims,
             browser_frame,
             browser_go,
+            mcp_status,
+            mcp_set_enabled,
             panel_snapshots,
             panel_snapshot_restore,
             git_changes_summary,
@@ -1114,6 +1118,7 @@ mod tests {
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
         ("mcp.rs", include_str!("mcp.rs")),
+        ("mcp_settings.rs", include_str!("mcp_settings.rs")),
         ("mcp_stdio.rs", include_str!("mcp_stdio.rs")),
         ("panel_snapshots.rs", include_str!("panel_snapshots.rs")),
         ("pty.rs", include_str!("pty.rs")),
@@ -1181,6 +1186,8 @@ mod tests {
         "github_device_start",
         "github_logout",
         "list_shells",
+        "mcp_set_enabled",
+        "mcp_status",
         "panel_snapshot_restore",
         "panel_snapshots",
         "pty_create",
