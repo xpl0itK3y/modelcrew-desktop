@@ -3,7 +3,7 @@ import { localizeBackendError, useI18n } from "../../i18n";
 import { getMcpStatus, setMcpEnabled, type McpStatus } from "../../mcp";
 import { SettingRow, SettingsPage, SettingsSwitch } from "./SettingsControls";
 
-export function McpTab() {
+export function PluginsTab() {
   const { t } = useI18n();
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,20 +39,20 @@ export function McpTab() {
 
   return (
     <SettingsPage
-      section="mcp"
-      title={t("settings.tabMcp")}
-      intro={t("settings.mcpIntro")}
-      keywords="MCP CodeGraph CocoIndex сервер server"
+      section="plugins"
+      title={t("settings.tabPlugins")}
+      intro={t("settings.pluginsIntro")}
+      keywords="плагины расширения plugins extensions MCP браузер browser"
     >
       <SettingRow
-        title={t("settings.mcpBrowser")}
-        description={t("settings.mcpBrowserNote")}
+        title={t("settings.pluginBrowser")}
+        description={t("settings.pluginBrowserNote")}
         // Имена инструментов есть на странице только при включённом сервере,
         // а искать раздел по ним хочется в любом случае.
         keywords={(status?.tools ?? []).join(" ")}
         control={
           <SettingsSwitch
-            label={t("settings.mcpBrowser")}
+            label={t("settings.pluginBrowser")}
             checked={status?.enabled ?? false}
             disabled={busy || status === null}
             onChange={toggle}
@@ -80,7 +80,7 @@ function Note(props: { status: McpStatus | null; failure: string | null }) {
   // Сервер выключен: инструментов нет ни одного, и агент не видит даже самого
   // сервера — обещать здесь список было бы обманом.
   if (!props.status.enabled) {
-    return <p className="settings-note">{t("settings.mcpOff")}</p>;
+    return <p className="settings-note">{t("settings.pluginOff")}</p>;
   }
   // Включён, но слушателя нет: платформа его не поддерживает (Windows) или
   // сокет не открылся. Молчать нельзя — иначе включённый переключатель
@@ -88,17 +88,17 @@ function Note(props: { status: McpStatus | null; failure: string | null }) {
   if (!props.status.listening) {
     return (
       <p className="settings-note is-warning" role="status">
-        {t("settings.mcpUnavailable")}
+        {t("settings.pluginUnavailable")}
       </p>
     );
   }
   return (
     <p className="settings-note">
-      {t("settings.mcpTools", { tools: props.status.tools.join(" · ") })}
+      {t("settings.pluginTools", { tools: props.status.tools.join(" · ") })}
       {props.status.socket && (
         <>
           <br />
-          <span className="settings-mcp-socket">{props.status.socket}</span>
+          <span className="settings-plugin-socket">{props.status.socket}</span>
         </>
       )}
     </p>

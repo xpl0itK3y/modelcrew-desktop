@@ -387,8 +387,8 @@ describe("Settings search", () => {
   it("keeps a place for the tooling that is not there yet", () => {
     renderSettings();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Плагины" }));
-    const panel = screen.getByRole("tabpanel", { name: "Плагины" });
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
+    const panel = screen.getByRole("tabpanel", { name: "MCP" });
     expect(within(panel).getByText("Скоро")).toBeVisible();
 
     // Разделы ищутся по именам инструментов, которых в интерфейсе пока нет.

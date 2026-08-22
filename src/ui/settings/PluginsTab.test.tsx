@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
-import { McpTab } from "./McpTab";
+import { PluginsTab } from "./PluginsTab";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -33,10 +33,10 @@ afterEach(() => setLocale("ru"));
 
 const theSwitch = () => screen.getByRole("switch", { name: "Браузер" });
 
-describe("McpTab", () => {
+describe("PluginsTab", () => {
   it("shows what the agent actually gets", async () => {
     invoke.mockResolvedValue(RUNNING);
-    render(<McpTab />);
+    render(<PluginsTab />);
 
     // Имена инструментов — те же, что уходят агенту: по ним человек и
     // сверяет, то ли он видит в /mcp у себя.
@@ -53,7 +53,7 @@ describe("McpTab", () => {
 
   it("takes the whole server down, not just the tools", async () => {
     invoke.mockResolvedValueOnce(RUNNING).mockResolvedValueOnce(SWITCHED_OFF);
-    render(<McpTab />);
+    render(<PluginsTab />);
     await waitFor(() =>
       expect(theSwitch()).toHaveAttribute("aria-checked", "true"),
     );
@@ -63,7 +63,7 @@ describe("McpTab", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "Сервер снят: агент не видит ни его, ни инструментов.",
+          "Плагин выключен: агент не видит ни сервера, ни инструментов.",
         ),
       ).toBeVisible(),
     );
@@ -77,12 +77,12 @@ describe("McpTab", () => {
 
   it("does not promise a server that failed to come up", async () => {
     invoke.mockResolvedValue({ ...RUNNING, listening: false, socket: null });
-    render(<McpTab />);
+    render(<PluginsTab />);
 
     await waitFor(() =>
       expect(
         screen.getByText(
-          "Сервер включён, но не поднялся: на этой системе он пока не работает.",
+          "Плагин включён, но сервер не поднялся: на этой системе он пока не работает.",
         ),
       ).toBeVisible(),
     );
@@ -92,7 +92,7 @@ describe("McpTab", () => {
     invoke
       .mockResolvedValueOnce(RUNNING)
       .mockRejectedValueOnce({ code: "mcp_settings_write_failed" });
-    render(<McpTab />);
+    render(<PluginsTab />);
     await waitFor(() =>
       expect(theSwitch()).toHaveAttribute("aria-checked", "true"),
     );
@@ -110,7 +110,7 @@ describe("McpTab", () => {
     // Бэкенд не ответил: положение выключателя неизвестно, и трогать его
     // нельзя — щелчок вслепую снял бы работающий сервер.
     invoke.mockReturnValue(new Promise(() => {}));
-    render(<McpTab />);
+    render(<PluginsTab />);
 
     expect(theSwitch()).toBeDisabled();
   });

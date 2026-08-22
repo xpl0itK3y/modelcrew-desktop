@@ -417,16 +417,17 @@ export const en: Record<MessageKey, string> = {
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
   "settings.tabMcp": "MCP",
-  "settings.mcpIntro":
-    "Tools the agent reaches for on its own, when it decides it needs them. They work in ModelCrew terminals: the agent is recognised by the panel it was started from.",
-  "settings.mcpBrowser": "Browser",
-  "settings.mcpBrowserNote":
-    "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. Applies to new terminals.",
-  "settings.mcpTools": "Tools: {tools}",
-  "settings.mcpOff": "The server is down: the agent sees neither it nor the tools.",
-  "settings.mcpUnavailable":
-    "The server is switched on but did not come up: it does not work on this system yet.",
   "settings.tabPlugins": "Plugins",
+  "settings.pluginsIntro":
+    "Plugins give the agent tools it reaches for on its own, when it decides it needs them. They work in ModelCrew terminals: the agent is recognised by the panel it was started from.",
+  "settings.pluginBrowser": "Browser",
+  "settings.pluginBrowserNote":
+    "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. Applies to new terminals.",
+  "settings.pluginTools": "Tools: {tools}",
+  "settings.pluginOff":
+    "The plugin is off: the agent sees neither the server nor the tools.",
+  "settings.pluginUnavailable":
+    "The plugin is on but the server did not come up: it does not work on this system yet.",
   "settings.tabHotkeys": "Shortcuts",
   "settings.hotkeysIntro":
     "Picked for your keyboard. They work while the focus is in a terminal: these combinations are captured before the shell, everything else goes through to it.",
