@@ -1050,6 +1050,23 @@ mod tests {
     }
 
     #[test]
+    fn the_settings_list_everything_the_plugin_gives_and_not_what_an_outsider_sees() {
+        // Список в настройках берётся у сервера, а сервер с недавних пор
+        // отвечает по-разному в зависимости от того, кто спросил. Человек в
+        // настройках — не «чужой агент», и показывать ему одну проверку связи
+        // значило бы соврать про то, что плагин умеет.
+        assert_eq!(
+            tool_names(),
+            [
+                "crew_ping",
+                "browser_open",
+                "browser_screenshot",
+                "browser_navigate"
+            ]
+        );
+    }
+
+    #[test]
     fn shows_an_outsider_nothing_he_could_call_anyway() {
         // Постоянная регистрация означает, что сервер прописан у агента
         // навсегда — в том числе когда его запускают в обычном терминале.
