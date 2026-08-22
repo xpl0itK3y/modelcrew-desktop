@@ -143,7 +143,7 @@ pub fn dispatch(ctx: &PanelContext, tools: &dyn Tools, line: &str) -> Option<Str
         "initialize" => result(id, initialize_result()),
         // Проверка живости из самого протокола: пустой результат.
         "ping" => result(id, json!({})),
-        "tools/list" => result(id, json!({ "tools": tool_list() })),
+        "tools/list" => result(id, json!({ "tools": tool_list(ctx) })),
         "tools/call" => call_tool(ctx, tools, id, value.get("params")),
         "" => error(id, -32600, "в запросе нет метода"),
         other => error(id, -32601, &format!("метод «{other}» неизвестен")),
@@ -162,9 +162,10 @@ fn initialize_result() -> Value {
 }
 
 /// Имена инструментов — для настроек: там показывают, что именно даёт сервер.
-/// Берутся из того же списка, что уходит агенту, поэтому разъехаться не могут.
+/// Берутся из того же списка, что уходит агенту своей панели, поэтому
+/// разъехаться не могут.
 pub fn tool_names() -> Vec<String> {
-    tool_list()
+    tool_list(&PanelContext::new(String::new(), Some(PathBuf::new())))
         .as_array()
         .map(|tools| {
             tools
@@ -176,23 +177,43 @@ pub fn tool_names() -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn tool_list() -> Value {
-    json!([
-        {
-            // Служебный: проверяет, что труба проложена, а агент и его проект
-            // опознаны. Инструмент работы, а не диагностики, — следующий.
-            "name": "crew_ping",
-            "description": concat!(
-                "Проверка связи с ModelCrew. Возвращает номер панели, из которой ",
-                "запущен агент, и корень проекта этой панели.",
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false,
-            },
+/// Что показать агенту.
+///
+/// Агенту вне терминала ModelCrew — только проверку связи. Инструменты, для
+/// которых нет панели, всё равно откажут, а показанный инструмент модель
+/// сначала позовёт и только потом узнает, что он не работает: ход потрачен,
+/// в журнале ошибка, и виноватым выглядит ModelCrew. Проверку связи
+/// оставляем: без неё человеку нечем выяснить, почему браузера нет.
+fn tool_list(ctx: &PanelContext) -> Value {
+    let mut tools = vec![ping_tool()];
+    if ctx.root.is_some() {
+        tools.extend(browser_tools());
+    }
+    Value::Array(tools)
+}
+
+/// Служебный: проверяет, что труба проложена, а агент и его проект опознаны.
+/// Показывается всегда — им же выясняют, почему остальных не видно.
+fn ping_tool() -> Value {
+    json!({
+        "name": "crew_ping",
+        "description": concat!(
+            "Проверка связи с ModelCrew. Возвращает номер панели, из которой ",
+            "запущен агент, и корень проекта этой панели.",
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false,
         },
-        {
+    })
+}
+
+/// Инструменты работы. У всех у них есть общее: они делают что-то с браузером
+/// **панели**, и без панели им нечего открывать.
+fn browser_tools() -> Vec<Value> {
+    vec![
+        json!({
             "name": "browser_open",
             "description": concat!(
                 "Поднять браузер этого проекта, если он ещё не запущен. ",
@@ -205,8 +226,8 @@ fn tool_list() -> Value {
                 "properties": {},
                 "additionalProperties": false,
             },
-        },
-        {
+        }),
+        json!({
             // Ради него всё и затевалось. Без картинки наш браузер для агента
             // — экран для человека, а глаза у агента свои: в живом прогоне
             // 2026-08-18 он после browser_navigate ушёл поднимать сторонний
@@ -225,8 +246,8 @@ fn tool_list() -> Value {
                 "properties": {},
                 "additionalProperties": false,
             },
-        },
-        {
+        }),
+        json!({
             "name": "browser_navigate",
             "description": concat!(
                 "Открыть страницу в браузере проекта и дождаться загрузки. ",
@@ -245,8 +266,8 @@ fn tool_list() -> Value {
                 "required": ["url"],
                 "additionalProperties": false,
             },
-        },
-    ])
+        }),
+    ]
 }
 
 fn call_tool(ctx: &PanelContext, tools: &dyn Tools, id: Value, params: Option<&Value>) -> String {
@@ -1026,6 +1047,32 @@ mod tests {
         assert_eq!(answer["result"]["isError"], true);
         let text = answer["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("панель не найдена"), "{text}");
+    }
+
+    #[test]
+    fn shows_an_outsider_nothing_he_could_call_anyway() {
+        // Постоянная регистрация означает, что сервер прописан у агента
+        // навсегда — в том числе когда его запускают в обычном терминале.
+        // Показать там инструменты браузера значит подождать, пока модель
+        // потратит на них ход и получит отказ: в журнале ошибка, виноватым
+        // выглядит ModelCrew. Проверку связи оставляем — ею и выясняют, куда
+        // делись остальные.
+        let answer = parse(
+            &dispatch(
+                &PanelContext::unknown(),
+                &StubTools::working(),
+                r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            )
+            .unwrap(),
+        );
+
+        let names: Vec<&str> = answer["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["crew_ping"]);
     }
 
     #[test]
