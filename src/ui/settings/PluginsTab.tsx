@@ -1,35 +1,34 @@
 import { useEffect, useState } from "react";
 import { localizeBackendError, useI18n } from "../../i18n";
-import { getMcpStatus, setMcpEnabled, type McpStatus } from "../../mcp";
+import {
+  refreshMcpStatus,
+  setMcpEnabled,
+  useMcpStatus,
+  type McpStatus,
+} from "../../mcp";
 import { SettingRow, SettingsPage, SettingsSwitch } from "./SettingsControls";
 
 export function PluginsTab() {
   const { t } = useI18n();
-  const [status, setStatus] = useState<McpStatus | null>(null);
+  const status = useMcpStatus();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  // Спрашиваем заново при каждом открытии настроек: сервер мог не подняться
+  // уже после старта приложения.
+  //
+  // Молча при отказе: настройки открываются и без ответа бэкенда, а
+  // переключатель остаётся недоступным — трогать то, о чём ничего не
+  // известно, нельзя.
   useEffect(() => {
-    let alive = true;
-    getMcpStatus()
-      .then((next) => {
-        if (alive) {
-          setStatus(next);
-        }
-      })
-      // Молча: настройки открываются и без ответа бэкенда, а переключатель
-      // остаётся недоступным — трогать то, о чём ничего не известно, нельзя.
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
+    refreshMcpStatus().catch(() => {});
   }, []);
 
   async function toggle(next: boolean) {
     setBusy(true);
     setFailure(null);
     try {
-      setStatus(await setMcpEnabled(next));
+      await setMcpEnabled(next);
     } catch (error) {
       setFailure(localizeBackendError(error));
     } finally {

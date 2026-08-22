@@ -65,6 +65,7 @@ import {
 import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
 import { watchPanelClaims } from "./crew/claimPolling";
+import { refreshMcpStatus, useBrowserPluginEnabled } from "./mcp";
 import { setWorkspaceNameResolver } from "./terminal/alertDelivery";
 import { subscribeAgentAttention } from "./terminal/attentionStore";
 import {
@@ -574,7 +575,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [gitDrawerOpen]);
   // Браузер проекта — такой же оверлей: страница видна прямо в приложении,
-  // и терминалы под ней остаются на своих местах.
+  // и терминалы под ней остаются на своих местах. Живёт он, пока включён
+  // плагин: выключенный плагин убирает браузер целиком, а не только у агентов.
+  const browserPluginEnabled = useBrowserPluginEnabled();
+  // Один раз при запуске: положение выключателя лежит на диске, до ответа
+  // глобус показан по умолчанию.
+  useEffect(() => {
+    refreshMcpStatus().catch(() => {});
+  }, []);
   const [browserDrawerOpen, setBrowserDrawerOpen] = useState(false);
   const [browserDrawerMaximized, setBrowserDrawerMaximized] = useState(false);
   const liveBrowserWorkspaceId = browserDrawerOpen ? activeProjectId : null;
@@ -596,14 +604,14 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [browserDrawerOpen]);
-  // Проект пропал (папку отвязали, переключились на непривязанный) — ящик
-  // закрываем сами. Иначе он остаётся «открытым» невидимо и всплывает потом,
-  // стоит появиться папке.
+  // Проект пропал (папку отвязали, переключились на непривязанный) или плагин
+  // выключили — ящик закрываем сами. Иначе он остаётся «открытым» невидимо и
+  // всплывает потом, стоит появиться папке.
   useEffect(() => {
-    if (!activeProjectId) {
+    if (!activeProjectId || !browserPluginEnabled) {
       setBrowserDrawerOpen(false);
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, browserPluginEnabled]);
   const sidebarWorkspaces = workspaces.list.map((workspace) => {
     const sessions = workspace.sessions.map((session) => ({
       id: session.id,
@@ -651,7 +659,7 @@ export default function App() {
           }
         }}
         browserOpen={browserDrawerOpen}
-        browserAvailable={activeProjectId !== null}
+        browserAvailable={activeProjectId !== null && browserPluginEnabled}
         onOpenBrowser={() => {
           setBrowserDrawerOpen(!browserDrawerOpen);
           if (!browserDrawerOpen) {

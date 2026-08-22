@@ -123,6 +123,11 @@ pub fn mcp_set_enabled(
         crate::mcp::resume(app.clone());
     } else {
         crate::mcp::stop();
+        // Браузер — это и есть плагин. Оставить работающий Chrome после
+        // выключения значило бы выключить его только для агентов, а человек
+        // так и смотрел бы на страницу в ящике.
+        use tauri::Manager;
+        app.state::<crate::browser_host::BrowserHost>().close_all();
     }
     Ok(status(&app))
 }

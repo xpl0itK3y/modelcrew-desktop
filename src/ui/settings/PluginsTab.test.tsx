@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
+import { forgetMcpStatus } from "../../mcp";
 import { PluginsTab } from "./PluginsTab";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -28,6 +29,9 @@ const SWITCHED_OFF = {
 // вечное обещание, на котором прогон и виснет.
 beforeEach(() => {
   invoke.mockReset();
+  // Состояние плагина общее на всё приложение и переживает размонтирование:
+  // без сброса соседний тест видел бы чужой ответ.
+  forgetMcpStatus();
 });
 afterEach(() => setLocale("ru"));
 
