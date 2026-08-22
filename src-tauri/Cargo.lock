@@ -2336,6 +2336,7 @@ name = "modelcrew-desktop"
 version = "0.0.18"
 dependencies = [
  "base64 0.22.1",
+ "libc",
  "log",
  "minisign-verify",
  "notify",

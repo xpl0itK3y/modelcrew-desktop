@@ -394,8 +394,7 @@ fn error(id: Value, code: i64, message: &str) -> String {
 /// в двух местах.
 pub fn token_of_handshake(line: &str) -> Option<String> {
     let value: Value = serde_json::from_str(line).ok()?;
-    let token = value.get("token")?.as_str()?;
-    (!token.is_empty()).then(|| token.to_string())
+    Some(value.get("token")?.as_str()?.to_string())
 }
 
 pub fn handshake(token: &str) -> String {
@@ -704,7 +703,7 @@ fn start(app: tauri::AppHandle) {
             // одна панель не должна ждать другую.
             std::thread::spawn(move || {
                 let tools = AppTools { app: app.clone() };
-                serve_connection(stream, &tools, &|token| panel_by_token(&app, token));
+                serve_connection(stream, &tools, &|caller| panel_of(&app, caller));
             });
         }
     });
@@ -723,18 +722,35 @@ pub fn resume(_app: tauri::AppHandle) {}
 #[cfg(not(unix))]
 pub fn serve(_app: tauri::AppHandle) {}
 
+/// Кто позвал: то, что о звонящем известно ещё до первой его строки, плюс
+/// пропуск, который он предъявил сам.
+#[cfg(unix)]
+pub struct Caller {
+    /// Пропуск из рукопожатия. Пусто, когда окружение до шима не дошло.
+    pub token: String,
+    /// Процессы от звонящего вверх, по данным ядра. Пусто там, где спросить
+    /// систему не удалось.
+    pub ancestry: Vec<u32>,
+}
+
 /// Разговор на одном соединении.
 ///
-/// Панель берётся по пропуску через переданную функцию, а не напрямую из
-/// `PtyManager`: так весь путь — рукопожатие, разбор строк, ответы — проверяется
-/// на живом сокете без поднятого приложения.
+/// Панель берётся через переданную функцию, а не напрямую из `PtyManager`:
+/// так весь путь — рукопожатие, разбор строк, ответы — проверяется на живом
+/// сокете без поднятого приложения.
 #[cfg(unix)]
 fn serve_connection(
     stream: std::os::unix::net::UnixStream,
     tools: &dyn Tools,
-    panel_of: &dyn Fn(&str) -> Option<(String, PathBuf)>,
+    panel_of: &dyn Fn(&Caller) -> Option<(String, PathBuf)>,
 ) {
     use std::io::{BufRead, BufReader, Write};
+
+    // Спрашиваем ядро до первой строки: соединение ещё целое, и процесс на
+    // том конце заведомо жив.
+    let ancestry = crate::peer::peer_pid(&stream)
+        .map(crate::peer::ancestry)
+        .unwrap_or_default();
 
     let Ok(write_half) = stream.try_clone() else {
         return;
@@ -750,6 +766,7 @@ fn serve_connection(
     let Some(token) = token_of_handshake(&first) else {
         return;
     };
+    let caller = Caller { token, ancestry };
 
     for line in lines.map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -758,7 +775,7 @@ fn serve_connection(
         // Панель перечитываем на каждый запрос, а не держим с рукопожатия:
         // её могли закрыть посреди сессии агента, и отвечать по устаревшему
         // корню значило бы работать в чужом каталоге.
-        let ctx = match panel_of(&token) {
+        let ctx = match panel_of(&caller) {
             Some((panel_id, root)) => PanelContext::new(panel_id, Some(root)),
             None => PanelContext::unknown(),
         };
@@ -774,10 +791,19 @@ fn serve_connection(
     }
 }
 
+/// Чья это панель.
+///
+/// Сначала по происхождению процесса, потом по пропуску. Именно в таком
+/// порядке: происхождение сообщает ядро, а пропуск — сам звонящий. Пропуск
+/// остаётся запасным путём для агентов, которые запускают сервер в стороне от
+/// своего дерева процессов, и для тех, у кого спросить ядро не вышло.
 #[cfg(unix)]
-fn panel_by_token(app: &tauri::AppHandle, token: &str) -> Option<(String, PathBuf)> {
+fn panel_of(app: &tauri::AppHandle, caller: &Caller) -> Option<(String, PathBuf)> {
     use tauri::Manager;
-    app.state::<crate::pty::PtyManager>().panel_of_token(token)
+    let sessions = app.state::<crate::pty::PtyManager>();
+    sessions
+        .panel_of_ancestry(&caller.ancestry)
+        .or_else(|| sessions.panel_of_token(&caller.token))
 }
 
 #[cfg(test)]
@@ -1149,6 +1175,57 @@ mod tests {
     /// так же, как «агент не видит инструмента».
     #[cfg(unix)]
     #[test]
+    #[cfg(unix)]
+    fn knows_who_called_even_when_the_pass_never_arrived() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        // Ради этого опознание по процессу и заводилось: cursor чистит
+        // окружение, и пропуска у шима нет вовсе. Панель обязана узнаться по
+        // тому, из кого он вырос.
+        let path = std::env::temp_dir().join(format!("mc-mcp-pid-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve_connection(stream, &StubTools::working(), &|caller: &Caller| {
+                // Пропуска нет — узнаём по родне. В цепочке обязаны быть мы
+                // сами: соединение открыто этим же процессом.
+                assert!(caller.token.is_empty(), "пропуск взялся ниоткуда");
+                caller
+                    .ancestry
+                    .contains(&std::process::id())
+                    .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
+            });
+        });
+
+        let client = UnixStream::connect(&path).unwrap();
+        let mut out = client.try_clone().unwrap();
+        let mut back = BufReader::new(client).lines();
+        for line in [
+            handshake(""),
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"crew_ping"}}"#
+                .to_string(),
+        ] {
+            out.write_all(line.as_bytes()).unwrap();
+            out.write_all(b"\n").unwrap();
+            out.flush().unwrap();
+        }
+
+        let answer = parse(&back.next().unwrap().unwrap());
+        let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("panel-a"), "{text}");
+        assert!(text.contains("/w/project"), "{text}");
+
+        // Именно shutdown, а не drop: `out` — клон, и пока читающая половина
+        // жива, сокет открыт, сервер ждёт следующую строку, а join висит.
+        out.shutdown(std::net::Shutdown::Write).unwrap();
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn carries_a_whole_conversation_over_a_real_socket() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::{UnixListener, UnixStream};
@@ -1159,8 +1236,8 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            serve_connection(stream, &StubTools::working(), &|token| {
-                (token == "pass-of-panel-a")
+            serve_connection(stream, &StubTools::working(), &|caller: &Caller| {
+                (caller.token == "pass-of-panel-a")
                     .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
             });
         });
@@ -1274,8 +1351,8 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            serve_connection(stream, &StubTools::working(), &|token| {
-                (token == "pass-of-panel-a")
+            serve_connection(stream, &StubTools::working(), &|caller: &Caller| {
+                (caller.token == "pass-of-panel-a")
                     .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
             });
         });
@@ -1476,11 +1553,14 @@ mod tests {
             token_of_handshake(&handshake("s3cr3t")).as_deref(),
             Some("s3cr3t")
         );
-        // Пустое и битое рукопожатие — не пропуск: обслуживать некого.
-        assert!(token_of_handshake(r#"{"token":""}"#).is_none());
+        // Пустой пропуск — не отказ, а «пропуска нет»: так приходит агент,
+        // которому вычистили окружение, и узнают его по родне процессов.
+        assert_eq!(token_of_handshake(r#"{"token":""}"#).as_deref(), Some(""));
+        // А вот рукопожатия вовсе нет — обслуживать некого.
         assert!(token_of_handshake("").is_none());
         assert!(token_of_handshake(r#"{"other":1}"#).is_none());
-        // Id панели больше не пропуск: его знает любой процесс пользователя.
+        // Id панели пропуском не был и не станет: его знает любой процесс
+        // пользователя.
         assert!(token_of_handshake(r#"{"panelId":"panel-b"}"#).is_none());
     }
 

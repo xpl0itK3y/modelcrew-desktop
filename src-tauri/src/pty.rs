@@ -355,6 +355,22 @@ impl PtyManager {
             .map(|(id, session)| (id.clone(), session.root.clone()))
     }
 
+    /// Панель, из терминала которой вырос процесс с такой роднёй.
+    ///
+    /// Цепочка идёт от звонящего вверх, поэтому первое совпадение — ближайшая
+    /// панель. Ближе шелла панели предков быть не может: сама панель и есть
+    /// его корень.
+    #[cfg(unix)]
+    pub fn panel_of_ancestry(&self, ancestry: &[u32]) -> Option<(String, PathBuf)> {
+        let sessions = self.sessions.lock().unwrap();
+        ancestry.iter().find_map(|pid| {
+            sessions
+                .iter()
+                .find(|(_, session)| session.child_pid == Some(*pid))
+                .map(|(id, session)| (id.clone(), session.root.clone()))
+        })
+    }
+
     /// Корень проекта панели: от него отсчитываются заявки на файлы.
     pub fn session_root(&self, id: &str) -> Option<PathBuf> {
         self.sessions
@@ -1906,6 +1922,48 @@ mod tests {
         );
 
         let _ = manager.kill("t-env2");
+    }
+
+    /// Панель узнаётся по тому, из кого вырос процесс агента, — без всякого
+    /// пропуска. Это и есть путь для cursor, который вычищает окружение, и
+    /// для постоянной регистрации, где конфиг один на проект, а панелей много.
+    #[cfg(unix)]
+    #[test]
+    fn a_panel_is_found_by_the_processes_the_agent_grew_out_of() {
+        let manager = PtyManager::default();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-pid".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                },
+                |_| {},
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+        let shell = manager
+            .sessions
+            .lock()
+            .unwrap()
+            .get("t-pid")
+            .and_then(|session| session.child_pid)
+            .expect("у живой панели есть процесс");
+
+        // Агент сидит не прямо в шелле панели, а под ним: своя оболочка, свой
+        // шим. Поэтому совпасть должен предок, а не первый же в цепочке.
+        let found = manager.panel_of_ancestry(&[u32::MAX, shell]);
+        assert_eq!(found, Some(("t-pid".to_string(), test_cwd())));
+
+        // Спросить систему не вышло или процесс уже чужой — не наш случай, и
+        // выдумывать панель нельзя: дальше в дело идёт пропуск.
+        assert_eq!(manager.panel_of_ancestry(&[]), None);
+        assert_eq!(manager.panel_of_ancestry(&[u32::MAX]), None);
+
+        let _ = manager.kill("t-pid");
     }
 
     /// Агент видит MCP только через окружение своей панели: адрес сокета и

@@ -45,6 +45,12 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 
+[target.'cfg(unix)'.dependencies]
+# Опознание звонящего по сокету: pid у ядра и цепочка его родителей. Всё это
+# системные вызовы, обёртки над ними в std нет. Крейт и так в дереве —
+# новых зависимостей не добавляется.
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",

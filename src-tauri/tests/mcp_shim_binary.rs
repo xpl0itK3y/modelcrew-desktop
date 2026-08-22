@@ -204,15 +204,46 @@ fn says_out_loud_that_it_was_not_let_in() {
 }
 
 #[test]
-fn refuses_to_start_without_a_pass() {
+fn goes_on_without_a_pass_and_lets_the_application_work_out_who_called() {
+    // Пропуска нет — так приходит агент, которому вычистили окружение
+    // (cursor), и так же будет приходить любой при постоянной регистрации:
+    // конфиг один на проект, а панелей у проекта много. Падать здесь значит
+    // не дать приложению даже попытаться опознать звонящего по процессам.
     let socket = socket_path("nopass");
-    let _listener = UnixListener::bind(&socket).unwrap();
+    let listener = UnixListener::bind(&socket).unwrap();
 
-    let out = shim(&socket, None).wait_with_output().unwrap();
+    let served = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut out = stream.try_clone().unwrap();
+        let mut lines = BufReader::new(stream).lines();
+        let handshake = lines.next().unwrap().unwrap();
+        let _request = lines.next().unwrap().unwrap();
+        out.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n")
+            .unwrap();
+        out.flush().unwrap();
+        handshake
+    });
 
-    assert_ne!(out.status.code(), Some(0));
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("MODELCREW_MCP_TOKEN"), "{stderr}");
+    let mut child = shim(&socket, None);
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
+        .unwrap();
+    stdin.flush().unwrap();
+
+    let answer = BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .next()
+        .expect("шим обязан вернуть ответ на stdout")
+        .unwrap();
+    drop(stdin);
+    let status = child.wait().unwrap();
+
+    // Рукопожатие всё равно есть, просто пустое: приложение по нему видит,
+    // что пропуска нет, и переходит к опознанию по родне процессов.
+    assert_eq!(served.join().unwrap(), r#"{"token":""}"#);
+    assert!(answer.contains("\"ok\":true"), "{answer}");
+    assert_eq!(status.code(), Some(0));
 
     let _ = std::fs::remove_file(&socket);
 }
