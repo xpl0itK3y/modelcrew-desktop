@@ -158,6 +158,7 @@ const backendErrorKeys: Record<string, MessageKey> = {
   browser_not_connected: "error.browserNotConnected",
   browser_command_failed: "error.browserCommandFailed",
   browser_url_unsupported: "error.browserUrlUnsupported",
+  mcp_settings_write_failed: "error.mcpSettingsWriteFailed",
 };
 
 const gitReasonKeys: Record<string, MessageKey> = {

@@ -417,6 +417,15 @@ export const en: Record<MessageKey, string> = {
   "settings.tabTerminal": "Terminal",
   "settings.tabAgents": "Agents",
   "settings.tabMcp": "MCP",
+  "settings.mcpIntro":
+    "Tools the agent reaches for on its own, when it decides it needs them. They work in ModelCrew terminals: the agent is recognised by the panel it was started from.",
+  "settings.mcpBrowser": "Browser",
+  "settings.mcpBrowserNote":
+    "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. Applies to new terminals.",
+  "settings.mcpTools": "Tools: {tools}",
+  "settings.mcpOff": "The server is down: the agent sees neither it nor the tools.",
+  "settings.mcpUnavailable":
+    "The server is switched on but did not come up: it does not work on this system yet.",
   "settings.tabPlugins": "Plugins",
   "settings.tabHotkeys": "Shortcuts",
   "settings.hotkeysIntro":
@@ -602,6 +611,7 @@ export const en: Record<MessageKey, string> = {
   "error.browserNotConnected": "Lost the connection to the project browser",
   "error.browserCommandFailed": "The browser could not do that",
   "error.browserCommandFailedReason": "The browser could not do that: {reason}",
+  "error.mcpSettingsWriteFailed": "Could not remember the MCP setting",
   "error.browserUrlUnsupported":
     "That address cannot be opened — only http and https work",
   "error.unknown": "An unknown error occurred",

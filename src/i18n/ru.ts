@@ -416,6 +416,15 @@ export const ru = {
   "settings.tabTerminal": "Терминал",
   "settings.tabAgents": "Агенты",
   "settings.tabMcp": "MCP",
+  "settings.mcpIntro":
+    "Инструменты, которые агент зовёт сам, когда решит, что они нужны. Работают в терминалах ModelCrew: агент опознаётся по панели, из которой запущен.",
+  "settings.mcpBrowser": "Браузер",
+  "settings.mcpBrowserNote":
+    "Агент открывает страницы в браузере проекта и ходит по ним. Своего окна у браузера нет — страницу видно в самом ModelCrew. Действует для новых терминалов.",
+  "settings.mcpTools": "Инструменты: {tools}",
+  "settings.mcpOff": "Сервер снят: агент не видит ни его, ни инструментов.",
+  "settings.mcpUnavailable":
+    "Сервер включён, но не поднялся: на этой системе он пока не работает.",
   "settings.tabPlugins": "Плагины",
   "settings.tabHotkeys": "Горячие клавиши",
   "settings.hotkeysIntro":
@@ -597,6 +606,7 @@ export const ru = {
   "error.browserNotConnected": "Связь с браузером проекта потеряна",
   "error.browserCommandFailed": "Браузер не смог это выполнить",
   "error.browserCommandFailedReason": "Браузер не смог это выполнить: {reason}",
+  "error.mcpSettingsWriteFailed": "Не удалось запомнить настройку MCP",
   "error.browserUrlUnsupported":
     "Такой адрес открывать нельзя — годятся только http и https",
   "error.unknown": "Произошла неизвестная ошибка",

@@ -26,6 +26,7 @@ import {
 import { AppearanceTab } from "./settings/AppearanceTab";
 import { TerminalTab } from "./settings/TerminalTab";
 import { AgentsTab } from "./settings/AgentsTab";
+import { McpTab } from "./settings/McpTab";
 import { HotkeysTab } from "./settings/HotkeysTab";
 import { SoonTab } from "./settings/SoonTab";
 import { NotificationsTab } from "./settings/NotificationsTab";
@@ -359,11 +360,7 @@ function SettingsShell(props: ShellProps) {
           hidden={isHidden("mcp")}
           tabIndex={0}
         >
-          <SoonTab
-            section="mcp"
-            title={t("settings.tabMcp")}
-            keywords="MCP CodeGraph CocoIndex сервер server"
-          />
+          <McpTab />
         </div>
 
         <div

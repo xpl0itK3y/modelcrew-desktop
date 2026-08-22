@@ -386,6 +386,14 @@
   color: var(--mc-danger);
 }
 
+/* Адрес сокета MCP: путь, который человек копирует в чужой конфиг, поэтому
+   моноширинный и переносится по любому символу — он длиннее строки. */
+.settings-mcp-socket {
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- Переключатели ---------- */
 
 .settings-switch {
