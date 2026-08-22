@@ -9,9 +9,12 @@ import { useI18n } from "../../../i18n";
 import { type GitRefKind } from "../../../git/gitBranches";
 import { type GitCommitInfo } from "../../../git/gitLog";
 import { formatRelativeTime } from "../../../git/relativeTime";
-import { computeCommitGraph } from "../../../git/commitGraph";
+import { computeCommitGraph, traceCurrentBranch } from "../../../git/commitGraph";
 import {
   GRAPH_COLORS,
+  GRAPH_CURRENT_HALO_OPACITY,
+  GRAPH_CURRENT_HALO_WIDTH,
+  GRAPH_CURRENT_STROKE_WIDTH,
   GRAPH_DOT_RADIUS,
   GRAPH_HEAD_INNER_RADIUS,
   GRAPH_HEAD_INNER_STROKE_WIDTH,
@@ -98,25 +101,25 @@ export function CommitGraph(props: {
   onOpenChanges: () => void;
 }) {
   const { locale, t } = useI18n();
-  const rows = useMemo(
-    () =>
-      computeCommitGraph(
-        props.commits.map((commit) => ({
-          hash: commit.hash,
-          parents: commit.parents,
-          refs: commit.refs,
-          refDetails: commit.refDetails,
-          isHead: commit.isHead,
-        })),
-        {
-          currentBranch: props.currentBranch,
-          upstreamBranch: props.upstreamBranch ?? null,
-        },
-      ),
-    [props.commits, props.currentBranch, props.upstreamBranch],
-  );
+  const { rows, trail } = useMemo(() => {
+    const inputs = props.commits.map((commit) => ({
+      hash: commit.hash,
+      parents: commit.parents,
+      refs: commit.refs,
+      refDetails: commit.refDetails,
+      isHead: commit.isHead,
+    }));
+    const graph = computeCommitGraph(inputs, {
+      currentBranch: props.currentBranch,
+      upstreamBranch: props.upstreamBranch ?? null,
+    });
+    return { rows: graph, trail: traceCurrentBranch(graph, inputs) };
+  }, [props.commits, props.currentBranch, props.upstreamBranch]);
   const head = rows[0];
   const headWidth = ((head?.width ?? 1) + 1) * GRAPH_LANE_WIDTH;
+  // Поводок рабочего дерева — верхний конец той же линии, если сверху стоит
+  // именно HEAD, а не вершина соседней ветки в режиме «Все ветки».
+  const headIsCurrent = props.commits[0]?.isHead === true;
 
   return (
     <div className="git-graph">
@@ -143,7 +146,11 @@ export function CommitGraph(props: {
               x2={graphLaneCenter(head.col)}
               y2={GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2}
               stroke={laneColor(head.color)}
-              strokeWidth={GRAPH_STROKE_WIDTH}
+              strokeWidth={
+                headIsCurrent
+                  ? GRAPH_CURRENT_STROKE_WIDTH
+                  : GRAPH_STROKE_WIDTH
+              }
               strokeDasharray="2 2"
             />
             <circle
@@ -171,6 +178,35 @@ export function CommitGraph(props: {
         const cx = graphLaneCenter(row.col);
         const rowWidth = (row.width + 1) * GRAPH_LANE_WIDTH;
         const selected = props.selectedHash === commit.hash;
+        // Ореол линии текущей ветки собираем заранее: он шире обычной дорожки
+        // и должен лежать позади всех, иначе размывает соседние линии.
+        const mark = trail[index];
+        const halo: { d: string; color: number }[] = [];
+        if (mark.through !== null) {
+          const edge = row.through[mark.through];
+          halo.push({
+            d: graphThroughPath(edge.fromCol, edge.toCol),
+            color: edge.color,
+          });
+        }
+        if (mark.top !== null) {
+          const edge = row.top[mark.top];
+          halo.push({
+            d: graphIncomingPath(edge.fromCol, edge.toCol),
+            color: edge.color,
+          });
+        }
+        if (mark.bottom !== null) {
+          const edge = row.bottom[mark.bottom];
+          halo.push({
+            d: graphParentPath(
+              edge.fromCol,
+              edge.toCol,
+              edge.parentIndex ?? 0,
+            ),
+            color: edge.color,
+          });
+        }
         return (
           <Fragment key={commit.hash}>
             <div
@@ -198,13 +234,30 @@ export function CommitGraph(props: {
                 style={{ width: rowWidth, minWidth: rowWidth }}
                 aria-hidden="true"
               >
+                {halo.map((line, k) => (
+                  <path
+                    key={`g-${k}`}
+                    className="git-graph-current-halo"
+                    d={line.d}
+                    fill="none"
+                    stroke={laneColor(line.color)}
+                    strokeOpacity={GRAPH_CURRENT_HALO_OPACITY}
+                    strokeWidth={GRAPH_CURRENT_HALO_WIDTH}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ))}
                 {row.through.map((edge, k) => (
                   <path
                     key={`x-${edge.fromCol}-${edge.toCol}-${edge.targetHash}-${k}`}
                     d={graphThroughPath(edge.fromCol, edge.toCol)}
                     fill="none"
                     stroke={laneColor(edge.color)}
-                    strokeWidth={GRAPH_STROKE_WIDTH}
+                    strokeWidth={
+                      mark.through === k
+                        ? GRAPH_CURRENT_STROKE_WIDTH
+                        : GRAPH_STROKE_WIDTH
+                    }
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -215,7 +268,11 @@ export function CommitGraph(props: {
                     d={graphIncomingPath(edge.fromCol, edge.toCol)}
                     fill="none"
                     stroke={laneColor(edge.color)}
-                    strokeWidth={GRAPH_STROKE_WIDTH}
+                    strokeWidth={
+                      mark.top === k
+                        ? GRAPH_CURRENT_STROKE_WIDTH
+                        : GRAPH_STROKE_WIDTH
+                    }
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -230,7 +287,11 @@ export function CommitGraph(props: {
                     )}
                     fill="none"
                     stroke={laneColor(edge.color)}
-                    strokeWidth={GRAPH_STROKE_WIDTH}
+                    strokeWidth={
+                      mark.bottom === k
+                        ? GRAPH_CURRENT_STROKE_WIDTH
+                        : GRAPH_STROKE_WIDTH
+                    }
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />

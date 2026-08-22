@@ -2,6 +2,8 @@ import type { MessageKey } from "./ru";
 
 export const en: Record<MessageKey, string> = {
   "common.cancel": "Cancel",
+  "common.ok": "Got it",
+  "common.copy": "Copy",
   "common.close": "Close",
   "common.delete": "Delete",
   "common.beta": "Beta",
@@ -77,7 +79,6 @@ export const en: Record<MessageKey, string> = {
     "Delete local branch “{name}”? Its server branch will remain.",
   "git.branchForceDeleteConfirm":
     "Branch “{name}” is not merged into the current branch. Force-delete its local copy? Unique commits will remain only in the reflog; the server branch will not be deleted.",
-  "git.branchesLoadFailed": "Could not load branches",
   "git.branchesEmpty": "No local branches yet",
   "git.branchMerge": "Merge into current",
   "git.branchMergeNamed": "Merge branch ‘{name}’ into the current one",
@@ -95,6 +96,18 @@ export const en: Record<MessageKey, string> = {
   "git.detachedNote":
     "You are looking at commit {hash}, not at a branch. New commits would not belong to any branch.",
   "git.detachedReturn": "Back to ‘{name}’",
+  "git.operationMerge": "Merge is not finished",
+  "git.operationRebase": "Rebase is not finished",
+  "git.operationCherryPick": "Cherry-pick is not finished",
+  "git.operationRevert": "Revert is not finished",
+  "git.operationConflicts": "Conflicts left to settle: {count}",
+  "git.operationReady": "No conflicts left — you can carry on",
+  "git.operationCommitHint":
+    "An ordinary commit finishes the merge: write a message and press Commit",
+  "git.operationContinue": "Continue",
+  "git.operationAbort": "Cancel",
+  "git.operationAbortConfirm":
+    "Put the repository back the way it was before this started? Everything already resolved by hand will be lost.",
   "git.remoteBranches": "On the server",
   "git.remoteBranchHint":
     "This branch only exists on the server: switching creates a tracking local copy",
@@ -116,53 +129,20 @@ export const en: Record<MessageKey, string> = {
   "git.actionBranch": "New branch here",
   "git.actionBranchName": "branch name",
   "git.actionBranchCreate": "Create",
-  "git.actionCherryPick": "Cherry-pick onto current branch",
-  "git.actionCherryConfirm": "Apply this commit onto the current branch?",
   "git.actionRevert": "Revert this commit",
   "git.actionRevertConfirm": "Create a commit that undoes this one?",
   "git.actionUncommit": "Undo last local commit",
   "git.actionUncommitConfirm":
     "Remove the last local commit from history? Its changes will remain staged and ready to commit again.",
-  "git.actionAmend": "Add changes to the last commit",
-  "git.actionAmendConfirm":
-    "Add the staged changes to the last commit? Unstaged changes stay untouched.",
-  "git.actionSquash": "Combine with the previous commit",
-  "git.actionSquashConfirm":
-    "Combine this commit with the previous one? Both messages are kept and the content stays the same.",
-  "git.actionFixup": "Merge into the previous commit",
-  "git.actionFixupConfirm":
-    "Combine this commit with the previous one, keeping only the previous message?",
   "git.actionDrop": "Remove commit from history",
   "git.actionDropConfirm":
     "Remove this commit from history? Newer commits are replayed on top and the working folder must be clean.",
-  "git.actionResetHere": "Move the branch here",
-  "git.actionResetSoft": "Keep changes staged",
-  "git.actionResetSoftConfirm":
-    "Move the branch to this commit? Everything from the newer commits stays staged.",
-  "git.actionResetMixed": "Keep changes in the files",
-  "git.actionResetMixedConfirm":
-    "Move the branch to this commit? The changes stay in your files but are no longer staged.",
-  "git.actionResetHard": "Discard every change",
-  "git.actionResetHardConfirm":
-    "Move the branch to this commit and delete every newer change together with unsaved work? The commits stay in the reflog.",
-  "git.actionCopyPatch": "Copy patch",
-  "git.actionSavePatch": "Save patch to a file…",
   "git.actionOpenGithub": "Open on GitHub",
   "git.actionOpenGithubMissing":
     "Cannot build the link: this repository has no GitHub remote",
-  "git.tagCreate": "Create tag…",
-  "git.tagCreateGo": "Create",
-  "git.tagName": "tag name",
   "git.tagDelete": "Delete tag ‘{name}’",
   "git.tagDeleteConfirm":
     "Delete the local tag ‘{name}’? The tag on the server stays.",
-  "git.compareTitle": "Comparison",
-  "git.compareWorkingTree": "working folder",
-  "git.compareIdentical": "No differences",
-  "git.compareWithWorkingTree": "Compare with the working folder",
-  "git.compareMark": "Mark for comparison",
-  "git.compareUnmark": "Clear the comparison mark",
-  "git.compareWithMarked": "Compare with {name}",
   "git.actionConfirm": "Continue",
   "git.actionReword": "Edit message",
   "git.rewordHint": "First line is the subject, the rest is the description. ⌘/Ctrl+Enter to save, Esc to cancel.",
@@ -650,6 +630,11 @@ export const en: Record<MessageKey, string> = {
     "The merge stopped on a conflict. Resolve it and finish (git merge --continue) or cancel it (git merge --abort)",
   "error.gitRebaseConflict":
     "The rebase stopped on a conflict. Resolve it and continue (git rebase --continue) or cancel it (git rebase --abort)",
+  "error.gitUnresolvedConflicts":
+    "‘{path}’ still carries conflict markers — clear them out, or they go into history",
+  "error.gitNoOperation": "There is no unfinished operation any more",
+  "error.gitOperationNeedsCommit":
+    "An ordinary commit finishes the merge: write a message and press Commit",
   "error.gitUpstreamExists": "This branch already has a copy on the server",
   "error.gitRemoteMissing": "Remote ‘{remote}’ was not found",
   "error.gitRemoteAmbiguous":

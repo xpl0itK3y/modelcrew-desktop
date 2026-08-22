@@ -193,17 +193,41 @@ const gitReasonKeys: Record<string, MessageKey> = {
   "head-moved": "error.gitHistoryMoved",
   "upstream-invalid": "error.gitUpstreamInvalid",
   "operation-in-progress": "error.gitOperationInProgress",
+  "unresolved-conflicts": "error.gitUnresolvedConflicts",
+  "no-operation": "error.gitNoOperation",
+  "operation-needs-commit": "error.gitOperationNeedsCommit",
   "not-on-branch": "error.gitCommitNotOnBranch",
   merge: "error.gitCommitMerge",
   "not-yours": "error.gitCommitNotYours",
   message: "error.gitCommitMessage",
 };
 
-export function localizeBackendError(error: unknown): string {
+export type BackendFailure = {
+  /// Что не получилось — короткая фраза на языке интерфейса.
+  message: string;
+  /// Слова самой подсистемы, как она их сказала. Есть не всегда: там, где
+  /// причину распознали мы сами, добавить к фразе нечего.
+  details?: string;
+};
+
+/// Наружу выпускаем только вывод git: он написан для человека и говорит о его
+/// репозитории. Диагностика прочих подсистем остаётся в консоли — в ответах
+/// GitHub, например, ходит токен.
+///
+/// Здесь ровно один код, и это не упущение. У `git_not_a_repository` debug не
+/// заполняется вовсе, а у `git_unavailable` там лежит текст ошибки запуска
+/// процесса: под заголовком «git не найден» пользователь читал бы
+/// «No such file or directory (os error 2)» — шум вместо объяснения.
+const detailedCodes = new Set(["git_command_failed"]);
+
+/// Хвост длиной в экран читать некому: важное git говорит первыми строками.
+const MAX_DETAILS = 2_000;
+
+export function describeBackendError(error: unknown): BackendFailure {
   const parsed = parseBackendError(error);
   if (!parsed) {
     console.error("Unstructured backend error", error);
-    return translate("error.unknown");
+    return { message: translate("error.unknown") };
   }
   const reason = parsed.context?.reason;
   const key =
@@ -218,7 +242,14 @@ export function localizeBackendError(error: unknown): string {
   if (parsed.debug) {
     console.error("Backend error", parsed);
   }
-  return translate(key, parsed.context);
+  const details = detailedCodes.has(parsed.code)
+    ? parsed.debug?.trim().slice(0, MAX_DETAILS) || undefined
+    : undefined;
+  return { message: translate(key, parsed.context), details };
+}
+
+export function localizeBackendError(error: unknown): string {
+  return describeBackendError(error).message;
 }
 
 export function backendErrorReason(

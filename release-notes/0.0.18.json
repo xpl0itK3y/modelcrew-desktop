@@ -1,0 +1,25 @@
+{
+  "version": "0.0.18",
+  "ru": {
+    "title": "Незаконченное слияние больше не уходит в историю молча",
+    "summary": "Коммит отклоняется, пока в файлах лежат маркеры конфликта, а баннер над вкладками называет незаконченную операцию и даёт продолжить или прервать её.",
+    "highlights": [
+      "Коммит отклоняется, пока в файлах остались маркеры конфликта — раньше они молча уходили в историю",
+      "Баннер над вкладками называет незаконченный merge, rebase, cherry-pick или revert и считает несведённые файлы",
+      "«Продолжить» и «Прервать» прямо в панели: прерывание спрашивает, продолжение называет файл, на котором гит встал",
+      "Ошибку гит объясняет своими словами — окно показывает его вывод и копирует его вместе с заголовком",
+      "Меню коммита сокращено до того, за что отвечает сам коммит; граф прочерчивает путь от HEAD"
+    ]
+  },
+  "en": {
+    "title": "An unfinished merge no longer slips into history",
+    "summary": "A commit is refused while conflict markers are still in the files, and a banner above the tabs names the unfinished operation and offers to continue or abort it.",
+    "highlights": [
+      "A commit is refused while conflict markers remain in the files — they used to slip into history unnoticed",
+      "A banner above the tabs names an unfinished merge, rebase, cherry-pick or revert and counts the unsettled files",
+      "Continue and Abort right in the panel: Abort asks first, Continue names the file git stopped on",
+      "Git explains a refusal in its own words — a dialog shows its output and copies it with the headline",
+      "The commit menu is cut to what a commit can answer for; the graph traces the path down from HEAD"
+    ]
+  }
+}

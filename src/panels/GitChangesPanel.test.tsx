@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localizeBackendError, setLocale } from "../i18n";
 import type { GitChangesSummary } from "../git/gitChanges";
@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   summaries: new Map<string, GitChangesSummary>(),
   listeners: new Map<string, Set<(summary: GitChangesSummary) => void>>(),
   commitAll: vi.fn(async () => {}),
+  continueOperation: vi.fn(async () => {}),
+  abortOperation: vi.fn(async () => {}),
   createBranch: vi.fn(async () => {}),
   renameBranch: vi.fn(async () => {}),
   deleteBranch: vi.fn(async () => {}),
@@ -18,27 +20,12 @@ const mocks = vi.hoisted(() => ({
   gitPullRebase: vi.fn(async () => {}),
   gitResetToUpstream: vi.fn(async () => {}),
   rewordCommit: vi.fn(async () => {}),
-  amendCommit: vi.fn(async () => {}),
-  squashCommit: vi.fn(async () => {}),
   dropCommit: vi.fn(async () => {}),
-  resetToCommit: vi.fn(async () => {}),
-  createTag: vi.fn(async () => {}),
   deleteTag: vi.fn(async () => {}),
-  commitPatch: vi.fn(async () => "PATCH BODY"),
-  saveCommitPatch: vi.fn(async () => true),
   githubCommitUrl: vi.fn<() => Promise<string | null>>(async () => null),
   mergeRef: vi.fn(async () => {}),
   rebaseOnto: vi.fn(async () => {}),
   publishBranch: vi.fn(async () => {}),
-  compareFiles: vi.fn(async () => [
-    { path: "src/a.ts", additions: 3, deletions: 1 },
-  ]),
-  compareFileDiff: vi.fn(async () => ({
-    path: "src/a.ts",
-    isBinary: false,
-    truncated: false,
-    diff: "@@ -1 +1,2 @@\n one\n+two\n",
-  })),
   fetchCommitFiles: vi.fn(async () => [
     { path: "src/a.ts", additions: 1, deletions: 1 },
   ]),
@@ -70,6 +57,8 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
       },
     ),
     commitAll: mocks.commitAll,
+    continueOperation: mocks.continueOperation,
+    abortOperation: mocks.abortOperation,
     refreshGitChanges: mocks.refreshGitChanges,
   };
 });
@@ -105,16 +94,8 @@ vi.mock("../git/gitLog", async (importOriginal) => ({
 vi.mock("../git/gitHistory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../git/gitHistory")>()),
   rewordCommit: mocks.rewordCommit,
-  amendCommit: mocks.amendCommit,
-  squashCommit: mocks.squashCommit,
   dropCommit: mocks.dropCommit,
-  resetToCommit: mocks.resetToCommit,
-  createTag: mocks.createTag,
   deleteTag: mocks.deleteTag,
-  commitPatch: mocks.commitPatch,
-  saveCommitPatch: mocks.saveCommitPatch,
-  compareFiles: mocks.compareFiles,
-  compareFileDiff: mocks.compareFileDiff,
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
@@ -270,6 +251,49 @@ describe("GitChangesView workspace lifecycle", () => {
         "feat: history controls\n\nAdds local branch management.",
       ),
     );
+  });
+
+  it("shows what git said when it refuses without a reason we know", async () => {
+    const stderr =
+      "error: Your local changes to the following files would be overwritten by checkout:\n" +
+      "\tdocs/PLAN.md\n" +
+      "Please commit your changes or stash them before you switch branches.\n" +
+      "Aborting";
+    mocks.commitAll.mockRejectedValueOnce({
+      code: "git_command_failed",
+      context: { exitCode: "1" },
+      debug: stderr,
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
+      target: { value: "wip" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
+
+    // «Команда git не выполнилась» само по себе не говорит ничего; ответ на
+    // вопрос «что случилось» лежит в словах git, и показать надо именно их.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("docs/PLAN.md");
+    expect(dialog).toHaveTextContent("stash them before you switch branches");
+  });
+
+  it("keeps a reason it can name to a single line", async () => {
+    mocks.commitAll.mockRejectedValueOnce({
+      code: "git_command_failed",
+      context: { reason: "dirty-tree" },
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.change(screen.getByLabelText("Заголовок коммита"), {
+      target: { value: "wip" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
+
+    // Причину мы уже назвали своей фразой — окно поверх панели ради одной
+    // строки было бы платой ни за что.
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
   it("ignores an older history response that finishes after a refresh", async () => {
@@ -461,28 +485,31 @@ describe("GitChangesView workspace lifecycle", () => {
   });
 
   it("rewrites history only against the head the panel showed", async () => {
+    // Цель действия и вершина ветки нарочно разные: пока они совпадают,
+    // проверка не отличает подтверждённый head от хеша самого коммита.
     const head = "7777777777777777777777777777777777777777";
+    const target = "6666666666666666666666666666666666666666";
     mocks.summaries.set("project-a", {
       ...summary("main", "from-a.txt"),
       headHash: head,
     });
     mocks.fetchLog.mockResolvedValue([
       {
-        hash: head,
-        shortHash: "7777777",
-        subject: "local tip",
+        hash: target,
+        shortHash: "6666666",
+        subject: "local commit",
         author: "Denis",
         authorEmail: "denis@example.com",
         epochMs: Date.now(),
         unpushed: true,
         localOnly: true,
         editable: true,
-        isHead: true,
+        isHead: false,
         parents: ["5555555555555555555555555555555555555555"],
         refs: [],
         refDetails: [],
         remoteRefs: [],
-        fullMessage: "local tip",
+        fullMessage: "local commit",
       },
     ]);
     render(<GitChangesView workspaceId="project-a" />);
@@ -490,12 +517,12 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
     fireEvent.click(
-      screen.getByRole("menuitem", { name: "Дополнить последний коммит" }),
+      screen.getByRole("menuitem", { name: "Удалить коммит из истории" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
     await waitFor(() =>
-      expect(mocks.amendCommit).toHaveBeenCalledWith("project-a", head),
+      expect(mocks.dropCommit).toHaveBeenCalledWith("project-a", target, head),
     );
   });
 
@@ -529,8 +556,8 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
 
     for (const name of [
-      "Дополнить последний коммит",
-      "Объединить с предыдущим",
+      "Изменить сообщение",
+      "Отменить последний локальный коммит",
       "Удалить коммит из истории",
     ]) {
       expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
@@ -573,48 +600,6 @@ describe("GitChangesView workspace lifecycle", () => {
       ),
     );
     expect(screen.getByRole("button", { name: "Граф" })).toBeEnabled();
-  });
-
-  it("compares two marked commits and shows the file diff", async () => {
-    const older = taggableCommit();
-    const newer = {
-      ...taggableCommit(),
-      hash: "1111111111111111111111111111111111111111",
-      shortHash: "1111111",
-      subject: "newer",
-      fullMessage: "newer",
-    };
-    mocks.fetchLog.mockResolvedValue([newer, older]);
-    render(<GitChangesView workspaceId="project-a" />);
-
-    fireEvent.click(screen.getByRole("tab", { name: "История" }));
-    const menus = await screen.findAllByTitle("Действия над коммитом");
-    fireEvent.click(menus[1]);
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Отметить для сравнения" }),
-    );
-    fireEvent.click(screen.getAllByTitle("Действия над коммитом")[0]);
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Сравнить с 9999999" }),
-    );
-
-    await waitFor(() =>
-      expect(mocks.compareFiles).toHaveBeenCalledWith(
-        "project-a",
-        older.hash,
-        newer.hash,
-      ),
-    );
-    fireEvent.click(await screen.findByText("src/a.ts"));
-    await waitFor(() =>
-      expect(mocks.compareFileDiff).toHaveBeenCalledWith(
-        "project-a",
-        older.hash,
-        "src/a.ts",
-        newer.hash,
-      ),
-    );
-    expect(await screen.findByText("+two".slice(1))).toBeInTheDocument();
   });
 
   it("opens a file from a commit in history with before and after side by side", async () => {
@@ -718,25 +703,18 @@ describe("GitChangesView workspace lifecycle", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("tags the commit the menu was opened on", async () => {
+  it("draws one divider where a published commit has nothing to rewrite", async () => {
     mocks.fetchLog.mockResolvedValue([taggableCommit()]);
-    render(<GitChangesView workspaceId="project-a" />);
+    const { container } = render(<GitChangesView workspaceId="project-a" />);
 
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     fireEvent.click(await screen.findByTitle("Действия над коммитом"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Создать тег…" }));
-    fireEvent.change(screen.getByLabelText("имя тега"), {
-      target: { value: "v2.0" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
 
-    await waitFor(() =>
-      expect(mocks.createTag).toHaveBeenCalledWith(
-        "project-a",
-        "v2.0",
-        "9999999999999999999999999999999999999999",
-      ),
-    );
+    // Правки истории у отправленного коммита нет, и две черты вставали
+    // подряд — в меню это читалось как пустая строка.
+    expect(
+      container.querySelectorAll(".git-actions-menu .git-actions-sep"),
+    ).toHaveLength(1);
   });
 
   it("explains that a commit link needs a GitHub remote", async () => {
@@ -1033,6 +1011,85 @@ describe("Git action errors", () => {
     ).toBe(
       "Не удалось определить корректную серверную ветку для синхронизации",
     );
+  });
+});
+
+describe("unfinished repository operation", () => {
+  // Приложение само заводит репозиторий в это состояние — «Забрать с rebase»
+  // намеренно оставляет перенос на явный continue/abort. Раньше об этом не
+  // говорил никто: был только статус «Конфликт» у отдельных файлов.
+  function stuck(
+    operation: GitChangesSummary["operation"],
+    conflicts: number,
+  ): GitChangesSummary {
+    return {
+      isRepo: true,
+      branch: "main",
+      headHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      operation,
+      files: Array.from({ length: conflicts }, (_, index) => ({
+        path: `clash-${index}.txt`,
+        status: "conflicted" as const,
+        additions: 1,
+        deletions: 1,
+      })),
+    };
+  }
+
+  it("names the operation and counts what is left to settle", () => {
+    mocks.summaries.set("project-a", stuck("rebase", 2));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    expect(screen.getByText("Перенос коммитов не завершён")).toBeInTheDocument();
+    expect(screen.getByText("Осталось развести конфликты: 2")).toBeInTheDocument();
+  });
+
+  it("offers to carry on once nothing conflicts any more", async () => {
+    mocks.summaries.set("project-a", stuck("rebase", 0));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    expect(screen.getByText("Конфликтов не осталось — можно продолжать")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    await waitFor(() =>
+      expect(mocks.continueOperation).toHaveBeenCalledWith("project-a"),
+    );
+  });
+
+  it("leaves the merge to the commit box instead of a second button", () => {
+    mocks.summaries.set("project-a", stuck("merge", 0));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    // У слияния есть поле сообщения и правильный автор — своё «продолжить»
+    // было бы худшей копией того, что уже стоит рядом.
+    expect(screen.getByText("Слияние не завершено")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Продолжить" })).toBeNull();
+    expect(
+      screen.getByText(
+        "Слияние завершит обычный коммит: напишите сообщение и нажмите «Коммит»",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("asks before throwing away a hand-resolved conflict", async () => {
+    mocks.summaries.set("project-a", stuck("cherryPick", 1));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Отменить" }));
+    expect(mocks.abortOperation).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Отменить" }),
+    );
+    await waitFor(() =>
+      expect(mocks.abortOperation).toHaveBeenCalledWith("project-a"),
+    );
+  });
+
+  it("stays out of the way while nothing is half-done", () => {
+    render(<GitChangesView workspaceId="project-a" />);
+    expect(screen.queryByText("Слияние не завершено")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить" })).toBeNull();
   });
 });
 

@@ -792,16 +792,20 @@ fn full_branch_lifecycle_workflow() {
     let side = git_at(root, &["rev-parse", "refs/heads/from-first"]);
     assert_eq!(side, first);
     let donor = commit_file(root, "donor.txt", "donor\n", "donor work");
-    reset_to_commit(root, &second, "hard", &donor).unwrap();
+    git_at(root, &["reset", "--hard", &second]);
     commit_action(root, "cherryPick", &donor, None).unwrap();
     assert!(root.join("donor.txt").exists(), "коммит применён поверх");
     let picked = git_at(root, &["rev-parse", "HEAD"]);
     commit_action(root, "revert", &picked, None).unwrap();
     assert!(!root.join("donor.txt").exists(), "отмена убрала файл");
 
-    // 5. Теги: лёгкий и аннотированный, переход на тег и удаление.
-    create_tag(root, "v1.0", &first, None).unwrap();
-    create_tag(root, "v1.0-note", &first, Some("first release")).unwrap();
+    // 5. Теги: переход на тег и удаление. Ставит их сам git — своей команды
+    // на создание тега у панели нет.
+    git_at(root, &["tag", "v1.0", &first]);
+    git_at(
+        root,
+        &["tag", "-a", "v1.0-note", "-m", "first release", &first],
+    );
     assert_eq!(git_at(root, &["cat-file", "-t", "v1.0-note"]), "tag");
     switch_branch(root, "v1.0", "tag").unwrap();
     assert!(collect_summary(root).unwrap().branch.is_none());
@@ -809,22 +813,7 @@ fn full_branch_lifecycle_workflow() {
     delete_tag(root, "v1.0").unwrap();
     assert!(!git_at(root, &["tag", "--list"]).contains("v1.0\n"));
 
-    // 6. Сравнение двух состояний и с рабочей папкой.
-    let head = git_at(root, &["rev-parse", "HEAD"]);
-    let changed = compare_files(root, &first, Some(&head)).unwrap();
-    assert!(changed.iter().any(|file| file.path == "a.txt"));
-    assert!(compare_file_diff(root, &first, Some(&head), "a.txt")
-        .unwrap()
-        .diff
-        .contains("+two"));
-    std::fs::write(root.join("a.txt"), "one\ntwo\nworking\n").unwrap();
-    assert!(compare_file_diff(root, &head, None, "a.txt")
-        .unwrap()
-        .diff
-        .contains("+working"));
-    git_at(root, &["checkout", "--", "a.txt"]);
-
-    // 7. Серверная ветка видна как удалённая и переключается по полному ref.
+    // 6. Серверная ветка видна как удалённая и переключается по полному ref.
     git_at(&bare, &["branch", "release", "refs/heads/main"]);
     fetch_upstream(root).unwrap();
     let remote = list_branches(root)
@@ -840,7 +829,7 @@ fn full_branch_lifecycle_workflow() {
         "создана локальная копия со слежением"
     );
 
-    // 8. Фильтры журнала работают на реальной истории.
+    // 7. Фильтры журнала работают на реальной истории.
     let by_text = list_log(
         root,
         50,

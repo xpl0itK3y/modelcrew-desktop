@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { localizeBackendError, useI18n } from "../../i18n";
+import { describeBackendError, useI18n, type BackendFailure } from "../../i18n";
 import { refreshGitChanges } from "../../git/gitChanges";
 import { createBranch, deleteBranch, fetchBranches, mergeRef, rebaseOnto, renameBranch, switchBranch, type GitBranchInfo } from "../../git/gitBranches";
 import { gitPull, gitPullRebase, gitPush, gitResetToUpstream, publishBranch } from "../../git/gitSync";
@@ -16,13 +16,16 @@ export function BranchSwitcher(props: {
   workspaceId: string;
   currentBranch?: string;
   headHash?: string;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  // Не просто «не вышло»: причина отказа приходит с бэкенда, и раньше объект
+  // ошибки выбрасывался в пустой catch. Показываем её прямо в списке —
+  // выпадающее меню открывают часто, отдельное окно поверх было бы навязчиво.
+  const [loadFailure, setLoadFailure] = useState<BackendFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [editor, setEditor] = useState<
     | { kind: "create" }
@@ -46,7 +49,7 @@ export function BranchSwitcher(props: {
     }
     const request = ++branchesRequestRef.current;
     setLoading(true);
-    setLoadFailed(false);
+    setLoadFailure(null);
     setBranches([]);
     fetchBranches(props.workspaceId)
       .then((next) => {
@@ -54,10 +57,10 @@ export function BranchSwitcher(props: {
           setBranches(next);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (branchesRequestRef.current === request) {
           setBranches([]);
-          setLoadFailed(true);
+          setLoadFailure(describeBackendError(error));
         }
       })
       .finally(() => {
@@ -94,11 +97,11 @@ export function BranchSwitcher(props: {
       const next = await fetchBranches(props.workspaceId);
       if (branchesRequestRef.current === request) {
         setBranches(next);
-        setLoadFailed(false);
+        setLoadFailure(null);
       }
-    } catch {
+    } catch (error) {
       if (branchesRequestRef.current === request) {
-        setLoadFailed(true);
+        setLoadFailure(describeBackendError(error));
       }
     }
   };
@@ -119,7 +122,7 @@ export function BranchSwitcher(props: {
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       // Типично: незакоммиченные изменения конфликтуют с целевой веткой.
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -159,7 +162,7 @@ export function BranchSwitcher(props: {
     } catch (error) {
       await reloadBranches();
       void refreshGitChanges(props.workspaceId);
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -183,7 +186,7 @@ export function BranchSwitcher(props: {
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       setIntegrate(null);
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -209,7 +212,7 @@ export function BranchSwitcher(props: {
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
       setDeleteTarget(null);
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -400,12 +403,12 @@ export function BranchSwitcher(props: {
             {loading && (
               <div className="git-branch-empty">{t("git.loading")}</div>
             )}
-            {!loading && loadFailed && (
+            {!loading && loadFailure && (
               <div className="git-branch-empty is-error">
-                {t("git.branchesLoadFailed")}
+                {loadFailure.message}
               </div>
             )}
-            {!loading && !loadFailed && branches.length === 0 && (
+            {!loading && !loadFailure && branches.length === 0 && (
               <div className="git-branch-empty">{t("git.branchesEmpty")}</div>
             )}
           </div>
@@ -456,7 +459,7 @@ export function DetachedHeadBanner(props: {
   workspaceId: string;
   headHash: string;
   previousBranch?: string;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -466,7 +469,7 @@ export function DetachedHeadBanner(props: {
       await switchBranch(props.workspaceId, branch, "local");
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -500,7 +503,7 @@ export function PublishBranch(props: {
   workspaceId: string;
   branch: string;
   headHash: string;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -515,7 +518,7 @@ export function PublishBranch(props: {
       await publishBranch(props.workspaceId, props.branch, props.headHash);
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }
@@ -553,7 +556,7 @@ export function SyncStatus(props: {
   behind?: number;
   // Ветки ещё нет на сервере — можно предложить первую отправку.
   canPublish?: boolean;
-  onError: (message: string) => void;
+  onError: (failure: BackendFailure) => void;
 }) {
   const { t } = useI18n();
   const { ahead, behind } = props;
@@ -675,7 +678,7 @@ export function SyncStatus(props: {
       }
       void refreshGitChanges(props.workspaceId);
     } catch (error) {
-      props.onError(localizeBackendError(error));
+      props.onError(describeBackendError(error));
     } finally {
       setBusy(false);
     }

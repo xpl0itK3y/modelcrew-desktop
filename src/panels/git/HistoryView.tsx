@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { localizeBackendError, useI18n } from "../../i18n";
+import { describeBackendError, useI18n, type BackendFailure } from "../../i18n";
 import { refreshGitChanges, subscribeGitChanges } from "../../git/gitChanges";
 import { switchBranch, type GitRefKind } from "../../git/gitBranches";
 import { fetchLog, type GitCommitInfo } from "../../git/gitLog";
@@ -7,7 +7,7 @@ import { formatRelativeTime } from "../../git/relativeTime";
 import { useAnimatedPresence } from "../../ui/useAnimatedPresence";
 
 // История коммитов: список и граф, раскрытая карточка коммита, меню действий
-// над коммитом, сравнение двух состояний и редактор сообщения.
+// над коммитом и редактор сообщения.
 //
 // Вертикаль отделена от списка изменений и от показа diff-а: здесь всё про
 // прошлое репозитория, и почти каждое действие переписывает историю, поэтому
@@ -17,7 +17,8 @@ import { AuthorAvatar } from "./history/AuthorAvatar";
 import { CommitActionsMenu } from "./history/CommitActionsMenu";
 import { CommitDetails, RevealHeight } from "./history/CommitDetails";
 import { CommitGraph, RefBadge } from "./history/CommitGraph";
-import { CompareView, RewordEditor } from "./history/CompareView";
+import { RewordEditor } from "./history/RewordEditor";
+import { GitErrorDialog } from "./GitErrorDialog";
 
 export function HistoryView(props: {
   workspaceId: string;
@@ -40,11 +41,6 @@ export function HistoryView(props: {
   const [searchField, setSearchField] = useState<"text" | "author" | "path">(
     "text",
   );
-  const [marked, setMarked] = useState<GitCommitInfo | null>(null);
-  const [comparing, setComparing] = useState<{
-    from: GitCommitInfo;
-    to: GitCommitInfo | null;
-  } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => {
@@ -64,7 +60,7 @@ export function HistoryView(props: {
     x: number;
     y: number;
   } | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<BackendFailure | null>(null);
   // Открытый редактор сообщения коммита.
   const [rewording, setRewording] = useState<GitCommitInfo | null>(null);
   // Немедленная перезагрузка лога после действия (не дожидаясь вотчера).
@@ -146,9 +142,11 @@ export function HistoryView(props: {
   const workingTreeCount = allBranches || filtering ? 0 : props.fileCount;
   const showGraph = graphMode && !filtering;
 
-  // Ошибка действия гаснет сама.
+  // Ошибка действия гаснет сама — но только короткая. Ту, где git объяснился
+  // сам, показывает окно, и закрывает его человек: гасить по таймеру текст,
+  // который нужно прочитать, значит отобрать его на середине.
   useEffect(() => {
-    if (!actionError) {
+    if (!actionError || actionError.details) {
       return;
     }
     const timer = window.setTimeout(() => setActionError(null), 6_000);
@@ -178,7 +176,7 @@ export function HistoryView(props: {
       void refreshGitChanges(props.workspaceId);
       setReloadNonce((value) => value + 1);
     } catch (error) {
-      setActionError(localizeBackendError(error));
+      setActionError(describeBackendError(error));
     }
   };
 
@@ -257,9 +255,9 @@ export function HistoryView(props: {
           }}
         />
       </div>
-      {actionError && (
+      {actionError && !actionError.details && (
         <div className="git-commit-error" role="alert">
-          {actionError}
+          {actionError.message}
         </div>
       )}
       {/* key по режиму перемонтирует контент — короткая анимация появления
@@ -432,17 +430,12 @@ export function HistoryView(props: {
           onError={setActionError}
           onDone={() => setReloadNonce((value) => value + 1)}
           onReword={setRewording}
-          marked={marked}
-          onMark={setMarked}
-          onCompare={(from, to) => setComparing({ from, to })}
         />
       )}
-      {comparing && (
-        <CompareView
-          workspaceId={props.workspaceId}
-          from={comparing.from}
-          to={comparing.to}
-          onClose={() => setComparing(null)}
+      {actionError?.details && (
+        <GitErrorDialog
+          failure={actionError}
+          onClose={() => setActionError(null)}
         />
       )}
       {rewording && (

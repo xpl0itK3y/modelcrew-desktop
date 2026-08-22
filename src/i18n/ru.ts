@@ -1,6 +1,8 @@
 // Russian catalog — the source of truth for MessageKey.
 export const ru = {
   "common.cancel": "Отмена",
+  "common.ok": "Понятно",
+  "common.copy": "Скопировать",
   "common.close": "Закрыть",
   "common.delete": "Удалить",
   "common.beta": "Бета",
@@ -76,7 +78,6 @@ export const ru = {
     "Удалить локальную ветку «{name}»? Ветка на сервере останется.",
   "git.branchForceDeleteConfirm":
     "Ветка «{name}» не влита в текущую. Принудительно удалить её локальную копию? Уникальные коммиты останутся только в reflog; ветка на сервере не удалится.",
-  "git.branchesLoadFailed": "Не удалось загрузить ветки",
   "git.branchesEmpty": "Локальных веток пока нет",
   "git.branchMerge": "Влить в текущую",
   "git.branchMergeNamed": "Влить ветку «{name}» в текущую",
@@ -94,6 +95,18 @@ export const ru = {
   "git.detachedNote":
     "Вы смотрите коммит {hash}, а не ветку. Новые коммиты не попадут ни в одну ветку.",
   "git.detachedReturn": "Вернуться на «{name}»",
+  "git.operationMerge": "Слияние не завершено",
+  "git.operationRebase": "Перенос коммитов не завершён",
+  "git.operationCherryPick": "Перенос коммита не завершён",
+  "git.operationRevert": "Откат коммита не завершён",
+  "git.operationConflicts": "Осталось развести конфликты: {count}",
+  "git.operationReady": "Конфликтов не осталось — можно продолжать",
+  "git.operationCommitHint":
+    "Слияние завершит обычный коммит: напишите сообщение и нажмите «Коммит»",
+  "git.operationContinue": "Продолжить",
+  "git.operationAbort": "Отменить",
+  "git.operationAbortConfirm":
+    "Вернуть репозиторий в состояние до начала операции? Всё, что уже разрешено вручную, будет потеряно.",
   "git.remoteBranches": "На сервере",
   "git.remoteBranchHint":
     "Ветка есть только на сервере: переключение создаст локальную копию со слежением",
@@ -115,53 +128,20 @@ export const ru = {
   "git.actionBranch": "Новая ветка отсюда",
   "git.actionBranchName": "имя ветки",
   "git.actionBranchCreate": "Создать",
-  "git.actionCherryPick": "Cherry-pick в текущую ветку",
-  "git.actionCherryConfirm": "Применить этот коммит поверх текущей ветки?",
   "git.actionRevert": "Откатить этот коммит",
   "git.actionRevertConfirm": "Создать коммит, отменяющий этот?",
   "git.actionUncommit": "Отменить последний локальный коммит",
   "git.actionUncommitConfirm":
     "Убрать последний локальный коммит из истории? Его изменения останутся подготовленными и готовыми к повторному коммиту.",
-  "git.actionAmend": "Дополнить последний коммит",
-  "git.actionAmendConfirm":
-    "Добавить подготовленные правки в последний коммит? Незастейдженные правки останутся нетронутыми.",
-  "git.actionSquash": "Объединить с предыдущим",
-  "git.actionSquashConfirm":
-    "Склеить этот коммит с предыдущим? Сообщения объединятся, содержимое не изменится.",
-  "git.actionFixup": "Влить в предыдущий без сообщения",
-  "git.actionFixupConfirm":
-    "Склеить этот коммит с предыдущим, оставив только сообщение предыдущего?",
   "git.actionDrop": "Удалить коммит из истории",
   "git.actionDropConfirm":
     "Убрать этот коммит из истории? Более новые коммиты будут перенесены, рабочая папка должна быть чистой.",
-  "git.actionResetHere": "Сбросить ветку сюда",
-  "git.actionResetSoft": "Оставить правки подготовленными",
-  "git.actionResetSoftConfirm":
-    "Перенести ветку на этот коммит? Все изменения более новых коммитов останутся подготовленными.",
-  "git.actionResetMixed": "Оставить правки в файлах",
-  "git.actionResetMixedConfirm":
-    "Перенести ветку на этот коммит? Изменения останутся в файлах, но не будут подготовлены.",
-  "git.actionResetHard": "Стереть все правки",
-  "git.actionResetHardConfirm":
-    "Перенести ветку на этот коммит и удалить все более новые изменения вместе с несохранённой работой? Коммиты останутся в reflog.",
-  "git.actionCopyPatch": "Скопировать патч",
-  "git.actionSavePatch": "Сохранить патч в файл…",
   "git.actionOpenGithub": "Открыть на GitHub",
   "git.actionOpenGithubMissing":
     "Не удалось составить ссылку: у репозитория нет remote на GitHub",
-  "git.tagCreate": "Создать тег…",
-  "git.tagCreateGo": "Создать",
-  "git.tagName": "имя тега",
   "git.tagDelete": "Удалить тег «{name}»",
   "git.tagDeleteConfirm":
     "Удалить локальный тег «{name}»? Тег на сервере останется.",
-  "git.compareTitle": "Сравнение",
-  "git.compareWorkingTree": "рабочая папка",
-  "git.compareIdentical": "Различий нет",
-  "git.compareWithWorkingTree": "Сравнить с рабочей папкой",
-  "git.compareMark": "Отметить для сравнения",
-  "git.compareUnmark": "Снять отметку сравнения",
-  "git.compareWithMarked": "Сравнить с {name}",
   "git.actionConfirm": "Продолжить",
   "git.actionReword": "Изменить сообщение",
   "git.rewordHint": "Первая строка — заголовок, дальше — описание. ⌘/Ctrl+Enter — сохранить, Esc — отмена.",
@@ -644,6 +624,11 @@ export const ru = {
     "Слияние остановлено на конфликте. Разрешите его и завершите (git merge --continue) или отмените (git merge --abort)",
   "error.gitRebaseConflict":
     "Перенос остановлен на конфликте. Разрешите его и продолжите (git rebase --continue) или отмените (git rebase --abort)",
+  "error.gitUnresolvedConflicts":
+    "В файле «{path}» ещё стоят маркеры конфликта — уберите их, иначе они уйдут в историю",
+  "error.gitNoOperation": "Незавершённых операций больше нет",
+  "error.gitOperationNeedsCommit":
+    "Слияние завершает обычный коммит: напишите сообщение и нажмите «Коммит»",
   "error.gitUpstreamExists": "У ветки уже есть серверная копия",
   "error.gitRemoteMissing": "Remote «{remote}» не найден",
   "error.gitRemoteAmbiguous":
