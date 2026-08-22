@@ -447,10 +447,11 @@ impl Tools for AppTools {
             .state::<crate::browser_host::BrowserHost>()
             .port(&key)
         else {
-            return Err(
-                "Браузер проекта ещё не открыт — снимать нечего.                  Откройте страницу: browser_navigate."
-                    .to_string(),
-            );
+            return Err(concat!(
+                "Браузер проекта ещё не открыт — снимать нечего. ",
+                "Откройте страницу: browser_navigate.",
+            )
+            .to_string());
         };
         let mut cdp = crate::cdp::Cdp::connect(port)
             .map_err(|error| format!("не удалось связаться с браузером: {}", excuse(&error)))?;
