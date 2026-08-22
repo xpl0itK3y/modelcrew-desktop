@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.0.18
+
+### Русский
+
+Коммит отклоняется, пока в файлах лежат маркеры конфликта, а баннер над вкладками называет незаконченную операцию и даёт продолжить или прервать её.
+
+- Коммит отклоняется, пока в файлах остались маркеры конфликта — раньше слияние завершалось молча и маркеры уходили в историю
+- Баннер над вкладками называет незаконченный merge, rebase, cherry-pick или revert и считает несведённые файлы
+- «Продолжить» и «Прервать» прямо в панели: прерывание спрашивает подтверждение, продолжение называет файл, на котором гит встал
+- Слияние заканчивается обычным коммитом — у него уже есть поле сообщения и нужный автор, поэтому отдельной кнопки ему не досталось
+- Ошибку гит объясняет своими словами: окно показывает его вывод и копирует его вместе с заголовком, а короткие ошибки остаются строкой
+- Отказ загрузить список веток объясняет причину прямо в выпадающем списке
+- Меню коммита сокращено до того, за что отвечает сам коммит: ушли amend, squash, fixup, три режима reset, сравнение, cherry-pick, создание тега и выгрузка патча
+- Ссылка на GitHub есть только у коммита, который на сервере уже есть; удаление тега осталось на месте
+- Пустая строка в меню, где у отправленного коммита не было ни одного пункта правки истории, больше не рисуется
+- Граф прочерчивает first-parent путь от HEAD и заливает значок текущей ветки — видно, на чём стоишь
+- Восемь IPC-команд, которых больше некому вызвать, убраны с бэкенда
+
+### English
+
+A commit is refused while conflict markers are still in the files, and a banner above the tabs names the unfinished operation and offers to continue or abort it.
+
+- A commit is refused while conflict markers remain in the files — a merge used to conclude silently and carry them into history
+- A banner above the tabs names an unfinished merge, rebase, cherry-pick or revert and counts the unsettled files
+- Continue and Abort right in the panel: Abort asks for confirmation, Continue names the file git stopped on
+- A merge is finished by an ordinary commit — that box already has a message field and the right author, so it gets no button of its own
+- Git explains a refusal in its own words: a dialog shows its output and copies it with the headline, while short errors stay a single line
+- A refusal to list branches gives its reason inside the dropdown
+- The commit menu is cut to what a commit can answer for: amend, squash, fixup, the three reset modes, compare, cherry-pick, tag creation and patch export are gone
+- The GitHub link appears only on a commit the server has seen; deleting a tag stays
+- The blank row a published commit used to leave where its history items would have been is gone
+- The graph traces the first-parent path down from HEAD and fills the current branch badge, so you can see where you stand
+- Eight IPC commands with nothing left to call them are off the backend
+
 ## 0.0.17
 
 ### Русский
