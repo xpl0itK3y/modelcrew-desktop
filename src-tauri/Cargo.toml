@@ -51,6 +51,16 @@ tungstenite = { version = "0.30.0", default-features = false, features = ["hands
 # новых зависимостей не добавляется.
 libc = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Кадр страницы снимает сам webview: WKWebView умеет отдать снимок, а больше
+# его взять неоткуда — окна у страницы нет. Крейты уже в дереве через wry,
+# новых зависимостей не добавляется.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration"] }
+objc2-app-kit = { version = "0.3", features = ["NSImage", "NSBitmapImageRep", "NSGraphics"] }
+objc2-foundation = { version = "0.3", features = ["NSError", "NSData", "NSDictionary", "NSString"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",

@@ -13,6 +13,7 @@ mod agent_hook_cli;
 mod agent_hooks;
 mod agent_sessions;
 mod browser_host;
+mod browser_page;
 mod browser_view;
 mod cdp;
 mod clipboard_images;
@@ -1096,6 +1097,7 @@ mod tests {
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("browser_host.rs", include_str!("browser_host.rs")),
+        ("browser_page.rs", include_str!("browser_page.rs")),
         ("browser_view.rs", include_str!("browser_view.rs")),
         ("cdp.rs", include_str!("cdp.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
