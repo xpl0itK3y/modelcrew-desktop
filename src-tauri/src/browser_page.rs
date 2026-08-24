@@ -95,7 +95,7 @@ pub fn is_open(app: &AppHandle, root: &str) -> bool {
 /// Закрыть страницу проекта.
 pub fn close(app: &AppHandle, root: &str) {
     if let Some(window) = app.get_webview_window(&label_for(root)) {
-        let _ = window.close();
+        let _ = window.destroy();
     }
 }
 
@@ -106,7 +106,10 @@ pub fn close(app: &AppHandle, root: &str) {
 pub fn close_all(app: &AppHandle) {
     for window in app.webview_windows().into_values() {
         if window.label().starts_with(LABEL_PREFIX) {
-            let _ = window.close();
+            // `destroy`, а не `close`: закрытие — это просьба, её слушает
+            // обработчик окон и её можно отменить. Здесь просьб не место:
+            // плагин выключили — страницы быть не должно.
+            let _ = window.destroy();
         }
     }
 }
