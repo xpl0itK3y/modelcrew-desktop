@@ -38,33 +38,37 @@ impl BrowserFrame {
 
 /// Кадр страницы проекта.
 ///
-/// Браузер здесь **не поднимается**: панель открыта у человека постоянно, и
-/// её открытие не повод запускать Chrome. Пока браузера нет, панель получает
+/// Страница здесь **не открывается**: панель открыта у человека постоянно, и
+/// её открытие не повод заводить страницу. Пока страницы нет, панель получает
 /// пустой кадр и говорит об этом сама.
 #[tauri::command]
 pub async fn browser_frame(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
-    browsers: tauri::State<'_, crate::browser_host::BrowserHost>,
     workspace_id: String,
 ) -> CommandResult<BrowserFrame> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    let Some(port) = browsers.port(&root.to_string_lossy()) else {
+    let key = root.to_string_lossy().to_string();
+    if !crate::browser_page::is_open(&app, &key) {
         return Ok(BrowserFrame::idle());
-    };
+    }
 
-    // Разговор с браузером блокирующий и в худшем случае длится до таймаута.
-    // На рантайме команд его держать нельзя — на нём же стоят в очереди
-    // остальные вызовы интерфейса, а за кадром сюда приходят каждую секунду.
+    // Снимок делает система и отвечает не сразу. На рантайме команд ждать его
+    // нельзя — на нём же стоят в очереди остальные вызовы интерфейса, а за
+    // кадром сюда приходят каждую секунду.
     tauri::async_runtime::spawn_blocking(move || {
-        let mut cdp = crate::cdp::Cdp::connect(port)?;
-        let image = cdp.screenshot()?;
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+
+        let png = crate::browser_page::snapshot(&app, &key).map_err(|reason| {
+            CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
+        })?;
         // Адрес и заголовок не критичны: без них панель покажет картинку без
         // подписи, и это лучше, чем ошибка вместо страницы.
-        let (url, title) = cdp.location().unwrap_or_default();
+        let (url, title) = crate::browser_page::info(&app, &key).unwrap_or_default();
         Ok(BrowserFrame {
-            image,
+            image: BASE64.encode(png),
             url,
             title,
             running: true,
@@ -85,11 +89,12 @@ pub async fn browser_go(
 ) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
-    // Здесь браузер как раз поднимаем: человек попросил открыть страницу.
-    // Запуск Chrome — секунды, ожидание загрузки — ещё сколько-то: и то, и
-    // другое блокирующее, и держать этим рантайм команд нельзя.
-    let port = crate::mcp::browser_port(&app, &root)?;
-    tauri::async_runtime::spawn_blocking(move || crate::cdp::Cdp::connect(port)?.navigate(&url))
-        .await
-        .map_err(|error| CommandError::new(ErrorCode::BrowserCommandFailed).with_debug(error))?
+    // Здесь страницу как раз открываем: человек попросил её открыть.
+    let key = root.to_string_lossy().to_string();
+    if !crate::browser_page::is_web(&url) {
+        return Err(CommandError::new(ErrorCode::BrowserUrlUnsupported).with_context("url", url));
+    }
+    crate::browser_page::open(&app, &key, &url).map_err(|reason| {
+        CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
+    })
 }

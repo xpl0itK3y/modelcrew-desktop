@@ -432,100 +432,58 @@ struct AppTools {
 
 impl Tools for AppTools {
     fn open_browser(&self, root: &Path) -> Result<(), String> {
-        browser_port(&self.app, root)
-            .map(|_port| ())
-            .map_err(|error| excuse(&error))
+        crate::browser_page::open(&self.app, &key_of(root), BLANK_PAGE)
     }
 
     fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
-        let port = browser_port(&self.app, root).map_err(|error| excuse(&error))?;
-        let mut cdp = crate::cdp::Cdp::connect(port)
-            .map_err(|error| format!("не удалось связаться с браузером: {}", excuse(&error)))?;
-        cdp.navigate(url).map_err(|error| match error.code {
-            crate::command_error::ErrorCode::BrowserUrlUnsupported => {
-                "Такой адрес открывать нельзя: годятся только http и https.".to_string()
-            }
-            _ => format!("страница не открылась: {}", excuse(&error)),
-        })?;
-        // Заголовок читаем после загрузки: до неё он пустой или ещё от
-        // прошлой страницы.
-        Ok(cdp
-            .location()
+        let url = url.trim();
+        if !crate::browser_page::is_web(url) {
+            return Err("Такой адрес открывать нельзя: годятся только http и https.".to_string());
+        }
+        let key = key_of(root);
+        crate::browser_page::open(&self.app, &key, url)?;
+        // Не дождались — не беда: заголовок будет от недогруженной страницы,
+        // а это лучше, чем отказ вместо перехода.
+        crate::browser_page::wait_ready(&self.app, &key, LOAD_WAIT);
+        Ok(crate::browser_page::info(&self.app, &key)
             .map(|(_url, title)| title)
             .unwrap_or_default())
     }
 
     fn screenshot(&self, root: &Path) -> Result<Shot, String> {
-        use tauri::Manager;
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
-        // Порт спрашиваем у хоста, а не через `browser_port`: тот поднимает
-        // браузер, а поднимать его ради снимка нечего — снимок about:blank
-        // выглядит как «страница пустая», и агент пойдёт чинить исправное.
-        let key = root.to_string_lossy().to_string();
-        let Some(port) = self
-            .app
-            .state::<crate::browser_host::BrowserHost>()
-            .port(&key)
-        else {
+        // Страницу здесь не открываем: снимок пустой страницы выглядит как
+        // «страница пустая», и агент пойдёт чинить исправное.
+        let key = key_of(root);
+        if !crate::browser_page::is_open(&self.app, &key) {
             return Err(concat!(
                 "Браузер проекта ещё не открыт — снимать нечего. ",
                 "Откройте страницу: browser_navigate.",
             )
             .to_string());
-        };
-        let mut cdp = crate::cdp::Cdp::connect(port)
-            .map_err(|error| format!("не удалось связаться с браузером: {}", excuse(&error)))?;
-        let image = cdp
-            .screenshot()
-            .map_err(|error| format!("не удалось снять страницу: {}", excuse(&error)))?;
+        }
+        let png = crate::browser_page::snapshot(&self.app, &key)?;
         // Подпись не критична: кадр без адреса лучше, чем ошибка вместо кадра.
-        let (url, title) = cdp.location().unwrap_or_default();
-        Ok(Shot { image, url, title })
+        let (url, title) = crate::browser_page::info(&self.app, &key).unwrap_or_default();
+        Ok(Shot {
+            image: BASE64.encode(png),
+            url,
+            title,
+        })
     }
 }
 
-/// Причина отказа словами, а не кодом.
-///
-/// Читает это агент: по коду вроде `BrowserNotConnected` он ничего сделать не
-/// может, а по причине — иногда может, и человеку её же и покажет.
-fn excuse(error: &crate::command_error::CommandError) -> String {
-    match error.context.get("reason") {
-        Some(reason) => format!("{reason} ({:?})", error.code),
-        None => format!("{:?}", error.code),
-    }
-}
+/// Пустая страница: с неё начинается браузер проекта, пока агент не назвал
+/// адрес.
+const BLANK_PAGE: &str = "about:blank";
 
-/// Поднять браузер проекта и вернуть его порт.
-///
-/// Отказ — кодом, а не фразой: по нему интерфейс подбирает свой текст, а
-/// «Chrome не установлен» и «не смог запуститься» — это разные разговоры с
-/// человеком. Агенту фразу собирает `excuse` из той же ошибки.
-pub fn browser_port(
-    app: &tauri::AppHandle,
-    root: &Path,
-) -> crate::command_error::CommandResult<u16> {
-    use crate::command_error::{CommandError, ErrorCode};
-    use tauri::Manager;
+/// Сколько ждать загрузку страницы после перехода.
+const LOAD_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
-    let Some(program) = crate::browser_host::chrome_program() else {
-        return Err(
-            CommandError::new(ErrorCode::BrowserNotInstalled).with_context(
-                "reason",
-                "Chrome не найден. Плагин браузера без него не работает: \
-                 поставьте Google Chrome или Chromium.",
-            ),
-        );
-    };
-    let base = app.path().app_data_dir().map_err(|error| {
-        CommandError::new(ErrorCode::BrowserLaunchFailed)
-            .with_context("reason", "некуда положить профиль браузера")
-            .with_debug(error)
-    })?;
-    let key = root.to_string_lossy().to_string();
-    let profile = crate::browser_host::profile_dir(&base, &key);
-
-    app.state::<crate::browser_host::BrowserHost>()
-        .ensure(&key, || crate::browser_host::launch(&program, &profile))
+/// Ключ проекта — тот же, что у панелей: путь его корня.
+fn key_of(root: &Path) -> String {
+    root.to_string_lossy().to_string()
 }
 
 /// Путь сокета. Рядом с каталогом событий хуков — то же место, та же уборка.
@@ -873,26 +831,6 @@ mod tests {
         );
         let path = data_dir_of(Path::new("/home/tester"), Some(PathBuf::from("/data")));
         assert_eq!(path, Path::new("/data/com.modelcrew.desktop"));
-    }
-
-    #[test]
-    fn tells_the_agent_the_reason_and_not_only_the_code() {
-        use crate::command_error::{CommandError, ErrorCode};
-
-        // Живой случай: «не удалось связаться с браузером: BrowserNotConnected»
-        // — всё, что видел агент, и делать с этим было нечего.
-        let with_reason = CommandError::new(ErrorCode::BrowserNotConnected)
-            .with_context("reason", "у браузера нет ни одной страницы");
-        assert_eq!(
-            excuse(&with_reason),
-            "у браузера нет ни одной страницы (BrowserNotConnected)"
-        );
-
-        // Причины может и не быть — тогда остаётся код, и это лучше пустоты.
-        assert_eq!(
-            excuse(&CommandError::new(ErrorCode::BrowserLaunchFailed)),
-            "BrowserLaunchFailed"
-        );
     }
 
     /// Инструменты, которые ничего не запускают, но помнят, о чём их просили.

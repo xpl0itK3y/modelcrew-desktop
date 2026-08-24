@@ -35,6 +35,10 @@ const LOAD_START: Duration = Duration::from_millis(150);
 /// Как часто переспрашивать, догрузилась ли страница.
 const LOAD_POLL: Duration = Duration::from_millis(100);
 
+/// С чего начинается метка окна страницы: по нему они находятся среди окон
+/// самого приложения.
+const LABEL_PREFIX: &str = "page-";
+
 /// Метка окна страницы проекта.
 ///
 /// Метка — отпечаток корня, а не сам путь: в пути есть разделители, пробелы и
@@ -48,7 +52,7 @@ pub fn label_for(root: &str) -> String {
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    format!("page-{name}")
+    format!("{LABEL_PREFIX}{name}")
 }
 
 /// Открыть страницу проекта или перевести уже открытую на новый адрес.
@@ -74,6 +78,15 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
         .map_err(|error| format!("страница не открылась: {error}"))
 }
 
+/// Адрес, по которому странице можно ходить.
+///
+/// Всё остальное — `file://`, `javascript:` и прочее — это уже не «сходи
+/// посмотри страницу», а доступ к машине руками агента.
+pub fn is_web(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
 /// Открыта ли страница проекта.
 pub fn is_open(app: &AppHandle, root: &str) -> bool {
     app.get_webview_window(&label_for(root)).is_some()
@@ -83,6 +96,18 @@ pub fn is_open(app: &AppHandle, root: &str) -> bool {
 pub fn close(app: &AppHandle, root: &str) {
     if let Some(window) = app.get_webview_window(&label_for(root)) {
         let _ = window.close();
+    }
+}
+
+/// Закрыть все страницы: выход из приложения и выключенный плагин.
+///
+/// Без этого окна остались бы висеть за краем экрана: человеку их не видно,
+/// а память и загруженные страницы они держат.
+pub fn close_all(app: &AppHandle) {
+    for window in app.webview_windows().into_values() {
+        if window.label().starts_with(LABEL_PREFIX) {
+            let _ = window.close();
+        }
     }
 }
 
@@ -159,7 +184,7 @@ fn ask<T: Send + 'static>(
 fn platform_info(platform: &tauri::webview::PlatformWebview) -> Result<(String, String), String> {
     let webview = unsafe { &*(platform.inner() as *mut objc2_web_kit::WKWebView) };
     let url = unsafe { webview.URL() }
-        .and_then(|url| unsafe { url.absoluteString() })
+        .and_then(|url| url.absoluteString())
         .map(|text| text.to_string())
         .unwrap_or_default();
     let title = unsafe { webview.title() }
@@ -276,7 +301,7 @@ mod tests {
         let label = label_for("/w/проект с пробелом/и-«кавычками»");
         assert!(
             label
-                .trim_start_matches("page-")
+                .trim_start_matches(LABEL_PREFIX)
                 .chars()
                 .all(|c| c.is_ascii_hexdigit()),
             "метка окна должна остаться простой: {label}"

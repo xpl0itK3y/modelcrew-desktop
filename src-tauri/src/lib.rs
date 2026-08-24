@@ -12,10 +12,8 @@ compile_error!(
 mod agent_hook_cli;
 mod agent_hooks;
 mod agent_sessions;
-mod browser_host;
 mod browser_page;
 mod browser_view;
-mod cdp;
 mod clipboard_images;
 mod command_error;
 mod crew;
@@ -457,13 +455,13 @@ fn pty_kill(
 #[tauri::command]
 fn pty_kill_all(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     state: tauri::State<'_, PtyManager>,
-    browsers: tauri::State<'_, browser_host::BrowserHost>,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
-    // Вместе с шеллами гасим и браузеры: команда зовётся перед обновлением, и
-    // переживший его Chrome остался бы висеть без хозяина.
-    browsers.close_all();
+    // Вместе с шеллами закрываем и страницы: команда зовётся перед
+    // обновлением, и пережившее его окно осталось бы висеть без хозяина.
+    browser_page::close_all(&app);
     state.kill_all()
 }
 
@@ -533,15 +531,15 @@ async fn workspace_pick_root(
 #[tauri::command]
 fn workspace_unregister_root(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     state: tauri::State<'_, WorkspaceRoots>,
-    browsers: tauri::State<'_, browser_host::BrowserHost>,
     workspace_id: String,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
-    // Браузер живёт при проекте: папку отвязали — его держать не для кого.
+    // Страница живёт при проекте: папку отвязали — её держать не для кого.
     // Корень берём до отвязки, после неё он уже не разрешится.
     if let Ok(root) = state.resolve(&workspace_id) {
-        browsers.close(&root.to_string_lossy());
+        browser_page::close(&app, &root.to_string_lossy());
     }
     state.unbind(&workspace_id)
 }
@@ -979,7 +977,6 @@ pub fn run() {
         .manage(GitWatchState::default())
         .manage(TreeWatchState::default())
         .manage(crew::CrewRegistry::default())
-        .manage(browser_host::BrowserHost::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
             list_shells,
@@ -1070,7 +1067,7 @@ pub fn run() {
                 let _ = app.state::<PtyManager>().kill_all();
                 // Chrome — отдельный процесс и наше завершение его не касается:
                 // без этого он пережил бы приложение, забрав себе профиль.
-                app.state::<browser_host::BrowserHost>().close_all();
+                browser_page::close_all(app);
             }
             // Клик по иконке в доке (macOS) при спрятанном окне — вернуть его.
             #[cfg(target_os = "macos")]
@@ -1096,10 +1093,8 @@ mod tests {
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
-        ("browser_host.rs", include_str!("browser_host.rs")),
         ("browser_page.rs", include_str!("browser_page.rs")),
         ("browser_view.rs", include_str!("browser_view.rs")),
-        ("cdp.rs", include_str!("cdp.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("crew.rs", include_str!("crew.rs")),
