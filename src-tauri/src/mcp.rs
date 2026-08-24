@@ -155,7 +155,7 @@ fn initialize_result() -> Value {
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": { "tools": {} },
         "serverInfo": {
-            "name": "modelcrew",
+            "name": "modelcrew-browser",
             "version": env!("CARGO_PKG_VERSION"),
         },
     })
@@ -900,7 +900,7 @@ mod tests {
         assert_eq!(answer["result"]["protocolVersion"], PROTOCOL_VERSION);
         // Без объявленной способности `tools` клиент за списком не придёт.
         assert!(answer["result"]["capabilities"]["tools"].is_object());
-        assert_eq!(answer["result"]["serverInfo"]["name"], "modelcrew");
+        assert_eq!(answer["result"]["serverInfo"]["name"], "modelcrew-browser");
     }
 
     #[test]

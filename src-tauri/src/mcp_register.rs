@@ -20,8 +20,14 @@ use crate::agent_hooks::{agent_home, back_up_once, home_dir, read_json, write_js
 
 /// Имя сервера у всех агентов одно: по нему человек узнаёт нас в их списках
 /// (`/mcp` у claude, `codex mcp list`), и по нему же мы находим свою запись,
-/// чтобы снять её и не тронуть чужие.
-const SERVER: &str = "modelcrew";
+/// чтобы снять её и не тронуть чужие. Названо по делу: сервер даёт браузер, а
+/// не «всё приложение», и в чужом списке это должно читаться сразу.
+const SERVER: &str = "modelcrew-browser";
+
+/// Как сервер звался раньше. Запись под старым именем осталась у тех, кому мы
+/// уже прописались: не сняв её, мы оставили бы агенту два сервера, из которых
+/// один — с прежним, неверным именем.
+const FORMER_NAMES: [&str; 1] = ["modelcrew"];
 
 /// Ключ запуска: приложение зовёт само себя, и по этому ключу узнаёт, что его
 /// позвали как мост к серверу, а не как приложение.
@@ -86,7 +92,8 @@ fn register(agent: &str, path: &Path, exe: &Path) -> Result<(), String> {
     }
     let mut config = read_json(path)?;
     let (section, entry) = json_entry(agent, exe);
-    if config.pointer(&format!("/{section}/{SERVER}")) == Some(&entry) {
+    let stale = former_names_in(&config, &section);
+    if stale.is_empty() && config.pointer(&format!("/{section}/{SERVER}")) == Some(&entry) {
         return Ok(());
     }
     back_up_once(path);
@@ -100,10 +107,11 @@ fn register(agent: &str, path: &Path, exe: &Path) -> Result<(), String> {
     if !servers.is_object() {
         *servers = Value::Object(Default::default());
     }
-    servers
-        .as_object_mut()
-        .expect("объект гарантирован выше")
-        .insert(SERVER.to_string(), entry);
+    let servers = servers.as_object_mut().expect("объект гарантирован выше");
+    for name in stale {
+        servers.remove(&name);
+    }
+    servers.insert(SERVER.to_string(), entry);
     write_json_atomically(path, &config)
 }
 
@@ -120,7 +128,11 @@ fn unregister(agent: &str, path: &Path) -> Result<(), String> {
     let Some(servers) = config.get_mut(&section).and_then(Value::as_object_mut) else {
         return Ok(());
     };
-    if servers.remove(SERVER).is_none() {
+    let mut changed = servers.remove(SERVER).is_some();
+    for name in FORMER_NAMES {
+        changed |= servers.remove(name).is_some();
+    }
+    if !changed {
         return Ok(());
     }
     write_json_atomically(path, &config)
@@ -148,6 +160,15 @@ fn json_entry(agent: &str, exe: &Path) -> (String, Value) {
             }),
         ),
     }
+}
+
+/// Какие из прежних имён лежат в конфиге сейчас.
+fn former_names_in(config: &Value, section: &str) -> Vec<String> {
+    FORMER_NAMES
+        .iter()
+        .filter(|name| config.pointer(&format!("/{section}/{name}")).is_some())
+        .map(|name| (*name).to_string())
+        .collect()
 }
 
 /// Метка нашего блока в TOML: по ней он находится, чтобы не вписаться дважды и
@@ -279,6 +300,24 @@ mod tests {
     }
 
     #[test]
+    fn the_record_under_the_old_name_goes_away_with_the_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(
+            dir.path(),
+            ".claude.json",
+            r#"{"mcpServers":{"modelcrew":{"command":"/old","args":["--mcp-stdio"]},"github":{"command":"gh"}}}"#,
+        );
+
+        register("claude", &path, &exe()).unwrap();
+
+        let config = read_json(&path).unwrap();
+        let servers = config["mcpServers"].as_object().unwrap();
+        assert!(!servers.contains_key("modelcrew"), "старое имя должно уйти");
+        assert!(servers.contains_key(SERVER));
+        assert!(servers.contains_key("github"), "чужое трогать нельзя");
+    }
+
+    #[test]
     fn writing_twice_leaves_one_record() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".cursor/mcp.json");
@@ -322,7 +361,7 @@ mod tests {
         let body = std::fs::read_to_string(&path).unwrap();
         assert!(body.starts_with("model = \"gpt-5\""));
         assert!(body.contains("[mcp_servers.other]"));
-        assert!(body.contains("[mcp_servers.modelcrew]"));
+        assert!(body.contains("[mcp_servers.modelcrew-browser]"));
         assert!(body.contains("command = \"/Applications/ModelCrew.app/Contents/MacOS/ModelCrew\""));
 
         unregister("codex", &path).unwrap();
@@ -339,7 +378,7 @@ mod tests {
         register("codex", &path, &exe()).unwrap();
 
         let body = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(body.matches("[mcp_servers.modelcrew]").count(), 1);
+        assert_eq!(body.matches("[mcp_servers.modelcrew-browser]").count(), 1);
         assert!(!body.contains("/old/ModelCrew"));
     }
 
@@ -348,7 +387,7 @@ mod tests {
         let text = concat!(
             "model = \"x\"\n",
             "\n# modelcrew: браузер проекта\n",
-            "[mcp_servers.modelcrew]\ncommand = \"a\"\nargs = [\"--mcp-stdio\"]\n",
+            "[mcp_servers.modelcrew-browser]\ncommand = \"a\"\nargs = [\"--mcp-stdio\"]\n",
             "\n[other]\nkey = 1\n",
         );
         let stripped = strip_toml_block(text);
