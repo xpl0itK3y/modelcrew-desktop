@@ -148,10 +148,12 @@ exec "$real" {flags} "$@"
 /// каждый по-своему: файлом, строкой или парой ключей настройки.
 fn shim_flags(agent: &str, exe: &Path) -> String {
     match agent {
-        // Файлом: путь к нему знает сама обёртка.
-        "claude" => format!("--mcp-config \"$self/{CONFIG_FILE}\""),
+        // Файлом, и обязательно через «=»: без него claude считает своим
+        // значением и всё, что идёт следом, — команда `claude mcp list` через
+        // обёртку падала с «файл mcp не найден».
+        "claude" => format!("--mcp-config=\"$self/{CONFIG_FILE}\""),
         // Строкой: файла он не принимает, поэтому подаём его же содержимое.
-        "copilot" => format!("--additional-mcp-config \"$(cat \"$self/{CONFIG_FILE}\")\""),
+        "copilot" => format!("--additional-mcp-config=\"$(cat \"$self/{CONFIG_FILE}\")\""),
         // Ключами настройки: у codex конфиг в TOML, и значения тоже в TOML.
         "codex" => format!(
             "-c {} -c {}",
@@ -314,8 +316,10 @@ mod tests {
 
     #[test]
     fn each_agent_gets_the_flag_it_understands() {
-        assert!(shim_flags("claude", &exe()).contains("--mcp-config"));
-        assert!(shim_flags("copilot", &exe()).contains("--additional-mcp-config"));
+        // Именно «=»: без него значением флага становятся и аргументы
+        // человека, идущие следом.
+        assert!(shim_flags("claude", &exe()).starts_with("--mcp-config="));
+        assert!(shim_flags("copilot", &exe()).starts_with("--additional-mcp-config="));
         let codex = shim_flags("codex", &exe());
         assert!(codex.contains("mcp_servers.modelcrew-browser.command="));
         assert!(codex.contains("--mcp-stdio"));
