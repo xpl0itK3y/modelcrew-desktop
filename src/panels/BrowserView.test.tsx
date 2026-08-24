@@ -138,7 +138,7 @@ describe("BrowserView", () => {
   it("explains a refusal in words the person can act on", async () => {
     invoke.mockImplementation((command: string) =>
       command === "browser_go"
-        ? Promise.reject({ code: "browser_not_installed" })
+        ? Promise.reject({ code: "browser_url_unsupported" })
         : Promise.resolve(frame()),
     );
 
@@ -147,12 +147,12 @@ describe("BrowserView", () => {
     fireEvent.submit(address());
 
     // Код ошибки человеку ничего не говорит: он должен прочитать, что делать.
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Chrome/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/http/);
   });
 
   it("names the reason the page did not open, not just the failure", async () => {
     // «Браузер не смог» без причины не подсказывает ничего, а причина здесь —
-    // ответ самого Chrome: дев-сервер не поднят, адрес набран с опечаткой.
+    // ответ самой страницы: дев-сервер не поднят, адрес набран с опечаткой.
     invoke.mockImplementation((command: string) =>
       command === "browser_go"
         ? Promise.reject({
@@ -211,8 +211,8 @@ describe("BrowserView", () => {
     render(<BrowserView workspaceId="w1" />);
     expect(await screen.findByRole("img")).toBeInTheDocument();
 
-    answer = () => Promise.reject({ code: "browser_not_connected" });
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Связь/);
+    answer = () => Promise.reject({ code: "browser_command_failed" });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/не смог/);
     // Прошлый кадр остаётся: он последнее, что известно о странице.
     expect(screen.getByRole("img")).toBeInTheDocument();
     expect(
@@ -221,7 +221,7 @@ describe("BrowserView", () => {
   });
 
   it("says it is working while the browser starts up", async () => {
-    // Первый запуск Chrome занимает секунды: без этой строки нажатие
+    // Первое открытие страницы занимает секунды: без этой строки нажатие
     // выглядит как будто ничего не произошло, и человек жмёт ещё раз.
     let release = () => {};
     invoke.mockImplementation((command: string) =>

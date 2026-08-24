@@ -584,12 +584,6 @@ export const en: Record<MessageKey, string> = {
     "WinGet is unavailable — install Git for Windows from the official website",
   "error.gitBashInstallFailed":
     "Git Bash was not installed. Check the system installer window and try again",
-  "error.browserNotInstalled":
-    "Chrome was not found — install Google Chrome or Chromium; the project browser needs it",
-  "error.browserLaunchFailed": "The project browser did not start",
-  "error.browserPortUnavailable":
-    "The browser started but never said which port to talk to it on",
-  "error.browserNotConnected": "Lost the connection to the project browser",
   "error.browserCommandFailed": "The browser could not do that",
   "error.browserCommandFailedReason": "The browser could not do that: {reason}",
   "error.mcpSettingsWriteFailed": "Could not remember the MCP setting",

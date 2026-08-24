@@ -152,10 +152,6 @@ const backendErrorKeys: Record<string, MessageKey> = {
   git_bash_install_unsupported: "error.gitBashInstallUnsupported",
   git_bash_installer_unavailable: "error.gitBashInstallerUnavailable",
   git_bash_install_failed: "error.gitBashInstallFailed",
-  browser_not_installed: "error.browserNotInstalled",
-  browser_launch_failed: "error.browserLaunchFailed",
-  browser_port_unavailable: "error.browserPortUnavailable",
-  browser_not_connected: "error.browserNotConnected",
   browser_command_failed: "error.browserCommandFailed",
   browser_url_unsupported: "error.browserUrlUnsupported",
   mcp_settings_write_failed: "error.mcpSettingsWriteFailed",
@@ -233,7 +229,7 @@ export function describeBackendError(error: unknown): BackendFailure {
   const key =
     parsed.code === "git_command_failed" && typeof reason === "string"
       ? (gitReasonKeys[reason] ?? "error.gitCommandFailed")
-      : // Причина отказа браузера — это ответ самого Chrome
+      : // Причина отказа браузера — это ответ самой страницы
         // (`net::ERR_CONNECTION_REFUSED` у не поднятого дев-сервера), и без
         // неё человеку остаётся «браузер не смог» без единой зацепки.
         parsed.code === "browser_command_failed" && typeof reason === "string"

@@ -116,7 +116,7 @@ describe("watchBrowserFrame", () => {
   });
 
   it("tells the trouble apart from a browser that is simply not running", async () => {
-    invoke.mockRejectedValue({ code: "browser_not_connected" });
+    invoke.mockRejectedValue({ code: "browser_command_failed" });
     const seen: unknown[] = [];
     const trouble: unknown[] = [];
 
@@ -131,7 +131,7 @@ describe("watchBrowserFrame", () => {
     // попадаем, когда сломалась связь с живым, и пустой кадр вместо причины
     // сказал бы человеку «браузер не запущен» про работающий.
     expect(seen).toEqual([]);
-    expect(trouble).toEqual([{ code: "browser_not_connected" }]);
+    expect(trouble).toEqual([{ code: "browser_command_failed" }]);
     stop();
   });
 
