@@ -28,6 +28,13 @@ const OFFSCREEN: (f64, f64) = (-31_000.0, -31_000.0);
 /// вечно нельзя — на том конце живой агент.
 const SNAPSHOT_WAIT: Duration = Duration::from_secs(5);
 
+/// Сколько ждать, пока переход вообще начнётся: до этого страница честно
+/// отвечает «не гружусь» — про прошлую страницу, а не про новую.
+const LOAD_START: Duration = Duration::from_millis(150);
+
+/// Как часто переспрашивать, догрузилась ли страница.
+const LOAD_POLL: Duration = Duration::from_millis(100);
+
 /// Метка окна страницы проекта.
 ///
 /// Метка — отпечаток корня, а не сам путь: в пути есть разделители, пробелы и
@@ -98,6 +105,76 @@ pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Адрес и заголовок страницы — то, чем она подписывается агенту.
+pub fn info(app: &AppHandle, root: &str) -> Result<(String, String), String> {
+    ask(app, root, platform_info)
+}
+
+/// Дождаться, пока страница догрузится.
+///
+/// Возвращает `false`, если не дождались: это не повод для отказа — кадр
+/// недогруженной страницы честнее, чем ошибка вместо кадра.
+pub fn wait_ready(app: &AppHandle, root: &str, wait: Duration) -> bool {
+    // Сразу после перехода загрузка ещё не началась, и `is_loading` соврал бы
+    // «готово». Поэтому сперва даём ей начаться.
+    std::thread::sleep(LOAD_START);
+    let deadline = std::time::Instant::now() + wait;
+    while std::time::Instant::now() < deadline {
+        match ask(app, root, platform_is_loading) {
+            Ok(false) => return true,
+            // Окна нет — ждать нечего.
+            Err(_) => return false,
+            Ok(true) => std::thread::sleep(LOAD_POLL),
+        }
+    }
+    false
+}
+
+/// Спросить у webview то, что знает только он сам.
+///
+/// Отвечает он на главном потоке, а спрашивают с чужого, поэтому ответ
+/// возвращается каналом.
+fn ask<T: Send + 'static>(
+    app: &AppHandle,
+    root: &str,
+    probe: fn(&tauri::webview::PlatformWebview) -> Result<T, String>,
+) -> Result<T, String> {
+    let window = app
+        .get_webview_window(&label_for(root))
+        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |platform| {
+            let _ = sender.send(probe(&platform));
+        })
+        .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+    match receiver.recv_timeout(SNAPSHOT_WAIT) {
+        Ok(result) => result,
+        Err(_) => Err("страница не ответила".to_string()),
+    }
+}
+
+/// Адрес и заголовок глазами системы.
+#[cfg(target_os = "macos")]
+fn platform_info(platform: &tauri::webview::PlatformWebview) -> Result<(String, String), String> {
+    let webview = unsafe { &*(platform.inner() as *mut objc2_web_kit::WKWebView) };
+    let url = unsafe { webview.URL() }
+        .and_then(|url| unsafe { url.absoluteString() })
+        .map(|text| text.to_string())
+        .unwrap_or_default();
+    let title = unsafe { webview.title() }
+        .map(|text| text.to_string())
+        .unwrap_or_default();
+    Ok((url, title))
+}
+
+/// Идёт ли ещё загрузка.
+#[cfg(target_os = "macos")]
+fn platform_is_loading(platform: &tauri::webview::PlatformWebview) -> Result<bool, String> {
+    let webview = unsafe { &*(platform.inner() as *mut objc2_web_kit::WKWebView) };
+    Ok(unsafe { webview.isLoading() })
+}
+
 /// Снимок средствами системы.
 #[cfg(target_os = "macos")]
 fn platform_snapshot(
@@ -157,6 +234,18 @@ unsafe fn png_of(
     }
     .ok_or_else(|| "PNG не собрался".to_string())?;
     Ok(png.to_vec())
+}
+
+/// На остальных системах webview ещё не научен рассказывать о себе.
+#[cfg(not(target_os = "macos"))]
+fn platform_info(_platform: &tauri::webview::PlatformWebview) -> Result<(String, String), String> {
+    Err("страница здесь пока не поддержана".to_string())
+}
+
+/// На остальных системах ждать нечего — считаем, что уже догрузилась.
+#[cfg(not(target_os = "macos"))]
+fn platform_is_loading(_platform: &tauri::webview::PlatformWebview) -> Result<bool, String> {
+    Ok(false)
 }
 
 /// На остальных системах снимок ещё не переведён на webview.
