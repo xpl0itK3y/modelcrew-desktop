@@ -27,6 +27,7 @@ mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
 mod mcp;
+mod mcp_register;
 mod mcp_settings;
 mod mcp_stdio;
 mod panel_snapshots;
@@ -949,6 +950,10 @@ pub fn run() {
             spawn_title_watcher(app.handle().clone());
             agent_hooks::install(app.handle());
             mcp::serve(app.handle().clone());
+            // Агент узнаёт об инструментах только из своего конфига, поэтому
+            // вписываемся туда сами — иначе человеку пришлось бы каждый раз
+            // запускать агента с длинным флагом.
+            mcp_register::apply(app.handle(), mcp_settings::enabled(app.handle()));
             #[cfg(desktop)]
             setup_tray(app)?;
             Ok(())
@@ -1107,6 +1112,7 @@ mod tests {
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
         ("mcp.rs", include_str!("mcp.rs")),
+        ("mcp_register.rs", include_str!("mcp_register.rs")),
         ("mcp_settings.rs", include_str!("mcp_settings.rs")),
         ("mcp_stdio.rs", include_str!("mcp_stdio.rs")),
         ("panel_snapshots.rs", include_str!("panel_snapshots.rs")),

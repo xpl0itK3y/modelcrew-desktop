@@ -820,7 +820,7 @@ fn append_section(agent: &str, helper: &Helper) -> Option<(&'static str, String)
 /// Это не то же, что родитель конфига — у copilot файл лежит на уровень
 /// глубже, и создавать `~/.copilot/hooks` тому, у кого нет `~/.copilot`,
 /// значит заводить конфиг несуществующему CLI.
-fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
+pub(crate) fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
     match agent {
         "claude" => Some(home.join(".claude")),
         "copilot" => Some(home.join(".copilot")),
@@ -1090,7 +1090,7 @@ const CLAUDE_EVENTS: [&str; 2] = ["Stop", "Notification"];
 /// Событие перед вызовом инструмента: на нём решается, свободен ли файл.
 const CLAUDE_CLAIM_EVENT: &str = "PreToolUse";
 
-fn read_json(path: &Path) -> Result<Value, String> {
+pub(crate) fn read_json(path: &Path) -> Result<Value, String> {
     match std::fs::read_to_string(path) {
         Ok(raw) if raw.trim().is_empty() => Ok(Value::Object(Default::default())),
         Ok(raw) => {
@@ -1105,7 +1105,7 @@ fn read_json(path: &Path) -> Result<Value, String> {
 
 /// Запись без окна, в котором файл уже пуст, а нового содержимого ещё нет:
 /// агент может читать конфиг в любой момент.
-fn write_json_atomically(path: &Path, value: &Value) -> Result<(), String> {
+pub(crate) fn write_json_atomically(path: &Path, value: &Value) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "нет родительского каталога".to_string())?;
@@ -1118,7 +1118,7 @@ fn write_json_atomically(path: &Path, value: &Value) -> Result<(), String> {
 }
 
 /// Копия конфига до первой нашей правки — чтобы было куда вернуться руками.
-fn back_up_once(path: &Path) {
+pub(crate) fn back_up_once(path: &Path) {
     if !path.exists() {
         return;
     }
@@ -1293,7 +1293,7 @@ pub struct AgentHookState {
     pub config: String,
 }
 
-fn home_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+pub(crate) fn home_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().home_dir().ok()
 }
 
