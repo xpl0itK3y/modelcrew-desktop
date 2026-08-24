@@ -364,10 +364,14 @@ fn pty_create(
         let home = app.path().home_dir().map_err(|error| {
             CommandError::new(ErrorCode::TerminalSnapshotStorageFailed).with_debug(error)
         })?;
+        // Обёртки агентов кладём здесь же: они нужны только панели, и путь к
+        // ним видит только её оболочка.
+        let shims = mcp_register::shims(&app, mcp_settings::enabled(&app));
         Some(terminal_snapshots::prepare_panel_history(
             &terminal_snapshots::history_base(&app)?,
             &id,
             &home,
+            shims.as_deref(),
         )?)
     } else {
         None
@@ -950,10 +954,9 @@ pub fn run() {
             spawn_title_watcher(app.handle().clone());
             agent_hooks::install(app.handle());
             mcp::serve(app.handle().clone());
-            // Агент узнаёт об инструментах только из своего конфига, поэтому
-            // вписываемся туда сами — иначе человеку пришлось бы каждый раз
-            // запускать агента с длинным флагом.
-            mcp_register::apply(app.handle(), mcp_settings::enabled(app.handle()));
+            // Наружу, в общие конфиги агентов, мы не пишем: плагин внутренний.
+            // Записи прежних версий снимаем.
+            mcp_register::clean_shared_configs(app.handle());
             #[cfg(desktop)]
             setup_tray(app)?;
             Ok(())

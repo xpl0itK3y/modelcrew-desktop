@@ -30,6 +30,21 @@ HISTFILE=\"$ZDOTDIR/.zsh_history\"
 setopt INC_APPEND_HISTORY
 ";
 
+/// Обёртки агентов — в начало PATH, и обязательно после файла пользователя:
+/// его `.zshrc` собирает PATH заново, и всё, что мы поставили бы раньше, он бы
+/// стёр. Плагин внутренний, поэтому и путь к нему живёт только здесь, в
+/// окружении панели.
+fn shims_line(dir: &Path) -> String {
+    let quoted = dir
+        .display()
+        .to_string()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`");
+    format!("export PATH=\"{quoted}:$PATH\"\n")
+}
+
 fn validate_snapshot_id(id: &str) -> CommandResult<()> {
     if id.is_empty()
         || id.len() > 128
@@ -125,7 +140,12 @@ pub fn prune_snapshots(dir: &Path, keep: &[String]) -> CommandResult<()> {
 /// Готовит ZDOTDIR-папку панели: симлинки на реальные zsh-дотфайлы
 /// пользователя, чтобы подменялось только расположение истории, а его
 /// конфигурация работала без изменений.
-pub fn prepare_panel_history(base: &Path, id: &str, home: &Path) -> CommandResult<PathBuf> {
+pub fn prepare_panel_history(
+    base: &Path,
+    id: &str,
+    home: &Path,
+    shims: Option<&Path>,
+) -> CommandResult<PathBuf> {
     validate_snapshot_id(id)?;
     let dir = base.join(id);
     fs::create_dir_all(&dir).map_err(storage_error)?;
@@ -148,10 +168,14 @@ pub fn prepare_panel_history(base: &Path, id: &str, home: &Path) -> CommandResul
         {
             let _ = fs::remove_file(&rc);
         }
-        fs::write(&rc, ZSHRC_WRAPPER).map_err(storage_error)?;
+        let body = match shims {
+            Some(dir) => format!("{ZSHRC_WRAPPER}{}", shims_line(dir)),
+            None => ZSHRC_WRAPPER.to_string(),
+        };
+        fs::write(&rc, body).map_err(storage_error)?;
     }
     #[cfg(not(unix))]
-    let _ = home;
+    let _ = (home, shims);
     Ok(dir)
 }
 
@@ -254,6 +278,36 @@ pub fn terminal_snapshots_prune(
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(unix)]
+    #[test]
+    fn the_panel_finds_the_agent_wrappers_and_the_person_outside_does_not() {
+        let base = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let shims = home.path().join("Application Support/mc/agent-shims");
+
+        let dir = prepare_panel_history(base.path(), "panel-1", home.path(), Some(&shims)).unwrap();
+        let rc = std::fs::read_to_string(dir.join(".zshrc")).unwrap();
+
+        // Строка обязана стоять ПОСЛЕ файла пользователя: его .zshrc собирает
+        // PATH заново и стёр бы всё, что мы поставили раньше.
+        let ours = rc
+            .find("agent-shims")
+            .expect("обёртки должны попасть в PATH");
+        let theirs = rc.find("$HOME/.zshrc").expect("файл пользователя на месте");
+        assert!(
+            ours > theirs,
+            "обёртки должны идти после файла пользователя"
+        );
+        assert!(rc.contains(r#"export PATH="#));
+
+        // Без обёрток строки нет вовсе — снаружи панели агент о сервере не
+        // узнаёт.
+        let plain = prepare_panel_history(base.path(), "panel-2", home.path(), None).unwrap();
+        let rc = std::fs::read_to_string(plain.join(".zshrc")).unwrap();
+        assert!(!rc.contains("agent-shims"));
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -371,7 +425,7 @@ mod tests {
         fs::write(home.join(".zshrc"), "export FROM_USER_RC=1\n").unwrap();
         fs::write(home.join(".zprofile"), "export FROM_PROFILE=1\n").unwrap();
 
-        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        let dir = prepare_panel_history(&base, "panel-1", &home, None).unwrap();
         assert_eq!(dir, base.join("panel-1"));
         // .zshrc — генерированная обёртка с мгновенной записью истории.
         let rc = fs::read_to_string(dir.join(".zshrc")).unwrap();
@@ -389,7 +443,7 @@ mod tests {
         // Отсутствующие дотфайлы не создают битых ссылок.
         assert!(fs::symlink_metadata(dir.join(".zlogin")).is_err());
         // Повторная подготовка идемпотентна.
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         delete_panel_history(&base, "panel-1").unwrap();
         assert!(!dir.exists());
@@ -414,7 +468,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         std::os::unix::fs::symlink(home.join(".zshrc"), dir.join(".zshrc")).unwrap();
 
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         // Обёртка записана в папку панели, НЕ сквозь ссылку в файл пользователя.
         assert_eq!(
@@ -433,8 +487,8 @@ mod tests {
         let base = temp_dir("hist-prune");
         let home = temp_dir("hist-prune-home");
         fs::create_dir_all(&home).unwrap();
-        prepare_panel_history(&base, "keep-me", &home).unwrap();
-        prepare_panel_history(&base, "drop-me", &home).unwrap();
+        prepare_panel_history(&base, "keep-me", &home, None).unwrap();
+        prepare_panel_history(&base, "drop-me", &home, None).unwrap();
         // Чужие папки (не похожие на id) не трогаем.
         fs::create_dir_all(base.join("weird name")).unwrap();
 
@@ -463,7 +517,7 @@ mod tests {
                 save_snapshot(&dir, &id, "payload").unwrap_err(),
                 load_snapshot(&dir, &id).unwrap_err(),
                 delete_snapshot(&dir, &id).unwrap_err(),
-                prepare_panel_history(&base, &id, &home).unwrap_err(),
+                prepare_panel_history(&base, &id, &home, None).unwrap_err(),
                 delete_panel_history(&base, &id).unwrap_err(),
             ] {
                 assert_eq!(
@@ -526,7 +580,7 @@ mod tests {
             );
             assert_eq!(load_snapshot(&dir, id).unwrap().as_deref(), Some("data"));
 
-            let panel = prepare_panel_history(&base, id, &home).unwrap();
+            let panel = prepare_panel_history(&base, id, &home, None).unwrap();
             assert_eq!(
                 fs::canonicalize(&panel).unwrap().parent().unwrap(),
                 fs::canonicalize(&base).unwrap().as_path(),
@@ -634,7 +688,7 @@ mod tests {
         let home = sandbox.join("home");
         fs::create_dir_all(&home).unwrap();
         save_snapshot(&dir, "panel-1", "data").unwrap();
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         assert_eq!(
             prune_snapshots(&dir, &["../..".into()]).unwrap_err().code,
@@ -693,8 +747,8 @@ mod tests {
         fs::write(&user_rc, "export USER_SECRET=1\n").unwrap();
         let before = fs::read(&user_rc).unwrap();
 
-        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        let dir = prepare_panel_history(&base, "panel-1", &home, None).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         assert_eq!(fs::read(&user_rc).unwrap(), before);
         // Обёртка — самостоятельный файл, а не жёсткая ссылка на файл пользователя.
@@ -721,7 +775,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         std::os::unix::fs::symlink(&shared, dir.join(".zshrc")).unwrap();
 
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         assert_eq!(fs::read_to_string(&shared).unwrap(), "shared config\n");
         assert!(fs::read_to_string(dir.join(".zshrc"))
@@ -742,7 +796,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         std::os::unix::fs::symlink(&target, dir.join(".zshrc")).unwrap();
 
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         // Битая ссылка не должна материализовать файл в чужой папке.
         assert!(fs::symlink_metadata(&target).is_err());
@@ -768,7 +822,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         std::os::unix::fs::symlink(&user_rc, dir.join(".zshrc")).unwrap();
 
-        prepare_panel_history(&base, "panel-1", &home).unwrap();
+        prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         assert_eq!(fs::read_to_string(&user_rc).unwrap(), "read only config\n");
         assert_eq!(
@@ -787,7 +841,7 @@ mod tests {
         let home = temp_dir("rc-histfile-home");
         fs::create_dir_all(&home).unwrap();
 
-        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        let dir = prepare_panel_history(&base, "panel-1", &home, None).unwrap();
 
         let rc = fs::read_to_string(dir.join(".zshrc")).unwrap();
         assert!(rc.contains("HISTFILE=\"$ZDOTDIR/.zsh_history\""));
@@ -810,8 +864,8 @@ mod tests {
         fs::create_dir_all(&home).unwrap();
         fs::write(home.join(".zprofile"), "export FROM_PROFILE=1\n").unwrap();
 
-        let first = prepare_panel_history(&base, "panel-a", &home).unwrap();
-        let second = prepare_panel_history(&base, "panel-b", &home).unwrap();
+        let first = prepare_panel_history(&base, "panel-a", &home, None).unwrap();
+        let second = prepare_panel_history(&base, "panel-b", &home, None).unwrap();
         assert_ne!(first, second);
 
         fs::write(first.join(".zsh_history"), "npm token add SECRET\n").unwrap();
@@ -846,7 +900,7 @@ mod tests {
             fs::write(home.join(name), format!("real {name}\n")).unwrap();
         }
 
-        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        let dir = prepare_panel_history(&base, "panel-1", &home, None).unwrap();
         for name in ZSH_DOTFILES {
             assert!(fs::symlink_metadata(dir.join(name))
                 .unwrap()
@@ -865,7 +919,7 @@ mod tests {
 
         // Тот же путь удаления используется и при чистке — он тоже не должен
         // проваливаться по ссылкам в дотфайлы пользователя.
-        let dir = prepare_panel_history(&base, "panel-1", &home).unwrap();
+        let dir = prepare_panel_history(&base, "panel-1", &home, None).unwrap();
         prune_panel_history(&base, &[]).unwrap();
         assert!(!dir.exists());
         for name in ZSH_DOTFILES {

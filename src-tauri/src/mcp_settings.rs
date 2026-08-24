@@ -128,9 +128,6 @@ pub fn mcp_set_enabled(
         // так и смотрел бы на страницу в ящике.
         crate::browser_page::close_all(&app);
     }
-    // Запись у агентов ходит за выключателем: иначе выключенный плагин они бы
-    // всё равно показывали, а сервер на том конце уже не отвечал.
-    crate::mcp_register::apply(&app, enabled);
     Ok(status(&app))
 }
 
