@@ -22,8 +22,8 @@
   <text x="150" y="68" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent in panel 1</text>
   <line x1="150" y1="82" x2="150" y2="406" stroke="#1f242d" stroke-dasharray="4 5"/>
   <rect x="355.5" y="26.5" width="249" height="56" rx="12" fill="#16181d" stroke="#4ade80"/>
-  <text x="480" y="50" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">File claims</text>
-  <text x="480" y="68" font-size="10.5" text-anchor="middle" fill="#8b93a3">the backend guard</text>
+  <text x="480" y="50" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claim guard</text>
+  <text x="480" y="68" font-size="10.5" text-anchor="middle" fill="#8b93a3">one file, one agent</text>
   <line x1="480" y1="82" x2="480" y2="406" stroke="#1f242d" stroke-dasharray="4 5"/>
   <rect x="705.5" y="26.5" width="209" height="56" rx="12" fill="#16181d" stroke="#1f242d"/>
   <text x="810" y="50" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Codex</text>
