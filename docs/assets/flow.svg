@@ -83,11 +83,11 @@
   <text class="m" x="256" y="390" font-size="9" text-anchor="start" fill="#4ade80">verdict</text>
   <path id="e_claim" d="M290 426 V480" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
   <path id="e_grant" d="M390 486 V426" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
-  <path id="e_events" d="M690 426 V480" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
+  <path id="e_events" d="M620 426 V480" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
   <text class="m" x="282" y="464" font-size="9" text-anchor="end" fill="#5c6472">write?</text>
   <text class="m" x="382" y="464" font-size="9" text-anchor="end" fill="#4ade80">yes · taken</text>
   <text class="m" x="490" y="464" font-size="9" text-anchor="middle" fill="#5c6472">one channel: claims and events</text>
-  <text class="m" x="698" y="464" font-size="9" text-anchor="start" fill="#fbbf24">events</text>
+  <text class="m" x="628" y="464" font-size="9" text-anchor="start" fill="#fbbf24">events</text>
   <path id="e_files" d="M210 554 V598" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
   <text class="m" x="222" y="590" font-size="9" text-anchor="start" fill="#5c6472">the write goes through</text>
   <path id="e_watch" d="M282 633 H296" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
@@ -99,20 +99,20 @@
   <text class="m" x="938" y="380" font-size="9" text-anchor="end" fill="#5c6472">calls you</text>
   <path id="m_claim" d="M218 364 V426 H290 V480" fill="none" stroke="none"/>
   <path id="m_grant" d="M390 486 V426 H246 V368" fill="none" stroke="none"/>
-  <path id="m_event1" d="M476 364 V426 H690 V480" fill="none" stroke="none"/>
-  <path id="m_event2" d="M734 364 V426 H690 V480" fill="none" stroke="none"/>
+  <path id="m_event1" d="M476 364 V426 H620 V480" fill="none" stroke="none"/>
+  <path id="m_event2" d="M734 364 V426 H620 V480" fill="none" stroke="none"/>
   <g class="flow">
     <circle r="3.3" fill="#4ade80"><animateMotion dur="1.0s" begin="0s" repeatCount="indefinite"><mpath xlink:href="#e_you"/></animateMotion></circle>
     <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#e_in0"/></animateMotion></circle>
     <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#e_out0"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.6s" repeatCount="indefinite"><mpath xlink:href="#e_in1"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="1.6s" repeatCount="indefinite"><mpath xlink:href="#e_out1"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="1.2s" repeatCount="indefinite"><mpath xlink:href="#e_in2"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="2.2s" repeatCount="indefinite"><mpath xlink:href="#e_out2"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="3.0s" begin="0.2s" repeatCount="indefinite"><mpath xlink:href="#m_claim"/></animateMotion></circle>
-    <circle r="2.6" fill="#4ade80"><animateMotion dur="6.0s" begin="2.0s" repeatCount="indefinite"><mpath xlink:href="#m_grant"/></animateMotion></circle>
-    <circle r="3.3" fill="#fbbf24"><animateMotion dur="6.0s" begin="1.5s" repeatCount="indefinite"><mpath xlink:href="#m_event1"/></animateMotion></circle>
-    <circle r="3.3" fill="#fbbf24"><animateMotion dur="3.0s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#m_event2"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#e_in1"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="1.5s" repeatCount="indefinite"><mpath xlink:href="#e_out1"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#e_in2"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="2.0s" repeatCount="indefinite"><mpath xlink:href="#e_out2"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="4.0s" begin="0.2s" repeatCount="indefinite"><mpath xlink:href="#m_claim"/></animateMotion></circle>
+    <circle r="2.6" fill="#4ade80"><animateMotion dur="4.0s" begin="2.2s" repeatCount="indefinite"><mpath xlink:href="#m_grant"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="4.0s" begin="1.4s" repeatCount="indefinite"><mpath xlink:href="#m_event1"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="4.0s" begin="3.0s" repeatCount="indefinite"><mpath xlink:href="#m_event2"/></animateMotion></circle>
     <circle r="3.3" fill="#4ade80"><animateMotion dur="1.0s" begin="0.3s" repeatCount="indefinite"><mpath xlink:href="#e_files"/></animateMotion></circle>
     <circle r="3.3" fill="#fbbf24"><animateMotion dur="1.0s" begin="0.6s" repeatCount="indefinite"><mpath xlink:href="#e_alert"/></animateMotion></circle>
   </g>

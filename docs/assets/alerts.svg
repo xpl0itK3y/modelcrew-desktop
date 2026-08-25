@@ -59,6 +59,5 @@
     <circle r="3.4" fill="#4ade80"><animateMotion dur="3.0s" begin="2.2s" repeatCount="indefinite"><mpath xlink:href="#a6"/></animateMotion></circle>
     <circle r="3.4" fill="#4ade80"><animateMotion dur="3.0s" begin="2.3000000000000003s" repeatCount="indefinite"><mpath xlink:href="#a7"/></animateMotion></circle>
     <circle r="3.4" fill="#4ade80"><animateMotion dur="3.0s" begin="2.4000000000000004s" repeatCount="indefinite"><mpath xlink:href="#a8"/></animateMotion></circle>
-    <circle r="2.8" fill="#4ade80"><animateMotion dur="6.0s" begin="3.6s" repeatCount="indefinite"><mpath xlink:href="#a9"/></animateMotion></circle>
   </g>
 </svg>

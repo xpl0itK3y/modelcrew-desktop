@@ -43,28 +43,28 @@
   <text class="m" x="645" y="371" font-size="11" text-anchor="middle" fill="#4ade80">granted — it is yours</text>
   <g class="flow">
     <circle r="3.6" fill="#c9ced8" opacity="0">
-      <animateMotion dur="9.0s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.0222;0.1556;1" calcMode="linear"><mpath xlink:href="#s0"/></animateMotion>
-      <animate attributeName="opacity" dur="9.0s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0192;0.0222;0.1556;0.1586;1"/>
+      <animateMotion dur="10.5s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.0190;0.2476;1" calcMode="linear"><mpath xlink:href="#s0"/></animateMotion>
+      <animate attributeName="opacity" dur="10.5s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0160;0.0190;0.2476;0.2506;1"/>
     </circle>
     <circle r="3.6" fill="#4ade80" opacity="0">
-      <animateMotion dur="9.0s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.1778;0.3111;1" calcMode="linear"><mpath xlink:href="#s1"/></animateMotion>
-      <animate attributeName="opacity" dur="9.0s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.1748;0.1778;0.3111;0.3141;1"/>
+      <animateMotion dur="10.5s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.1619;0.3905;1" calcMode="linear"><mpath xlink:href="#s1"/></animateMotion>
+      <animate attributeName="opacity" dur="10.5s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.1589;0.1619;0.3905;0.3935;1"/>
     </circle>
     <circle r="3.6" fill="#c9ced8" opacity="0">
-      <animateMotion dur="9.0s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.3333;0.4667;1" calcMode="linear"><mpath xlink:href="#s2"/></animateMotion>
-      <animate attributeName="opacity" dur="9.0s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.3303;0.3333;0.4667;0.4697;1"/>
+      <animateMotion dur="10.5s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.3048;0.5333;1" calcMode="linear"><mpath xlink:href="#s2"/></animateMotion>
+      <animate attributeName="opacity" dur="10.5s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.3018;0.3048;0.5333;0.5363;1"/>
     </circle>
     <circle r="3.6" fill="#ff8fa3" opacity="0">
-      <animateMotion dur="9.0s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.4889;0.6222;1" calcMode="linear"><mpath xlink:href="#s3"/></animateMotion>
-      <animate attributeName="opacity" dur="9.0s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.4859;0.4889;0.6222;0.6252;1"/>
+      <animateMotion dur="10.5s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.4476;0.6762;1" calcMode="linear"><mpath xlink:href="#s3"/></animateMotion>
+      <animate attributeName="opacity" dur="10.5s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.4446;0.4476;0.6762;0.6792;1"/>
     </circle>
     <circle r="3.6" fill="#c9ced8" opacity="0">
-      <animateMotion dur="9.0s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.6444;0.7778;1" calcMode="linear"><mpath xlink:href="#s4"/></animateMotion>
-      <animate attributeName="opacity" dur="9.0s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.6414;0.6444;0.7778;0.7808;1"/>
+      <animateMotion dur="10.5s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.5905;0.8190;1" calcMode="linear"><mpath xlink:href="#s4"/></animateMotion>
+      <animate attributeName="opacity" dur="10.5s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.5875;0.5905;0.8190;0.8220;1"/>
     </circle>
     <circle r="3.6" fill="#4ade80" opacity="0">
-      <animateMotion dur="9.0s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.8000;0.9333;1" calcMode="linear"><mpath xlink:href="#s5"/></animateMotion>
-      <animate attributeName="opacity" dur="9.0s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.7970;0.8000;0.9333;0.9363;1"/>
+      <animateMotion dur="10.5s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.7333;0.9619;1" calcMode="linear"><mpath xlink:href="#s5"/></animateMotion>
+      <animate attributeName="opacity" dur="10.5s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.7303;0.7333;0.9619;0.9649;1"/>
     </circle>
   </g>
   <rect x="150.5" y="412.5" width="659" height="0" fill="none"/>
