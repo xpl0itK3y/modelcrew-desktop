@@ -496,16 +496,19 @@
   z-index: 2;
   cursor: col-resize;
   background: transparent;
-  transition: background 120ms ease;
 }
 
-.resize-handle:hover,
+/* Под курсором и во время перетаскивания разделитель ничего не рисует. Пока
+   колонки стояли впритык, заливка ложилась на сам шов и читалась как «здесь
+   можно взяться». Между карточками теперь поле, и та же заливка встаёт в нём
+   отдельной полосой во всю высоту окна — как раз там, где пусто по замыслу.
+   Что разделитель под курсором, говорит сам курсор; что его тянут — соседние
+   карточки, которые едут следом.
+
+   Клавиатуре указание всё же нужно: у неё нет ни курсора, ни движения под
+   рукой, и без рамки фокус на разделителе просто негде увидеть. */
 .resize-handle:focus-visible {
-  background: var(--mc-accent-soft);
   outline: 0;
-}
-
-.resize-handle:focus-visible {
   box-shadow: inset 0 0 0 1px var(--mc-accent-border);
 }
 
@@ -514,15 +517,8 @@ body.is-resizing {
   user-select: none;
 }
 
-body.is-resizing .sidebar-rail,
-body.is-resizing .resize-handle {
+body.is-resizing .sidebar-rail {
   transition: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .resize-handle {
-    transition: none;
-  }
 }
 
 /* Меню строки дерева. */
