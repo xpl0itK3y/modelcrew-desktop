@@ -1,109 +1,108 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 960 616" width="960" height="616" role="img" aria-label="Схема работы ModelCrew: панели, PTY, агенты, заявки на файлы, хуки, git-панель и сигналы">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 980 664" width="980" height="664" role="img" aria-label="Каждая панель говорит со своим PTY, каждый PTY ведёт одного агента; агенты идут через заявки на файлы и хуки, а результат возвращается в git-панель и к человеку">
   <title>How ModelCrew runs several agents at once</title>
   <defs>
-    <marker id="tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 1.2 L7 4 L0 6.8 z" fill="#232833"/>
+    </marker>
+    <marker id="tip_dim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L7 4 L0 6.8 z" fill="#1f242d"/>
     </marker>
   </defs>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    .flow circle { filter: drop-shadow(0 0 3px currentColor); }
+    .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     @media (prefers-reduced-motion: reduce) { .flow { display: none; } }
   </style>
-  <rect x="0.5" y="0.5" width="959" height="615" rx="16" fill="#101216" stroke="#232833"/>
-  <rect x="36.5" y="66.5" width="95" height="45" rx="12" fill="#1b1e25" stroke="#1f242d"/>
-  <text x="84" y="94" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">You</text>
-  <rect x="168.5" y="30.5" width="753" height="112" rx="14" fill="#1b1e25" stroke="#232833"/>
-  <text x="182" y="50" font-size="10" font-weight="600" letter-spacing="1.2" fill="#5c6472">MODELCREW WINDOW</text>
-  <rect x="190.5" y="60.5" width="225" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="303" y="88" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claude Code</text>
-  <text x="303" y="104" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
-  <rect x="442.5" y="60.5" width="225" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="555" y="88" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Codex</text>
-  <text x="555" y="104" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
-  <rect x="694.5" y="60.5" width="225" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="807" y="88" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Cursor</text>
-  <text x="807" y="104" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
-  <rect x="190.5" y="186.5" width="225" height="39" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="303" y="210" font-size="11.5" font-weight="500" text-anchor="middle" fill="#e8ebf2">PTY</text>
-  <rect x="442.5" y="186.5" width="225" height="39" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="555" y="210" font-size="11.5" font-weight="500" text-anchor="middle" fill="#e8ebf2">PTY</text>
-  <rect x="694.5" y="186.5" width="225" height="39" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="807" y="210" font-size="11.5" font-weight="500" text-anchor="middle" fill="#e8ebf2">PTY</text>
-  <rect x="190.5" y="264.5" width="225" height="57" rx="12" fill="#16181d" stroke="#4ade80"/>
-  <text x="303" y="290" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claude Code</text>
-  <text x="303" y="306" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
-  <rect x="442.5" y="264.5" width="225" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="555" y="290" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Codex</text>
-  <text x="555" y="306" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
-  <rect x="694.5" y="264.5" width="225" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="807" y="290" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Cursor</text>
-  <text x="807" y="306" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
-  <rect x="190.5" y="372.5" width="339" height="73" rx="12" fill="#16181d" stroke="#4ade80"/>
-  <text x="360" y="406" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">File claims</text>
-  <text x="360" y="422" font-size="10.5" text-anchor="middle" fill="#8b93a3">one file, one agent — a taken file is refused</text>
-  <rect x="582.5" y="372.5" width="337" height="73" rx="12" fill="#16181d" stroke="#fbbf24"/>
-  <text x="751" y="406" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Agent hooks</text>
-  <text x="751" y="422" font-size="10.5" text-anchor="middle" fill="#8b93a3">finished · waiting · needs permission</text>
-  <rect x="190.5" y="494.5" width="159" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="270" y="530" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Project files</text>
-  <rect x="370.5" y="494.5" width="159" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="450" y="530" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Git panel</text>
-  <rect x="582.5" y="494.5" width="337" height="61" rx="12" fill="#16181d" stroke="#fbbf24"/>
-  <text x="751" y="530" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Sound · banner · dock badge</text>
-  <path id="e_you" d="M132 89 H162" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <text x="147" y="82" font-size="9" text-anchor="middle" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">keys</text>
-  <path id="e_in0" d="M289.0 122 V180" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_out0" d="M317.0 180 V124" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_pty0" d="M303.0 226 V258" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_in1" d="M541.0 122 V180" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_out1" d="M569.0 180 V124" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_pty1" d="M555.0 226 V258" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_in2" d="M793.0 122 V180" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_out2" d="M821.0 180 V124" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_pty2" d="M807.0 226 V258" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <text x="263" y="158" font-size="9" text-anchor="end" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">input</text>
-  <text x="343" y="158" font-size="9" text-anchor="start" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">output</text>
-  <path id="e_c0" d="M303 322 C303 344 360 350 360 366" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_c1" d="M555 322 C555 346 400 348 372 366" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_c2" d="M807 322 C807 348 420 344 384 366" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_h0" d="M320 322 C340 350 700 344 738 366" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_h1" d="M572 322 C572 346 740 346 750 366" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_h2" d="M824 322 C824 344 766 350 762 366" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <text x="455" y="356" font-size="9" text-anchor="middle" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">write?</text>
-  <text x="660" y="356" font-size="9" text-anchor="middle" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">events</text>
-  <path id="e_deny" d="M330 366 C320 348 470 344 545 322" fill="none" stroke="#ff8fa3" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.75" marker-end="url(#tip)"/>
-  <text x="430" y="338" font-size="9" text-anchor="middle" fill="#ff8fa3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">taken — try another</text>
-  <path id="e_files" d="M300 446 V488" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_watch" d="M350 525 H364" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <path id="e_alert" d="M751 446 V488" fill="none" stroke="#232833" stroke-width="1.6" marker-end="url(#tip)"/>
-  <text x="316" y="472" font-size="9" text-anchor="start" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">writes</text>
-  <path id="e_loop_git" d="M370 556 C300 596 150 592 150 470 V150" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#tip)"/>
-  <text x="112" y="330" font-size="9" text-anchor="middle" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">live diffs</text>
-  <path id="e_loop_you" d="M920 525 C946 525 946 120 100 120 V116" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#tip)"/>
-  <text x="600" y="112" font-size="9" text-anchor="middle" fill="#5c6472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">the app calls you back</text>
+  <rect x="0.5" y="0.5" width="979" height="663" rx="16" fill="#101216" stroke="#232833"/>
+  <rect x="430.5" y="26.5" width="119" height="43" rx="12" fill="#1b1e25" stroke="#1f242d"/>
+  <text x="490" y="52" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">You</text>
+  <rect x="90.5" y="96.5" width="799" height="112" rx="14" fill="#1b1e25" stroke="#232833"/>
+  <text x="106" y="118" font-size="10" font-weight="600" letter-spacing="1.2" fill="#5c6472">MODELCREW WINDOW</text>
+  <rect x="109.5" y="130.5" width="245" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="232" y="159" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claude Code</text>
+  <text x="232" y="175" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
+  <rect x="367.5" y="130.5" width="245" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="490" y="159" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Codex</text>
+  <text x="490" y="175" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
+  <rect x="625.5" y="130.5" width="245" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="748" y="159" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Cursor</text>
+  <text x="748" y="175" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
+  <rect x="109.5" y="248.5" width="245" height="37" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="232" y="272" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <rect x="367.5" y="248.5" width="245" height="37" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="490" y="272" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <rect x="625.5" y="248.5" width="245" height="37" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="748" y="272" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <rect x="109.5" y="312.5" width="245" height="57" rx="12" fill="#16181d" stroke="#4ade80"/>
+  <text x="232" y="339" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claude Code</text>
+  <text x="232" y="355" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
+  <rect x="367.5" y="312.5" width="245" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="490" y="339" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Codex</text>
+  <text x="490" y="355" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
+  <rect x="625.5" y="312.5" width="245" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="748" y="339" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Cursor</text>
+  <text x="748" y="355" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
+  <rect x="140.5" y="438.5" width="299" height="73" rx="12" fill="#16181d" stroke="#4ade80"/>
+  <text x="290" y="473" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">File claims</text>
+  <text x="290" y="489" font-size="10.5" text-anchor="middle" fill="#8b93a3">one file, one agent — a taken file is refused</text>
+  <rect x="540.5" y="438.5" width="299" height="73" rx="12" fill="#16181d" stroke="#fbbf24"/>
+  <text x="690" y="473" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Agent hooks</text>
+  <text x="690" y="489" font-size="10.5" text-anchor="middle" fill="#8b93a3">finished · waiting · needs permission</text>
+  <rect x="140.5" y="560.5" width="139" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="210" y="594" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Project files</text>
+  <rect x="300.5" y="560.5" width="139" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="370" y="594" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Git panel</text>
+  <rect x="540.5" y="560.5" width="299" height="57" rx="12" fill="#16181d" stroke="#fbbf24"/>
+  <text x="690" y="594" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Sound · banner · dock badge</text>
+  <path id="e_you" d="M490 70 V92" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <text class="m" x="506" y="86" font-size="9" text-anchor="start" fill="#5c6472">keys</text>
+  <path id="e_in0" d="M216 192 V242" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_out0" d="M248 242 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_pty0" d="M232 286 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_in1" d="M474 192 V242" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_out1" d="M506 242 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_pty1" d="M490 286 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_in2" d="M732 192 V242" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_out2" d="M764 242 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_pty2" d="M748 286 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <text class="m" x="206" y="222" font-size="9" text-anchor="end" fill="#5c6472">input</text>
+  <text class="m" x="258" y="222" font-size="9" text-anchor="start" fill="#5c6472">output</text>
+  <path d="M232 400 H748" fill="none" stroke="#232833" stroke-width="1.6"/>
+  <path id="e_drop0" d="M232 370 V396" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_drop1" d="M490 370 V396" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_drop2" d="M748 370 V396" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_bus_c" d="M232 400 H290 V432" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_bus_h" d="M748 400 H690 V432" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <text class="m" x="278" y="421" font-size="9" text-anchor="end" fill="#5c6472">write?</text>
+  <text class="m" x="702" y="421" font-size="9" text-anchor="start" fill="#5c6472">events</text>
+  <path id="e_files" d="M210 512 V554" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <text class="m" x="224" y="538" font-size="9" text-anchor="start" fill="#5c6472">writes</text>
+  <path id="e_watch" d="M282 589 H296" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_alert" d="M690 512 V554" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_loop_git" d="M370 618 V640 H34 V152 H84" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
+  <text class="m" x="44" y="344" font-size="9" text-anchor="start" fill="#5c6472">live diffs</text>
+  <path id="e_loop_you" d="M844 589 H946 V48 H558" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
+  <text class="m" x="752" y="40" font-size="9" text-anchor="middle" fill="#5c6472">the app calls you back</text>
   <g class="flow">
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="1.6s" begin="0s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_you"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="1.5s" begin="0.0s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_in0"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.5s" begin="0.75s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_out0"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.1s" begin="0.0s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_pty0"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="1.5s" begin="0.3s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_in1"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.5s" begin="1.05s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_out1"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.1s" begin="0.5s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_pty1"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="1.5s" begin="0.6s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_in2"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.5s" begin="1.35s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_out2"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.1s" begin="1.0s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_pty2"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="2.2s" begin="0.0s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_c0"/></animateMotion></circle>
-    <circle r="3.2" fill="#fbbf24"><animateMotion dur="2.4s" begin="1.1s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_h0"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="2.2s" begin="0.6s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_c1"/></animateMotion></circle>
-    <circle r="3.2" fill="#fbbf24"><animateMotion dur="2.4s" begin="1.6s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_h1"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="2.2s" begin="1.2s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_c2"/></animateMotion></circle>
-    <circle r="3.2" fill="#fbbf24"><animateMotion dur="2.4s" begin="2.1s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_h2"/></animateMotion></circle>
-    <circle r="3.2" fill="#ff8fa3"><animateMotion dur="2.0s" begin="1.4s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_deny"/></animateMotion></circle>
-    <circle r="3.2" fill="#4ade80"><animateMotion dur="1.2s" begin="0.4s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_files"/></animateMotion></circle>
-    <circle r="3.2" fill="#60a5fa"><animateMotion dur="0.8s" begin="0.9s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_watch"/></animateMotion></circle>
-    <circle r="3.2" fill="#fbbf24"><animateMotion dur="1.2s" begin="0.7s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_alert"/></animateMotion></circle>
-    <circle r="2.8" fill="#60a5fa"><animateMotion dur="3.4s" begin="1.2s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_loop_git"/></animateMotion></circle>
-    <circle r="2.8" fill="#fbbf24"><animateMotion dur="4.0s" begin="1.8s" repeatCount="indefinite" rotate="auto"><mpath xlink:href="#e_loop_you"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.0s" begin="0s" repeatCount="indefinite"><mpath xlink:href="#e_you"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.4s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#e_in0"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.4s" begin="0.7s" repeatCount="indefinite"><mpath xlink:href="#e_out0"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="0.8s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#e_pty0"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="0.9s" begin="0.4s" repeatCount="indefinite"><mpath xlink:href="#e_drop0"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.4s" begin="0.25s" repeatCount="indefinite"><mpath xlink:href="#e_in1"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.4s" begin="0.95s" repeatCount="indefinite"><mpath xlink:href="#e_out1"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="0.8s" begin="0.4s" repeatCount="indefinite"><mpath xlink:href="#e_pty1"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="0.9s" begin="0.7s" repeatCount="indefinite"><mpath xlink:href="#e_drop1"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.4s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#e_in2"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.4s" begin="1.2s" repeatCount="indefinite"><mpath xlink:href="#e_out2"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="0.8s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#e_pty2"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="0.9s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#e_drop2"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.8s" begin="0.9s" repeatCount="indefinite"><mpath xlink:href="#e_bus_c"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="1.8s" begin="1.3s" repeatCount="indefinite"><mpath xlink:href="#e_bus_h"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.1s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#e_files"/></animateMotion></circle>
+    <circle r="3.3" fill="#60a5fa"><animateMotion dur="0.7s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#e_watch"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="1.1s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#e_alert"/></animateMotion></circle>
+    <circle r="2.8" fill="#60a5fa"><animateMotion dur="3.6s" begin="1.4s" repeatCount="indefinite"><mpath xlink:href="#e_loop_git"/></animateMotion></circle>
+    <circle r="2.8" fill="#fbbf24"><animateMotion dur="4.2s" begin="2.0s" repeatCount="indefinite"><mpath xlink:href="#e_loop_you"/></animateMotion></circle>
   </g>
 </svg>
