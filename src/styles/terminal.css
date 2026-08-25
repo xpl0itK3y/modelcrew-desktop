@@ -3,7 +3,7 @@
 .dockview-theme-modelcrew {
   --dv-group-view-background-color: var(--mc-panel);
   --dv-tabs-and-actions-container-background-color: var(--mc-panel-header);
-  --dv-tabs-and-actions-container-height: 30px;
+  --dv-tabs-and-actions-container-height: 34px;
   --dv-tabs-and-actions-container-font-size: 12px;
   --dv-activegroup-visiblepanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
@@ -54,7 +54,9 @@
 }
 
 .dockview-theme-modelcrew .dv-tabs-and-actions-container {
-  border-bottom: 1px solid var(--mc-border);
+  /* Шапка отделена от терминала волоском, а не чертой: рамку карточке уже
+     держит её собственный край, и вторая линия в полную силу спорила с ним. */
+  border-bottom: 1px solid var(--mc-panel-border);
   /* Точка отсчёта для подписи «что правит»: она смотрит на ширину шапки, а
      не окна — в сетке из двенадцати панелей это разные величины. Ширина
      шапки задаётся группой, поэтому containment здесь безопасен. */
@@ -92,9 +94,9 @@
 .terminal-tab {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   height: 100%;
-  padding: 0 10px;
+  padding: 0 12px;
   max-width: 220px;
 }
 
