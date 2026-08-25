@@ -11,7 +11,7 @@
   height: min(680px, calc(100vh - 48px));
   min-width: 0;
   padding: 0;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   overflow: hidden;
 }
 
@@ -47,7 +47,7 @@
   width: 100%;
   padding: 9px 12px 9px 33px;
   border: 1px solid var(--mc-border);
-  border-radius: 9px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   color: var(--mc-text-bright);
   font: inherit;
@@ -101,7 +101,7 @@
   gap: 10px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: transparent;
   color: var(--mc-text-muted);
   font: inherit;
@@ -279,7 +279,7 @@
   min-width: 22px;
   padding: 3px 7px;
   border: 1px solid var(--mc-border);
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: var(--mc-surface-raised);
   color: var(--mc-text-bright);
   font: inherit;
@@ -329,7 +329,7 @@
 .settings-button {
   padding: 7px 15px;
   border: 1px solid var(--mc-border);
-  border-radius: 9px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-button);
   color: var(--mc-text-bright);
   font: inherit;
@@ -438,14 +438,14 @@
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--mc-border);
-  border-radius: 9px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-button);
 }
 
 .settings-segment {
   padding: 6px 13px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--mc-radius-sm);
   background: transparent;
   color: var(--mc-text-muted);
   font: inherit;
@@ -489,7 +489,7 @@
   padding: 8px 32px 8px 12px;
   appearance: none;
   border: 1px solid var(--mc-border);
-  border-radius: 9px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-button);
   color: var(--mc-text-bright);
   font: inherit;
@@ -623,7 +623,7 @@
   min-width: 0;
   padding: 8px;
   border: 1px solid var(--mc-border);
-  border-radius: 9px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-button);
   color: var(--mc-text);
   text-align: left;
@@ -654,7 +654,7 @@
   height: 40px;
   overflow: hidden;
   border: 1px solid var(--mc-border);
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
 }
 
 .theme-preview-sidebar {
@@ -774,7 +774,7 @@
   height: 26px;
   padding: 0;
   border: 1px solid var(--mc-border);
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   cursor: pointer;
 }

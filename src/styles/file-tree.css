@@ -316,7 +316,7 @@
 .file-view-save {
   padding: 2px 9px;
   border: 1px solid var(--mc-border);
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   background: var(--mc-button);
   color: var(--mc-text-bright);
   font: inherit;
@@ -533,7 +533,7 @@ body.is-resizing .resize-handle {
   min-width: 180px;
   padding: 4px;
   border: 1px solid var(--mc-border);
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   box-shadow: 0 12px 32px var(--mc-shadow);
 }
@@ -543,7 +543,7 @@ body.is-resizing .resize-handle {
   width: 100%;
   padding: 6px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text);
   font: inherit;
@@ -609,7 +609,7 @@ body.is-resizing .resize-handle {
   width: 100%;
   padding: 4px 8px;
   border: 1px solid var(--mc-border);
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: var(--mc-panel);
   color: var(--mc-text);
   font: inherit;

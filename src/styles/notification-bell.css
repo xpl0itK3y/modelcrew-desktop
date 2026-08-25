@@ -126,7 +126,7 @@
   margin-top: 6px;
   padding: 6px 8px;
   border: 1px solid var(--mc-border);
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: var(--mc-surface);
   color: var(--mc-text-bright);
   font-family: var(--mc-font-mono, ui-monospace, SFMono-Regular, monospace);

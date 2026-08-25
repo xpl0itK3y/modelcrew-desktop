@@ -410,7 +410,7 @@
   gap: 8px;
   padding: 10px 18px;
   border: 1px solid var(--mc-accent-border);
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-accent-soft);
   color: var(--mc-text-bright);
   font-size: 13.5px;
@@ -544,7 +544,7 @@
   gap: 8px;
   padding: 8px 14px;
   border: 1px solid var(--mc-accent-border);
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: color-mix(in srgb, var(--mc-surface-raised) 94%, transparent);
   color: var(--mc-text-bright);
   font-size: 12.5px;
@@ -641,7 +641,7 @@ body.cmd-dragging * {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: color-mix(in srgb, var(--mc-surface-raised) 88%, transparent);
   border: 1px solid var(--mc-border);
   color: var(--mc-text-bright);
