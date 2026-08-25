@@ -35,14 +35,15 @@ Built on **Tauri 2** with a Rust **portable-pty** backend, **React 18**,
 ## How it works
 
 <div align="center">
-<img src="docs/assets/flow.gif" alt="Panels talk to their own PTY, each PTY runs one agent CLI; agents ask the claim guard before writing and send hook events; changes come back as live diffs in the git panel and alerts come back to you" width="100%" />
+<img src="docs/assets/flow.gif" alt="Each panel talks to its own PTY; the shell inside it runs one agent CLI. Every file claim and every event leaves through one channel of agent hooks: the claim guard answers the agent that asked, events turn into alerts, and both loops close back on you" width="100%" />
 </div>
 
-Every panel is a terminal of its own: its own PTY, its own shell history, its
-own agent conversation. What the agents do next runs through two places the
-application keeps for itself — the guard that hands out files, and the hooks
-that say when someone is waiting. Both loops close back on the window: edits
-show up as live diffs, and a waiting agent finds you wherever you are.
+Every panel is a terminal of its own: its own PTY, its own shell, its own agent
+conversation. Everything an agent says back leaves through a single channel —
+its hooks. A claim for a file waits there for a verdict, so two agents never
+write the same file at once; everything else goes on to the alerts. Both loops
+close back on you: edits show up as live diffs, and a waiting agent finds you
+wherever you are.
 
 ## Features
 

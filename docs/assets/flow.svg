@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 980 664" width="980" height="664" role="img" aria-label="Каждая панель говорит со своим PTY, каждый PTY ведёт одного агента; агенты идут через заявки на файлы и хуки, а результат возвращается в git-панель и к человеку">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 980 680" width="980" height="680" role="img" aria-label="Каждая панель говорит со своим PTY, в PTY работает оболочка и уже в ней агент; заявки на файлы и события агентов идут одним каналом хуков, страж отвечает агенту, а результат возвращается в git-панель и к человеку">
   <title>How ModelCrew runs several agents at once</title>
   <defs>
     <marker id="tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
@@ -7,13 +7,19 @@
     <marker id="tip_dim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 1.2 L7 4 L0 6.8 z" fill="#1f242d"/>
     </marker>
+    <marker id="tip_green" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L7 4 L0 6.8 z" fill="#4ade80"/>
+    </marker>
+    <marker id="tip_amber" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L7 4 L0 6.8 z" fill="#fbbf24"/>
+    </marker>
   </defs>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     @media (prefers-reduced-motion: reduce) { .flow { display: none; } }
   </style>
-  <rect x="0.5" y="0.5" width="979" height="663" rx="16" fill="#101216" stroke="#232833"/>
+  <rect x="0.5" y="0.5" width="979" height="679" rx="16" fill="#101216" stroke="#232833"/>
   <rect x="430.5" y="26.5" width="119" height="43" rx="12" fill="#1b1e25" stroke="#1f242d"/>
   <text x="490" y="52" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">You</text>
   <rect x="90.5" y="96.5" width="799" height="112" rx="14" fill="#1b1e25" stroke="#232833"/>
@@ -27,12 +33,15 @@
   <rect x="625.5" y="130.5" width="245" height="61" rx="12" fill="#16181d" stroke="#1f242d"/>
   <text x="748" y="159" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Cursor</text>
   <text x="748" y="175" font-size="10.5" text-anchor="middle" fill="#8b93a3">terminal panel</text>
-  <rect x="109.5" y="248.5" width="245" height="37" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="232" y="272" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
-  <rect x="367.5" y="248.5" width="245" height="37" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="490" y="272" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
-  <rect x="625.5" y="248.5" width="245" height="37" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="748" y="272" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <rect x="109.5" y="242.5" width="245" height="47" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="232" y="264" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <text x="232" y="280" font-size="10.5" text-anchor="middle" fill="#8b93a3">zsh · bash · fish</text>
+  <rect x="367.5" y="242.5" width="245" height="47" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="490" y="264" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <text x="490" y="280" font-size="10.5" text-anchor="middle" fill="#8b93a3">zsh · bash · fish</text>
+  <rect x="625.5" y="242.5" width="245" height="47" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="748" y="264" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">PTY</text>
+  <text x="748" y="280" font-size="10.5" text-anchor="middle" fill="#8b93a3">zsh · bash · fish</text>
   <rect x="109.5" y="312.5" width="245" height="57" rx="12" fill="#16181d" stroke="#4ade80"/>
   <text x="232" y="339" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claude Code</text>
   <text x="232" y="355" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
@@ -42,66 +51,94 @@
   <rect x="625.5" y="312.5" width="245" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
   <text x="748" y="339" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Cursor</text>
   <text x="748" y="355" font-size="10.5" text-anchor="middle" fill="#8b93a3">agent CLI</text>
-  <rect x="140.5" y="438.5" width="299" height="73" rx="12" fill="#16181d" stroke="#4ade80"/>
-  <text x="290" y="473" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">File claims</text>
-  <text x="290" y="489" font-size="10.5" text-anchor="middle" fill="#8b93a3">one file, one agent — a taken file is refused</text>
-  <rect x="540.5" y="438.5" width="299" height="73" rx="12" fill="#16181d" stroke="#fbbf24"/>
-  <text x="690" y="473" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Agent hooks</text>
-  <text x="690" y="489" font-size="10.5" text-anchor="middle" fill="#8b93a3">finished · waiting · needs permission</text>
-  <rect x="140.5" y="560.5" width="139" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="210" y="594" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Project files</text>
-  <rect x="300.5" y="560.5" width="139" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
-  <text x="370" y="594" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Git panel</text>
-  <rect x="540.5" y="560.5" width="299" height="57" rx="12" fill="#16181d" stroke="#fbbf24"/>
-  <text x="690" y="594" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Sound · banner · dock badge</text>
+  <rect x="109.5" y="409.5" width="761" height="24" rx="10" fill="#1b1e25" stroke="#232833"/>
+  <text x="126" y="425" font-size="10" font-weight="600" letter-spacing="1.2" fill="#5c6472">AGENT HOOKS</text>
+  <rect x="140.5" y="474.5" width="299" height="67" rx="12" fill="#16181d" stroke="#4ade80"/>
+  <text x="290" y="506" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Claim guard</text>
+  <text x="290" y="522" font-size="10.5" text-anchor="middle" fill="#8b93a3">one file, one agent — the agent waits</text>
+  <rect x="540.5" y="474.5" width="299" height="67" rx="12" fill="#16181d" stroke="#fbbf24"/>
+  <text x="690" y="506" font-size="13" font-weight="600" text-anchor="middle" fill="#e8ebf2">Alerts</text>
+  <text x="690" y="522" font-size="10.5" text-anchor="middle" fill="#8b93a3">finished · waiting · needs permission</text>
+  <rect x="140.5" y="574.5" width="139" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="210" y="608" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Project files</text>
+  <rect x="300.5" y="574.5" width="139" height="57" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="370" y="608" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Git panel</text>
+  <rect x="540.5" y="574.5" width="299" height="57" rx="12" fill="#16181d" stroke="#fbbf24"/>
+  <text x="690" y="608" font-size="12" font-weight="600" text-anchor="middle" fill="#e8ebf2">Sound · banner · dock badge</text>
   <path id="e_you" d="M490 70 V92" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
   <text class="m" x="506" y="86" font-size="9" text-anchor="start" fill="#5c6472">keys</text>
-  <path id="e_in0" d="M216 192 V242" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_out0" d="M248 242 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_pty0" d="M232 286 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_in1" d="M474 192 V242" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_out1" d="M506 242 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_pty1" d="M490 286 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_in2" d="M732 192 V242" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_out2" d="M764 242 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_pty2" d="M748 286 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <text class="m" x="206" y="222" font-size="9" text-anchor="end" fill="#5c6472">input</text>
-  <text class="m" x="258" y="222" font-size="9" text-anchor="start" fill="#5c6472">output</text>
-  <path d="M232 400 H748" fill="none" stroke="#232833" stroke-width="1.6"/>
-  <path id="e_drop0" d="M232 370 V396" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_drop1" d="M490 370 V396" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_drop2" d="M748 370 V396" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_bus_c" d="M232 400 H290 V432" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_bus_h" d="M748 400 H690 V432" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <text class="m" x="278" y="421" font-size="9" text-anchor="end" fill="#5c6472">write?</text>
-  <text class="m" x="702" y="421" font-size="9" text-anchor="start" fill="#5c6472">events</text>
-  <path id="e_files" d="M210 512 V554" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <text class="m" x="224" y="538" font-size="9" text-anchor="start" fill="#5c6472">writes</text>
-  <path id="e_watch" d="M282 589 H296" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_alert" d="M690 512 V554" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
-  <path id="e_loop_git" d="M370 618 V640 H34 V152 H84" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
-  <text class="m" x="44" y="344" font-size="9" text-anchor="start" fill="#5c6472">live diffs</text>
-  <path id="e_loop_you" d="M844 589 H946 V48 H558" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
-  <text class="m" x="752" y="40" font-size="9" text-anchor="middle" fill="#5c6472">the app calls you back</text>
+  <path id="e_in0" d="M174 192 V236" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_out0" d="M290 236 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_pty0" d="M232 290 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_in1" d="M432 192 V236" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_out1" d="M548 236 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_pty1" d="M490 290 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_in2" d="M690 192 V236" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_out2" d="M806 236 V196" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_pty2" d="M748 290 V306" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <text class="m" x="164" y="220" font-size="9" text-anchor="end" fill="#5c6472">input</text>
+  <text class="m" x="300" y="220" font-size="9" text-anchor="start" fill="#5c6472">output</text>
+  <path id="e_hook0" d="M218 370 V403" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_back0" d="M246 403 V374" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
+  <path id="e_hook1" d="M476 370 V403" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_back1" d="M504 403 V374" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
+  <path id="e_hook2" d="M734 370 V403" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_back2" d="M762 403 V374" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
+  <text class="m" x="208" y="390" font-size="9" text-anchor="end" fill="#5c6472">hook</text>
+  <text class="m" x="256" y="390" font-size="9" text-anchor="start" fill="#4ade80">verdict</text>
+  <path id="e_claim" d="M290 434 V468" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
+  <path id="e_grant" d="M390 474 V440" fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_green)"/>
+  <path id="e_events" d="M690 434 V468" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
+  <text class="m" x="282" y="458" font-size="9" text-anchor="end" fill="#5c6472">write?</text>
+  <text class="m" x="382" y="458" font-size="9" text-anchor="end" fill="#4ade80">yes · taken</text>
+  <text class="m" x="698" y="458" font-size="9" text-anchor="start" fill="#fbbf24">events</text>
+  <text class="m" x="490" y="458" font-size="9" text-anchor="middle" fill="#5c6472">one channel: claims and events</text>
+  <path id="e_files" d="M210 542 V568" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <text class="m" x="222" y="562" font-size="9" text-anchor="start" fill="#5c6472">the write goes through</text>
+  <path id="e_watch" d="M282 603 H296" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="e_alert" d="M690 542 V568" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
+  <text class="m" x="702" y="562" font-size="9" text-anchor="start" fill="#fbbf24">not in this panel</text>
+  <path id="e_loop_git" d="M370 632 V656 H34 V48 H424" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
+  <text class="m" x="44" y="352" font-size="9" text-anchor="start" fill="#5c6472">live diffs</text>
+  <path id="e_loop_you" d="M844 603 H946 V48 H556" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
+  <text class="m" x="938" y="352" font-size="9" text-anchor="end" fill="#5c6472">calls you</text>
+  <path id="m_keys" d="M490 70 V132" fill="none" stroke="none"/>
+  <path id="m_in0" d="M174 192 V310" fill="none" stroke="none"/>
+  <path id="m_out0" d="M290 310 V194" fill="none" stroke="none"/>
+  <path id="m_claim0" d="M218 370 V421 H290 V476" fill="none" stroke="none"/>
+  <path id="m_grant0" d="M390 474 V421 H246 V368" fill="none" stroke="none"/>
+  <path id="m_event0" d="M218 370 V421 H690 V476" fill="none" stroke="none"/>
+  <path id="m_in1" d="M432 192 V310" fill="none" stroke="none"/>
+  <path id="m_out1" d="M548 310 V194" fill="none" stroke="none"/>
+  <path id="m_claim1" d="M476 370 V421 H290 V476" fill="none" stroke="none"/>
+  <path id="m_grant1" d="M390 474 V421 H504 V368" fill="none" stroke="none"/>
+  <path id="m_event1" d="M476 370 V421 H690 V476" fill="none" stroke="none"/>
+  <path id="m_in2" d="M690 192 V310" fill="none" stroke="none"/>
+  <path id="m_out2" d="M806 310 V194" fill="none" stroke="none"/>
+  <path id="m_claim2" d="M734 370 V421 H290 V476" fill="none" stroke="none"/>
+  <path id="m_grant2" d="M390 474 V421 H762 V368" fill="none" stroke="none"/>
+  <path id="m_event2" d="M734 370 V421 H690 V476" fill="none" stroke="none"/>
+  <path id="m_files" d="M210 542 V590" fill="none" stroke="none"/>
+  <path id="m_alert" d="M690 542 V590" fill="none" stroke="none"/>
   <g class="flow">
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0s" repeatCount="indefinite"><mpath xlink:href="#e_you"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="3.0s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#e_in0"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="3.0s" begin="0.7s" repeatCount="indefinite"><mpath xlink:href="#e_out0"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#e_pty0"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.4s" repeatCount="indefinite"><mpath xlink:href="#e_drop0"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="3.0s" begin="0.25s" repeatCount="indefinite"><mpath xlink:href="#e_in1"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="3.0s" begin="0.95s" repeatCount="indefinite"><mpath xlink:href="#e_out1"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="0.4s" repeatCount="indefinite"><mpath xlink:href="#e_pty1"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.7s" repeatCount="indefinite"><mpath xlink:href="#e_drop1"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="3.0s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#e_in2"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="3.0s" begin="1.2s" repeatCount="indefinite"><mpath xlink:href="#e_out2"/></animateMotion></circle>
-    <circle r="2.6" fill="#c9ced8"><animateMotion dur="2.0s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#e_pty2"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#e_drop2"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="3.0s" begin="0.9s" repeatCount="indefinite"><mpath xlink:href="#e_bus_c"/></animateMotion></circle>
-    <circle r="3.3" fill="#fbbf24"><animateMotion dur="3.0s" begin="1.3s" repeatCount="indefinite"><mpath xlink:href="#e_bus_h"/></animateMotion></circle>
-    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#e_files"/></animateMotion></circle>
-    <circle r="3.3" fill="#60a5fa"><animateMotion dur="1.5s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#e_watch"/></animateMotion></circle>
-    <circle r="3.3" fill="#fbbf24"><animateMotion dur="2.0s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#e_alert"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="0.75s" begin="0s" repeatCount="indefinite"><mpath xlink:href="#m_keys"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.5s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#m_in0"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.5s" begin="0.75s" repeatCount="indefinite"><mpath xlink:href="#m_out0"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.5s" begin="0.5s" repeatCount="indefinite"><mpath xlink:href="#m_in1"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.5s" begin="1.25s" repeatCount="indefinite"><mpath xlink:href="#m_out1"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="1.5s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#m_in2"/></animateMotion></circle>
+    <circle r="2.6" fill="#c9ced8"><animateMotion dur="1.5s" begin="1.75s" repeatCount="indefinite"><mpath xlink:href="#m_out2"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="2.0s" begin="0.0s" repeatCount="indefinite"><mpath xlink:href="#m_claim0"/></animateMotion></circle>
+    <circle r="2.6" fill="#4ade80"><animateMotion dur="3.0s" begin="1.2s" repeatCount="indefinite"><mpath xlink:href="#m_grant0"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="6.0s" begin="0.9s" repeatCount="indefinite"><mpath xlink:href="#m_event0"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="3.0s" begin="0.4s" repeatCount="indefinite"><mpath xlink:href="#m_claim1"/></animateMotion></circle>
+    <circle r="2.6" fill="#4ade80"><animateMotion dur="3.0s" begin="1.6s" repeatCount="indefinite"><mpath xlink:href="#m_grant1"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="3.0s" begin="1.3s" repeatCount="indefinite"><mpath xlink:href="#m_event1"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="6.0s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#m_claim2"/></animateMotion></circle>
+    <circle r="2.6" fill="#4ade80"><animateMotion dur="6.0s" begin="2.0s" repeatCount="indefinite"><mpath xlink:href="#m_grant2"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="2.0s" begin="1.7000000000000002s" repeatCount="indefinite"><mpath xlink:href="#m_event2"/></animateMotion></circle>
+    <circle r="3.3" fill="#4ade80"><animateMotion dur="0.6s" begin="0.6s" repeatCount="indefinite"><mpath xlink:href="#m_files"/></animateMotion></circle>
+    <circle r="3.3" fill="#fbbf24"><animateMotion dur="0.6s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#m_alert"/></animateMotion></circle>
     <circle r="2.8" fill="#60a5fa"><animateMotion dur="6.0s" begin="1.4s" repeatCount="indefinite"><mpath xlink:href="#e_loop_git"/></animateMotion></circle>
     <circle r="2.8" fill="#fbbf24"><animateMotion dur="6.0s" begin="2.0s" repeatCount="indefinite"><mpath xlink:href="#e_loop_you"/></animateMotion></circle>
   </g>
