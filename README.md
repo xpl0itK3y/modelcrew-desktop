@@ -18,7 +18,7 @@
 Six agents, six panels — with live git diffs, per-panel history,
 and a nudge the moment one of them needs you.
 
-[**Features**](#features) · [**Supported agents**](#supported-agents) · [**Install**](#install) · [**Shortcuts**](#keyboard-shortcuts) · [**Development**](#development)
+[**How it works**](#how-it-works) · [**Features**](#features) · [**Supported agents**](#supported-agents) · [**Install**](#install) · [**Shortcuts**](#keyboard-shortcuts) · [**Development**](#development)
 
 </div>
 
@@ -31,6 +31,18 @@ and say when one of them is waiting for you.
 
 Built on **Tauri 2** with a Rust **portable-pty** backend, **React 18**,
 **TypeScript**, **Vite**, **xterm.js** and **dockview**.
+
+## How it works
+
+<div align="center">
+<img src="docs/assets/flow.svg" alt="Panels talk to their own PTY, each PTY runs one agent CLI; agents ask the claim guard before writing and send hook events; changes come back as live diffs in the git panel and alerts come back to you" width="100%" />
+</div>
+
+Every panel is a terminal of its own: its own PTY, its own shell history, its
+own agent conversation. What the agents do next runs through two places the
+application keeps for itself — the guard that hands out files, and the hooks
+that say when someone is waiting. Both loops close back on the window: edits
+show up as live diffs, and a waiting agent finds you wherever you are.
 
 ## Features
 
@@ -51,6 +63,21 @@ backend with batched output and WebGL rendering · titles that follow the
 foreground process · nine themes, eighteen accent colors, shell picker, font
 size and notification sounds · English / Russian interface · macOS, Windows
 and Linux installers with auto-update.
+
+### One project, several agents
+
+Two agents in one folder used to overwrite each other's work. Now a file is
+claimed before it is edited, and a write over a stale read is refused.
+
+<div align="center">
+<img src="docs/assets/claims.svg" alt="Claude Code claims src/app.ts and is granted it; Codex asks for the same file, is refused, and claims src/api.ts instead" width="100%" />
+</div>
+
+### When an agent needs you
+
+<div align="center">
+<img src="docs/assets/alerts.svg" alt="An agent event checks whether its panel is in use; if it is not, a sound, a system banner and a dock badge go out, and one click opens that very panel" width="100%" />
+</div>
 
 ## Supported agents
 
