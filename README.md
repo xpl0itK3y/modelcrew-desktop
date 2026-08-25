@@ -24,15 +24,13 @@ and a nudge the moment one of them needs you.
 
 ---
 
-ModelCrew is a modular, agent-based development system where each agent role
-can run on a separate model, and you stay in control of quality, cost,
-security, and the level of autonomy.
+ModelCrew is a desktop terminal manager for working with several AI coding
+agents at once. Terminals arrange themselves into a grid, live inside project
+workspaces, come back after a restart with their text and their conversations,
+and say when one of them is waiting for you.
 
-The current release is the **terminal foundation** — a desktop terminal
-manager built on **Tauri 2**, **React 18**, **TypeScript**, **Vite**,
-**xterm.js**, **dockview**, and a Rust **portable-pty** backend. Terminals
-arrange themselves into a fleet grid, live inside project workspaces, are
-driven by mouse and hotkeys, and title themselves after the running program.
+Built on **Tauri 2** with a Rust **portable-pty** backend, **React 18**,
+**TypeScript**, **Vite**, **xterm.js** and **dockview**.
 
 ## Features
 
@@ -40,28 +38,30 @@ driven by mouse and hotkeys, and title themselves after the running program.
 |---|---|
 | **Fleet grid layout** | New terminals split the grid automatically, while any panel can still be zoomed to the full window. |
 | **Session restore** | Every session of a project comes back alive at launch — terminals reopen with their previous text and each panel resumes **its own** agent conversation, bound precisely per panel. |
-| **Live git panel** | A slide-over showing uncommitted changes in real time as agents edit files: per-file diffs with live counters, a commit box, one-click revert, a branch switcher, and full commit history. |
+| **One project, several agents** | Before an agent edits a file it claims it; a file already taken is left to its neighbour, and a write over a stale read is refused. Each agent hears the refusal in its own protocol — an exit code, a JSON decision, a plugin error. |
+| **Live git panel** | Uncommitted changes in real time as agents edit files: per-file diffs with live counters, a commit box, one-click revert, a branch switcher and history with a graph. An unfinished merge, rebase, cherry-pick or revert is named by a banner with Continue and Abort, and a commit is refused while conflict markers are still in the files. |
+| **Project tree and editor** | The project's files beside the terminals: a tree that follows the disk, search by name, and a column of its own for the open file with syntax highlighting and line numbers. |
 | **Agent alerts** | When an out-of-sight agent finishes or waits for your decision, ModelCrew plays a sound, shows a system banner naming the agent and project, and badges the app icon with the count of waiting panels. |
 | **Per-panel history** | Each terminal keeps its own shell history (zsh, bash, fish), so pressing arrow-up never leaks commands between panels. |
-| **Resilient updates** | Signed auto-updates download in the background into a persistent cache — a restart never re-downloads — with progress and release notes in the notification center. A downloaded update keeps its badge on the bell and the app icon until it is installed, so reading the notification never hides it. |
+| **Resilient updates** | Signed auto-updates download in the background into a persistent cache — a restart never re-downloads — with progress and release notes in the notification center. A downloaded update keeps its badge until it is installed, so reading the notification never hides it. |
 
 **Also inside:** projects → sessions → terminals (one folder = one project,
 enforced by the backend, friendly codenames like `amber-lynx`) · native PTY
 backend with batched output and WebGL rendering · titles that follow the
-foreground process · six themes, accent colors, shell picker, font size and
-notification sounds · English / Russian interface · macOS, Windows and Linux
-installers with auto-update.
+foreground process · nine themes, eighteen accent colors, shell picker, font
+size and notification sounds · English / Russian interface · macOS, Windows
+and Linux installers with auto-update.
 
 ## Supported agents
 
-Each panel remembers **which** conversation it was running and resumes
-exactly that one — six Claude Code panels get six different chats. Twelve
-CLIs are recognized:
+Each panel remembers **which** conversation it was running and resumes exactly
+that one — six Claude Code panels get six different chats. Ten CLIs are
+recognized:
 
 <div align="center">
 
 `Claude Code` · `Codex` · `GitHub Copilot` · `OpenCode` · `Kilo Code` ·
-`Kimi Code` · `Grok` · `Cursor` · `Aider` · `Antigravity`
+`Kimi Code` · `Grok Build` · `Cursor` · `Aider` · `Antigravity`
 
 </div>
 
@@ -84,11 +84,10 @@ sudo pacman -U ModelCrew_x.y.z_linux_x86_64.pkg.tar.zst
 
 …or build `modelcrew-bin` from the attached `PKGBUILD`. Both x86_64 and
 aarch64 packages are compiled on Arch itself, against the same libraries they
-will run with. Every package
-declares what ModelCrew runs at runtime — `git` for the change panel,
-`pkexec` for installing updates, `xdg-open` for links, plus WebKitGTK,
-GStreamer audio plugins and tray support. The AppImage carries GStreamer
-itself so notification sounds work out of the box.
+will run with. Every package declares what ModelCrew runs at runtime — `git`
+for the change panel, `pkexec` for installing updates, `xdg-open` for links,
+plus WebKitGTK, GStreamer audio plugins and tray support. The AppImage carries
+GStreamer itself so notification sounds work out of the box.
 
 > **Linux notifications:** system banners use the standard
 > `org.freedesktop.Notifications` D-Bus service. Desktop environments
@@ -117,21 +116,25 @@ itself so notification sounds work out of the box.
 
 | macOS | Windows / Linux | Action |
 |---|---|---|
-| ⌘T | Ctrl&nbsp;+&nbsp;T | New terminal in the grid |
-| ⌘W | Ctrl&nbsp;+&nbsp;W | Close the active terminal |
-| ⌘⇧W | Ctrl&nbsp;+&nbsp;Shift&nbsp;+&nbsp;W | Close the group (with confirmation) |
-| ⌘⌥&nbsp;+&nbsp;arrows | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;arrows | Focus the neighboring terminal |
-| ⌘⇧&nbsp;+&nbsp;arrows | Ctrl&nbsp;+&nbsp;Shift&nbsp;+&nbsp;arrows | Swap with the neighbor; at an edge — new split |
-| hold&nbsp;⌘⌥ | hold&nbsp;Ctrl&nbsp;+&nbsp;Alt | Show panel numbers overlay |
-| ⌘⌥&nbsp;+&nbsp;digit | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;digit | Focus panel № |
-| ⌘⌥⇧&nbsp;+&nbsp;digit | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;Shift&nbsp;+&nbsp;digit | Swap the active panel with № |
-| ⌘↩ | Ctrl&nbsp;+&nbsp;Enter | Zoom the panel / restore the layout |
-| ⌘&nbsp;+&nbsp;drag | Ctrl&nbsp;+&nbsp;drag | Drag a terminal anywhere to swap panels |
+| ⌘T | Ctrl&nbsp;+&nbsp;T | Add a terminal to the grid |
+| ⌘W | Ctrl&nbsp;+&nbsp;W | Close the terminal |
+| ⌘⇧W | Ctrl&nbsp;+&nbsp;Shift&nbsp;+&nbsp;W | Close the group, with confirmation |
+| ⌘↩ | Ctrl&nbsp;+&nbsp;Enter | Expand the terminal or restore the grid |
+| hold&nbsp;⌘⌥ | hold&nbsp;Ctrl&nbsp;+&nbsp;Alt | Show panel numbers while the keys are held |
+| ⌘⌥&nbsp;+&nbsp;digit | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;digit | Focus a panel by its number |
+| ⌘⌥&nbsp;+&nbsp;arrows | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;arrows | Focus the neighbouring panel |
+| ⌘⌥⇧&nbsp;+&nbsp;digit | Ctrl&nbsp;+&nbsp;Alt&nbsp;+&nbsp;Shift&nbsp;+&nbsp;digit | Swap with the panel of that number |
+| ⌘⇧&nbsp;+&nbsp;arrows | Ctrl&nbsp;+&nbsp;Shift&nbsp;+&nbsp;arrows | Move the panel aside |
+
+The reference inside Settings adapts to your keyboard and is the one that is
+always current.
 
 **Mouse tips**
 
+- ⌘ (Ctrl) + drag a terminal anywhere to swap panels.
 - Double-click a panel title to rename it (pins the name).
 - Double-click a project or session in the sidebar to rename it.
+- Drag the divider between columns to resize; double-click it to reset.
 - The gear in the title bar opens Settings (appearance, terminal, notifications).
 
 ## Development
@@ -166,7 +169,7 @@ divergence and rebase through it, and deletes the branch afterwards.
 The version is changed with a single command:
 
 ```bash
-npm run version:set -- 0.0.5
+npm run version:set -- x.y.z
 ```
 
 It synchronizes npm and Cargo, creates a bilingual template in
@@ -188,19 +191,6 @@ Key setup, package formats, and manual verification are described in
 
 </details>
 
-## Roadmap
-
-The terminal foundation is shipping. Built on top of it, next:
-
-- [ ] Agent orchestration (swarm)
-- [ ] Kanban task board
-- [ ] Memory with a relation graph
-- [ ] Built-in browser preview
-
 ## License
 
-[MIT](LICENSE) © Denis
-
-<div align="center">
-<sub>Built with Tauri, React, and a Rust PTY core.</sub>
-</div>
+[MIT](LICENSE)
