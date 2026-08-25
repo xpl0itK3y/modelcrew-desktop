@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.0.19
+
+### Русский
+
+Колонки и панели стали карточками с общим полем между ними, скругления свелись к трём мерам, а выбранное отмечено заливкой строки вместо полосок акцента.
+
+- Боковая панель и дерево файлов — карточки со своим краем, а не области, встречающиеся по волосяной линии
+- Терминалы тоже карточки одной с ними формы: где кончается одна и начинается соседняя, показывает поле между ними
+- Восемь десятков углов, набранных поштучно от двух до четырнадцати пикселей, сведены к трём мерам: карточка, строка внутри неё, элемент управления
+- Всё, что меньше шести пикселей, считается насечкой — ползунок, галочка — и сохраняет прежнее значение
+- Активная панель отмечена одной линией вместо двух: поле вокруг карточки уже отделяет её, и заливке внутри делать нечего
+- Акцент больше не заливает светом всю сетку — на двенадцати панелях это читалось как размывка
+- Выбранная строка проекта и сессии показана заливкой, а не полоской слева; счётчик рядом перестал выглядеть предупреждением
+- Имя проекта отделено от пути за ним: светлее и чуть тяжелее, путь остался прежним
+- Полоса с именем выше на четыре пикселя, кнопки на ней выросли вместе с ней
+- Шапка панели стала просторнее, а черта под ней — волосяной, а не такой же тяжёлой, как край карточки
+- Поля живут на самой карточке, а не на рейке вокруг: спрятанная боковая панель не оставляет за собой полоску
+
+### English
+
+The columns and panels are now cards with a shared field between them, corners come down to three measures, and what is chosen is marked by its fill instead of accent stripes.
+
+- The sidebar and the file tree are cards with an edge of their own, not areas meeting along a hairline
+- The terminals are cards of the same shape, and the field between them is what tells one from the next
+- Eighty-odd corner radii picked one at a time, from two to fourteen pixels, come down to three measures: a card, a row inside it, a control
+- Anything smaller than six pixels counts as a notch — a slider, a tick — and keeps the value it had
+- The active panel is drawn with one line instead of two: the field around the card already sets it apart, so the fill inside had nothing left to do
+- The accent no longer pours light over the whole grid — at twelve panels it read as a wash
+- A chosen project or session is shown by the row's fill rather than a stripe on its left, and the counter beside it stopped looking like a warning
+- The project name is told apart from the path behind it: a shade lighter and half a step heavier, the path unchanged
+- The name strip is four pixels taller and its buttons grow with it
+- The panel header has room to stand in, and the rule under it is a hair rather than a line as heavy as the card's own edge
+- The insets live on the card, not on the rail around it: a hidden sidebar leaves no strip behind
+
 ## 0.0.18
 
 ### Русский

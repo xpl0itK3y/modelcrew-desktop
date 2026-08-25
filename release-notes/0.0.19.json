@@ -1,0 +1,25 @@
+{
+  "version": "0.0.19",
+  "ru": {
+    "title": "Окно разложено на карточки, и все углы говорят на одном языке",
+    "summary": "Колонки и панели стали карточками с общим полем между ними, скругления свелись к трём мерам, а выбранное отмечено заливкой строки вместо полосок акцента.",
+    "highlights": [
+      "Боковая панель, дерево файлов и терминалы — карточки со своими краями, расстояние между ними задаёт одна мера",
+      "Восемь десятков углов, набранных поштучно, сведены к трём: карточка, строка внутри неё, элемент управления",
+      "Активная панель отмечена одной линией вместо двух, и акцент больше не заливает светом всю сетку",
+      "Выбранное показывает заливка строки; акцент вернулся к значению «здесь что-то живёт»",
+      "Имя проекта отделено от пути — светлее и чуть тяжелее, а шапке панели добавлено место"
+    ]
+  },
+  "en": {
+    "title": "The window becomes cards that share one language of corners",
+    "summary": "The columns and panels are now cards with a shared field between them, corners come down to three measures, and what is chosen is marked by its fill instead of accent stripes.",
+    "highlights": [
+      "The sidebar, the file tree and the terminals are cards with their own edges, spaced by a single shared measure",
+      "Eighty-odd corner radii picked one at a time come down to three: a card, a row inside it, a control",
+      "The active panel is drawn with one line instead of two, and the accent no longer washes the whole grid",
+      "Selection is shown by the row's fill; the accent goes back to meaning something is alive",
+      "The project name is told apart from the path behind it, and the panel header is given room to stand in"
+    ]
+  }
+}
