@@ -5,7 +5,10 @@
   flex-direction: column;
   flex: 0 0 auto;
   min-height: 0;
-  border-right: 1px solid var(--mc-border);
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+  overflow: hidden;
+  border: 1px solid var(--mc-panel-border);
+  border-radius: var(--mc-radius);
   background: var(--mc-sidebar);
 }
 

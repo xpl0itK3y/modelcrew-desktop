@@ -31,6 +31,13 @@
   --mc-selection-ring: #ffffff;
   --mc-terminal-bg: #16181d;
   --mc-titlebar-height: 40px;
+  /* Форма карточки. Один словарь на всё приложение: панель, колонка,
+     всплывающее окно скруглены одинаково, иначе край каждой читается
+     как отдельное решение. */
+  --mc-radius: 12px;
+  --mc-radius-sm: 8px;
+  --mc-radius-xs: 6px;
+  --mc-gap: 8px;
 }
 
 html,
@@ -69,7 +76,7 @@ body {
   position: relative; /* якорь для оверлея панели изменений */
   flex: 1;
   min-width: 0;
-  padding: 0 8px 8px;
+  padding: var(--mc-gap);
 }
 
 .dock-area > * {
