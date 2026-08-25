@@ -111,7 +111,9 @@ const modelcrewTheme: DockviewTheme = {
   name: "modelcrew",
   className: "dockview-theme-modelcrew",
   colorScheme: "dark",
-  gap: 3,
+  // Поле между панелями: на нём держится скругление углов и по нему читается,
+  // где кончается одна карточка и начинается соседняя.
+  gap: 8,
   dndOverlayMounting: "absolute",
   dndPanelOverlay: "group",
   tabGroupIndicator: "none",

@@ -25,11 +25,11 @@
   --dv-background-color: transparent;
 }
 
-/* Плотная сетка: тонкие рамки, острые углы; активная — рамка акцентом */
+/* Сетка карточек: тонкие рамки, скруглённые углы; активная — рамка акцентом */
 .dockview-theme-modelcrew .dv-groupview {
-  /* Углы прямые: панели стыкуются вплотную, и скругление оставляло бы между
-     ними просветы фона на каждом стыке. */
-  border-radius: 0;
+  /* Скругление держится на поле между панелями: пока они стыковались
+     вплотную, оно оставляло бы просвет фона на каждом стыке. */
+  border-radius: var(--mc-radius);
   overflow: hidden;
   border: 1px solid var(--mc-panel-border);
   box-sizing: border-box;
@@ -44,26 +44,13 @@
    двенадцати панелях на экране рамка — единственный признак того, куда уйдёт
    ввод с клавиатуры, и разбавленный цвет теряется среди неактивных соседей.
    Внешнее кольцо тем же цветом даёт видимые два пикселя, не сдвигая раскладку:
-   box-shadow рисуется поверх, за пределами border-box. */
+   box-shadow рисуется поверх, за пределами border-box.
+
+   Одна рамка и ничего внутрь: поле вокруг карточки отделяет её от соседей
+   само, и заливке, красившей акцентом весь терминал, работы не осталось. */
 .dockview-theme-modelcrew .dv-groupview.dv-active-group {
   border-color: var(--mc-accent);
   box-shadow: 0 0 0 1px var(--mc-accent);
-}
-
-/* Свечение уходит внутрь панели, а не наружу: снаружи оно ложится на соседей
-   и на щели сетки, где его почти не видно, а изнутри подсвечивает саму панель
-   — тот самый ореол вдоль рамки. Отдельным слоем поверх содержимого, потому
-   что inset-тень на самой группе закрасил бы терминал своим фоном. */
-.dockview-theme-modelcrew .dv-groupview.dv-active-group::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  /* Слой декоративный: клики и выделение текста проходят сквозь него. */
-  pointer-events: none;
-  z-index: 2;
-  box-shadow: inset 0 0 26px
-    color-mix(in srgb, var(--mc-accent) 20%, transparent);
 }
 
 .dockview-theme-modelcrew .dv-tabs-and-actions-container {
@@ -79,7 +66,7 @@
   animation: drop-pulse 900ms ease-in-out infinite;
   border: 1px solid var(--mc-accent);
   /* Повторяет форму панели, на место которой встанет перетаскиваемая. */
-  border-radius: 0;
+  border-radius: var(--mc-radius);
 }
 
 @keyframes drop-pulse {
