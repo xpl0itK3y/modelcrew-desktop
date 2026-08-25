@@ -232,7 +232,6 @@ export function Sidebar(props: SidebarProps) {
           return (
             <li key={workspace.id} className="workspace-node">
               <div className={`workspace-item ${isActive ? "is-active" : ""}`}>
-                <span className="workspace-accent" />
                 <button
                   type="button"
                   className="workspace-disclosure"

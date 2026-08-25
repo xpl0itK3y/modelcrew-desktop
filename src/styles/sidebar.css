@@ -110,7 +110,7 @@
   align-items: center;
   gap: 2px;
   padding: 0 6px 0 5px;
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   color: var(--mc-text-muted);
 }
 
@@ -121,20 +121,6 @@
 .workspace-item.is-active {
   background: var(--mc-surface-active);
   color: var(--mc-text-bright);
-}
-
-.workspace-accent {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 0;
-  width: 3px;
-  border-radius: 2px;
-  background: transparent;
-}
-
-.workspace-item.is-active .workspace-accent {
-  background: var(--mc-accent);
 }
 
 .workspace-disclosure,
@@ -242,10 +228,10 @@
   width: auto;
   height: 20px;
   padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--mc-accent) 35%, transparent);
+  border: 1px solid var(--mc-border);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--mc-accent) 16%, transparent);
-  color: var(--mc-accent);
+  background: var(--mc-surface-raised);
+  color: var(--mc-text-faint);
   font-size: 11px;
 }
 
@@ -347,7 +333,7 @@
   align-items: center;
   gap: 2px;
   padding: 0 6px 0 9px;
-  border-radius: 7px;
+  border-radius: var(--mc-radius-sm);
   color: var(--mc-text-muted);
 }
 
@@ -359,17 +345,6 @@
 .session-item.is-active {
   background: var(--mc-surface-active);
   color: var(--mc-text-bright);
-}
-
-.session-item.is-active::before {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 0;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--mc-accent);
-  content: "";
 }
 
 .session-main {
