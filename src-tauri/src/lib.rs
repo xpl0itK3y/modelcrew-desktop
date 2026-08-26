@@ -203,28 +203,36 @@ fn process_names(pids: &[i32]) -> std::collections::HashMap<i32, String> {
         .map(|pid| pid.to_string())
         .collect::<Vec<_>>()
         .join(",");
+    // Без `comm=`: рядом с другими колонками ps подгоняет её под шестнадцать
+    // символов и молча режет. Агент, запущенный обёрткой по полному пути,
+    // превращался в «/Users/denis/.lo», а панель подписывалась «.lo».
+    // В `command=` argv приходит целиком — там же и первый токен.
     let Ok(output) = std::process::Command::new("ps")
-        .args(["-ww", "-o", "pid=,comm=,command=", "-p", &list])
+        .args(["-ww", "-o", "pid=,command=", "-p", &list])
         .output()
     else {
         return names;
     };
     for line in String::from_utf8_lossy(&output.stdout).lines() {
-        // Колонки: pid, comm (один токен), затем argv процесса.
-        let mut tokens = line.split_whitespace();
-        let (Some(pid_str), Some(comm)) = (tokens.next(), tokens.next()) else {
-            continue;
-        };
-        let Ok(pid) = pid_str.parse::<i32>() else {
-            continue;
-        };
-        let argv: Vec<&str> = tokens.collect();
-        let name = friendly_name(comm, &argv);
-        if !name.is_empty() {
+        if let Some((pid, name)) = name_of_ps_line(line) {
             names.insert(pid, name);
         }
     }
     names
+}
+
+/// Разбор строки `ps -o pid=,command=`: номер процесса и подпись для панели.
+///
+/// Отдельно от вызова ps, чтобы проверять разбор без живых процессов: беда
+/// была именно здесь, а воспроизвести её живьём можно только на машине, где
+/// нужный агент лежит по достаточно длинному пути.
+#[cfg(unix)]
+fn name_of_ps_line(line: &str) -> Option<(i32, String)> {
+    let mut tokens = line.split_whitespace();
+    let pid = tokens.next()?.parse::<i32>().ok()?;
+    let argv: Vec<&str> = tokens.collect();
+    let name = friendly_name(argv.first()?, &argv);
+    (!name.is_empty()).then_some((pid, name))
 }
 
 /// Имя для подписи панели. Обычно это basename исполняемого файла, но для
@@ -1592,6 +1600,31 @@ mod tests {
         // Отменённый выбор не отдаёт путь наружу вообще.
         let cancelled = serde_json::to_value(WorkspaceRootResult::Cancelled).unwrap();
         assert_eq!(cancelled, serde_json::json!({ "status": "cancelled" }));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_panel_takes_its_name_from_argv_not_from_a_cut_off_column() {
+        // Рядом с другими колонками ps подгоняет comm под шестнадцать символов.
+        // Обёртка запускает агента полным путём, и подпись панели
+        // превращалась в «.lo» — обрезок от /Users/denis/.local/bin/claude.
+        assert_eq!(
+            name_of_ps_line(
+                "4242 /Users/denis/.local/bin/claude --mcp-config=/Users/denis/Library/Application Support/com.modelcrew.desktop/agent-shims/mcp.json"
+            ),
+            Some((4242, "claude".to_string())),
+            "полный путь до агента обязан читаться как имя агента"
+        );
+        // Интерпретатор по длинному пути разворачивается так же, как короткий.
+        assert_eq!(
+            name_of_ps_line("77 /opt/homebrew/bin/node /Users/denis/.local/bin/codex.js --resume"),
+            Some((77, "codex".to_string()))
+        );
+        // Строки не про процесс — например, продолжение argv с переводом
+        // строки — не должны становиться панелями.
+        assert_eq!(name_of_ps_line("не число и не процесс"), None);
+        assert_eq!(name_of_ps_line("4242"), None);
+        assert_eq!(name_of_ps_line(""), None);
     }
 
     #[test]
