@@ -50,6 +50,9 @@ function BrowserProjectView(props: { workspaceId: string }) {
   // Где стояла страница, когда отказали. Ушла дальше — отказ уже не про то,
   // что видно, и убирается сам.
   const refusedAt = useRef<string | null>(null);
+  // Место под кадр: по нему бэкенд подгоняет саму страницу, чтобы картинка
+  // была той же формы, что и ящик.
+  const pageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return watchBrowserFrame(
@@ -66,6 +69,14 @@ function BrowserProjectView(props: { workspaceId: string }) {
         }
       },
       (error) => setTrouble(localizeBackendError(error)),
+      () => {
+        const box = pageRef.current?.getBoundingClientRect();
+        // Нулевой размер бывает, пока ящик ещё раскрывается: подгонять по
+        // нему — значит на мгновение сжать страницу в точку.
+        return box && box.width > 0 && box.height > 0
+          ? { width: Math.round(box.width), height: Math.round(box.height) }
+          : null;
+      },
     );
   }, [props.workspaceId]);
 
@@ -123,7 +134,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
           {failure}
         </p>
       )}
-      <div className="browser-page">
+      <div className="browser-page" ref={pageRef}>
         {picture ? (
           <img
             className="browser-frame"

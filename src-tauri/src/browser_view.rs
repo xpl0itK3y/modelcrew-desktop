@@ -47,12 +47,21 @@ pub async fn browser_frame(
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
+    width: Option<f64>,
+    height: Option<f64>,
 ) -> CommandResult<BrowserFrame> {
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     let key = root.to_string_lossy().to_string();
     if !crate::browser_page::is_open(&app, &key) {
         return Ok(BrowserFrame::idle());
+    }
+    // Размер места, где кадр покажут, знает только панель. Не подогнав под
+    // него страницу, мы отдали бы картинку другой формы: по ширине её
+    // растянут, а снизу останется пустая полоса.
+    if let (Some(width), Some(height)) = (width, height) {
+        // Неудача здесь не повод остаться без кадра: покажем прежней формы.
+        let _ = crate::browser_page::fit(&app, &key, width, height);
     }
 
     // Снимок делает система и отвечает не сразу. На рантайме команд ждать его

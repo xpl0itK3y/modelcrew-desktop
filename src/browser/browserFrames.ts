@@ -66,6 +66,10 @@ export function watchBrowserFrame(
   workspaceId: string | null,
   onFrame: (frame: BrowserFrame) => void,
   onTrouble: (error: unknown) => void = () => {},
+  // Место, где кадр покажут. Спрашиваем перед каждым снимком, а не запоминаем
+  // однажды: ящик тянут за край, окно разворачивают, и страница обязана идти
+  // за местом следом. Без размера бэкенд оставит страницу как есть.
+  sizeOf: () => { width: number; height: number } | null = () => null,
 ): () => void {
   if (!isTauri || !workspaceId) {
     onFrame(NO_FRAME);
@@ -78,8 +82,11 @@ export function watchBrowserFrame(
     // Окно свёрнуто или перекрыто — смотреть некому, кадр не нужен.
     if (!document.hidden) {
       try {
+        const size = sizeOf();
         const frame = await invoke<BrowserFrame>("browser_frame", {
           workspaceId,
+          width: size?.width,
+          height: size?.height,
         });
         if (!stopped) {
           onFrame(frame);

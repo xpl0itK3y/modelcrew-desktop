@@ -14,9 +14,14 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// Размер страницы. От него зависит вёрстка, которую увидят и агент, и
-/// человек, поэтому он задан явно, а не отдан на волю системы.
+/// Размер страницы, пока о ней никто не спрашивал. От него зависит вёрстка,
+/// которую увидит агент, открывший страницу до того, как человек открыл ящик.
 const VIEWPORT: (f64, f64) = (1280.0, 800.0);
+
+/// Меньше этого страницу не сжимаем. Ящик можно ужать до полоски, но вёрстка
+/// в полосок шириной с ладонь — это уже не то, что человек хотел посмотреть,
+/// и агенту она сказала бы о странице неправду.
+const MIN_VIEWPORT: (f64, f64) = (480.0, 360.0);
 
 /// Куда убрано окно страницы.
 ///
@@ -78,6 +83,36 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
         .map_err(|error| format!("страница не открылась: {error}"))
 }
 
+/// Подогнать страницу под то место, где её показывают.
+///
+/// Ящик и страница должны совпадать: иначе кадр 1280×800 растягивается по
+/// ширине ящика, снизу остаётся чёрная полоса, а агент видит вёрстку, которой
+/// перед человеком нет.
+pub fn fit(app: &AppHandle, root: &str, width: f64, height: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window(&label_for(root))
+        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let wanted = (width.max(MIN_VIEWPORT.0), height.max(MIN_VIEWPORT.1));
+    // Кадр просят раз в секунду, а перерисовка страницы стоит времени: меняем
+    // размер, только когда он и правда разъехался с местом.
+    if let Some(current) = logical_size(&window) {
+        if (current.0 - wanted.0).abs() < 1.0 && (current.1 - wanted.1).abs() < 1.0 {
+            return Ok(());
+        }
+    }
+    window
+        .set_size(tauri::LogicalSize::new(wanted.0, wanted.1))
+        .map_err(|error| format!("страницу не изменить в размере: {error}"))
+}
+
+/// Размер окна страницы в тех же единицах, в которых его задают, — точках, а
+/// не пикселях устройства.
+fn logical_size(window: &tauri::WebviewWindow) -> Option<(f64, f64)> {
+    let scale = window.scale_factor().ok()?;
+    let size = window.inner_size().ok()?;
+    (scale > 0.0).then(|| (f64::from(size.width) / scale, f64::from(size.height) / scale))
+}
+
 /// Адрес, по которому странице можно ходить.
 ///
 /// Всё остальное — `file://`, `javascript:` и прочее — это уже не «сходи
@@ -119,12 +154,15 @@ pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
     let window = app
         .get_webview_window(&label_for(root))
         .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    // Ширину снимка берём у самой страницы: она меняется вместе с ящиком, и
+    // постоянная здесь означала бы кадр не того размера, что показывают.
+    let width = logical_size(&window).map_or(VIEWPORT.0, |size| size.0) as u32;
     let (sender, receiver) = std::sync::mpsc::channel();
     window
         .with_webview(move |platform| {
             // Снимок начинает система и отвечает позже своим вызовом, поэтому
             // ответ уходит в канал, а не возвращается отсюда.
-            platform_snapshot(&platform, sender);
+            platform_snapshot(&platform, width, sender);
         })
         .map_err(|error| format!("до страницы не достучаться: {error}"))?;
     match receiver.recv_timeout(SNAPSHOT_WAIT) {
@@ -207,6 +245,7 @@ fn platform_is_loading(platform: &tauri::webview::PlatformWebview) -> Result<boo
 #[cfg(target_os = "macos")]
 fn platform_snapshot(
     platform: &tauri::webview::PlatformWebview,
+    width: u32,
     sender: std::sync::mpsc::Sender<Result<Vec<u8>, String>>,
 ) {
     use block2::RcBlock;
@@ -229,7 +268,7 @@ fn platform_snapshot(
     // На ретине система отдала бы кадр вдвое больше страницы. Агенту он
     // уходит картинкой в ответе, поэтому просим ровно ширину страницы:
     // вчетверо меньше байт при той же вёрстке.
-    unsafe { config.setSnapshotWidth(Some(&NSNumber::new_u32(VIEWPORT.0 as u32))) };
+    unsafe { config.setSnapshotWidth(Some(&NSNumber::new_u32(width))) };
     let handler = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
         let _ = sender.send(unsafe { png_of(image, error) });
     });
@@ -280,6 +319,7 @@ fn platform_is_loading(_platform: &tauri::webview::PlatformWebview) -> Result<bo
 #[cfg(not(target_os = "macos"))]
 fn platform_snapshot(
     _platform: &tauri::webview::PlatformWebview,
+    _width: u32,
     sender: std::sync::mpsc::Sender<Result<Vec<u8>, String>>,
 ) {
     let _ = sender.send(Err("снимок страницы здесь пока не поддержан".to_string()));

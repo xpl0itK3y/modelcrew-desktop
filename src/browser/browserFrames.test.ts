@@ -92,6 +92,74 @@ describe("watchBrowserFrame", () => {
     stop();
   });
 
+  it("tells the backend how big the place for the frame is", async () => {
+    // Без этого страница снимается своим постоянным размером: по ширине ящика
+    // кадр растягивают, а снизу остаётся пустая полоса.
+    invoke.mockResolvedValue(NO_FRAME);
+
+    const stop = watchBrowserFrame(
+      "workspace-1",
+      () => {},
+      () => {},
+      () => ({ width: 792, height: 560 }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(invoke).toHaveBeenCalledWith("browser_frame", {
+      workspaceId: "workspace-1",
+      width: 792,
+      height: 560,
+    });
+    stop();
+  });
+
+  it("asks the place again before every frame", async () => {
+    // Ящик тянут за край между снимками: спроси мы размер однажды, страница
+    // осталась бы прежней формы до перезапуска слежения.
+    invoke.mockResolvedValue(NO_FRAME);
+    const sizes = [
+      { width: 792, height: 560 },
+      { width: 500, height: 400 },
+    ];
+
+    const stop = watchBrowserFrame(
+      "workspace-1",
+      () => {},
+      () => {},
+      () => sizes.shift() ?? null,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(invoke).toHaveBeenNthCalledWith(2, "browser_frame", {
+      workspaceId: "workspace-1",
+      width: 500,
+      height: 400,
+    });
+    stop();
+  });
+
+  it("still asks for a frame while the place is unknown", async () => {
+    // Пока ящик раскрывается, места ещё нет. Кадр всё равно нужен: страницу
+    // просто оставят в том размере, в котором она есть.
+    invoke.mockResolvedValue(NO_FRAME);
+
+    const stop = watchBrowserFrame(
+      "workspace-1",
+      () => {},
+      () => {},
+      () => null,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(invoke).toHaveBeenCalledWith("browser_frame", {
+      workspaceId: "workspace-1",
+      width: undefined,
+      height: undefined,
+    });
+    stop();
+  });
+
   it("waits for one frame before asking for the next", async () => {
     // Снимок иногда идёт дольше секунды. С обычным интервалом запросы
     // наложились бы, и браузер снимал бы кадры вместо того, чтобы работать.
