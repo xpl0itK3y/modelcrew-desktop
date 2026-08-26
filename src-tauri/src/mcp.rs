@@ -682,7 +682,12 @@ fn start(app: tauri::AppHandle) {
             // одна панель не должна ждать другую.
             std::thread::spawn(move || {
                 let tools = AppTools { app: app.clone() };
-                serve_connection(stream, &tools, &|caller| panel_of(&app, caller));
+                serve_connection(
+                    stream,
+                    &tools,
+                    &|caller| panel_of(&app, caller),
+                    &|| GENERATION.load(Ordering::SeqCst) == generation,
+                );
             });
         }
     });
@@ -722,6 +727,7 @@ fn serve_connection(
     stream: std::os::unix::net::UnixStream,
     tools: &dyn Tools,
     panel_of: &dyn Fn(&Caller) -> Option<(String, PathBuf)>,
+    still_serving: &dyn Fn() -> bool,
 ) {
     use std::io::{BufRead, BufReader, Write};
 
@@ -748,6 +754,14 @@ fn serve_connection(
     let caller = Caller { token, ancestry };
 
     for line in lines.map_while(Result::ok) {
+        // Выключатель щёлкнули посреди сессии агента. Слушателя уже нет, но
+        // это соединение открыто до того и осталось от прошлой жизни: отвечать
+        // по нему — значит держать инструменты живыми после того, как человек
+        // их выключил. Уходим молча, обрывая разговор: агент увидит, что
+        // сервера больше нет, а не получит ответ от выключенного плагина.
+        if !still_serving() {
+            return;
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -1229,7 +1243,7 @@ mod tests {
                     .ancestry
                     .contains(&std::process::id())
                     .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
-            });
+            }, &|| true);
         });
 
         let client = UnixStream::connect(&path).unwrap();
@@ -1258,6 +1272,64 @@ mod tests {
     }
 
     #[test]
+    fn a_session_open_since_before_the_switch_stops_answering() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        // Выключатель снимает слушателя, но соединения, открытые до него,
+        // остаются: агент уже сидит на своём. Без этой проверки он продолжал
+        // бы звать инструменты как ни в чём не бывало, а человек видел бы
+        // выключенный плагин, который работает.
+        let path = std::env::temp_dir().join(format!("mc-mcp-off-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        let on = Arc::new(AtomicBool::new(true));
+
+        let serving = Arc::clone(&on);
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve_connection(
+                stream,
+                &StubTools::working(),
+                &|_| Some(("panel-a".to_string(), PathBuf::from("/w/project"))),
+                &|| serving.load(Ordering::SeqCst),
+            );
+        });
+
+        let client = UnixStream::connect(&path).unwrap();
+        let mut out = client.try_clone().unwrap();
+        let mut back = BufReader::new(client).lines();
+        let say = |out: &mut UnixStream, line: &str| {
+            out.write_all(line.as_bytes()).unwrap();
+            out.write_all(b"\n").unwrap();
+            out.flush().unwrap();
+        };
+
+        say(&mut out, &handshake("pass-of-panel-a"));
+        say(
+            &mut out,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"crew_ping"}}"#,
+        );
+        let first: Value = serde_json::from_str(&back.next().unwrap().unwrap()).unwrap();
+        assert_eq!(first["id"], 1, "до выключения инструмент обязан отвечать");
+
+        on.store(false, Ordering::SeqCst);
+        say(
+            &mut out,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"crew_ping"}}"#,
+        );
+
+        assert!(
+            back.next().is_none(),
+            "выключенный плагин ответил на запрос старой сессии"
+        );
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn carries_a_whole_conversation_over_a_real_socket() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::{UnixListener, UnixStream};
@@ -1271,7 +1343,7 @@ mod tests {
             serve_connection(stream, &StubTools::working(), &|caller: &Caller| {
                 (caller.token == "pass-of-panel-a")
                     .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
-            });
+            }, &|| true);
         });
 
         let client = UnixStream::connect(&path).unwrap();
@@ -1334,7 +1406,7 @@ mod tests {
                 ALIVE
                     .load(Ordering::SeqCst)
                     .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
-            });
+            }, &|| true);
         });
 
         let client = UnixStream::connect(&path).unwrap();
@@ -1386,7 +1458,7 @@ mod tests {
             serve_connection(stream, &StubTools::working(), &|caller: &Caller| {
                 (caller.token == "pass-of-panel-a")
                     .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
-            });
+            }, &|| true);
         });
 
         let client = UnixStream::connect(&path).unwrap();
@@ -1426,7 +1498,7 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            serve_connection(stream, &StubTools::working(), &|_| None);
+            serve_connection(stream, &StubTools::working(), &|_| None, &|| true);
         });
 
         let client = UnixStream::connect(&path).unwrap();
@@ -1467,7 +1539,7 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             serve_connection(stream, &StubTools::working(), &|_| {
                 Some(("panel-a".to_string(), PathBuf::from("/w/project")))
-            });
+            }, &|| true);
         });
 
         let mut client = UnixStream::connect(&path).unwrap();
