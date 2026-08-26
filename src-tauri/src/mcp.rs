@@ -445,9 +445,17 @@ impl Tools for AppTools {
         // Не дождались — не беда: заголовок будет от недогруженной страницы,
         // а это лучше, чем отказ вместо перехода.
         crate::browser_page::wait_ready(&self.app, &key, LOAD_WAIT);
-        Ok(crate::browser_page::info(&self.app, &key)
-            .map(|(_url, title)| title)
-            .unwrap_or_default())
+        let (landed, title) = crate::browser_page::info(&self.app, &key).unwrap_or_default();
+        // Страницу открыл агент, а смотрит на неё человек — и у страницы нет
+        // своего окна, чтобы выскочить и о себе сказать. Без этого человек
+        // узнаёт о ней, только если сам догадается открыть ящик.
+        announce_page(
+            &self.app,
+            root,
+            if landed.is_empty() { url } else { &landed },
+            &title,
+        );
+        Ok(title)
     }
 
     fn screenshot(&self, root: &Path) -> Result<Shot, String> {
@@ -472,6 +480,33 @@ impl Tools for AppTools {
             title,
         })
     }
+}
+
+/// Что случилось со страницей проекта — для интерфейса.
+///
+/// Корнем, а не идентификатором панели: страница принадлежит проекту, а
+/// смотрит на неё то окно, где этот проект открыт.
+#[derive(Clone, serde::Serialize)]
+struct PageOpened {
+    root: String,
+    url: String,
+    title: String,
+}
+
+/// Сказать окну, что агент открыл страницу. Промах здесь ничего не ломает:
+/// событие — извещение, а не часть работы инструмента.
+fn announce_page(app: &tauri::AppHandle, root: &Path, url: &str, title: &str) {
+    use tauri::Emitter;
+
+    let _ = app.emit_to(
+        "main",
+        "browser-page-opened",
+        PageOpened {
+            root: root.to_string_lossy().to_string(),
+            url: url.to_string(),
+            title: title.to_string(),
+        },
+    );
 }
 
 /// Пустая страница: с неё начинается браузер проекта, пока агент не назвал
@@ -754,16 +789,25 @@ fn serve_connection(
     let caller = Caller { token, ancestry };
 
     for line in lines.map_while(Result::ok) {
-        // Выключатель щёлкнули посреди сессии агента. Слушателя уже нет, но
-        // это соединение открыто до того и осталось от прошлой жизни: отвечать
-        // по нему — значит держать инструменты живыми после того, как человек
-        // их выключил. Уходим молча, обрывая разговор: агент увидит, что
-        // сервера больше нет, а не получит ответ от выключенного плагина.
-        if !still_serving() {
-            return;
-        }
         if line.trim().is_empty() {
             continue;
+        }
+        // Выключатель щёлкнули посреди сессии агента. Слушателя уже нет, но
+        // это соединение открыто до того и осталось от прошлой жизни: отвечать
+        // по нему инструментами — значит держать их живыми после того, как
+        // человек их выключил.
+        //
+        // Но и молча оборвать нельзя: запрос уже отправлен, и агент будет
+        // ждать ответа, которого не будет. Живьём это выглядело так — вызов
+        // висел две минуты и уходил в фон. Поэтому прощаемся словами: один
+        // отказ с причиной, и только потом кладём трубку.
+        if !still_serving() {
+            if let Some(answer) = farewell(&line) {
+                let _ = out.write_all(answer.as_bytes());
+                let _ = out.write_all(b"\n");
+                let _ = out.flush();
+            }
+            return;
         }
         // Панель перечитываем на каждый запрос, а не держим с рукопожатия:
         // её могли закрыть посреди сессии агента, и отвечать по устаревшему
@@ -783,6 +827,30 @@ fn serve_connection(
         }
     }
 }
+
+/// Ответ на запрос, пришедший к уже снятому серверу.
+///
+/// `None` — отвечать нечему: уведомления ответа не ждут, и молчание на них
+/// правильно.
+#[cfg(unix)]
+fn farewell(line: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    let id = value.get("id").cloned()?;
+    // Вызову инструмента отвечаем неудачей инструмента, а не поломкой
+    // протокола: агент читает причину и решает сам, что делать дальше.
+    if value.get("method").and_then(Value::as_str) == Some("tools/call") {
+        return Some(result(id, error_content(SWITCHED_OFF)));
+    }
+    Some(error(id, -32000, SWITCHED_OFF))
+}
+
+/// Что слышит агент от выключенного плагина. Не «сервер умер», а что именно
+/// произошло и кто это может вернуть: выключил человек, включит тоже он.
+#[cfg(unix)]
+const SWITCHED_OFF: &str = concat!(
+    "Плагин ModelCrew выключен — браузер проекта сейчас недоступен. ",
+    "Инструменты вернутся, когда его включат: Настройки → Плагины → Браузер.",
+);
 
 /// Чья это панель.
 ///
@@ -1272,7 +1340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_open_since_before_the_switch_stops_answering() {
+    fn a_session_open_since_before_the_switch_hears_why_it_is_over() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::{UnixListener, UnixStream};
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -1321,9 +1389,20 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"crew_ping"}}"#,
         );
 
+        // Отказ, а не тишина: запрос уже отправлен, и без ответа агент ждёт
+        // его до собственного тайм-аута — живьём это были две минуты.
+        let last: Value = serde_json::from_str(&back.next().unwrap().unwrap()).unwrap();
+        assert_eq!(last["id"], 2);
+        assert_eq!(last["result"]["isError"], true);
+        let text = last["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("выключен") && text.contains("Плагины"),
+            "отказ не говорит ни что случилось, ни как это вернуть: {text}"
+        );
+        // И только теперь трубка кладётся: инструментов больше нет.
         assert!(
             back.next().is_none(),
-            "выключенный плагин ответил на запрос старой сессии"
+            "выключенный плагин продолжил разговор"
         );
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
