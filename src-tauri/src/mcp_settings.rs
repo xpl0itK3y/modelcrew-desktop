@@ -94,14 +94,13 @@ pub struct McpStatus {
 }
 
 fn status(app: &tauri::AppHandle) -> McpStatus {
-    let listening = crate::mcp::listening();
+    // Спрашиваем у слушателя, а не вычисляем заново: он один знает, какой
+    // адрес занят на самом деле.
+    let socket = crate::mcp::listening_at();
     McpStatus {
         enabled: enabled(app),
-        listening,
-        socket: listening
-            .then(|| crate::mcp::socket_path(app))
-            .flatten()
-            .map(|path| path.display().to_string()),
+        listening: socket.is_some(),
+        socket: socket.map(|path| path.display().to_string()),
         tools: crate::mcp::tool_names(),
         agents: crate::mcp::agents(),
     }

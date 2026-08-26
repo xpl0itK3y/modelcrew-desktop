@@ -530,9 +530,40 @@ fn key_of(root: &Path) -> String {
     root.to_string_lossy().to_string()
 }
 
+/// Адрес, однажды выбранный, остаётся адресом до конца работы приложения.
+///
+/// Панели получают его в окружение при запуске и запоминают. Выбери мы адрес
+/// заново после выключателя — сокет ушёл бы из-под уже открытых панелей, и
+/// их агенты стучались бы туда, где никого нет.
+#[cfg(unix)]
+static CHOSEN: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
 /// Путь сокета. Рядом с каталогом событий хуков — то же место, та же уборка.
 #[cfg(unix)]
 pub fn socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    remembered(&CHOSEN, || choose_socket_path(app))
+}
+
+/// Первый ответ запоминается, дальше отдаётся он же.
+///
+/// Отдельно от самого выбора, потому что выбор без приложения не проверить, а
+/// постоянство адреса — главное здесь и проверить его надо.
+#[cfg(unix)]
+fn remembered(
+    chosen: &std::sync::Mutex<Option<PathBuf>>,
+    pick: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    let mut chosen = chosen.lock().unwrap();
+    if let Some(path) = chosen.as_ref() {
+        return Some(path.clone());
+    }
+    let path = pick()?;
+    *chosen = Some(path.clone());
+    Some(path)
+}
+
+#[cfg(unix)]
+fn choose_socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     let path = data_dir_socket_path(app)?;
     if path.as_os_str().len() <= SOCK_PATH_LIMIT {
         return Some(path);
@@ -694,6 +725,21 @@ pub fn stop() {
 
 #[cfg(not(unix))]
 pub fn stop() {}
+
+/// Адрес, на котором стоим прямо сейчас. `None` — не стоим ни на каком.
+///
+/// Именно тот, что занят, а не тот, что выбрали бы: настройки показывают
+/// человеку дверь, в которую и правда стучится его агент.
+pub fn listening_at() -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        LISTENING.lock().unwrap().clone()
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
 
 /// Включён ли сервер прямо сейчас — то, что видит агент, а не то, что записано
 /// в настройках.
@@ -989,6 +1035,46 @@ mod tests {
         assert_eq!(
             conf.get("identifier").and_then(Value::as_str),
             Some(APP_IDENTIFIER)
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_address_is_chosen_once_and_never_again() {
+        // Адрес панель получает в окружение при запуске и запоминает. Выбери
+        // приложение его заново после выключателя — агенты уже открытых
+        // панелей стучались бы туда, где никого нет, и выглядело бы это как
+        // «включил обратно, а инструментов нет».
+        let chosen = Mutex::new(None);
+        let first = remembered(&chosen, || Some(PathBuf::from("/tmp/first.sock"))).unwrap();
+        let again = remembered(&chosen, || panic!("адрес выбрали второй раз")).unwrap();
+        assert_eq!(first, again);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_address_never_wanders_once_it_is_chosen() {
+        // Панели получают адрес в окружение при запуске и запоминают его. Выбери
+        // мы его заново после выключателя — на слишком глубоком каталоге данных
+        // это был бы новый временный каталог, и агенты уже открытых панелей
+        // стучались бы туда, где никого нет.
+        let chosen = Mutex::new(None);
+        let first = remembered(&chosen, || Some(PathBuf::from("/tmp/first.sock")));
+        let second = remembered(&chosen, || Some(PathBuf::from("/tmp/second.sock")));
+        assert_eq!(first, Some(PathBuf::from("/tmp/first.sock")));
+        assert_eq!(second, first, "адрес сменился под уже открытыми панелями");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_choice_that_failed_is_not_remembered_as_an_answer() {
+        // Каталог данных мог быть ещё не готов. Запомни мы неудачу, сервер
+        // остался бы без адреса до перезапуска приложения.
+        let chosen = Mutex::new(None);
+        assert_eq!(remembered(&chosen, || None), None);
+        assert_eq!(
+            remembered(&chosen, || Some(PathBuf::from("/tmp/later.sock"))),
+            Some(PathBuf::from("/tmp/later.sock"))
         );
     }
 
