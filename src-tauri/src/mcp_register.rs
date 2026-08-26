@@ -50,10 +50,19 @@ const SUPPORTED: [&str; 6] = [
 
 /// Агенты, которым обёртка умеет передать сервер флагом при запуске.
 ///
-/// Остальные — cursor, opencode, grok — читают только свои файлы, а писать в
-/// них значит опять вылезти наружу. Им плагин пока недоступен, и это честнее,
-/// чем сервер, висящий у человека в общем списке.
+/// opencode здесь нет и не нужно: он читает конфиг прямо из окружения, и
+/// обёртка ему ни к чему — см. `opencode_config`. Остальные — cursor, grok —
+/// читают только свои файлы, а писать в них значит опять вылезти наружу. Им
+/// плагин пока недоступен, и это честнее, чем сервер, висящий у человека в
+/// общем списке.
 const WRAPPED: [&str; 3] = ["claude", "codex", "copilot"];
+
+/// Переменная окружения opencode: конфиг в ней лежит строкой, целиком.
+pub const OPENCODE_ENV: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// Схема конфига opencode. Не проверка, а подсказка редактору, — но раз она
+/// стоит в их собственных примерах, пусть стоит и у нас.
+const OPENCODE_SCHEMA: &str = "https://opencode.ai/config.json";
 
 // ---------------------------------------------------------------------------
 // Внутрь: обёртки для панели.
@@ -74,6 +83,43 @@ pub fn shims(app: &tauri::AppHandle, enabled: bool) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     write_shims(&dir, &exe).ok()?;
     Some(dir)
+}
+
+/// Конфиг opencode с нашим сервером — тем же слоем, что и всё остальное.
+///
+/// Обёртки opencode не нужны вовсе: он берёт конфиг из окружения, а панель
+/// окружение и так задаёт. Наружу это не вылезает по самому устройству —
+/// переменная живёт ровно столько, сколько панель, и в обычном терминале
+/// пользователя её нет.
+///
+/// Значение накладывается последним слоем поверх глобального и проектного
+/// конфигов, а не вместо них (так это описано у самого opencode). Поэтому и
+/// здесь: то, что уже стояло в окружении, мы дополняем, а не затираем.
+pub fn opencode_config(exe: &Path, inherited: Option<&str>) -> String {
+    let mut document = match inherited.and_then(|text| serde_json::from_str::<Value>(text).ok()) {
+        Some(Value::Object(map)) => map,
+        // Своего значения не было — или было, да не разобралось. Чинить чужое
+        // не нам: такое opencode всё равно не прочтёт.
+        _ => serde_json::Map::new(),
+    };
+    document
+        .entry("$schema")
+        .or_insert_with(|| json!(OPENCODE_SCHEMA));
+    let servers = document.entry("mcp").or_insert_with(|| json!({}));
+    let ours = json!({
+        "type": "local",
+        "command": [exe.to_string_lossy(), STDIO_FLAG],
+        "enabled": true,
+    });
+    match servers.as_object_mut() {
+        Some(servers) => {
+            servers.insert(SERVER.to_string(), ours);
+        }
+        // На месте списка серверов оказалось не пойми что. Оставить как есть
+        // значило бы отдать opencode заведомо битый конфиг.
+        None => *servers = json!({ SERVER: ours }),
+    }
+    Value::Object(document).to_string()
 }
 
 #[cfg(unix)]
@@ -303,6 +349,44 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, body).unwrap();
         path
+    }
+
+    #[test]
+    fn opencode_gets_the_server_without_any_wrapper() {
+        let config: Value = serde_json::from_str(&opencode_config(&exe(), None)).unwrap();
+        let ours = &config["mcp"][SERVER];
+        assert_eq!(ours["type"], "local");
+        assert_eq!(ours["enabled"], true);
+        // Путь и ключ — одним массивом, а не строкой: в пути есть пробел, и
+        // строкой opencode разобрал бы его на два слова.
+        assert_eq!(
+            ours["command"],
+            json!([exe().to_string_lossy(), STDIO_FLAG])
+        );
+    }
+
+    #[test]
+    fn what_the_person_already_had_in_the_environment_survives() {
+        // Значение накладывается последним слоем поверх остальных конфигов, а
+        // не вместо них. Затри мы чужое — человек внутри панели молча лишился
+        // бы собственных серверов и настроек.
+        let theirs = r#"{"model":"anthropic/claude","mcp":{"их-сервер":{"type":"local"}}}"#;
+        let config: Value = serde_json::from_str(&opencode_config(&exe(), Some(theirs))).unwrap();
+        assert_eq!(config["model"], "anthropic/claude");
+        assert_eq!(config["mcp"]["их-сервер"]["type"], "local");
+        assert!(config["mcp"][SERVER].is_object());
+    }
+
+    #[test]
+    fn a_broken_value_in_the_environment_does_not_break_ours() {
+        // Чужое значение оказалось не JSON или не тем JSON. Чинить его не нам:
+        // opencode такое всё равно не прочтёт, а вот отдать ему битый конфиг
+        // из-за этого нельзя — тогда он не прочтёт и наш сервер.
+        for text in ["", "{", "[]", "\"строка\"", r#"{"mcp":"не список"}"#] {
+            let config: Value = serde_json::from_str(&opencode_config(&exe(), Some(text)))
+                .unwrap_or_else(|error| panic!("не JSON при {text:?}: {error}"));
+            assert!(config["mcp"][SERVER].is_object(), "{text:?}");
+        }
     }
 
     #[test]

@@ -171,6 +171,16 @@ impl PtyManager {
                 cmd.env(crate::mcp::TOKEN_ENV, &token);
                 mcp_token = token;
             }
+            // opencode обёртки не читает — он читает конфиг из окружения.
+            // Здесь же, вместе с адресом: условие одно и то же — плагин в этой
+            // панели доступен.
+            if let Ok(exe) = std::env::current_exe() {
+                let inherited = std::env::var(crate::mcp_register::OPENCODE_ENV).ok();
+                cmd.env(
+                    crate::mcp_register::OPENCODE_ENV,
+                    crate::mcp_register::opencode_config(&exe, inherited.as_deref()),
+                );
+            }
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
@@ -2015,6 +2025,25 @@ mod tests {
             .panel_of_token(token_from(&output))
             .expect("пропуск из окружения не сошёлся ни с одной панелью");
         assert_eq!(root, test_cwd());
+        // Третья переменная — конфиг для opencode: обёрток он не читает, и
+        // кроме окружения панели узнать о нас ему неоткуда. В общую пробу его
+        // не вставить — это JSON, и шелл разобрал бы его на слова, — поэтому
+        // спрашиваем не значение, а ответ на вопрос.
+        manager
+            .write("t-mcp", &Shell::line(&opencode_probe()))
+            .expect("запись в PTY");
+        let output = wait_for_output(
+            &manager,
+            "t-mcp",
+            &out_rx,
+            OPENCODE_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+        assert!(
+            output.contains(&format!("{OPENCODE_PROBE}yes")),
+            "opencode не узнает о сервере: конфига нет в окружении панели: {output}"
+        );
         let _ = manager.kill("t-mcp");
 
         // Вторая половина той же истории: выключатель в настройках снимает
@@ -2059,7 +2088,43 @@ mod tests {
             "после выключения обе переменные обязаны быть пустыми: {output}"
         );
 
+        manager
+            .write("t-mcp-off", &Shell::line(&opencode_probe()))
+            .expect("запись в PTY");
+        let output = wait_for_output(
+            &manager,
+            "t-mcp-off",
+            &off_rx,
+            OPENCODE_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+        assert!(
+            output.contains(&format!("{OPENCODE_PROBE}no")),
+            "выключенный плагин остался в окружении для opencode: {output}"
+        );
+
         let _ = manager.kill("t-mcp-off");
+    }
+
+    /// Маркер пробы для opencode.
+    ///
+    /// Нарочно не похож на имя самой переменной: имя видно в эхе набранной
+    /// строки, и маркер вроде «OPENCODE_» нашёлся бы в нём раньше, чем шелл
+    /// успеет ответить. Тест тогда проходил бы через раз, по расторопности
+    /// шелла. В самой строке маркер разорван кавычками — по той же причине.
+    #[cfg(unix)]
+    const OPENCODE_PROBE: &str = "OCPROBE_";
+
+    /// Спрашиваем не значение переменной, а есть ли в нём наш сервер: значение
+    /// — JSON, и в `echo` без кавычек оно рассыпалось бы на слова.
+    #[cfg(unix)]
+    fn opencode_probe() -> String {
+        format!(
+            "case \"${{{}}}\" in *{}*) echo OC\"PROBE\"_yes;; *) echo OC\"PROBE\"_no;; esac",
+            crate::mcp_register::OPENCODE_ENV,
+            crate::mcp::STDIO_FLAG,
+        )
     }
 
     /// Пропуск из вывода пробы: он идёт последним словом после адреса сокета.
