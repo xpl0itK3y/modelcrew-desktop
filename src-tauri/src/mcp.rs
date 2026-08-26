@@ -1178,6 +1178,36 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[cfg(unix)]
+    fn the_door_goes_away_with_the_server() {
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        // Пока файл сокета лежит на диске, агент считает вход живым: он
+        // стучится и получает отказ соединения вместо честного «сервера тут
+        // сейчас нет». Значит, снявшись, слушатель обязан унести и файл.
+        let path = std::env::temp_dir().join(format!("mc-mcp-stop-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        // Поток, который спит в accept, — тот самый, ради которого stop стучит
+        // в сокет сам: без стука он не проснулся бы и держал слушателя.
+        let accepting = std::thread::spawn(move || {
+            let _ = listener.accept();
+        });
+        *LISTENING.lock().unwrap() = Some(path.clone());
+        assert!(listening(), "слушатель должен считаться поднятым");
+
+        stop();
+
+        accepting.join().unwrap();
+        assert!(!listening(), "слушатель остался поднятым после снятия");
+        assert!(!path.exists(), "файл сокета пережил слушателя");
+        assert!(
+            UnixStream::connect(&path).is_err(),
+            "по адресу всё ещё кто-то отвечает"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn knows_who_called_even_when_the_pass_never_arrived() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::{UnixListener, UnixStream};
