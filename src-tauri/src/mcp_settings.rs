@@ -119,6 +119,12 @@ pub fn mcp_set_enabled(
     // перезапуск, обманывает молча.
     save(&app, enabled)
         .map_err(|error| CommandError::new(ErrorCode::McpSettingsWriteFailed).with_debug(error))?;
+    // Обёртки — вторая половина выключателя: сокет решает, ответят ли агенту,
+    // а обёртки — узнает ли он вообще, что сервер есть. Раскладывались они до
+    // сих пор только при создании панели, и щелчок посреди работы доходил
+    // лишь до тех панелей, которых ещё нет. В уже открытых всё оставалось как
+    // было до следующего запуска приложения.
+    let _ = crate::mcp_register::shims(&app, enabled);
     if enabled {
         crate::mcp::resume(app.clone());
     } else {
