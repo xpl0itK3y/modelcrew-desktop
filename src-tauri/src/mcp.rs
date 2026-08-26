@@ -158,8 +158,29 @@ fn initialize_result() -> Value {
             "name": "modelcrew-browser",
             "version": env!("CARGO_PKG_VERSION"),
         },
+        "instructions": INSTRUCTIONS,
     })
 }
+
+/// Что за место этот терминал — единственное, чего агент не может узнать из
+/// описаний инструментов.
+///
+/// Описание объясняет, что делает инструмент; это — где агент находится.
+/// Разница решает: у агента может быть свой браузер, и, не зная про окно
+/// ModelCrew, он разумно берёт свой. Живьём (codex, 2026-08-26) так и вышло —
+/// страница открылась в Chrome, а человек смотрел в пустой ящик ModelCrew.
+///
+/// Поле из самого протокола: клиент кладёт его в системную подсказку. Кто его
+/// не читает — ничего не теряет, описания инструментов на месте.
+const INSTRUCTIONS: &str = concat!(
+    "Этот терминал — панель ModelCrew, и у проекта здесь есть свой браузер. ",
+    "Страницу, открытую через browser_navigate, человек видит прямо в окне ",
+    "ModelCrew, а browser_screenshot возвращает ровно то, что видит он. ",
+    "Любой другой браузер — свой плагин, Chrome, отдельное окно — человеку в ",
+    "ModelCrew не виден: открытая там страница для него всё равно что не ",
+    "открыта. Поэтому смотреть страницы этого проекта и показывать их ",
+    "человеку следует этими инструментами.",
+);
 
 /// Имена инструментов — для настроек: там показывают, что именно даёт сервер.
 /// Берутся из того же списка, что уходит агенту своей панели, поэтому
@@ -260,8 +281,10 @@ fn browser_tools() -> Vec<Value> {
             "name": "browser_navigate",
             "description": concat!(
                 "Открыть страницу в браузере проекта и дождаться загрузки. ",
-                "Это единственный способ посмотреть страницу в этом проекте: ",
-                "то, что откроешь, человек увидит в окне ModelCrew. ",
+                "Это единственный способ показать страницу человеку: то, что ",
+                "откроешь, он увидит в окне ModelCrew. Сторонний браузер для ",
+                "этого поднимать не нужно и не следует — в своём плагине или ",
+                "в Chrome страница откроется там, куда человек не смотрит. ",
                 "Годятся только http и https.",
             ),
             "inputSchema": {
@@ -1172,6 +1195,40 @@ mod tests {
         // Без объявленной способности `tools` клиент за списком не придёт.
         assert!(answer["result"]["capabilities"]["tools"].is_object());
         assert_eq!(answer["result"]["serverInfo"]["name"], "modelcrew-browser");
+        // Где агент находится, из описаний инструментов не следует. Не сказав
+        // этого, мы оставляем его со своим браузером против нашего — и он
+        // разумно берёт свой, а человек смотрит в пустой ящик.
+        let instructions = answer["result"]["instructions"].as_str().unwrap_or_default();
+        assert!(
+            instructions.contains("ModelCrew") && instructions.contains("browser_navigate"),
+            "агенту не сказано, куда он попал и чем здесь смотреть: {instructions}"
+        );
+    }
+
+    #[test]
+    fn tells_the_agent_not_to_open_the_page_where_no_one_is_looking() {
+        // У агента может быть свой браузер, и по названию наш от него не
+        // отличить. Живьём (codex, 2026-08-26) он открыл страницу в Chrome, а
+        // человек в это время смотрел в ящик ModelCrew.
+        let answer = dispatch(
+            &ctx(),
+            &StubTools::working(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+        )
+        .unwrap();
+        let answer = parse(&answer);
+        let tools = answer["result"]["tools"].as_array().unwrap();
+        for name in ["browser_navigate", "browser_screenshot"] {
+            let description = tools
+                .iter()
+                .find(|tool| tool["name"] == name)
+                .and_then(|tool| tool["description"].as_str())
+                .unwrap_or_default();
+            assert!(
+                description.contains("Сторонний браузер"),
+                "{name} не отговаривает от чужого браузера: {description}"
+            );
+        }
     }
 
     #[test]
