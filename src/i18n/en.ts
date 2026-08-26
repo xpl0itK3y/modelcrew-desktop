@@ -406,8 +406,9 @@ export const en: Record<MessageKey, string> = {
     "Plugins give the agent tools it reaches for on its own, when it decides it needs them. They work in ModelCrew terminals: the agent is recognised by the panel it was started from.",
   "settings.pluginBrowser": "Browser",
   "settings.pluginBrowserNote":
-    "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. Applies to new terminals.",
+    "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. The switch takes effect at once; no need to restart the agent.",
   "settings.pluginTools": "Tools: {tools}",
+  "settings.pluginAgents": "Agents on the line: {agents}",
   "settings.pluginOff":
     "The plugin is off: the agent sees neither the server nor the tools.",
   "settings.pluginUnavailable":

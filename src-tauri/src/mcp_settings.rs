@@ -87,6 +87,10 @@ pub struct McpStatus {
     /// Имена инструментов берём у самого сервера, а не переписываем в
     /// настройках: переписанный список разъехался бы с настоящим молча.
     tools: Vec<String>,
+    /// Сколько агентов сидит на сокете сейчас. Единственное, чем человек может
+    /// проверить, что его агент нас видит: сам агент об этом не скажет, а
+    /// открытый сокет говорит лишь о нашей половине трубы.
+    agents: usize,
 }
 
 fn status(app: &tauri::AppHandle) -> McpStatus {
@@ -99,6 +103,7 @@ fn status(app: &tauri::AppHandle) -> McpStatus {
             .flatten()
             .map(|path| path.display().to_string()),
         tools: crate::mcp::tool_names(),
+        agents: crate::mcp::agents(),
     }
 }
 

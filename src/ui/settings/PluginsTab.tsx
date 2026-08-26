@@ -8,6 +8,11 @@ import {
 } from "../../mcp";
 import { SettingRow, SettingsPage, SettingsSwitch } from "./SettingsControls";
 
+/// Как часто переспрашивать состояние плагина, пока страница открыта. Реже —
+/// и человек успевает решить, что число не живое; чаще — и это опрос ради
+/// опроса: агент подключается раз за сессию.
+const WATCH_EVERY = 2000;
+
 export function PluginsTab() {
   const { t } = useI18n();
   const status = useMcpStatus();
@@ -15,13 +20,20 @@ export function PluginsTab() {
   const [failure, setFailure] = useState<string | null>(null);
 
   // Спрашиваем заново при каждом открытии настроек: сервер мог не подняться
-  // уже после старта приложения.
+  // уже после старта приложения. И потом переспрашиваем, пока страница
+  // открыта: агенты приходят и уходят сами, без нашего участия, и застывшее
+  // число врёт ровно тогда, когда на него смотрят.
   //
   // Молча при отказе: настройки открываются и без ответа бэкенда, а
   // переключатель остаётся недоступным — трогать то, о чём ничего не
   // известно, нельзя.
   useEffect(() => {
-    refreshMcpStatus().catch(() => {});
+    const ask = () => {
+      refreshMcpStatus().catch(() => {});
+    };
+    ask();
+    const timer = setInterval(ask, WATCH_EVERY);
+    return () => clearInterval(timer);
   }, []);
 
   async function toggle(next: boolean) {
@@ -93,7 +105,11 @@ function Note(props: { status: McpStatus | null; failure: string | null }) {
   }
   return (
     <p className="settings-note">
-      {t("settings.pluginTools", { tools: props.status.tools.join(" · ") })}
+      <span>
+        {t("settings.pluginTools", { tools: props.status.tools.join(" · ") })}
+      </span>
+      <br />
+      <span>{t("settings.pluginAgents", { agents: props.status.agents })}</span>
       {props.status.socket && (
         <>
           <br />

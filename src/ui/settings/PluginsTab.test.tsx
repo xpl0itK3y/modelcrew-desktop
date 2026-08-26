@@ -15,6 +15,7 @@ const RUNNING = {
   socket:
     "/Users/tester/Library/Application Support/com.modelcrew.desktop/mcp.sock",
   tools: ["crew_ping", "browser_open", "browser_navigate"],
+  agents: 2,
 };
 
 const SWITCHED_OFF = {
@@ -77,6 +78,17 @@ describe("PluginsTab", () => {
     // Список инструментов исчезает вместе с сервером: показывать его при
     // выключенном сервере значило бы обещать то, чего агент не увидит.
     expect(screen.queryByText(/crew_ping/)).toBeNull();
+  });
+
+  it("counts the agents that are on the line right now", async () => {
+    // Единственное, чем человек проверяет, что агент его видит: сам агент об
+    // этом не скажет, а открытый сокет говорит лишь о нашей половине трубы.
+    invoke.mockResolvedValue(RUNNING);
+    render(<PluginsTab />);
+
+    await waitFor(() =>
+      expect(screen.getByText("Агентов на связи: 2")).toBeVisible(),
+    );
   });
 
   it("does not promise a server that failed to come up", async () => {

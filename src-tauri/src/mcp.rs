@@ -610,6 +610,48 @@ static LISTENING: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None
 #[cfg(unix)]
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Сколько агентов сидит на сокете прямо сейчас.
+///
+/// Единственное, чем человек может проверить, что агент нас видит: сам агент
+/// об этом не скажет, а «сокет открыт» говорит лишь о нашей половине трубы.
+#[cfg(unix)]
+static AGENTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Учёт соединения на всё время разговора. Считаем через жизнь значения, а не
+/// вручную: из разговора выходят из десятка мест, и забытый вычет оставил бы
+/// в настройках агентов, которых давно нет.
+#[cfg(unix)]
+struct CountedAgent;
+
+#[cfg(unix)]
+impl CountedAgent {
+    fn new() -> Self {
+        AGENTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+#[cfg(unix)]
+impl Drop for CountedAgent {
+    fn drop(&mut self) {
+        AGENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Сколько агентов на связи. Ноль при живых агентах — не беда: связь шим
+/// держит между запросами, но после выключателя поднимает её заново только со
+/// следующим вызовом инструмента.
+pub fn agents() -> usize {
+    #[cfg(unix)]
+    {
+        AGENTS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
 /// Поднимает слушателя, если MCP не выключен в настройках. Ошибки не фатальны:
 /// без MCP приложение работает как работало, просто агенты не видят
 /// инструментов.
@@ -725,6 +767,7 @@ fn start(app: tauri::AppHandle) {
             // Поток на соединение: сессия агента живёт, пока жив он сам, и
             // одна панель не должна ждать другую.
             std::thread::spawn(move || {
+                let _counted = CountedAgent::new();
                 let tools = AppTools { app: app.clone() };
                 serve_connection(
                     stream,
