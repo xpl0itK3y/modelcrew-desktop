@@ -94,3 +94,36 @@
   text-align: center;
   text-wrap: balance;
 }
+
+/* ---------- Значок на глобусе ---------- */
+
+/* Страницу открывает агент, а у страницы нет своего окна: значок на кнопке —
+   единственный способ сказать человеку, что там появилось новое. Считается
+   от последнего раза, когда ящик открывали. */
+.browser-titlebar-button {
+  position: relative;
+  overflow: visible;
+}
+
+.browser-titlebar-badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: inline-flex;
+  min-width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border: 1px solid var(--mc-panel);
+  border-radius: 999px;
+  background: var(--mc-accent);
+  /* Цифра на акценте: тёмная на светлом кружке, а не текстом интерфейса —
+     тот на акцентном фоне теряется в половине тем. */
+  color: var(--mc-bg);
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}

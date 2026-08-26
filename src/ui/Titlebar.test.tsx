@@ -74,6 +74,7 @@ function titlebar(
       onOpenGitChanges={vi.fn()}
       browserOpen={false}
       browserAvailable
+      browserUnseen={0}
       onOpenBrowser={vi.fn()}
       updater={updater}
       {...overrides}
@@ -86,6 +87,46 @@ afterEach(() => {
   for (const id of getWaitingPanelIds()) {
     clearAgentAttention(id);
   }
+});
+
+describe("Titlebar browser button", () => {
+  it("shows how many pages an agent opened while nobody was looking", () => {
+    // У страницы проекта нет своего окна: она не выскочит и о себе не скажет.
+    // Значок на глобусе — единственное, что об этом говорит.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 2,
+      }),
+    );
+
+    expect(
+      document.querySelector(".browser-titlebar-badge"),
+    ).toHaveTextContent("2");
+  });
+
+  it("keeps the badge narrow when the agent went on a spree", () => {
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 42,
+      }),
+    );
+
+    expect(
+      document.querySelector(".browser-titlebar-badge"),
+    ).toHaveTextContent("9+");
+  });
+
+  it("says nothing when there is nothing new to look at", () => {
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 0,
+      }),
+    );
+
+    expect(
+      document.querySelector(".browser-titlebar-badge"),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("Titlebar notification center", () => {

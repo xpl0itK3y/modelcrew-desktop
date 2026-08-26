@@ -32,6 +32,8 @@ import {
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
 import { BrowserView } from "./panels/BrowserView";
+import { pageLabel, watchPagesOpened } from "./browser/pagesOpened";
+import { sendSystemNotification } from "./notifications";
 import { subscribeGitChanges, type GitChangesSummary } from "./git/gitChanges";
 import { aggregateCounts } from "./git/unifiedDiff";
 import { TerminalTab } from "./panels/TerminalTab";
@@ -118,6 +120,18 @@ const modelcrewTheme: DockviewTheme = {
   dndPanelOverlay: "group",
   tabGroupIndicator: "none",
 };
+
+/// Имя проекта, которому принадлежит корень. Без него баннер сказал бы
+/// «агент открыл страницу», не сказав, в каком проекте.
+function workspaceNameOfRoot(
+  list: { displayName: string; folder?: { selectedPath: string } | null }[],
+  root: string,
+): string | null {
+  return (
+    list.find((workspace) => workspace.folder?.selectedPath === root)
+      ?.displayName ?? null
+  );
+}
 
 export default function App() {
   const { locale, t } = useI18n();
@@ -585,12 +599,56 @@ export default function App() {
   }, []);
   const [browserDrawerOpen, setBrowserDrawerOpen] = useState(false);
   const [browserDrawerMaximized, setBrowserDrawerMaximized] = useState(false);
+  // Сколько страниц агент открыл, пока на них никто не смотрел, — по корню
+  // проекта. Корень, а не id: страница принадлежит браузеру проекта, и
+  // событие приходит с бэкенда, который про id воркспейсов не знает.
+  const [pagesUnseen, setPagesUnseen] = useState<Record<string, number>>({});
+  const activeRoot = activeWorkspace?.folder?.selectedPath ?? null;
+  // Ящик открыт — значит, на страницу смотрят: считать её непросмотренной
+  // и звонить о ней незачем.
+  const watchedRoot = browserDrawerOpen ? activeRoot : null;
+  const watchedRootRef = useRef(watchedRoot);
+  watchedRootRef.current = watchedRoot;
   const liveBrowserWorkspaceId = browserDrawerOpen ? activeProjectId : null;
   const browserPresence = useAnimatedPresence(liveBrowserWorkspaceId, 160);
   const renderedBrowserWorkspaceId =
     liveBrowserWorkspaceId ?? browserPresence?.item ?? null;
   const browserDrawerClosing =
     liveBrowserWorkspaceId === null || Boolean(browserPresence?.closing);
+  // Агент открыл страницу. У неё нет своего окна, поэтому о ней говорим сами:
+  // числом на глобусе, а когда человек смотрит не сюда — ещё и баннером.
+  useEffect(() => {
+    return watchPagesOpened((page) => {
+      if (page.root === watchedRootRef.current && document.hasFocus()) {
+        return;
+      }
+      setPagesUnseen((counts) => ({
+        ...counts,
+        [page.root]: (counts[page.root] ?? 0) + 1,
+      }));
+      const project = workspaceNameOfRoot(workspaces.list, page.root);
+      void sendSystemNotification(
+        project
+          ? t("browser.pageOpenedIn", { project })
+          : t("browser.pageOpened"),
+        pageLabel(page),
+      );
+    });
+    // Список проектов нужен только для подписи баннера: пересобирать
+    // подписку из-за него — терять события на каждой правке списка.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Открыли ящик — страницы этого проекта просмотрены.
+  useEffect(() => {
+    if (!browserDrawerOpen || !activeRoot) {
+      return;
+    }
+    setPagesUnseen((counts) =>
+      counts[activeRoot] ? { ...counts, [activeRoot]: 0 } : counts,
+    );
+  }, [browserDrawerOpen, activeRoot]);
+
   useEffect(() => {
     if (!browserDrawerOpen) {
       return;
@@ -660,6 +718,7 @@ export default function App() {
         }}
         browserOpen={browserDrawerOpen}
         browserAvailable={activeProjectId !== null && browserPluginEnabled}
+        browserUnseen={activeRoot ? (pagesUnseen[activeRoot] ?? 0) : 0}
         onOpenBrowser={() => {
           setBrowserDrawerOpen(!browserDrawerOpen);
           if (!browserDrawerOpen) {
