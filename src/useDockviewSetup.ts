@@ -13,11 +13,7 @@ import {
   isManualTitle,
 } from "./terminal/registry";
 import { rememberAutoTitle } from "./terminal/panelTitles";
-import {
-  rememberAgentProcess,
-  panelProcessLabel,
-  scheduleAgentSessionBinding,
-} from "./agents";
+import { rememberAgentProcess, scheduleAgentSessionBinding } from "./agents";
 import { addPanel, localizeDefaultPanelTitles } from "./layoutOps";
 import {
   activeSession,
@@ -112,10 +108,7 @@ export function useDockviewSetup({
         void listen<{ id: string; title: string }>(
           "pty-title",
           (titleEvent) => {
-            // Бинарь может называть себя не так, как команда запуска: панель
-            // подписываем командой, иначе она переименовывается сама собой.
-            const label = panelProcessLabel(titleEvent.payload.title);
-            rememberAutoTitle(titleEvent.payload.id, label);
+            rememberAutoTitle(titleEvent.payload.id, titleEvent.payload.title);
             // Агент в фокусе панели — кандидат на авто-возобновление после
             // полного перезапуска приложения. Точную сессию ищет локатор в
             // папке проекта панели.
@@ -142,7 +135,7 @@ export function useDockviewSetup({
               titleKind !== "manual" &&
               !isManualTitle(titleEvent.payload.id)
             ) {
-              panel.api.setTitle(label);
+              panel.api.setTitle(titleEvent.payload.title);
               panel.api.updateParameters({
                 ...panel.api.getParameters(),
                 titleKind: "process",

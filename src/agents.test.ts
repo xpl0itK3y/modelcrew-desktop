@@ -9,7 +9,6 @@ import {
   isShellProcess,
   loadAgentResumeMode,
   matchAgent,
-  panelProcessLabel,
   pruneAgentRecords,
   rememberAgentProcess,
   rememberedSessionId,
@@ -32,21 +31,31 @@ describe("agent catalog", () => {
     expect(matchAgent("claude")?.agent.id).toBe("claude");
     expect(matchAgent("Codex")?.agent.id).toBe("codex");
     expect(matchAgent("COPILOT")?.agent.id).toBe("copilot");
-    expect(matchAgent(" agy ")?.agent.id).toBe("antigravity");
-    expect(matchAgent("kilo")?.agent.id).toBe("kilocode");
-    expect(matchAgent("Kimi")?.agent.id).toBe("kimi");
-    expect(matchAgent("grok")?.agent.id).toBe("grok");
-    expect(matchAgent("cursor-agent")?.agent.id).toBe("cursor");
+    expect(matchAgent(" opencode ")?.agent.id).toBe("opencode");
     // Снятые с поддержки опознаваться не должны: половинчатая поддержка хуже
     // отсутствия — панель считалась бы агентской, а канала у неё нет.
-    expect(matchAgent("qwen")).toBeNull();
-    expect(matchAgent("amp")).toBeNull();
-    expect(matchAgent("aider")).toBeNull();
+    for (const gone of [
+      "qwen",
+      "amp",
+      "aider",
+      "kilo",
+      "kilocode",
+      "kimi",
+      "kimi-code",
+      "grok",
+      "cursor-agent",
+      "agy",
+    ]) {
+      expect(matchAgent(gone)).toBeNull();
+    }
     expect(matchAgent("zsh")).toBeNull();
     expect(matchAgent("vim")).toBeNull();
-    expect(AGENTS.find((agent) => agent.id === "kimi")?.label).toBe(
-      "Kimi Code",
-    );
+    expect(AGENTS.map((agent) => agent.id)).toEqual([
+      "claude",
+      "codex",
+      "copilot",
+      "opencode",
+    ]);
   });
 
   it("keeps transient subprocesses but clears an explicit shell immediately", () => {
@@ -94,10 +103,10 @@ describe("agent catalog", () => {
     expect(buildAgentResume(claude, false)).toBe("claude --continue");
     expect(buildAgentResume(claude, true)).toBe("claude --resume");
 
-    rememberAgentProcess("panel-3", "kimi");
-    const kimi = getAgentRecord("panel-3")!;
-    expect(buildAgentResume(kimi, false)).toBe("kimi --continue");
-    expect(buildAgentResume(kimi, true)).toBe("kimi --session");
+    rememberAgentProcess("panel-3", "opencode");
+    const opencode = getAgentRecord("panel-3")!;
+    expect(buildAgentResume(opencode, false)).toBe("opencode --continue");
+    expect(buildAgentResume(opencode, true)).toBe("opencode --continue");
 
     rememberAgentProcess("panel-copilot", "copilot");
     const copilot = getAgentRecord("panel-copilot")!;
@@ -144,10 +153,10 @@ describe("agent catalog", () => {
       "codex resume abc-123",
     );
 
-    rememberAgentProcess("panel-kimi", "kimi");
-    bindAgentSession("panel-kimi", "df13800a-7139-4259-8330-6769145fc02e");
-    expect(buildAgentResume(getAgentRecord("panel-kimi")!, false)).toBe(
-      "kimi --session df13800a-7139-4259-8330-6769145fc02e",
+    rememberAgentProcess("panel-opencode", "opencode");
+    bindAgentSession("panel-opencode", "ses_5f1c2d3e4a5b6c7d");
+    expect(buildAgentResume(getAgentRecord("panel-opencode")!, false)).toBe(
+      "opencode --session ses_5f1c2d3e4a5b6c7d",
     );
 
     rememberAgentProcess("panel-copilot", "copilot");
@@ -190,16 +199,16 @@ describe("agent catalog", () => {
   });
 
   it("strips duplicate session bindings during pruning", () => {
-    rememberAgentProcess("panel-1", "agy");
-    rememberAgentProcess("panel-2", "agy");
+    rememberAgentProcess("panel-1", "opencode");
+    rememberAgentProcess("panel-2", "opencode");
     rememberAgentProcess("panel-3", "claude");
     bindAgentSession("panel-1", "conv-1");
     // Дубль в хранилище имитирует наследие старой гонки локаторов.
     localStorage.setItem(
       "modelcrew.terminalAgents",
       JSON.stringify({
-        "panel-1": { agentId: "antigravity", command: "agy", detectedAt: 1, sessionId: "conv-1" },
-        "panel-2": { agentId: "antigravity", command: "agy", detectedAt: 2, sessionId: "conv-1" },
+        "panel-1": { agentId: "opencode", command: "opencode", detectedAt: 1, sessionId: "conv-1" },
+        "panel-2": { agentId: "opencode", command: "opencode", detectedAt: 2, sessionId: "conv-1" },
         "panel-3": { agentId: "claude", command: "claude", detectedAt: 3, sessionId: "conv-1" },
       }),
     );
@@ -211,8 +220,8 @@ describe("agent catalog", () => {
   });
 
   it("refuses to bind a session already taken by another panel", () => {
-    rememberAgentProcess("panel-1", "agy");
-    rememberAgentProcess("panel-2", "agy");
+    rememberAgentProcess("panel-1", "opencode");
+    rememberAgentProcess("panel-2", "opencode");
     expect(bindAgentSession("panel-1", "conv-1")).toBe(true);
     // Гонка локаторов: вторая панель получила тот же id до обновления exclude.
     expect(bindAgentSession("panel-2", "conv-1")).toBe(false);
@@ -338,21 +347,6 @@ describe("agent catalog", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("recognises the name the kimi binary gives itself", () => {
-    // Запускают его как `kimi`, а в списке процессов он значится kimi-code —
-    // и панель после перезапуска сама собой меняла подпись.
-    expect(matchAgent("kimi-code")?.agent.id).toBe("kimi");
-    expect(panelProcessLabel("kimi-code")).toBe("kimi");
-    expect(panelProcessLabel("claude")).toBe("claude");
-    expect(panelProcessLabel("vim")).toBe("vim");
-
-    // Команда для resume — та, которой агента запускают: `kimi-code` в PATH нет.
-    rememberAgentProcess("panel-kimi-alias", "kimi-code");
-    expect(buildAgentResume(getAgentRecord("panel-kimi-alias")!, false)).toBe(
-      "kimi --continue",
-    );
   });
 
   it("keeps the session id after the agent quits to the shell", () => {

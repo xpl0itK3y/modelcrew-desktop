@@ -1,7 +1,7 @@
 //! Уведомления от самих агентов, а не по косвенным признакам вывода.
 //!
 //! CLI умеют звать внешнюю программу, когда закончили ход или просят
-//! разрешения: у codex это `notify` в config.toml, у claude/copilot/grok —
+//! разрешения: у codex это `notify` в config.toml, у claude и copilot —
 //! hooks. Такой хук запускается внутри панели, поэтому знает её id из
 //! окружения (см. `pty::set_agent_events_dir`) и просто кладёт событие файлом.
 //! Приложение забирает файлы и шлёт их во фронт — без сокетов и портов, и
@@ -31,12 +31,10 @@ dir="$MODELCREW_EVENTS_DIR"
 # Заявка: спрашиваем приложение, свободен ли файл, и ждём ответ. Всё, что
 # пошло не так — отсутствие каталога, неразобранный путь, молчание — трактуем
 # как «можно»: слой согласования не должен останавливать работу из-за себя.
-if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilot" ] || [ "$1" = "--claim-codex" ]; then
+if [ "$1" = "--claim" ] || [ "$1" = "--claim-copilot" ] || [ "$1" = "--claim-codex" ]; then
   [ -z "$dir" ] && exit 0
   payload="$(cat)"
-  # Имя инструмента: `name` последним — у antigravity он лежит в `toolCall.name`,
-  # но ключ слишком общий, чтобы спрашивать о нём раньше остальных.
-  for key in tool_name toolName tool name; do
+  for key in tool_name toolName tool; do
     tool=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
     [ -n "$tool" ] && break
   done
@@ -50,9 +48,7 @@ if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilo
     # Ключ пути у агентов называется по-разному, и схему их полезной нагрузки
     # никто не обещает. Пробуем известные написания по очереди; не нашли —
     # выходим с нулём, то есть пропускаем правку.
-    # TargetFile и AbsolutePath — antigravity: он кладёт вызов вложенно
-    # (`toolCall.args.TargetFile`), поэтому по имени ключа, а не по пути в дереве.
-    for key in file_path filePath target_file absolute_path path TargetFile AbsolutePath; do
+    for key in file_path filePath target_file absolute_path path; do
       files=$(printf '%s' "$payload" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
       [ -n "$files" ] && break
     done
@@ -102,10 +98,10 @@ if [ "$1" = "--claim" ] || [ "$1" = "--claim-json" ] || [ "$1" = "--claim-copilo
 $files
 CLAIM_FILES
 
-  # Отказ выражается по-разному: claude, grok, kimi, cursor и codex читают код
-  # возврата 2 и stderr, antigravity ждёт `decision` JSON-ом в stdout, copilot —
-  # `permissionDecision` там же. Причина нужна всем одинаково: без неё агент не
-  # понимает, что делать дальше, и берётся за тот же файл снова.
+  # Отказ выражается по-разному: claude и codex читают код возврата 2 и stderr,
+  # copilot ждёт `permissionDecision` JSON-ом в stdout. Причина нужна всем
+  # одинаково: без неё агент не понимает, что делать дальше, и берётся за тот
+  # же файл снова.
   case "$verdict" in
     stale)
       reason='Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.'
@@ -121,10 +117,6 @@ CLAIM_FILES
     *) reason='' ;;
   esac
   case "$1" in
-    --claim-json)
-      [ -z "$reason" ] && { printf '{"decision":"allow"}\n'; exit 0; }
-      printf '{"decision":"deny","reason":"%s"}\n' "$reason"
-      exit 0 ;;
     --claim-copilot)
       [ -z "$reason" ] && exit 0
       printf '{"permissionDecision":"deny","permissionDecisionReason":"%s"}\n' "$reason"
@@ -366,14 +358,7 @@ fn claim_answer(verdict: &ClaimVerdict) -> String {
 /// здесь дорого стоит: приняв чтение за правку, мы заперли бы файл на пять
 /// минут за агентом, который его лишь посмотрел.
 fn is_read_tool(tool: &str) -> bool {
-    // Первые два — claude, grok и kimi; остальные три — antigravity.
-    const READS: [&str; 5] = [
-        "read",
-        "notebookread",
-        "view_file",
-        "read_file",
-        "view_code_item",
-    ];
+    const READS: [&str; 2] = ["read", "notebookread"];
     READS.iter().any(|known| tool.eq_ignore_ascii_case(known))
 }
 
@@ -521,19 +506,7 @@ fn normalize(agent: &str, payload: &Value) -> (String, String) {
             text(payload, &["type"]),
             text(payload, &["last-assistant-message"]),
         ),
-        // Stop у antigravity имени события не несёт: там причина останова и
-        // отдельное поле ошибки. Приводим к тем же словам, что и у остальных.
-        "antigravity" => {
-            let failed = !text(payload, &["error"]).is_empty()
-                || text(payload, &["terminationReason"])
-                    .to_ascii_lowercase()
-                    .contains("error");
-            (
-                if failed { "error" } else { "Stop" }.to_string(),
-                text(payload, &["error"]),
-            )
-        }
-        // claude/copilot/grok: {"hook_event_name":"Stop","message":"…"}
+        // claude/copilot: {"hook_event_name":"Stop","message":"…"}
         _ => (
             text(
                 payload,
@@ -569,249 +542,8 @@ fn hook_config_path(agent: &str, home: &Path) -> Option<PathBuf> {
         "claude" => Some(home.join(".claude/settings.json")),
         "copilot" => Some(home.join(".copilot/hooks/modelcrew.json")),
         "opencode" => Some(home.join(".config/opencode/plugin/modelcrew-notify.js")),
-        "grok" => Some(home.join(".grok/config.toml")),
-        "cursor" => Some(home.join(".cursor/hooks.json")),
-        // Общий файл кастомизаций: глобальные лежат в ~/.gemini/config,
-        // а не рядом с самим CLI.
-        "antigravity" => Some(home.join(".gemini/config/hooks.json")),
-        "kimi" => Some(home.join(".kimi-code/config.toml")),
-        // Форк opencode: каталог зависит от того, как его собрали.
-        "kilocode" => kilo_home(home).map(|dir| dir.join("plugin/modelcrew-notify.js")),
         // Остальным каналом мы пока не умеем — либо формат не подтверждён,
         // либо у самого CLI уведомлений нет.
-        _ => None,
-    }
-}
-
-/// Имя нашего блока в общем файле кастомизаций antigravity: там верхний
-/// уровень — карта имён, а не список событий, поэтому чужие имена рядом.
-const ANTIGRAVITY_KEY: &str = "modelcrew";
-
-/// Обработчики у него кладутся **прямо** в массив события. Обёртка
-/// `{matcher, hooks:[…]}`, как у claude, считается ошибкой — и роняет разбор
-/// всего файла, а не только своей записи: «invalid hook … command hook must
-/// specify 'command'» в его логе, и ни один хук больше не работает.
-fn antigravity_block(helper: &Helper) -> Value {
-    serde_json::json!({
-        "Stop": [{ "type": "command", "command": hook_command(helper, "antigravity") }],
-        // Заявка на файл. Структура «matcher + hooks» — из его же
-        // документации; имена инструментов свои, не как у claude. Решение он
-        // ждёт не кодом возврата, а JSON-ом в stdout — за это отвечает режим
-        // `--claim-json` хелпера.
-        "PreToolUse": [{
-            "matcher": ANTIGRAVITY_WRITE_TOOLS,
-            "hooks": [{ "type": "command", "command": hook_claim_json_command(helper) }],
-        }],
-    })
-}
-
-/// Инструменты antigravity, меняющие файлы, плюс чтение — оно заявку не
-/// берёт, но нужно для сверки устаревшего чтения.
-/// Имена взяты из его собственных описаний инструментов, а не по догадке.
-/// Чтения тоже в списке: они не занимают файл, но запоминают его содержимое —
-/// без этого не поймать правку, построенную на устаревшем чтении.
-const ANTIGRAVITY_WRITE_TOOLS: &str = "write_to_file|replace_file_content|create_file|edit_file|\
-     read_file|view_file|view_code_item";
-
-fn install_antigravity_hook(settings: &mut Value, helper: &Helper) -> bool {
-    if !settings.is_object() {
-        *settings = Value::Object(Default::default());
-    }
-    let root = settings.as_object_mut().expect("объект гарантирован выше");
-    let block = antigravity_block(helper);
-    if root.get(ANTIGRAVITY_KEY) == Some(&block) {
-        return false;
-    }
-    root.insert(ANTIGRAVITY_KEY.to_string(), block);
-    true
-}
-
-fn remove_antigravity_hook(settings: &mut Value, _helper: &Helper) -> bool {
-    settings
-        .as_object_mut()
-        .is_some_and(|root| root.remove(ANTIGRAVITY_KEY).is_some())
-}
-
-fn antigravity_hook_installed(settings: &Value, helper: &Helper) -> bool {
-    settings.get(ANTIGRAVITY_KEY) == Some(&antigravity_block(helper))
-}
-
-/// Настройки уведомлений grok. Взято из его же документации, которую он
-/// кладёт рядом с собой (`~/.grok/docs/user-guide/05-configuration.md`).
-///
-/// Оба «по умолчанию» здесь пришлось перебить, и по одной причине: в матрице
-/// поддержки терминалов наш стоит как «Unknown» — протокол BEL и отслеживания
-/// фокуса нет. Поэтому `auto` выбрал бы звонок вместо последовательности, а
-/// `unfocused` и `only_unfocused` не срабатывали бы никогда: фокус, которого
-/// не видно, всегда считается активным. Кого и когда тревожить, приложение
-/// решает само — панель на виду при активном окне молчит.
-///
-/// Каналов сразу два: последовательность несёт текст сообщения, хук — точный
-/// тип события. Дубли схлопывает окно тишины: сигнал того же веса от одной
-/// панели второй раз не проходит.
-const GROK_SECTION: &str = "\n\
-    # Добавлено ModelCrew: уведомления агента читаются из вывода панели.\n\
-    [ui.notifications]\n\
-    method = \"osc9\"\n\
-    condition = \"always\"\n\
-    \n\
-    [[ui.notifications.hooks]]\n\
-    # Только тип события: $GROK_MESSAGE — произвольный текст, и внутри JSON\n\
-    # он мог бы разъехаться на первой же кавычке.\n\
-    command = \"__COMMAND__\"\n\
-    events = [\"turn_complete\", \"approval_required\", \"agent_error\"]\n\
-    only_unfocused = false\n\
-    timeout_secs = 10\n";
-
-fn grok_section(helper: &Helper) -> String {
-    // Кавычки внутри TOML-строки экранируются, иначе значение обрывается.
-    let command = format!(
-        "{} '{{\\\"type\\\":\\\"$GROK_EVENT\\\"}}'",
-        hook_command(helper, "grok").replace('"', "\\\"")
-    );
-    GROK_SECTION.replace("__COMMAND__", &command)
-}
-
-/// Событие конца хода у cursor и запись хука в его формате. Файл общий с
-/// IDE, поэтому вписываемся точечно, как и в настройки claude.
-const CURSOR_EVENT: &str = "stop";
-const CURSOR_CLAIM_EVENT: &str = "preToolUse";
-
-fn cursor_hook_entry(helper: &Helper) -> Value {
-    serde_json::json!({
-        // Нагрузку отдаём аргументом: stdin cursor хуку не передаёт, и
-        // хелпер ушёл бы читать терминал и не вернулся.
-        "command": format!(
-            "{} {}",
-            hook_command(helper, "cursor"),
-            helper.quote(r#"{"type":"stop"}"#)
-        ),
-    })
-}
-
-fn cursor_hook_is_ours(entry: &Value, helper: &Helper) -> bool {
-    entry
-        .get("command")
-        .and_then(Value::as_str)
-        .is_some_and(|command| command.contains(&helper.needle()))
-}
-
-fn install_cursor_hook(settings: &mut Value, helper: &Helper) -> bool {
-    if !settings.is_object() {
-        *settings = Value::Object(Default::default());
-    }
-    let root = settings.as_object_mut().expect("объект гарантирован выше");
-    root.entry("version").or_insert_with(|| Value::from(1));
-    let hooks = root
-        .entry("hooks")
-        .or_insert_with(|| Value::Object(Default::default()));
-    if !hooks.is_object() {
-        *hooks = Value::Object(Default::default());
-    }
-    let hooks = hooks.as_object_mut().expect("объект гарантирован выше");
-    let mut changed = false;
-    for (event, entry) in [
-        (CURSOR_EVENT, cursor_hook_entry(helper)),
-        (CURSOR_CLAIM_EVENT, cursor_claim_entry(helper)),
-    ] {
-        let list = hooks
-            .entry(event)
-            .or_insert_with(|| Value::Array(Vec::new()));
-        if !list.is_array() {
-            *list = Value::Array(Vec::new());
-        }
-        let list = list.as_array_mut().expect("массив гарантирован выше");
-        changed |= put_our_cursor_entry(list, helper, entry);
-    }
-    changed
-}
-
-/// Как и у claude: запись заменяется, если отличается от нужной, — иначе
-/// исправления не доезжают до тех, у кого конфиг уже создан.
-fn put_our_cursor_entry(list: &mut Vec<Value>, helper: &Helper, expected: Value) -> bool {
-    match list
-        .iter_mut()
-        .find(|entry| cursor_hook_is_ours(entry, helper))
-    {
-        Some(entry) if *entry == expected => false,
-        Some(entry) => {
-            *entry = expected;
-            true
-        }
-        None => {
-            list.push(expected);
-            true
-        }
-    }
-}
-
-/// Заявка на файл. Живой запуск показал, что нагрузку он присылает в точности
-/// как claude — `tool_name` и `tool_input.file_path`, — и отказ читает так же:
-/// код возврата 2, причина из stderr доходит до агента дословно. Поля matcher
-/// у него нет: лишние вызовы отсеивает сам хелпер.
-fn cursor_claim_entry(helper: &Helper) -> Value {
-    serde_json::json!({ "command": hook_claim_command(helper) })
-}
-
-fn remove_cursor_hook(settings: &mut Value, helper: &Helper) -> bool {
-    let Some(hooks) = settings
-        .as_object_mut()
-        .and_then(|root| root.get_mut("hooks"))
-        .and_then(Value::as_object_mut)
-    else {
-        return false;
-    };
-    let mut changed = false;
-    for event in [CURSOR_EVENT, CURSOR_CLAIM_EVENT] {
-        let Some(list) = hooks.get_mut(event).and_then(Value::as_array_mut) else {
-            continue;
-        };
-        let before = list.len();
-        list.retain(|entry| !cursor_hook_is_ours(entry, helper));
-        changed |= before != list.len();
-        if list.is_empty() {
-            hooks.remove(event);
-        }
-    }
-    changed
-}
-
-fn cursor_hook_installed(settings: &Value, helper: &Helper) -> bool {
-    [CURSOR_EVENT, CURSOR_CLAIM_EVENT].iter().all(|event| {
-        settings
-            .get("hooks")
-            .and_then(|hooks| hooks.get(event))
-            .and_then(Value::as_array)
-            .is_some_and(|list| list.iter().any(|entry| cursor_hook_is_ours(entry, helper)))
-    })
-}
-
-/// Каталог kilocode: имя зависит от дистрибуции форка, берём существующий.
-fn kilo_home(home: &Path) -> Option<PathBuf> {
-    let candidates = [home.join(".config/kilo"), home.join(".config/kilocode")];
-    candidates
-        .iter()
-        .find(|dir| dir.is_dir())
-        .or(candidates.first())
-        .cloned()
-}
-
-/// Секция, дописываемая в конец чужого конфига. Пара «маркер, блок»: по
-/// маркеру видно, что секция уже есть — и неважно, наша она или своя.
-/// Настройку, сделанную руками, мы не трогаем.
-fn append_section(agent: &str, helper: &Helper) -> Option<(&'static str, String)> {
-    match agent {
-        // Схема из самого бинарника grok:
-        //   method = auto|osc9|osc99|osc777|bel|none
-        //   condition = unfocused|always|never
-        // Берём `always`: свой «unfocused» grok считает по терминалу и про
-        // наши панели ничего не знает, а кого и когда тревожить, приложение
-        // решает само — панель на виду при активном окне молчит.
-        "grok" => Some(("[ui.notifications]", grok_section(helper))),
-        // Хуки kimi — массив записей в его же TOML. Договор об отказе тот же,
-        // что у claude (выход 2 и stderr), и имена инструментов те же, так
-        // что заявка на файл работает без перевода.
-        "kimi" => Some((KIMI_MARKER, kimi_section(helper))),
         _ => None,
     }
 }
@@ -825,12 +557,7 @@ fn agent_home(agent: &str, home: &Path) -> Option<PathBuf> {
         "claude" => Some(home.join(".claude")),
         "copilot" => Some(home.join(".copilot")),
         "opencode" => Some(home.join(".config/opencode")),
-        "grok" => Some(home.join(".grok")),
-        "cursor" => Some(home.join(".cursor")),
-        "antigravity" => Some(home.join(".gemini")),
-        "kimi" => Some(home.join(".kimi-code")),
         "codex" => Some(home.join(".codex")),
-        "kilocode" => kilo_home(home),
         _ => None,
     }
 }
@@ -864,7 +591,7 @@ fn own_file_body(agent: &str, helper: &Helper) -> Option<String> {
             }))
             .ok()?,
         ),
-        "opencode" | "kilocode" => Some(opencode_plugin(agent)),
+        "opencode" => Some(opencode_plugin()),
         _ => None,
     }
 }
@@ -873,10 +600,10 @@ fn own_file_body(agent: &str, helper: &Helper) -> Option<String> {
 /// `"session.idle"`: тот не вызывается ни разу, проверено на живой сессии.
 /// Хелпер здесь не нужен — плагин уже внутри процесса панели и видит её
 /// окружение, поэтому кладёт событие сам.
-fn opencode_plugin(agent: &str) -> String {
+fn opencode_plugin() -> String {
     // Тело — обычная строка с одной подстановкой: JS здесь полон `${...}`, и
     // отдавать его форматтеру Rust значит драться с ним за каждую скобку.
-    OPENCODE_PLUGIN.replace("__AGENT__", agent)
+    OPENCODE_PLUGIN.replace("__AGENT__", "opencode")
 }
 
 const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew: заявки на файлы и сообщение о том, что агент затих.
@@ -988,16 +715,6 @@ impl Helper {
         }
     }
 
-    /// Дополнительный аргумент команды — например полезная нагрузка, которую
-    /// агент не передаёт сам. Кавычки те же, что и у пути: одинарные cmd
-    /// отдал бы программе как есть, вместе с самими кавычками.
-    fn quote(&self, arg: &str) -> String {
-        match self.launch {
-            Launch::Script => format!("'{}'", arg.replace('\'', r"'\''")),
-            Launch::Program => format!("\"{}\"", arg.replace('"', "\\\"")),
-        }
-    }
-
     /// Строка, по которой мы узнаём свой хук в чужом конфиге.
     fn needle(&self) -> String {
         self.path.display().to_string()
@@ -1031,27 +748,6 @@ fn hook_claim_command(helper: &Helper) -> String {
     helper.command(crate::agent_hook_cli::ClaimFlag::Plain.arg())
 }
 
-/// То же, но для агента, который ждёт решение JSON-ом в stdout, а не кодом
-/// возврата.
-/// Метка нашего блока в конфиге kimi: по ней видно, что секция уже стоит.
-const KIMI_MARKER: &str = "# modelcrew: уведомления и заявки на файлы";
-
-fn kimi_section(helper: &Helper) -> String {
-    format!(
-        "\n{KIMI_MARKER}\n\
-         [[hooks]]\n\
-         event = \"Stop\"\n\
-         command = {command:?}\n\
-         \n\
-         [[hooks]]\n\
-         event = \"PreToolUse\"\n\
-         matcher = \"Edit|Write|MultiEdit|Read\"\n\
-         command = {claim:?}\n",
-        command = hook_command(helper, "kimi"),
-        claim = hook_claim_command(helper),
-    )
-}
-
 /// У codex путь лежит внутри текста патча, а не отдельным ключом — разбор
 /// у хелпера отдельный.
 fn hook_claim_codex_command(helper: &Helper) -> String {
@@ -1060,10 +756,6 @@ fn hook_claim_codex_command(helper: &Helper) -> String {
 
 fn hook_claim_copilot_command(helper: &Helper) -> String {
     helper.command(crate::agent_hook_cli::ClaimFlag::Copilot.arg())
-}
-
-fn hook_claim_json_command(helper: &Helper) -> String {
-    helper.command(crate::agent_hook_cli::ClaimFlag::Json.arg())
 }
 
 /// Наш ли это хук. Ищем по пути хелпера, а не по всей строке: команда могла
@@ -1142,10 +834,6 @@ fn claude_hook_entry(helper: &Helper) -> Value {
 /// другим путём. Свой файл: чужого содержимого в нём не бывает.
 fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
     match agent {
-        // Глобальные хуки грока доверены всегда — в отличие от проектных,
-        // которым нужен явный `/hooks-trust`. Формат он принимает тот же, что
-        // у claude, и сам переводит имена инструментов в свои.
-        "grok" => Some(home.join(".grok/hooks/modelcrew.json")),
         // У codex глобальные хуки лежат тут же, но запускает он их только
         // после разового одобрения человеком: `/hooks` в его же сессии. Пока
         // одобрения нет, файл просто лежит и ничего не делает.
@@ -1154,19 +842,15 @@ fn claim_file(agent: &str, home: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Заявка для grok: событие как у claude, но без matcher.
+/// Заявка для codex: событие как у claude, но без matcher.
 ///
 /// Инструменты у него зовутся по-своему — `write`, `edit`, `read`,
 /// `apply_patch`, — и матчер из claude не совпадал ни с одним: хук молчал, а
 /// заявки не работали вовсе, никак этого не показывая. Отбирать вызовы здесь
 /// нечем и незачем: хелпер сам пропускает всё, в чём не нашёл пути, так что
 /// незнакомый или новый инструмент ничего не ломает.
-fn claim_file_body(agent: &str, helper: &Helper) -> String {
-    let command = if agent == "codex" {
-        hook_claim_codex_command(helper)
-    } else {
-        hook_claim_command(helper)
-    };
+fn claim_file_body(helper: &Helper) -> String {
+    let command = hook_claim_codex_command(helper);
     let entry = serde_json::json!({
         "hooks": [{ "type": "command", "command": command }],
     });
@@ -1310,28 +994,11 @@ pub fn hook_state(app: &tauri::AppHandle, agent: &str) -> AgentHookState {
     let Some(path) = hook_config_path(agent, &home) else {
         return unsupported;
     };
-    if let Some((marker, _)) = append_section(agent, &helper) {
-        let installed = std::fs::read_to_string(&path).is_ok_and(|body| body.contains(marker));
-        return AgentHookState {
-            agent: agent.to_string(),
-            supported: true,
-            installed,
-            config: path.display().to_string(),
-        };
-    }
     let installed = match own_file_body(agent, &helper) {
         // Устаревшее тело считаем неподключённым — тогда старт его перепишет.
         Some(body) => std::fs::read_to_string(&path).is_ok_and(|current| current == body),
         None => read_json(&path)
-            .map(|settings| {
-                if agent == "cursor" {
-                    cursor_hook_installed(&settings, &helper)
-                } else if agent == "antigravity" {
-                    antigravity_hook_installed(&settings, &helper)
-                } else {
-                    claude_hook_installed(&settings, &helper)
-                }
-            })
+            .map(|settings| claude_hook_installed(&settings, &helper))
             .unwrap_or(false),
     };
     AgentHookState {
@@ -1360,7 +1027,7 @@ pub fn set_hook(
     // уведомлений: это одна настройка для пользователя.
     if let Some(claims) = claim_file(agent, &home) {
         if enabled {
-            let body = claim_file_body(agent, &helper);
+            let body = claim_file_body(&helper);
             if std::fs::read_to_string(&claims).unwrap_or_default() != body {
                 if let Some(parent) = claims.parent() {
                     let _ = std::fs::create_dir_all(parent);
@@ -1370,22 +1037,6 @@ pub fn set_hook(
         } else {
             let _ = std::fs::remove_file(&claims);
         }
-    }
-    // Дописываемая секция в чужом конфиге: трогаем только её и только если
-    // такой секции там ещё нет.
-    if let Some((marker, block)) = append_section(agent, &helper) {
-        let current = std::fs::read_to_string(&path).unwrap_or_default();
-        if enabled {
-            if !current.contains(marker) {
-                back_up_once(&path);
-                std::fs::write(&path, format!("{current}{block}"))
-                    .map_err(|error| format!("{}: {error}", path.display()))?;
-            }
-        } else if let Some(rest) = current.strip_suffix(block.as_str()) {
-            // Снимаем только свой блок целиком: правленный руками не наш.
-            std::fs::write(&path, rest).map_err(|error| format!("{}: {error}", path.display()))?;
-        }
-        return Ok(hook_state(app, agent));
     }
     // Свой отдельный файл: чужого в нём нет, поэтому никакого слияния.
     if let Some(body) = own_file_body(agent, &helper) {
@@ -1409,13 +1060,10 @@ pub fn set_hook(
         return Ok(hook_state(app, agent));
     }
     let mut settings = read_json(&path)?;
-    let changed = match (agent, enabled) {
-        ("cursor", true) => install_cursor_hook(&mut settings, &helper),
-        ("cursor", false) => remove_cursor_hook(&mut settings, &helper),
-        ("antigravity", true) => install_antigravity_hook(&mut settings, &helper),
-        ("antigravity", false) => remove_antigravity_hook(&mut settings, &helper),
-        (_, true) => install_claude_hook(&mut settings, &helper),
-        (_, false) => remove_claude_hook(&mut settings, &helper),
+    let changed = if enabled {
+        install_claude_hook(&mut settings, &helper)
+    } else {
+        remove_claude_hook(&mut settings, &helper)
     };
     if changed {
         back_up_once(&path);
@@ -1425,18 +1073,13 @@ pub fn set_hook(
 }
 
 /// Агенты, которым мы умеем прописывать себя.
-const SUPPORTED_AGENTS: [&str; 9] = [
+const SUPPORTED_AGENTS: [&str; 4] = [
     "claude",
     // Уведомления у codex читаются из вывода панели, а вот заявка на файлы
     // идёт хуком — ради неё он и в списке.
     "codex",
     "copilot",
     "opencode",
-    "grok",
-    "kilocode",
-    "cursor",
-    "antigravity",
-    "kimi",
 ];
 
 /// Ставить хук только тем, кто у пользователя действительно есть: наличие
@@ -1478,69 +1121,6 @@ mod tests {
     /// путь тоже с пробелом — «Program Files».
     fn windows_helper() -> Helper {
         Helper::program(PathBuf::from(r"C:\Program Files\ModelCrew\ModelCrew.exe"))
-    }
-
-    /// Прогон настоящего хелпера на полезной нагрузке, снятой с живого
-    /// antigravity. Схему вызова он кладёт вложенно и в своих ключах —
-    /// написанное «на глаз» извлечение молча пропускало каждую правку.
-    ///
-    /// Только там, где хелпер запускается сам: он написан на POSIX-оболочке, и
-    /// Windows отвечает на попытку выполнить его кодом 193. Разбирает он текст,
-    /// а не платформу, поэтому прогона на macOS и Linux для него достаточно.
-    #[cfg(unix)]
-    #[test]
-    fn reads_an_antigravity_payload_and_answers_in_its_dialect() {
-        let base = std::env::temp_dir().join(format!("mc-claim-{}", std::process::id()));
-        let events = base.join("agent-events");
-        std::fs::create_dir_all(&events).unwrap();
-        let script = executable_helper(&base);
-
-        // Ровно то, что прислал agy, вплоть до порядка ключей.
-        let payload = concat!(
-            r#"{"conversationId":"762f086f","modelName":"gemini-3.6-flash-high","#,
-            r#""stepIdx":10,"toolCall":{"args":{"AllowMultiple":false,"#,
-            r#""Instruction":"Добавить комментарий","TargetFile":"/w/README.md"},"#,
-            r#""name":"replace_file_content"},"workspacePaths":["/w"]}"#
-        );
-        let mut child = std::process::Command::new(&script)
-            .arg("--claim-json")
-            .env("MODELCREW_PANEL_ID", "panel-7")
-            .env("MODELCREW_EVENTS_DIR", &events)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        use std::io::Write;
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(payload.as_bytes())
-            .unwrap();
-
-        // Заявка должна дойти до приложения разобранной, а не пустой.
-        let request = read_claim(&events);
-        assert_eq!(request["file"], "/w/README.md");
-        assert_eq!(request["tool"], "replace_file_content");
-        assert_eq!(request["panelId"], "panel-7");
-
-        std::fs::write(
-            events.join(format!("{}.res", request["id"].as_str().unwrap())),
-            r#"{"verdict":"deny","task":"правит сосед"}"#,
-        )
-        .unwrap();
-
-        let out = child.wait_with_output().unwrap();
-        let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
-        // Он читает решение из stdout, а не код возврата, и показывает
-        // причину агенту — без неё отказ для него необъясним.
-        assert_eq!(answer["decision"], "deny");
-        assert!(
-            answer["reason"].as_str().unwrap().contains("другой файл"),
-            "{answer}"
-        );
-        assert_eq!(out.status.code(), Some(0));
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Кладёт настоящий хелпер под свежим именем и делает его исполняемым.
@@ -1837,24 +1417,8 @@ mod tests {
         );
     }
 
-    /// Нагрузку, которую агент не передаёт сам, мы дописываем аргументом.
-    /// На Windows её нельзя брать в одинарные кавычки: cmd их не раскрывает и
-    /// отдал бы программе строку вместе с кавычками — вместо JSON пришло бы
-    /// `'{"type":"stop"}'`, и событие конца хода потерялось бы.
-    #[test]
-    fn the_payload_argument_is_quoted_the_way_that_shell_expects() {
-        let posix = cursor_hook_entry(&helper());
-        let posix = posix["command"].as_str().unwrap();
-        assert!(posix.ends_with(r#"'{"type":"stop"}'"#), "{posix}");
-
-        let windows = cursor_hook_entry(&windows_helper());
-        let windows = windows["command"].as_str().unwrap();
-        assert!(windows.ends_with(r#""{\"type\":\"stop\"}""#), "{windows}");
-    }
-
-    /// Каждое наречие отказа должно доехать и до Windows: заявку у codex,
-    /// copilot и antigravity мы просим теми же флагами, разбор которых
-    /// проверен отдельно.
+    /// Каждое наречие отказа должно доехать и до Windows: заявку у codex и
+    /// copilot мы просим теми же флагами, разбор которых проверен отдельно.
     #[test]
     fn every_dialect_survives_the_move_to_windows() {
         for (command, expected) in [
@@ -1863,7 +1427,6 @@ mod tests {
                 hook_claim_copilot_command(&windows_helper()),
                 "--claim-copilot",
             ),
-            (hook_claim_json_command(&windows_helper()), "--claim-json"),
         ] {
             assert_eq!(
                 command,
@@ -1969,81 +1532,13 @@ mod tests {
     }
 
     #[test]
-    fn writes_kimi_a_toml_block_with_both_hooks() {
-        let block = kimi_section(&helper());
-
-        // Конец хода — для уведомлений, заявка — для файлов. Одна секция на
-        // обе задачи: пользователь включает и выключает их вместе.
-        assert!(block.contains("event = \"Stop\""));
-        assert!(block.contains("event = \"PreToolUse\""));
-        assert!(block.contains("matcher = \"Edit|Write|MultiEdit|Read\""));
-        assert!(block.contains("--claim"));
-        // Путь с пробелом попадает в TOML строкой, а не разваливается.
-        assert!(block.contains("Application Support"));
-        assert!(block.starts_with(&format!("\n{KIMI_MARKER}")));
-    }
-
-    #[test]
-    fn knows_where_kimi_keeps_its_config() {
-        let home = Path::new("/Users/x");
-
-        assert_eq!(
-            hook_config_path("kimi", home),
-            Some(home.join(".kimi-code/config.toml"))
-        );
-        // Каталог агента — признак, что он вообще запускался: иначе мы
-        // завели бы конфиг тому, у кого этого CLI нет.
-        assert_eq!(agent_home("kimi", home), Some(home.join(".kimi-code")));
-    }
-
-    #[test]
-    fn asks_antigravity_in_the_dialect_it_answers_in() {
-        let block = antigravity_block(&helper());
-
-        // Уведомления и заявка живут в одном блоке — снимаются тоже вместе.
-        assert!(block["Stop"].is_array());
-        let entry = &block["PreToolUse"][0];
-        // Имена инструментов у него свои: матчер claude тут не сработал бы.
-        assert!(entry["matcher"].as_str().unwrap().contains("write_to_file"));
-        assert!(entry["matcher"].as_str().unwrap().contains("read_file"));
-        // Решение он ждёт JSON-ом в stdout, а не кодом возврата — за это
-        // отвечает отдельный режим хелпера.
-        assert!(entry["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .ends_with("--claim-json"));
-
-        // Повторная установка того же блока файл не трогает.
-        let mut settings = serde_json::json!({});
-        assert!(install_antigravity_hook(&mut settings, &helper()));
-        assert!(!install_antigravity_hook(&mut settings, &helper()));
-        assert!(antigravity_hook_installed(&settings, &helper()));
-        assert!(remove_antigravity_hook(&mut settings, &helper()));
-    }
-
-    #[test]
     fn tells_reading_tools_from_writing_ones() {
         // Чтение проходит через хук, но заявку не берёт: осмотр тридцати
         // файлов запер бы соседу полпроекта.
         assert!(is_read_tool("Read"));
         assert!(is_read_tool("read"));
         assert!(is_read_tool("NotebookRead"));
-        // У antigravity свои имена — и он единственный, кто ходит в хук за
-        // каждым просмотром файла.
-        for reading in ["view_file", "read_file", "view_code_item"] {
-            assert!(is_read_tool(reading), "инструмент {reading}");
-        }
-        for writing in [
-            "Edit",
-            "Write",
-            "MultiEdit",
-            "NotebookEdit",
-            "Bash",
-            "write_to_file",
-            "replace_file_content",
-            "edit_file",
-            "create_file",
-        ] {
+        for writing in ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"] {
             assert!(!is_read_tool(writing), "инструмент {writing}");
         }
     }
@@ -2067,32 +1562,9 @@ mod tests {
     }
 
     #[test]
-    fn gives_grok_the_claim_hook_without_a_matcher() {
-        let body = claim_file_body("grok", &helper());
-        let parsed: Value = serde_json::from_str(&body).expect("валидный JSON");
-        let entry = &parsed["hooks"]["PreToolUse"][0];
-
-        // Живой запуск показал: grok зовёт инструменты своими именами —
-        // `write`, `edit`, `read`, `apply_patch`, — и матчер из claude не
-        // совпадал ни с одним. Хук молчал, заявки не работали, и снаружи это
-        // ничем не отличалось от «файл свободен».
-        assert!(entry.get("matcher").is_none(), "{entry}");
-        assert!(entry["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .ends_with("--claim"));
-    }
-
-    #[test]
     fn puts_the_claim_file_only_where_hooks_are_trusted_without_asking() {
         let home = Path::new("/Users/x");
 
-        // Глобальные хуки грока доверены всегда; проектные потребовали бы
-        // явного согласия, поэтому туда не пишем.
-        assert_eq!(
-            claim_file("grok", home),
-            Some(home.join(".grok/hooks/modelcrew.json"))
-        );
         // У claude заявка идёт в общий settings.json вместе с остальными
         // хуками — отдельный файл ему не нужен.
         assert_eq!(claim_file("claude", home), None);
@@ -2104,9 +1576,9 @@ mod tests {
             claim_file("codex", home),
             Some(home.join(".codex/hooks.json"))
         );
-        // Остальные получают заявку иначе: cursor и kimi — в свой общий
-        // конфиг, opencode — плагином, antigravity — своим диалектом.
-        for agent in ["cursor", "opencode", "kimi", "antigravity"] {
+        // Остальные получают заявку иначе: copilot — своим файлом хуков,
+        // opencode — плагином.
+        for agent in ["copilot", "opencode"] {
             assert_eq!(claim_file(agent, home), None, "агент {agent}");
         }
     }
@@ -2265,12 +1737,11 @@ mod tests {
         let home = Path::new("/home/x");
 
         // Попав в автоподключение, агент обязан получить хоть что-то: общий
-        // конфиг, свой файл, дописанную секцию или заявку на файлы. Иначе он
-        // числился бы подключённым и молча ничего не получал.
+        // конфиг, свой файл или заявку на файлы. Иначе он числился бы
+        // подключённым и молча ничего не получал.
         for agent in SUPPORTED_AGENTS {
             let somewhere = hook_config_path(agent, home).is_some()
                 || own_file_body(agent, &helper()).is_some()
-                || append_section(agent, &helper()).is_some()
                 || claim_file(agent, home).is_some();
             assert!(somewhere, "{agent}");
         }
@@ -2289,12 +1760,6 @@ mod tests {
             hook_config_path("claude", home),
             Some(PathBuf::from("/home/x/.claude/settings.json"))
         );
-        // У kimi канал подтверждён по его же бинарю: секция [[hooks]] в
-        // собственном TOML, договор об отказе как у claude.
-        assert_eq!(
-            hook_config_path("kimi", home),
-            Some(PathBuf::from("/home/x/.kimi-code/config.toml"))
-        );
         // У codex уведомления идут разбором вывода панели — общий конфиг ему
         // писать незачем. Каталог у него при этом свой: по нему видно, что
         // агент вообще установлен, и туда же ложится заявка на файлы.
@@ -2303,137 +1768,17 @@ mod tests {
             agent_home("codex", home),
             Some(PathBuf::from("/home/x/.codex"))
         );
-        // Снятый с поддержки агент не должен получить ни конфига, ни каталога:
-        // иначе установка хуков нашла бы его на диске и вернулась.
-        assert_eq!(hook_config_path("aider", home), None);
-        assert_eq!(agent_home("aider", home), None);
-    }
-
-    #[test]
-    fn a_fork_names_itself_in_the_event_it_writes() {
-        // Иначе панель kilocode подписалась бы как opencode.
-        assert!(opencode_plugin("kilocode").contains(r#"agent: "kilocode""#));
-        assert!(opencode_plugin("opencode").contains(r#"agent: "opencode""#));
-        assert!(!opencode_plugin("kilocode").contains("__AGENT__"));
-    }
-
-    #[test]
-    fn the_kilocode_directory_falls_back_to_a_known_name() {
-        let home = Path::new("/home/x");
-
-        // Ни одного каталога нет — берём первый вариант, но ставить туда
-        // ничего не будем: agent_is_present это отсечёт.
-        assert_eq!(kilo_home(home), Some(PathBuf::from("/home/x/.config/kilo")));
-        assert!(!agent_is_present("kilocode", home));
-    }
-
-    #[test]
-    fn the_cursor_hook_lands_in_the_file_shared_with_the_ide() {
-        let mut settings = serde_json::json!({
-            "version": 1,
-            "hooks": { "beforeShellExecution": [{ "command": "./audit.sh" }] }
-        });
-
-        assert!(install_cursor_hook(&mut settings, &helper()));
-
-        // Чужой хук в общем с IDE файле обязан пережить нашу правку.
-        assert_eq!(
-            settings["hooks"]["beforeShellExecution"][0]["command"],
-            "./audit.sh"
-        );
-        assert!(cursor_hook_installed(&settings, &helper()));
-        // Заявка на файл: проверено на живом cursor-agent — нагрузка приходит
-        // как у claude, отказ читается кодом возврата 2, причина из stderr
-        // доходит до агента дословно.
-        let claim = settings["hooks"]["preToolUse"][0]["command"]
-            .as_str()
-            .unwrap();
-        assert!(claim.ends_with("--claim"), "{claim}");
-        // Нагрузка аргументом: stdin cursor хуку не даёт, и хелпер завис бы.
-        let ours = settings["hooks"]["stop"][0]["command"].as_str().unwrap();
-        assert!(ours.ends_with(r#"'{"type":"stop"}'"#), "{ours}");
-        assert!(!install_cursor_hook(&mut settings, &helper()));
-
-        assert!(remove_cursor_hook(&mut settings, &helper()));
-        assert!(settings["hooks"].get("stop").is_none());
-        assert!(settings["hooks"].get("preToolUse").is_none());
-        assert_eq!(
-            settings["hooks"]["beforeShellExecution"][0]["command"],
-            "./audit.sh"
-        );
-    }
-
-    #[test]
-    fn the_antigravity_block_keeps_handlers_unwrapped() {
-        let mut settings = serde_json::json!({
-            "lint-checker": {
-                "PostToolUse": [{ "matcher": "run_command", "hooks": [{ "command": "./lint.sh" }] }]
-            }
-        });
-
-        assert!(install_antigravity_hook(&mut settings, &helper()));
-
-        // Чужое имя рядом переживает правку: верхний уровень тут — карта имён.
-        assert!(settings.get("lint-checker").is_some());
-        // Обработчик лежит прямо в массиве события. Обёртка {matcher, hooks}
-        // для antigravity — ошибка разбора, и роняет весь файл, а не запись.
-        let ours = &settings[ANTIGRAVITY_KEY]["Stop"][0];
-        assert!(ours.get("command").is_some(), "{ours}");
-        assert!(ours.get("hooks").is_none(), "{ours}");
-        assert!(antigravity_hook_installed(&settings, &helper()));
-        assert!(!install_antigravity_hook(&mut settings, &helper()));
-
-        assert!(remove_antigravity_hook(&mut settings, &helper()));
-        assert!(settings.get(ANTIGRAVITY_KEY).is_none());
-        assert!(settings.get("lint-checker").is_some());
-    }
-
-    #[test]
-    fn an_antigravity_stop_reads_as_a_finished_turn() {
-        let done = parse_event(
-            r#"{"agent":"antigravity","panelId":"p","payload":{
-                "terminationReason":"NO_TOOL_CALL","fullyIdle":true,"error":""}}"#,
-        )
-        .expect("Stop должен разбираться");
-        // Имени события в нагрузке нет — сводим к слову, которое знает фронт.
-        assert_eq!(done.event, "Stop");
-
-        let failed = parse_event(
-            r#"{"agent":"antigravity","panelId":"p","payload":{
-                "terminationReason":"error","error":"кончился лимит"}}"#,
-        )
-        .unwrap();
-        assert_eq!(failed.event, "error");
-        assert_eq!(failed.message, "кончился лимит");
-    }
-
-    #[test]
-    fn the_grok_section_asks_for_the_sequence_our_scanner_reads() {
-        let (marker, block) = append_section("grok", &helper()).expect("grok поддержан");
-
-        assert_eq!(marker, "[ui.notifications]");
-        assert!(block.contains(r#"method = "osc9""#), "{block}");
-        // «unfocused» grok считает по терминалу и про наши панели не знает;
-        // кого тревожить, решает приложение.
-        assert!(block.contains(r#"condition = "always""#), "{block}");
-        assert!(block.contains(marker));
-    }
-
-    #[test]
-    fn a_notifications_section_the_user_wrote_himself_is_not_touched() {
-        let (marker, block) = append_section("grok", &helper()).unwrap();
-        let mine = format!("[ui]\ntheme = \"dark\"\n\n{marker}\nmethod = \"bel\"\n");
-
-        // Секция есть — значит выбор уже сделан, и он важнее нашего.
-        assert!(mine.contains(marker));
-        // А в пустой конфиг блок дописывается целиком, ничего не затирая.
-        let empty = String::new();
-        assert_eq!(format!("{empty}{block}"), block);
+        // Снятые с поддержки не должны получить ни конфига, ни каталога: иначе
+        // установка хуков нашла бы их на диске и полезла бы писать.
+        for gone in ["aider", "kimi", "kilocode", "grok", "cursor", "antigravity"] {
+            assert_eq!(hook_config_path(gone, home), None, "{gone}");
+            assert_eq!(agent_home(gone, home), None, "{gone}");
+        }
     }
 
     #[test]
     fn the_opencode_plugin_uses_the_shape_that_actually_fires() {
-        let body = opencode_plugin("opencode");
+        let body = opencode_plugin();
 
         // Документированный ключ "session.idle" не вызывается ни разу —
         // проверено на живой сессии, поэтому обработчик именно `event`.
