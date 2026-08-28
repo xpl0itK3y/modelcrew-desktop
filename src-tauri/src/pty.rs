@@ -132,9 +132,6 @@ impl PtyManager {
         cmd.env("MODELCREW_PANEL_ID", &opts.id);
         if let Some(events) = AGENT_EVENTS_DIR.get() {
             cmd.env("MODELCREW_EVENTS_DIR", events);
-            for (key, value) in crate::agent_hooks::env_hooks(events) {
-                cmd.env(key, value);
-            }
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.

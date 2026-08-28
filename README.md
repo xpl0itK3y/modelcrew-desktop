@@ -119,13 +119,13 @@ second after "finished" is never the one that gets swallowed.
 ## Supported agents
 
 Each panel remembers **which** conversation it was running and resumes exactly
-that one — six Claude Code panels get six different chats. Ten CLIs are
+that one — six Claude Code panels get six different chats. Nine CLIs are
 recognized:
 
 <div align="center">
 
 `Claude Code` · `Codex` · `GitHub Copilot` · `OpenCode` · `Kilo Code` ·
-`Kimi Code` · `Grok Build` · `Cursor` · `Aider` · `Antigravity`
+`Kimi Code` · `Grok Build` · `Cursor` · `Antigravity`
 
 </div>
 

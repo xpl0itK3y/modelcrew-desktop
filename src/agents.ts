@@ -101,14 +101,6 @@ export const AGENTS: AgentDefinition[] = [
     resumeSession: ["--resume"],
   },
   {
-    id: "aider",
-    label: "Aider",
-    processNames: ["aider"],
-    // У aider одна история на репозиторий, адресных сессий нет.
-    resumeLast: ["--restore-chat-history"],
-    resumePicker: ["--restore-chat-history"],
-  },
-  {
     id: "antigravity",
     label: "Antigravity",
     processNames: ["agy"],

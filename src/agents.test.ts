@@ -37,11 +37,11 @@ describe("agent catalog", () => {
     expect(matchAgent("Kimi")?.agent.id).toBe("kimi");
     expect(matchAgent("grok")?.agent.id).toBe("grok");
     expect(matchAgent("cursor-agent")?.agent.id).toBe("cursor");
-    expect(matchAgent("aider")?.agent.id).toBe("aider");
     // Снятые с поддержки опознаваться не должны: половинчатая поддержка хуже
     // отсутствия — панель считалась бы агентской, а канала у неё нет.
     expect(matchAgent("qwen")).toBeNull();
     expect(matchAgent("amp")).toBeNull();
+    expect(matchAgent("aider")).toBeNull();
     expect(matchAgent("zsh")).toBeNull();
     expect(matchAgent("vim")).toBeNull();
     expect(AGENTS.find((agent) => agent.id === "kimi")?.label).toBe(
@@ -159,19 +159,21 @@ describe("agent catalog", () => {
       "copilot --resume 3a659d2e-1bb9-4814-8525-cb190c8d6e77",
     );
 
-    // Многословные команды и агент без адресного resume.
+    // Многословная команда возобновления собирается по порядку аргументов.
     expect(
       buildAgentResume(
         { agentId: "codex", command: "codex", sessionId: "T-1" },
         false,
       ),
     ).toBe("codex resume T-1");
+    // Снятый с поддержки агент команды не даёт — панель просто останется
+    // обычным терминалом.
     expect(
       buildAgentResume(
         { agentId: "aider", command: "aider", sessionId: "ignored" },
         false,
       ),
-    ).toBe("aider --restore-chat-history");
+    ).toBeNull();
   });
 
   it("rejects malformed session ids everywhere", () => {

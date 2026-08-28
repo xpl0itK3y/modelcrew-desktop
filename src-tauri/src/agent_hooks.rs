@@ -1439,39 +1439,6 @@ const SUPPORTED_AGENTS: [&str; 9] = [
     "kimi",
 ];
 
-/// Подключение через окружение панели — самый безопасный вид: ничего не
-/// пишется в чужие файлы и действует только внутри наших терминалов.
-///
-/// aider зовёт команду, когда ответ готов и он ждёт ввода. Полезную нагрузку
-/// он не передаёт, поэтому отдаём её сами вторым аргументом — иначе хелпер
-/// полез бы читать stdin, а там терминал, и он бы там и остался.
-pub fn env_hooks(events_dir: &Path) -> Vec<(String, String)> {
-    env_hooks_with(events_dir, |name| std::env::var_os(name).is_some())
-}
-
-fn env_hooks_with(events_dir: &Path, already_set: impl Fn(&str) -> bool) -> Vec<(String, String)> {
-    let Some(helper) = events_dir
-        .parent()
-        .map(|base| native_helper_at(base.join(HELPER_NAME)))
-    else {
-        return Vec::new();
-    };
-    // Своя настройка пользователя важнее нашей: если он уже задал команду
-    // уведомления или выключил их, перебивать это молча нельзя.
-    if already_set("AIDER_NOTIFICATIONS_COMMAND") || already_set("AIDER_NOTIFICATIONS") {
-        return Vec::new();
-    }
-    let command = format!(
-        "{} {}",
-        hook_command(&helper, "aider"),
-        helper.quote(r#"{"type":"waiting"}"#)
-    );
-    vec![
-        ("AIDER_NOTIFICATIONS".to_string(), "true".to_string()),
-        ("AIDER_NOTIFICATIONS_COMMAND".to_string(), command),
-    ]
-}
-
 /// Ставить хук только тем, кто у пользователя действительно есть: наличие
 /// каталога агента и есть признак, что он хоть раз запускался. Иначе мы
 /// создавали бы конфиг тому, кто этот CLI в глаза не видел.
@@ -2336,8 +2303,8 @@ mod tests {
             agent_home("codex", home),
             Some(PathBuf::from("/home/x/.codex"))
         );
-        // У aider канал только через окружение — молча трогать чужой конфиг
-        // на догадках нельзя.
+        // Снятый с поддержки агент не должен получить ни конфига, ни каталога:
+        // иначе установка хуков нашла бы его на диске и вернулась.
         assert_eq!(hook_config_path("aider", home), None);
         assert_eq!(agent_home("aider", home), None);
     }
@@ -2462,47 +2429,6 @@ mod tests {
         // А в пустой конфиг блок дописывается целиком, ничего не затирая.
         let empty = String::new();
         assert_eq!(format!("{empty}{block}"), block);
-    }
-
-    #[test]
-    fn aider_is_wired_through_the_environment_with_its_payload_supplied() {
-        let events_dir = Path::new("/data/mc/agent-events");
-        // Своё окружение проверки не спрашиваем: на машине разработчика или
-        // раннера AIDER_NOTIFICATIONS вполне может быть выставлен, и тогда
-        // env_hooks честно вернёт пустоту, а проверка упала бы на чужой
-        // настройке вместо своего предмета.
-        let vars = env_hooks_with(events_dir, |_| false);
-        let command = vars
-            .iter()
-            .find(|(key, _)| key == "AIDER_NOTIFICATIONS_COMMAND")
-            .map(|(_, value)| value.clone())
-            .expect("команда уведомления должна быть задана");
-
-        assert!(vars
-            .iter()
-            .any(|(key, value)| key == "AIDER_NOTIFICATIONS" && value == "true"));
-        // Кем именно зовут, решает платформа: на POSIX скриптом, на Windows
-        // самим приложением. Спрашиваем то же решение, а не повторяем его
-        // здесь — иначе проверка сторожила бы собственную копию правила.
-        let helper = native_helper_at(events_dir.parent().unwrap().join(HELPER_NAME));
-        assert!(command.contains(&helper.needle()), "{command}");
-        // Нагрузка вторым аргументом — иначе хелпер уйдёт читать stdin, а там
-        // терминал, и вызов повиснет. Кавычки спрашиваем у того же хелпера:
-        // на Windows одинарные не годятся, cmd отдал бы их программе как есть.
-        assert!(
-            command.ends_with(&helper.quote(r#"{"type":"waiting"}"#)),
-            "{command}"
-        );
-    }
-
-    #[test]
-    fn a_notification_command_the_user_already_chose_is_left_alone() {
-        // Настроил свою команду — значит она ему нужна; наша не должна её
-        // вытеснить только потому, что панель наша.
-        for owned in ["AIDER_NOTIFICATIONS_COMMAND", "AIDER_NOTIFICATIONS"] {
-            let vars = env_hooks_with(Path::new("/data/mc/agent-events"), |name| name == owned);
-            assert!(vars.is_empty(), "{owned}: {vars:?}");
-        }
     }
 
     #[test]
