@@ -46,7 +46,12 @@ import {
   joinWrappedRows,
   type PanelRow,
 } from "./panelTail";
-import { getAppTheme, loadTheme, type ThemeId } from "../theme";
+import {
+  getAppTheme,
+  loadTheme,
+  terminalMinimumContrast,
+  type ThemeId,
+} from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
 import {
@@ -73,6 +78,7 @@ const RESIZE_DEBOUNCE_MS = 250;
 // В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
 
 let currentTerminalTheme = getAppTheme(loadTheme()).terminal;
+let currentTerminalContrast = terminalMinimumContrast(loadTheme());
 let currentTerminalFontSize = loadTerminalFontSize();
 
 export type TerminalEntry = {
@@ -210,8 +216,12 @@ if (typeof window !== "undefined") {
 
 export function applyTerminalTheme(themeId: ThemeId): void {
   currentTerminalTheme = getAppTheme(themeId).terminal;
+  currentTerminalContrast = terminalMinimumContrast(themeId);
   for (const entry of registry.values()) {
     entry.term.options.theme = { ...currentTerminalTheme };
+    // Порог меняется вместе с темой: агент, запущенный до переключения, свои
+    // цвета не пересматривает — подпирает его уже открытый терминал.
+    entry.term.options.minimumContrastRatio = currentTerminalContrast;
     entry.term.refresh(0, Math.max(0, entry.term.rows - 1));
   }
 }
@@ -270,6 +280,9 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     lineHeight: 1.25,
     scrollback: 5000,
     theme: { ...currentTerminalTheme },
+    // Порог различимости: держит чужие экраны, нарисованные под тёмный
+    // терминал, читаемыми на светлой теме.
+    minimumContrastRatio: currentTerminalContrast,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
