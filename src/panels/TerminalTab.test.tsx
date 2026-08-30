@@ -13,7 +13,8 @@ import { raiseAgentAlert } from "../terminal/agentAlerts";
 import { resetAgentAlertBurst } from "../terminal/alertDelivery";
 import { clearAgentAttention } from "../terminal/attentionStore";
 import { clearPanelClaims, setPanelClaims } from "../crew/claimStore";
-import { rememberAgentProcess } from "../agents";
+import { AGENTS, rememberAgentProcess } from "../agents";
+import { KEYS, writeSetting } from "../settings/storage";
 import { TerminalTab } from "./TerminalTab";
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -144,6 +145,40 @@ describe("what the tab glyph says about the panel", () => {
 
     expect(agent.container.querySelector(".tab-glyph")).toHaveClass("is-agent");
     expect(shell.container.querySelector(".tab-glyph")).toHaveClass("is-shell");
+  });
+
+  it("gives every supported agent its own company mark", () => {
+    const seen = new Set<string>();
+    for (const agent of AGENTS) {
+      const id = `glyph-${agent.id}`;
+      used.push(id);
+      rememberAgentProcess(id, agent.id);
+      const { container } = render(<TerminalTab {...headerProps(id)} />);
+      const glyph = container.querySelector(".tab-glyph");
+
+      expect(glyph).toHaveClass("is-agent", `is-${agent.id}`);
+      // Одна марка на двоих означала бы, что панели различает только имя.
+      const path = glyph?.querySelector("svg")?.innerHTML ?? "";
+      expect(seen.has(path)).toBe(false);
+      seen.add(path);
+    }
+  });
+
+  it("keeps a dropped agent looking like an agent", () => {
+    // Запись пережила версию, в которой этого агента убрали из каталога:
+    // сам watcher такую больше не заведёт, а в хранилище она ещё лежит.
+    used.push("glyph-gone");
+    writeSetting(
+      KEYS.terminalAgents,
+      JSON.stringify({
+        "glyph-gone": { agentId: "aider", command: "aider", detectedAt: 1 },
+      }),
+    );
+    const { container } = render(<TerminalTab {...headerProps("glyph-gone")} />);
+
+    // Марки для него нет, но панель всё ещё не простая оболочка.
+    expect(container.querySelector(".tab-glyph")).toHaveClass("is-agent");
+    expect(container.querySelector(".tab-glyph")).not.toHaveClass("is-aider");
   });
 
   it("keeps the glyph out of the reading order", () => {
