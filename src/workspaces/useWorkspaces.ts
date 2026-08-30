@@ -15,6 +15,7 @@ import { getAutoTitle } from "../terminal/panelTitles";
 import { translate, type Locale } from "../i18n";
 import {
   addPanel,
+  dockFloatingGroups,
   localizeDefaultPanelTitles,
   snapshotActiveSessionLayout,
 } from "../layoutOps";
@@ -151,6 +152,9 @@ export function useWorkspaces({
             // «Изменения» переехали в оверлей: вкладку из старых раскладок
             // (когда панель жила в dockview) убираем при восстановлении.
             api.getPanel("git-changes")?.api.close();
+            // Вытащить панель из сетки больше нельзя, но в старых раскладках
+            // такие плавающие окна остались — возвращаем их на место.
+            dockFloatingGroups(api);
             restored = true;
           } catch {
             // Повреждённая сохранённая раскладка не должна блокировать вход

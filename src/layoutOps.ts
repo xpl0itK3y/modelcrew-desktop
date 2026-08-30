@@ -100,6 +100,26 @@ export function localizeDefaultPanelTitles(
   };
 }
 
+// Панели, вытащенные из сетки в плавающее окно. Завести новые уже нельзя
+// (dockview запущен с disableFloatingGroups), но в раскладках, сохранённых
+// раньше, они есть — а fromJSON восстанавливает их как были, поверх всей
+// сетки и мимо неё. Возвращаем каждую такую панель в сетку отдельной ячейкой
+// у правого края: id, а с ним и живой PTY, у неё остаётся прежний.
+export function dockFloatingGroups(api: DockviewApi): number {
+  let docked = 0;
+  // Обходим копии списков: перенос меняет и набор групп, и состав каждой.
+  const floating = api.groups.filter(
+    (group) => group.api.location.type === "floating",
+  );
+  for (const group of floating) {
+    for (const panel of [...group.panels]) {
+      panel.api.moveTo({ position: "right" });
+      docked += 1;
+    }
+  }
+  return docked;
+}
+
 export function addPanel(
   api: DockviewApi,
   workspaceId: string,

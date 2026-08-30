@@ -14,7 +14,11 @@ import {
 } from "./terminal/registry";
 import { rememberAutoTitle } from "./terminal/panelTitles";
 import { rememberAgentProcess, scheduleAgentSessionBinding } from "./agents";
-import { addPanel, localizeDefaultPanelTitles } from "./layoutOps";
+import {
+  addPanel,
+  dockFloatingGroups,
+  localizeDefaultPanelTitles,
+} from "./layoutOps";
 import {
   activeSession,
   type FolderRuntimeStatus,
@@ -169,6 +173,9 @@ export function useDockviewSetup({
       ) {
         try {
           event.api.fromJSON(localizeDefaultPanelTitles(session.layout)!);
+          // Раскладка могла быть сохранена, когда панель ещё разрешалось
+          // вытащить из сетки в плавающее окно.
+          dockFloatingGroups(event.api);
         } catch {
           event.api.closeAllGroups();
           addPanel(event.api, workspace.id, session.id);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { planTerminalPlacement, type TerminalGridGroup } from "./layoutOps";
+import type { DockviewApi } from "dockview";
+import {
+  dockFloatingGroups,
+  planTerminalPlacement,
+  type TerminalGridGroup,
+} from "./layoutOps";
 import {
   TERMINAL_SPAWN_MODES,
   type TerminalSpawnMode,
@@ -176,5 +181,63 @@ describe("terminal placement planning", () => {
         planTerminalPlacement(single({ width: 479, height: 319 }), mode),
       ).toBeNull();
     }
+  });
+});
+
+// Сетка dockview в том объёме, который нужен возврату вытащенных панелей: у
+// группы есть место обитания и список панелей, у панели — перенос.
+function fakeApi(
+  groups: readonly { location: "grid" | "floating"; panels: string[] }[],
+) {
+  const moved: string[] = [];
+  const api = {
+    groups: groups.map((group) => ({
+      api: { location: { type: group.location } },
+      panels: group.panels.map((id) => ({
+        id,
+        api: {
+          moveTo: (options: { position?: string }) => {
+            moved.push(`${id}:${options.position}`);
+          },
+        },
+      })),
+    })),
+  } as unknown as DockviewApi;
+  return { api, moved };
+}
+
+describe("returning floating panels to the grid", () => {
+  it("docks every panel that was pulled out of the grid", () => {
+    const { api, moved } = fakeApi([
+      { location: "grid", panels: ["ostalsya"] },
+      { location: "floating", panels: ["claude"] },
+      { location: "floating", panels: ["codex"] },
+    ]);
+
+    expect(dockFloatingGroups(api)).toBe(2);
+    // Каждая встаёт своей ячейкой, а панель из сетки никто не трогает.
+    expect(moved).toEqual(["claude:right", "codex:right"]);
+  });
+
+  it("gives a floating group's panels a cell each", () => {
+    // Иначе они уехали бы в одну группу вкладками, а вкладок здесь нет:
+    // на экране осталась бы одна панель, остальные — за ней.
+    const { api, moved } = fakeApi([
+      { location: "grid", panels: ["odna"] },
+      { location: "floating", panels: ["claude", "codex"] },
+    ]);
+
+    expect(dockFloatingGroups(api)).toBe(2);
+    expect(moved).toEqual(["claude:right", "codex:right"]);
+  });
+
+  it("leaves a layout that never left the grid alone", () => {
+    const { api, moved } = fakeApi([
+      { location: "grid", panels: ["odna"] },
+      { location: "grid", panels: ["dve"] },
+    ]);
+
+    expect(dockFloatingGroups(api)).toBe(0);
+    expect(moved).toEqual([]);
   });
 });
