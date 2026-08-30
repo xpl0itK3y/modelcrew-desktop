@@ -106,7 +106,7 @@
 }
 
 .file-row.is-active {
-  background: var(--mc-surface-active);
+  background: var(--mc-hover-strong);
   color: var(--mc-text-bright);
 }
 

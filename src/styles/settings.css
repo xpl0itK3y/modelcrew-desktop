@@ -117,7 +117,7 @@
 }
 
 .settings-nav-item.is-selected {
-  background: var(--mc-surface-active);
+  background: var(--mc-hover-strong);
   color: var(--mc-text-bright);
 }
 
