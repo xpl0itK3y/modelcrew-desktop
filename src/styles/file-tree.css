@@ -210,7 +210,12 @@
      держит columnWidths — в одном месте, а не по половине здесь и там. */
   flex: 0 0 auto;
   min-height: 0;
-  border-right: 1px solid var(--mc-border);
+  /* Карточка, как рейка и дерево слева и поднос справа. Одна колонка из
+     четырёх стояла впритык к соседям и держалась на одной линии справа —
+     в ряду карточек это читалось как недоделка, а не как замысел. */
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+  border: 1px solid var(--mc-card-edge);
+  border-radius: var(--mc-radius);
   background: var(--mc-panel);
 }
 
