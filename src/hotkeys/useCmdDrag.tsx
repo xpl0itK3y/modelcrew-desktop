@@ -4,6 +4,7 @@ import { isMac } from "../platform";
 import { flipGroups, snapshotGroupRects } from "../animations";
 import { swapPanels } from "../layoutOps";
 import { translate } from "../i18n";
+import { isCoveredByModal } from "./modalGuard";
 
 // ⌘-драг: зажал Mod, схватил терминал за любое место — под курсором
 // призрак панели; дроп на другой терминал меняет их местами, дроп у
@@ -140,6 +141,12 @@ export function useCmdDrag(options: CmdDragOptions): void {
     const onPointerDown = (event: PointerEvent) => {
       const mod = isMac ? event.metaKey : event.ctrlKey;
       if (!mod || event.button !== 0 || event.altKey || event.shiftKey) {
+        return;
+      }
+      // Панель ищется по координатам курсора, а не по тому, на что нажали.
+      // Открытые настройки лежат поверх сетки, но для этого поиска их будто
+      // нет: терминал брался и переставлялся прямо сквозь диалог.
+      if (isCoveredByModal()) {
         return;
       }
       const api = optionsRef.current.getApi();
