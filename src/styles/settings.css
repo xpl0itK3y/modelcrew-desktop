@@ -2,28 +2,36 @@
 
 /* Диалог разделён на две колонки: слева навигация с поиском, справа — страница
    раздела. Высота фиксирована, прокручивается только правая колонка: так
-   переключение разделов не дёргает окно и не меняет положение навигации. */
+   переключение разделов не дёргает окно и не меняет положение навигации.
+
+   Само окно — та же оснастка, что и в главном окне: светлая плоскость, на
+   которой лежат карточки. Раньше колонки делила вертикальная линия во всю
+   высоту, и настройки выглядели старше остального приложения на целую эпоху. */
 .settings-dialog {
   position: relative;
   display: flex;
+  gap: var(--mc-gap);
   box-sizing: border-box;
   width: min(980px, calc(100vw - 48px));
   height: min(680px, calc(100vh - 48px));
   min-width: 0;
-  padding: 0;
+  padding: var(--mc-gap);
   border-radius: var(--mc-radius);
+  background: var(--mc-sidebar);
   overflow: hidden;
 }
 
+/* Навигация — карточка на этой плоскости, как рейка проектов в главном окне. */
 .settings-nav {
   display: flex;
   box-sizing: border-box;
-  width: 252px;
+  width: 244px;
   flex: none;
   flex-direction: column;
-  padding: 18px 14px 14px;
-  border-right: 1px solid var(--mc-border);
-  background: var(--mc-sidebar);
+  padding: 12px 10px 10px;
+  border: 1px solid var(--mc-card-edge);
+  border-radius: var(--mc-radius);
+  background: var(--mc-panel);
 }
 
 .settings-search {
@@ -152,10 +160,11 @@
   padding-top: 8px;
 }
 
+/* Линия внутри карточки, а не между карточками: ей достаточно быть тише. */
 .settings-nav-footer {
   margin-top: 12px;
   padding: 10px 10px 0;
-  border-top: 1px solid var(--mc-border);
+  border-top: 1px solid var(--mc-panel-border);
   color: var(--mc-text-faint);
   font-size: 10.5px;
   text-align: center;
@@ -163,20 +172,22 @@
 }
 
 /* Кнопка висит над прокручиваемой колонкой, поэтому у неё свой фон: иначе
-   уезжающий вверх текст просвечивал бы сквозь неё. */
+   уезжающий вверх текст просвечивал бы сквозь неё. Фон — цвет плоскости,
+   по которой она и ездит. */
 .settings-close {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: calc(var(--mc-gap) + 6px);
+  right: calc(var(--mc-gap) + 6px);
   z-index: 2;
-  background: var(--mc-surface-raised);
+  background: var(--mc-sidebar);
 }
 
+/* Правая колонка — сама плоскость: карточки в ней собирает уже страница. */
 .settings-content {
   box-sizing: border-box;
   flex: 1;
   min-width: 0;
-  padding: 30px 40px 40px;
+  padding: 20px 26px 26px 18px;
   overflow-y: auto;
   scrollbar-color: var(--mc-scrollbar) transparent;
   scrollbar-width: thin;
@@ -201,8 +212,11 @@
   }
 }
 
+/* Справа оставлено место под кнопку закрытия: она висит над этой же колонкой,
+   и длинное название раздела заезжало бы под неё. */
 .settings-page-title {
   margin: 0 0 6px;
+  padding-right: 40px;
   color: var(--mc-text-bright);
   font-size: 19px;
   font-weight: 600;
@@ -217,10 +231,23 @@
   line-height: 1.55;
 }
 
+/* Настройки раздела — одна карточка, а не список строк, разделённых линиями во
+   всю ширину колонки. Линии остались, но теперь они внутренние: карточка
+   говорит «это один раздел», линии — «а это разные настройки в нём».
+   Пустой (всё скрыл поиск) карточка не рисуется: рамка вокруг пустоты
+   выглядела бы поломкой. */
 .settings-rows {
   display: flex;
   flex-direction: column;
-  margin-top: 10px;
+  margin-top: 16px;
+  padding: 0 16px;
+  border: 1px solid var(--mc-card-edge);
+  border-radius: var(--mc-radius);
+  background: var(--mc-panel);
+}
+
+.settings-rows:empty {
+  display: none;
 }
 
 /* Строка настройки: слева название с пояснением, справа сам переключатель —
@@ -230,8 +257,8 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px 28px;
-  padding: 17px 0;
-  border-bottom: 1px solid var(--mc-border);
+  padding: 16px 0;
+  border-bottom: 1px solid var(--mc-panel-border);
 }
 
 .settings-row:last-child {
@@ -572,7 +599,7 @@
   width: 17px;
   height: 17px;
   appearance: none;
-  border: 3px solid var(--mc-surface-raised);
+  border: 3px solid var(--mc-panel);
   border-radius: 50%;
   background: var(--mc-accent);
   box-shadow: 0 0 0 1px var(--mc-accent-border), 0 2px 7px var(--mc-shadow);
@@ -582,7 +609,7 @@
 .notification-volume-slider::-moz-range-thumb {
   width: 11px;
   height: 11px;
-  border: 3px solid var(--mc-surface-raised);
+  border: 3px solid var(--mc-panel);
   border-radius: 50%;
   background: var(--mc-accent);
   box-shadow: 0 0 0 1px var(--mc-accent-border), 0 2px 7px var(--mc-shadow);
@@ -622,9 +649,9 @@
   gap: 10px;
   min-width: 0;
   padding: 8px;
-  border: 1px solid var(--mc-border);
+  border: 1px solid var(--mc-card-edge);
   border-radius: var(--mc-radius-sm);
-  background: var(--mc-button);
+  background: var(--mc-surface-raised);
   color: var(--mc-text);
   text-align: left;
   cursor: pointer;
@@ -633,7 +660,7 @@
 }
 
 .theme-card:hover {
-  background: var(--mc-button-hover);
+  background: var(--mc-surface-active);
   transform: translateY(-1px);
 }
 
@@ -751,7 +778,7 @@
 
 .accent-swatch.is-selected {
   border-color: var(--mc-selection-ring);
-  box-shadow: 0 0 0 2px var(--mc-surface-raised), 0 0 10px var(--mc-accent-glow);
+  box-shadow: 0 0 0 2px var(--mc-panel), 0 0 10px var(--mc-accent-glow);
 }
 
 .accent-swatch:focus-visible {
@@ -781,12 +808,15 @@
 
 @media (max-width: 880px) {
   .settings-nav {
-    width: 208px;
+    width: 204px;
   }
 
-  /* Справа остаётся место под кнопку закрытия — она висит над этой колонкой. */
   .settings-content {
-    padding: 28px 46px 32px 24px;
+    padding: 18px 16px 18px 12px;
+  }
+
+  .settings-rows {
+    padding: 0 13px;
   }
 }
 
