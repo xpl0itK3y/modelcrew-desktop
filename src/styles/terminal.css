@@ -2,9 +2,11 @@
 
 .dockview-theme-modelcrew {
   --dv-group-view-background-color: var(--mc-panel);
-  --dv-tabs-and-actions-container-background-color: var(--mc-panel-header);
-  --dv-tabs-and-actions-container-height: 34px;
-  --dv-tabs-and-actions-container-font-size: 12px;
+  /* Шапка того же цвета, что и терминал под ней: карточка — одна плоскость, а
+     не полка со стоящим на ней окном. Отделяет их волосок, а не смена фона. */
+  --dv-tabs-and-actions-container-background-color: var(--mc-panel);
+  --dv-tabs-and-actions-container-height: 30px;
+  --dv-tabs-and-actions-container-font-size: 12.5px;
   --dv-activegroup-visiblepanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
@@ -31,7 +33,11 @@
      вплотную, оно оставляло бы просвет фона на каждом стыке. */
   border-radius: var(--mc-radius);
   overflow: hidden;
-  border: 1px solid var(--mc-panel-border);
+  /* Край карточки рисуется заметной линией, а не той же, что делит шапку и
+     терминал внутри неё. Пока обе были одним цветом, панель держалась на
+     разнице заливок; теперь заливка у карточки и у поля вокруг общая, и всю
+     работу «где кончается панель» делает эта рамка. */
+  border: 1px solid var(--mc-card-edge);
   box-sizing: border-box;
   transition:
     border-color 120ms ease,
@@ -92,10 +98,26 @@
 .terminal-tab {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   height: 100%;
-  padding: 0 12px;
-  max-width: 220px;
+  padding: 0 8px 0 10px;
+  max-width: 240px;
+}
+
+/* Значок между точкой и именем: чем занята панель — агентом или оболочкой.
+   Точка рядом говорит про жизнь процесса, значок — про его род, и цвет он
+   берёт у имени: у выбранной панели разгорается вместе с ним. */
+.tab-glyph {
+  display: inline-flex;
+  flex: none;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.tab-glyph svg {
+  display: block;
+  width: 13px;
+  height: 13px;
 }
 
 .tab-dot {
@@ -163,8 +185,12 @@
   }
 }
 
+/* Имя панели набрано полужирным: в шапке без своего фона оно — единственное,
+   что держит верх карточки, и в обычном начертании расплывалось в ряду с
+   подписью справа и кнопками. */
 .tab-title {
   overflow: hidden;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -186,11 +212,24 @@
 .group-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   height: 100%;
   padding: 0 6px;
   opacity: 0.5;
   transition: opacity 120ms ease;
+}
+
+/* Кнопки ужаты под низкую шапку: в тридцати пикселях прежние двадцать восемь
+   упирались в оба края и подсветка при наведении читалась как полоса во всю
+   высоту карточки. */
+.group-actions .icon-button {
+  width: 22px;
+  height: 22px;
+}
+
+.group-actions .icon-button svg {
+  width: 13px;
+  height: 13px;
 }
 
 .dv-groupview:hover .group-actions,

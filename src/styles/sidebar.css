@@ -31,7 +31,10 @@
   flex: none;
   margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
   padding: 4px 6px;
-  border: 1px solid var(--mc-panel-border);
+  /* Тот же край, что у панелей: рейка, дерево проекта и терминалы — карточки
+     одного рода, и обводить их разными линиями значило бы сказать, что они
+     разного. */
+  border: 1px solid var(--mc-card-edge);
   border-radius: var(--mc-radius);
   background: var(--mc-sidebar);
   transform: translateX(0);

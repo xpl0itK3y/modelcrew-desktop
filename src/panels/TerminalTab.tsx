@@ -11,6 +11,8 @@ import {
   subscribeAgentAttention,
 } from "../terminal/attentionStore";
 import { getPanelClaims, subscribePanelClaims } from "../crew/claimStore";
+import { getAgentRecord } from "../agents";
+import { AgentIcon, TerminalGlyphIcon } from "../ui/Icons";
 import { useI18n } from "../i18n";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
@@ -102,6 +104,12 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       ? t("terminal.statusRunning")
       : t("terminal.statusExited");
 
+  // Значок рода панели: агент или обычная оболочка. Читается прямо в отрисовке,
+  // без своего состояния: запись об агенте заводит watcher заголовков, а он же
+  // меняет и заголовок — то есть к каждой её смене вкладка и так перерисуется.
+  // Значок молчит для читающих вслух: что за агент, уже сказано именем панели.
+  const hasAgent = getAgentRecord(props.api.id) !== null;
+
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
       <span
@@ -110,6 +118,12 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
         title={dotLabel}
         aria-label={dotLabel}
       />
+      <span
+        className={`tab-glyph ${hasAgent ? "is-agent" : "is-shell"}`}
+        aria-hidden="true"
+      >
+        {hasAgent ? <AgentIcon /> : <TerminalGlyphIcon />}
+      </span>
       {editing ? (
         <input
           ref={inputRef}

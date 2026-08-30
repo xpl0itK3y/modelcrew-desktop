@@ -135,6 +135,30 @@ describe("terminal tab claim state", () => {
   });
 });
 
+describe("what the tab glyph says about the panel", () => {
+  it("tells a panel with an agent from a bare shell", () => {
+    const agent = render(<TerminalTab {...headerProps(panel("glyph-agent"))} />);
+    // Панель без записи об агенте: watcher видел там только оболочку.
+    used.push("glyph-shell");
+    const shell = render(<TerminalTab {...headerProps("glyph-shell")} />);
+
+    expect(agent.container.querySelector(".tab-glyph")).toHaveClass("is-agent");
+    expect(shell.container.querySelector(".tab-glyph")).toHaveClass("is-shell");
+  });
+
+  it("keeps the glyph out of the reading order", () => {
+    const { container } = render(
+      <TerminalTab {...headerProps(panel("glyph-silent"))} />,
+    );
+
+    // Что за агент, уже сказано именем панели рядом; второй раз — лишнее.
+    expect(container.querySelector(".tab-glyph")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  });
+});
+
 describe("terminal tab attention dot", () => {
   it("marks the panel the notification came from", async () => {
     const id = panel("marks-panel");
