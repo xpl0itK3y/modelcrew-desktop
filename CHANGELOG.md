@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.0.20
+
+### Русский
+
+Панели опущены до тона окна и обведены краем, каталог агентов сокращён до четырёх проверенных, а их экраны читаются и на светлых темах.
+
+- Тёмные темы держат две ступени вместо трёх: внизу окно вместе с панелями, на ступень выше оснастка, а границу держит край карточки
+- Панель обведена краем, а не выделена заливкой; поле под сеткой одно, без светлой полосы по кайме
+- Колонка редактора стала такой же карточкой, как её соседи, а разделитель перестал закрашивать поле между ними
+- Окно настроек собрано заново из карточек: навигация и группы настроек лежат на плоскости так же, как панели в сетке
+- На вкладке агента стоит марка его компании: Claude, OpenAI, GitHub Copilot, OpenCode
+- В каталоге остались четыре агента, чей канал уведомлений, захват файла и привязка сессии проверены на живом прогоне: Claude Code, Codex, GitHub Copilot, OpenCode
+- Панель с Aider стала обычным терминалом: адресуемых сессий у него нет, и половина того, что обещает каталог, к нему не относилась
+- Экраны агентов остаются читаемыми на светлых темах: терминал поднимает цвет буквы, если она не набирает контраста к фону, на котором лежит
+- Терминалы больше не вытаскиваются из сетки поверх окна, а вытащенные раньше возвращаются на место при восстановлении раскладки
+- Открытый диалог больше не пропускает сквозь себя перетаскивание и горячие клавиши сетки
+- README рассказывает, что такое ModelCrew сейчас, а схемы работы агентов стали анимациями, которые показываются прямо на GitHub
+
+### English
+
+The panels drop to the tone of the window and are outlined instead of filled, the agent catalog is down to the four we finished, and their screens stay readable on the light themes.
+
+- The dark themes hold two steps instead of three: the window and its panels at the bottom, the chrome one step above, and the card edge doing the separating
+- A panel is outlined rather than shaded, and one field runs under the whole grid instead of a lighter band along its rim
+- The editor column became a card like its neighbours, and the divider stopped painting the gap between them
+- The settings window is rebuilt out of cards: its navigation and its groups sit on the plane the way panels sit in the grid
+- Every agent tab carries its company's own mark: Claude, OpenAI, GitHub Copilot, OpenCode
+- The catalog keeps the four agents whose notification channel, file claim and per-panel session binding were verified against a live run: Claude Code, Codex, GitHub Copilot, OpenCode
+- A panel running Aider is an ordinary terminal now: it has no addressable sessions, and half of what the catalog promises never applied to it
+- Agent screens stay readable on the light themes: the terminal lifts a glyph's colour when it does not reach contrast against the background it sits on
+- Terminals can no longer be pulled out of the grid and float above the window, and ones pulled out earlier return to it when the layout is restored
+- An open dialog no longer passes drags and grid shortcuts through to what is behind it
+- The README says what ModelCrew is today, and the diagrams of how the agents run became animations that play on GitHub
+
 ## 0.0.19
 
 ### Русский

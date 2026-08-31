@@ -1,0 +1,25 @@
+{
+  "version": "0.0.20",
+  "ru": {
+    "title": "Две ступени тона и четыре проверенных агента",
+    "summary": "Панели опущены до тона окна и обведены краем, каталог агентов сокращён до четырёх проверенных, а их экраны читаются и на светлых темах.",
+    "highlights": [
+      "Панели и окно настроек — карточки с краем вместо заливки, опущенные до тона окна за ними",
+      "На вкладке агента стоит марка его компании: Claude, OpenAI, GitHub Copilot, OpenCode",
+      "В каталоге остались четыре агента, проверенных на живом прогоне; остальные CLI — обычные терминалы",
+      "Панели держатся в сетке, а открытый диалог больше не пропускает сквозь себя её ввод",
+      "Экраны агентов остаются читаемыми на светлых темах"
+    ]
+  },
+  "en": {
+    "title": "Two steps of tone, and four agents we stand behind",
+    "summary": "The panels drop to the tone of the window and are outlined instead of filled, the agent catalog is down to the four we finished, and their screens stay readable on the light themes.",
+    "highlights": [
+      "Panels and the settings window are cards with an edge instead of a fill, dropped to the tone of the window",
+      "Every agent tab carries its company's own mark: Claude, OpenAI, GitHub Copilot, OpenCode",
+      "The catalog keeps the four agents verified against a live run; other CLIs run as ordinary terminals",
+      "Panels stay inside the grid, and an open dialog no longer passes input through to it",
+      "Agent screens stay readable on the light themes"
+    ]
+  }
+}
