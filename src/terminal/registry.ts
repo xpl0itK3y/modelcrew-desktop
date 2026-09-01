@@ -35,6 +35,8 @@ import {
 import { setPanelTailResolver } from "./alertDelivery";
 import { clearAgentAttention } from "./attentionStore";
 import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
+import { loadHookChannels, noteHookChannel } from "./hookChannel";
+import { forgetAlertThrottle } from "./alertPolicy";
 import { isMouseReport } from "./terminalInput";
 import {
   forgetAutoTitle,
@@ -165,6 +167,10 @@ if (isTauri) {
       // Drag-and-drop не должен мешать запуску терминалов, если API недоступен.
     });
 
+  // Кто из агентов рассказывает о себе сам: их панелям догадки по выводу не
+  // нужны и только дублировали бы точный сигнал.
+  void loadHookChannels();
+
   // Агент сообщил о себе сам — через свой хук. Это точный сигнал: и тип
   // события, и текст пришли от него, а не выужены из вывода.
   void listen<AgentHookEvent>("agent-event", (event) => {
@@ -177,9 +183,13 @@ if (isTauri) {
     // его вызвал: форк или обёртка читает чужие настройки и подписался бы
     // чужим именем. Панель знает своего агента по foreground-процессу — на
     // него и полагаемся, пока он известен.
+    const agentId = getAgentRecord(entry.id)?.agentId ?? event.payload.agent;
+    // Канал доказан делом — на случай, если хук встал уже после старта
+    // приложения и в загруженный список попасть не успел.
+    noteHookChannel(agentId);
     void raiseAgentHookAlert(
       entry.id,
-      getAgentRecord(entry.id)?.agentId ?? event.payload.agent,
+      agentId,
       alert.kind,
       {
         visible: isPanelOnScreen(entry.container),
@@ -209,6 +219,7 @@ if (typeof window !== "undefined") {
     for (const entry of registry.values()) {
       if (isPanelOnScreen(entry.container) && entry.container.contains(active)) {
         clearAgentAttention(entry.id);
+        forgetAlertThrottle(entry.id);
       }
     }
   });
@@ -335,7 +346,13 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   // такому фокусу значит терять её от одного движения мыши мимо панели.
   container.addEventListener(
     "pointerdown",
-    () => clearAgentAttention(entry.id),
+    () => {
+      // Реакция пользователя всюду значит одно: разговор окончен. Снимаем
+      // вместе с отметкой и окно тишины, иначе следующий сигнал этой панели
+      // ещё пятнадцать секунд оставался бы заглушённым как менее важный.
+      clearAgentAttention(entry.id);
+      forgetAlertThrottle(entry.id);
+    },
     true,
   );
   registry.set(id, entry);
@@ -751,6 +768,7 @@ export async function destroyTerminal(id: string): Promise<void> {
   discardSnapshot(id);
   discardAgentRecord(id);
   clearAgentAttention(id);
+  forgetAlertThrottle(id);
   entry.outputGeneration += 1;
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);

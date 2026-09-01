@@ -526,6 +526,18 @@ fn workspace_unregister_root(
     state.unbind(&workspace_id)
 }
 
+// Агенты, чей хук-канал уведомлений подключён. Фронтенд по этому списку
+// молчит догадками для их панелей: агент сообщает о себе сам, а две версии
+// одного события — это два баннера подряд про одно и то же.
+#[tauri::command]
+fn agent_hook_channels(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> CommandResult<Vec<String>> {
+    ensure_main_window(&window)?;
+    Ok(agent_hooks::notification_channels(&app))
+}
+
 // Бейдж непрочитанного на иконке приложения: счётчик в Dock (macOS) и на
 // иконках доков Linux (KDE, GNOME с доком, Cinnamon, Unity); на Windows
 // числовых бейджей нет — красная точка поверх иконки в панели задач.
@@ -967,6 +979,7 @@ pub fn run() {
             terminal_snapshots_prune,
             terminal_clipboard_image_save,
             agent_session_locate,
+            agent_hook_channels,
             crew_claims,
             panel_snapshots,
             panel_snapshot_restore,
@@ -1086,6 +1099,7 @@ mod tests {
     // Полный список команд, доступных веб-вью. Снимок, а не вычисление:
     // добавление команды обязано быть отдельной осознанной правкой теста.
     const EXPECTED_COMMANDS: &[&str] = &[
+        "agent_hook_channels",
         "agent_session_locate",
         "app_set_badge",
         "app_set_locale",

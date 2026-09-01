@@ -15,6 +15,7 @@ import {
   type TerminalAttentionNotification,
 } from "./attentionScanner";
 import {
+  forgetAlertThrottle,
   isPanelInUse,
   recordDeliveredAlert,
   selectMostImportantNotification,
@@ -23,7 +24,12 @@ import {
   type AgentAlertKind,
 } from "./alertPolicy";
 import { announceAgentAlert } from "./alertDelivery";
-import { clearAgentAttention, markAgentPanelWaiting } from "./attentionStore";
+import {
+  clearAgentAttention,
+  isAgentPanelWaiting,
+  markAgentPanelWaiting,
+} from "./attentionStore";
+import { hasHookChannel } from "./hookChannel";
 
 // ---------- Учёт вывода панели ----------
 
@@ -31,6 +37,14 @@ import { clearAgentAttention, markAgentPanelWaiting } from "./attentionStore";
 export const AGENT_IDLE_MIN_BYTES = 1_200;
 // Тишина после активности, означающая «закончил или ждёт».
 export const AGENT_IDLE_QUIET_MS = 6_000;
+// Сколько догадка по тишине ждёт хук, когда он у агента есть.
+//
+// Отменять её совсем нельзя: хук установлен — не значит сработал. Его могли
+// отключить в отдельном проекте, CLI мог оказаться форком, читающим другой
+// конфиг, — и панель замолчала бы навсегда. Поэтому догадка не отменяется, а
+// отступает: успел хук за это время (ему хватает долей секунды) — окно тишины
+// погасит её как менее важную, не успел — она позовёт сама.
+export const AGENT_HOOK_IDLE_GRACE_MS = 30_000;
 // Первые секунды после запуска панели не сигналят: восстановленный TUI
 // агента штатно рисует экран и замолкает.
 export const SPAWN_ALERT_MUTE_MS = 25_000;
@@ -138,10 +152,28 @@ export function trackAgentOutput(
     tracker.quietTimer = undefined;
     const worked = tracker.activityBytes >= AGENT_IDLE_MIN_BYTES;
     tracker.activityBytes = 0;
-    if (worked) {
-      void raiseAgentAlert(terminalId, "idle", getContext());
+    if (!worked) {
+      return;
     }
+    // Панель молчащего агента — это чаще всего долгий инструмент, а не
+    // законченная работа. У кого есть хук, тот сейчас и скажет, что произошло
+    // на самом деле; отступаем и даём ему сказать первым.
+    if (panelHasHookChannel(terminalId)) {
+      tracker.quietTimer = window.setTimeout(() => {
+        tracker.quietTimer = undefined;
+        void raiseAgentAlert(terminalId, "idle", getContext());
+      }, AGENT_HOOK_IDLE_GRACE_MS);
+      return;
+    }
+    void raiseAgentAlert(terminalId, "idle", getContext());
   }, AGENT_IDLE_QUIET_MS);
+}
+
+// Рассказывает ли агент этой панели о себе сам. Спрашиваем в момент сигнала, а
+// не на каждый чанк вывода: за записью панели стоит чтение хранилища.
+function panelHasHookChannel(terminalId: string): boolean {
+  const agentId = getAgentRecord(terminalId)?.agentId;
+  return agentId !== undefined && hasHookChannel(agentId);
 }
 
 // Пользователь напечатал в панель: с этого момента её сигналы имеют смысл.
@@ -160,6 +192,9 @@ export function acknowledgeAgentPanel(
   terminalId: string,
 ): void {
   clearAgentAttention(terminalId);
+  // Вместе с отметкой снимаем и окно тишины: разговор закончен, и следующий
+  // сигнал этой панели должен звучать, даже если он спокойнее предыдущего.
+  forgetAlertThrottle(terminalId);
   tracker.activityBytes = 0;
   if (tracker.quietTimer !== undefined) {
     window.clearTimeout(tracker.quietTimer);
@@ -185,6 +220,14 @@ export async function raiseAgentAlert(
   const record = getAgentRecord(terminalId);
   if (!record) {
     return; // в панели не агент — обычные команды не сигналят
+  }
+  // Звонок у агента с хуком не добавляет ничего: хук назовёт то же событие и
+  // назовёт точно. А звучал звонок первым — и следом хук законно пробивал окно
+  // тишины как более важный, отчего на одно событие приходило два баннера.
+  // Молчащий хук эту панель не потеряет: догадка по тишине не отменена, она
+  // лишь отступает на AGENT_HOOK_IDLE_GRACE_MS.
+  if (kind === "bell" && hasHookChannel(record.agentId)) {
+    return;
   }
   return deliverAgentAlert(
     terminalId,
@@ -233,6 +276,11 @@ async function deliverAgentAlert(
     return;
   }
 
+  // Ждала ли панель до этого сигнала. Спрашиваем раньше пометки: окно тишины
+  // держится именно на неотвеченном сигнале, а пометку мы сейчас поставим сами
+  // и ответ на свой же вопрос получили бы всегда утвердительный.
+  const wasWaiting = isAgentPanelWaiting(terminalId);
+
   // Отметку ставим до окна тишины: мигающая точка в шапке и счётчик на
   // колокольчике не мешают работе и гаснут не по таймеру, а когда панель
   // выберут. Окно тишины — только про баннеры.
@@ -242,7 +290,7 @@ async function deliverAgentAlert(
   // пока мы спрашивали про фокус, сигнал той же панели мог дойти до конца, и
   // на одно событие пришло бы два баннера.
   const now = Date.now();
-  if (shouldThrottleAlert(terminalId, kind, now)) {
+  if (shouldThrottleAlert(terminalId, kind, now, wasWaiting)) {
     return;
   }
   recordDeliveredAlert(terminalId, kind, now);

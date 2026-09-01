@@ -128,16 +128,34 @@ const lastAlert = new Map<string, DeliveredAlert>();
 // Внутри окна тишины пропускаем только то, что требовательнее уже показанного:
 // иначе запрос разрешения, пришедший через секунду после «закончил», пропал бы
 // молча, и пользователь ушёл бы от вставшего агента.
+//
+// Пока панель ждёт ответа, окно не истекает вовсе. Агент, которому не ответили,
+// переспрашивает сам: Claude Code повторяет неотвеченный запрос разрешения
+// каждые полминуты, и по баннеру на повтор — это тот же дубль, только растянутый
+// во времени. Напоминание у пользователя уже перед глазами: точка в шапке панели
+// и счётчик на колокольчике горят, пока он не ответит. А вот сигнал важнее
+// показанного проходит и здесь — работа встала, об этом надо сказать.
 export function shouldThrottleAlert(
   terminalId: string,
   kind: AgentAlertKind,
   now: number,
+  panelWaiting = false,
 ): boolean {
   const previous = lastAlert.get(terminalId);
-  if (!previous || now - previous.at >= MIN_ALERT_GAP_MS) {
+  if (!previous) {
+    return false;
+  }
+  if (!panelWaiting && now - previous.at >= MIN_ALERT_GAP_MS) {
     return false;
   }
   return ALERT_PRIORITY[kind] <= previous.priority;
+}
+
+// Пользователь ответил панели или она закрылась — разговор окончен. Следующий
+// её сигнал начинает счёт заново, даже если он спокойнее предыдущего; заодно
+// запись не копится по закрытым панелям.
+export function forgetAlertThrottle(terminalId: string): void {
+  lastAlert.delete(terminalId);
 }
 
 // Окно занимает только дошедший до пользователя сигнал: смолчавший — из-за
