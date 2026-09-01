@@ -126,7 +126,16 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 // закрытия самой панели и служит запасным ответом на вопрос «какой диалог
 // продолжать», когда свежей привязки нет.
 
-type RememberedSession = { agentId: string; sessionId: string };
+type RememberedSession = {
+  agentId: string;
+  sessionId: string;
+  // Проект, в котором живёт диалог. Нужен, чтобы «продолжить последний чат»
+  // отменялось только из-за соседа по той же папке: чужая папка чужому чату
+  // не конкурент. Записи прежних версий папку не помнят — такую сессию
+  // считаем соседской, потому что лишний список диалогов безобиднее, чем две
+  // панели в одном чате.
+  workspaceId?: string;
+};
 
 function loadSessions(): Record<string, RememberedSession> {
   try {
@@ -153,6 +162,9 @@ function loadSessions(): Record<string, RememberedSession> {
         sessions[id] = {
           agentId: candidate.agentId,
           sessionId: candidate.sessionId,
+          ...(typeof candidate.workspaceId === "string"
+            ? { workspaceId: candidate.workspaceId }
+            : {}),
         };
       }
     }
@@ -184,6 +196,31 @@ export function rememberedSessionId(
   return boundAgentSessionIds(agentId, terminalId).includes(stored.sessionId)
     ? undefined
     : stored.sessionId;
+}
+
+// «Продолжить последний диалог» — единственная команда возобновления, которой
+// нельзя сказать «кроме этих». Она открывает самый свежий чат папки, а он
+// запросто принадлежит соседней панели, которая возобновится по точному id:
+// так две панели и оказываются в одном разговоре. Поэтому предлагаем её,
+// только когда в этой папке нет другой панели с известным чатом того же
+// агента, — иначе безопаснее показать список.
+export function agentChatClaimedNearby(
+  agentId: string,
+  exceptTerminalId: string,
+  workspaceId: string,
+): boolean {
+  for (const [terminalId, session] of Object.entries(loadSessions())) {
+    if (terminalId === exceptTerminalId || session.agentId !== agentId) {
+      continue;
+    }
+    if (
+      session.workspaceId === undefined ||
+      session.workspaceId === workspaceId
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 
@@ -413,6 +450,7 @@ export function getAgentRecord(terminalId: string): AgentRecord | null {
 export function bindAgentSession(
   terminalId: string,
   sessionId: string,
+  workspaceId?: string,
 ): boolean {
   if (!SESSION_ID_PATTERN.test(sessionId)) {
     return false;
@@ -423,6 +461,13 @@ export function bindAgentSession(
     return false;
   }
   if (record.sessionId === sessionId) {
+    // Привязка уже есть, но папку могла не знать та версия, что её ставила.
+    const sessions = loadSessions();
+    const known = sessions[terminalId];
+    if (workspaceId && known?.workspaceId === undefined) {
+      sessions[terminalId] = { ...known, agentId: record.agentId, sessionId, workspaceId };
+      saveSessions(sessions);
+    }
     return true;
   }
   // Локаторы панелей бегут параллельно: пока эта панель ждала ответа, другая
@@ -436,7 +481,13 @@ export function bindAgentSession(
   records[terminalId] = { ...record, sessionId };
   saveRecords(records);
   const sessions = loadSessions();
-  sessions[terminalId] = { agentId: record.agentId, sessionId };
+  sessions[terminalId] = {
+    agentId: record.agentId,
+    sessionId,
+    // Папку знает только тот, кто заводил привязку. Без неё сессия сойдёт за
+    // соседскую — осторожная сторона этой развилки.
+    ...(workspaceId ? { workspaceId } : {}),
+  };
   saveSessions(sessions);
   return true;
 }
@@ -507,11 +558,17 @@ const LOCATE_ATTEMPT_DELAYS_MS = [1_500, 6_000, 20_000];
 
 const pendingBindings = new Set<string>();
 
-// Папка проекта панели: нужна, чтобы повторить поиск сессии позже, когда
-// пользователь наконец напишет агенту.
-const bindingRoots = new Map<string, string>();
+// Проект панели: папка нужна, чтобы повторить поиск сессии позже, когда
+// пользователь наконец напишет агенту, а id рабочего пространства — чтобы
+// найденный чат запомнился вместе с местом, где он живёт.
+type BindingRoot = { cwd: string; workspaceId: string };
 
-async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
+const bindingRoots = new Map<string, BindingRoot>();
+
+async function locateOnce(
+  terminalId: string,
+  root: BindingRoot,
+): Promise<boolean> {
   const record = getAgentRecord(terminalId);
   if (!record || record.sessionId) {
     return true; // привязка не нужна или уже есть
@@ -523,11 +580,11 @@ async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
   try {
     const found = await invoke<string | null>("agent_session_locate", {
       agent: record.agentId,
-      cwd,
+      cwd: root.cwd,
       sinceEpochMs: Math.max(0, Math.round(record.detectedAt)),
       exclude: boundAgentSessionIds(record.agentId, terminalId),
     });
-    if (found && bindAgentSession(terminalId, found)) {
+    if (found && bindAgentSession(terminalId, found, root.workspaceId)) {
       return true;
     }
   } catch {
@@ -536,15 +593,15 @@ async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
   return false;
 }
 
-function startBinding(terminalId: string, cwd: string): void {
+function startBinding(terminalId: string, root: BindingRoot): void {
   if (!isTauri || pendingBindings.has(terminalId)) {
     return;
   }
   pendingBindings.add(terminalId);
-  bindingRoots.set(terminalId, cwd);
+  bindingRoots.set(terminalId, root);
   let attempt = 0;
   const tryLocate = () => {
-    void locateOnce(terminalId, cwd).then((done) => {
+    void locateOnce(terminalId, root).then((done) => {
       attempt += 1;
       if (done || attempt >= LOCATE_ATTEMPT_DELAYS_MS.length) {
         pendingBindings.delete(terminalId);
@@ -560,8 +617,9 @@ function startBinding(terminalId: string, cwd: string): void {
 export function scheduleAgentSessionBinding(
   terminalId: string,
   cwd: string,
+  workspaceId: string,
 ): void {
-  startBinding(terminalId, cwd);
+  startBinding(terminalId, { cwd, workspaceId });
 }
 
 // Пользователь написал в панель с агентом. Файл сессии агент создаёт с первым
@@ -580,8 +638,8 @@ export function retryAgentSessionBinding(terminalId: string): void {
   if (!record || record.sessionId) {
     return;
   }
-  const cwd = bindingRoots.get(terminalId);
-  if (cwd) {
-    startBinding(terminalId, cwd);
+  const root = bindingRoots.get(terminalId);
+  if (root) {
+    startBinding(terminalId, root);
   }
 }

@@ -126,8 +126,12 @@ export function useDockviewSetup({
               const folder = workspacesRef.current.list.find(
                 (workspace) => workspace.id === workspaceId,
               )?.folder?.canonicalPath;
-              if (folder) {
-                scheduleAgentSessionBinding(titleEvent.payload.id, folder);
+              if (folder && workspaceId) {
+                scheduleAgentSessionBinding(
+                  titleEvent.payload.id,
+                  folder,
+                  workspaceId,
+                );
               }
             }
             const panel = event.api.getPanel(titleEvent.payload.id);

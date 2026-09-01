@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AGENTS,
+  agentChatClaimedNearby,
   bindAgentSession,
   boundAgentSessionIds,
   buildAgentResume,
@@ -203,7 +204,7 @@ describe("agent catalog", () => {
     // запись потеряла id, хотя диалог остался за ней. Пока владение считали по
     // одним записям, чат становился ничьим.
     rememberAgentProcess("panel-1", "claude");
-    bindAgentSession("panel-1", "chat-of-panel-1");
+    bindAgentSession("panel-1", "chat-of-panel-1", "ws-1");
     rememberAgentProcess("panel-1", "zsh");
     expect(getAgentRecord("panel-1")).toBeNull();
 
@@ -213,9 +214,38 @@ describe("agent catalog", () => {
       "chat-of-panel-1",
     ]);
     // И привязать его к соседке нельзя даже напрямую.
-    expect(bindAgentSession("panel-2", "chat-of-panel-1")).toBe(false);
+    expect(bindAgentSession("panel-2", "chat-of-panel-1", "ws-1")).toBe(false);
     // А своя панель этот чат по-прежнему продолжает.
     expect(rememberedSessionId("panel-1", "claude")).toBe("chat-of-panel-1");
+  });
+
+  it("refuses the last chat when a neighbour in the folder owns one", () => {
+    rememberAgentProcess("panel-1", "claude");
+    bindAgentSession("panel-1", "chat-of-panel-1", "ws-1");
+
+    // Панель без своей привязки в той же папке: «продолжить последний» открыл
+    // бы самый свежий чат папки — тот самый, что займёт panel-1.
+    expect(agentChatClaimedNearby("claude", "panel-2", "ws-1")).toBe(true);
+    // В другой папке чужой чат не мешает: --continue там свой.
+    expect(agentChatClaimedNearby("claude", "panel-2", "ws-2")).toBe(false);
+    // Другой агент — другой список диалогов.
+    expect(agentChatClaimedNearby("codex", "panel-2", "ws-1")).toBe(false);
+    // Своя же привязка себе не соседка.
+    expect(agentChatClaimedNearby("claude", "panel-1", "ws-1")).toBe(false);
+  });
+
+  it("treats a session remembered without a folder as a neighbour", () => {
+    // Записи прежних версий папку не помнят. Ошибаемся в сторону списка
+    // диалогов: он хуже точного возобновления, но лучше двух панелей в одном
+    // разговоре.
+    localStorage.setItem(
+      "modelcrew.agentSessions",
+      JSON.stringify({
+        "panel-1": { agentId: "claude", sessionId: "chat-from-old-version" },
+      }),
+    );
+    expect(agentChatClaimedNearby("claude", "panel-2", "ws-1")).toBe(true);
+    expect(agentChatClaimedNearby("claude", "panel-2", "ws-9")).toBe(true);
   });
 
   it("strips duplicate remembered chats during pruning", () => {
@@ -298,7 +328,7 @@ describe("agent catalog", () => {
       rememberAgentProcess("panel-1", "claude");
       invokeMock.mockResolvedValue("located-session-id");
 
-      scheduleAgentSessionBinding("panel-1", "/tmp/proj");
+      scheduleAgentSessionBinding("panel-1", "/tmp/proj", "ws-1");
       await vi.advanceTimersByTimeAsync(2_000);
 
       expect(invokeMock).toHaveBeenCalledWith(
@@ -317,7 +347,7 @@ describe("agent catalog", () => {
       rememberAgentProcess("panel-1", "codex");
       invokeMock.mockResolvedValueOnce(null).mockResolvedValueOnce("late-id");
 
-      scheduleAgentSessionBinding("panel-1", "/tmp/proj");
+      scheduleAgentSessionBinding("panel-1", "/tmp/proj", "ws-1");
       await vi.advanceTimersByTimeAsync(2_000);
       expect(getAgentRecord("panel-1")!.sessionId).toBeUndefined();
       await vi.advanceTimersByTimeAsync(7_000);
@@ -336,7 +366,7 @@ describe("agent catalog", () => {
       // сообщения не было, файла сессии не существует, и все попытки после
       // запуска уходят впустую.
       invokeMock.mockResolvedValue(null);
-      scheduleAgentSessionBinding("panel-late", "/tmp/proj");
+      scheduleAgentSessionBinding("panel-late", "/tmp/proj", "ws-1");
       await vi.advanceTimersByTimeAsync(60_000);
       expect(getAgentRecord("panel-late")!.sessionId).toBeUndefined();
 

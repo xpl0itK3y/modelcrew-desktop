@@ -14,6 +14,7 @@ import {
   registerSnapshotSource,
 } from "./snapshots";
 import {
+  agentChatClaimedNearby,
   buildAgentResume,
   discardAgentRecord,
   getAgentRecord,
@@ -607,7 +608,15 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
     return;
   }
   const key = `${workspaceId}:${record.agentId}`;
-  const picker = resumedAgentKeys.has(key);
+  // Список диалогов вместо последнего чата нужен в двух случаях: панель этого
+  // агента в этой папке уже возобновлялась в этом запуске, либо чат в папке
+  // числится за другой панелью. Второе важнее: «продолжить последний» открывает
+  // самый свежий чат папки и не умеет никого исключать, поэтому именно так
+  // панель без своей привязки забирала разговор у соседки, которая шла по
+  // точному id.
+  const picker =
+    resumedAgentKeys.has(key) ||
+    agentChatClaimedNearby(record.agentId, entry.id, workspaceId);
   resumedAgentKeys.add(key);
   // Свежей привязки может не быть: агент успел выйти в оболочку до закрытия
   // приложения, и запись пересоздалась уже без id. Тогда берём последнюю
