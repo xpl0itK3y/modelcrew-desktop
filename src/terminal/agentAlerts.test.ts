@@ -678,6 +678,66 @@ describe("agents that report themselves through a hook", () => {
     expect(isAgentPanelWaiting("guess-panel")).toBe(false);
   });
 
+  it("keeps the deferred guess alive while the agent redraws its status line", async () => {
+    // Отсрочка жила в общем слоте таймера тишины, а его сбрасывает любой байт
+    // вывода. Агент с хуком, подрисовывающий проценты контекста раз в двадцать
+    // секунд, не звал вовсе: каждая подрисовка убивала отложенную догадку и
+    // заводила новый отсчёт, до порога «поработал» уже не доходивший.
+    noteHookChannel("claude", "completed");
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "redraw-panel");
+    trackAgentOutput(
+      tracker,
+      "redraw-panel",
+      "x".repeat(AGENT_IDLE_MIN_BYTES),
+      () => hidden,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 100);
+    await settle();
+
+    // Отсрочка идёт; агент подрисовывает строку состояния.
+    await vi.advanceTimersByTimeAsync(10_000);
+    trackAgentOutput(tracker, "redraw-panel", "ctx 42%", () => hidden);
+    await settle();
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(AGENT_HOOK_IDLE_GRACE_MS);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("redraw-panel")).toBe(true);
+  });
+
+  it("drops the deferred guess when the agent goes back to work", async () => {
+    // Непрерывный вывод все полминуты: таймер тишины до срабатывания так и не
+    // доживает, и отсрочка приходит к своему сроку у работающей панели. Звать
+    // не о чем — следующая пауза позовёт сама.
+    noteHookChannel("claude", "completed");
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "busy-panel");
+    trackAgentOutput(
+      tracker,
+      "busy-panel",
+      "x".repeat(AGENT_IDLE_MIN_BYTES),
+      () => hidden,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 100);
+    await settle();
+
+    for (let tick = 0; tick < 8; tick += 1) {
+      await vi.advanceTimersByTimeAsync(4_000);
+      trackAgentOutput(
+        tracker,
+        "busy-panel",
+        "y".repeat(AGENT_IDLE_MIN_BYTES),
+        () => hidden,
+      );
+    }
+    await settle();
+
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+  });
+
   it("still calls out a panel whose hook never spoke", async () => {
     // Хук установлен — не значит сработал: его могли отключить в отдельном
     // проекте. Догадка отступает, но не исчезает, иначе панель замолчала бы

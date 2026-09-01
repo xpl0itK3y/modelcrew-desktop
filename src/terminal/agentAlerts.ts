@@ -55,6 +55,11 @@ export type AgentAlertTracker = {
   scanState: AttentionScanState;
   activityBytes: number;
   quietTimer: number | undefined;
+  // Отсрочка догадки в пользу хука. Отдельно от quietTimer: тот сбрасывается
+  // любым выводом, а отступаем мы как раз от панели, которая продолжает
+  // подрисовывать строку состояния. В общем слоте отсрочка не доживала до
+  // своего срока — её убивал первый же чанк, и панель не звала вовсе.
+  hookGraceTimer: number | undefined;
   muteUntil: number;
   // До какого момента ждём перерисовку на наш же ресайз.
   redrawUntil: number;
@@ -68,6 +73,7 @@ export function createAgentAlertTracker(): AgentAlertTracker {
     scanState: createAttentionScanState(),
     activityBytes: 0,
     quietTimer: undefined,
+    hookGraceTimer: undefined,
     muteUntil: 0,
     redrawUntil: 0,
     engaged: false,
@@ -159,8 +165,15 @@ export function trackAgentOutput(
     // законченная работа. У кого есть хук, тот сейчас и скажет, что произошло
     // на самом деле; отступаем и даём ему сказать первым.
     if (panelHasHookChannel(terminalId)) {
-      tracker.quietTimer = window.setTimeout(() => {
-        tracker.quietTimer = undefined;
+      clearHookGrace(tracker);
+      tracker.hookGraceTimer = window.setTimeout(() => {
+        tracker.hookGraceTimer = undefined;
+        // Пока мы отступали, агент мог снова взяться за работу — тогда звать
+        // не о чем, следующая пауза позовёт сама. Подрисовка строки состояния
+        // работой не считается: ради неё отсрочка и живёт отдельно.
+        if (tracker.activityBytes >= AGENT_IDLE_MIN_BYTES) {
+          return;
+        }
         void raiseAgentAlert(terminalId, "idle", getContext());
       }, AGENT_HOOK_IDLE_GRACE_MS);
       return;
@@ -186,7 +199,14 @@ export function markAgentPanelEngaged(
   acknowledgeAgentPanel(tracker, terminalId);
 }
 
-// Пользователь ответил панели: сигнал снят, накопление и таймер — заново.
+function clearHookGrace(tracker: AgentAlertTracker): void {
+  if (tracker.hookGraceTimer !== undefined) {
+    window.clearTimeout(tracker.hookGraceTimer);
+    tracker.hookGraceTimer = undefined;
+  }
+}
+
+// Пользователь ответил панели: сигнал снят, накопление и таймеры — заново.
 export function acknowledgeAgentPanel(
   tracker: AgentAlertTracker,
   terminalId: string,
@@ -200,6 +220,9 @@ export function acknowledgeAgentPanel(
     window.clearTimeout(tracker.quietTimer);
     tracker.quietTimer = undefined;
   }
+  // И отложенную догадку тоже: пользователь уже здесь, а она сработала бы
+  // через полминуты после того, как он с панелью разобрался.
+  clearHookGrace(tracker);
 }
 
 export function disposeAgentAlertTracker(tracker: AgentAlertTracker): void {
@@ -207,6 +230,7 @@ export function disposeAgentAlertTracker(tracker: AgentAlertTracker): void {
     window.clearTimeout(tracker.quietTimer);
     tracker.quietTimer = undefined;
   }
+  clearHookGrace(tracker);
 }
 
 // ---------- От сигнала к уведомлению ----------

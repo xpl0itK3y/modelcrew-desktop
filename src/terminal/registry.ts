@@ -220,8 +220,7 @@ if (typeof window !== "undefined") {
     }
     for (const entry of registry.values()) {
       if (isPanelOnScreen(entry.container) && entry.container.contains(active)) {
-        clearAgentAttention(entry.id);
-        forgetAlertThrottle(entry.id);
+        acknowledgeAgentPanel(entry.alerts, entry.id);
       }
     }
   });
@@ -351,9 +350,10 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     () => {
       // Реакция пользователя всюду значит одно: разговор окончен. Снимаем
       // вместе с отметкой и окно тишины, иначе следующий сигнал этой панели
-      // ещё пятнадцать секунд оставался бы заглушённым как менее важный.
-      clearAgentAttention(entry.id);
-      forgetAlertThrottle(entry.id);
+      // ещё пятнадцать секунд оставался бы заглушённым как менее важный, — и
+      // отложенную догадку, иначе она позовёт через полминуты после того, как
+      // пользователь с панелью уже разобрался.
+      acknowledgeAgentPanel(entry.alerts, entry.id);
     },
     true,
   );
