@@ -34,6 +34,7 @@ vi.mock("../notifications", () => ({
 import { rememberAgentProcess } from "../agents";
 import { raiseAgentAlert } from "./agentAlerts";
 import { resetAgentAlertBurst } from "./alertDelivery";
+import { shouldThrottleAlert } from "./alertPolicy";
 import {
   clearAgentAttention,
   getAgentAttentionCount,
@@ -41,6 +42,7 @@ import {
   markAgentPanelWaiting,
 } from "./attentionStore";
 import {
+  acknowledgeTerminalPanel,
   destroyTerminal,
   ensureSpawned,
   getOrCreateTerminal,
@@ -106,6 +108,25 @@ describe("what takes the mark off a panel", () => {
     );
 
     expect(isAgentPanelWaiting("press-panel")).toBe(false);
+  });
+
+  it("takes the mark off a panel reached from the bell", async () => {
+    // Переход из колокольчика делает панель активной программно: ни
+    // pointerdown, ни focus окна при этом не случается, а окно тишины, пока
+    // панель ждёт, не истекает вовсе — панель замолкала до конца запуска.
+    const entry = mountPanel("bell-panel", 400);
+    await callFor("bell-panel");
+    expect(isAgentPanelWaiting("bell-panel")).toBe(true);
+    expect(
+      shouldThrottleAlert("bell-panel", "permission", Date.now(), true),
+    ).toBe(true);
+
+    acknowledgeTerminalPanel(entry.id);
+
+    expect(isAgentPanelWaiting("bell-panel")).toBe(false);
+    expect(
+      shouldThrottleAlert("bell-panel", "completed", Date.now(), false),
+    ).toBe(false);
   });
 
   it("does not count mouse motion over the panel as work", async () => {

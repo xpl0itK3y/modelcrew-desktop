@@ -12,6 +12,7 @@ import {
   isManualTitle,
 } from "../terminal/registry";
 import { getAutoTitle } from "../terminal/panelTitles";
+import { acknowledgeTerminalPanel } from "../terminal/registry";
 import { translate, type Locale } from "../i18n";
 import {
   addPanel,
@@ -268,6 +269,8 @@ export function useWorkspaces({
         }
       }
       apiRef.current?.getPanel(panelId)?.api.setActive();
+      // Пользователь пришёл на зов — это и есть ответ панели.
+      acknowledgeTerminalPanel(panelId);
     },
     [apiRef, selectSession],
   );

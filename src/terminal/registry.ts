@@ -226,6 +226,23 @@ if (typeof window !== "undefined") {
   });
 }
 
+// Пользователь пришёл к панели из колокольчика. Реакция та же, что нажатие в
+// саму панель, но ни pointerdown, ни focus здесь не срабатывают: панель
+// делают активной программно, а окно и так в фокусе. Без этого отметка
+// «ждёт» оставалась висеть, а вместе с ней и окно тишины, которое пока панель
+// ждёт не истекает вовсе, — и панель замолкала до конца запуска.
+export function acknowledgeTerminalPanel(id: string): void {
+  const entry = registry.get(id);
+  if (entry) {
+    acknowledgeAgentPanel(entry.alerts, entry.id);
+    return;
+  }
+  // Панель из скрытой сессии могла ещё не попасть в реестр: снимаем хотя бы
+  // то, что живёт отдельно от неё.
+  clearAgentAttention(id);
+  forgetAlertThrottle(id);
+}
+
 export function applyTerminalTheme(themeId: ThemeId): void {
   currentTerminalTheme = getAppTheme(themeId).terminal;
   currentTerminalContrast = terminalMinimumContrast(themeId);
