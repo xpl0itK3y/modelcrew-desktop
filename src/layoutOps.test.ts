@@ -81,6 +81,20 @@ function single(
   ];
 }
 
+// Соседство: новый терминал встал вплотную к предыдущему — рядом в той же
+// строке или в соседней строке, если предыдущая закончилась.
+function adjacent(rows: Grid, previous: string, next: string): boolean {
+  for (const cells of rows) {
+    const from = cells.indexOf(previous);
+    const to = cells.indexOf(next);
+    if (from >= 0 && to >= 0) {
+      return Math.abs(from - to) === 1;
+    }
+  }
+  const rowOf = (id: string) => rows.findIndex((cells) => cells.includes(id));
+  return Math.abs(rowOf(previous) - rowOf(next)) === 1;
+}
+
 describe("terminal placement planning", () => {
   it("keeps the row-major strategy as the default", () => {
     expect(planTerminalPlacement(single(), "balanced")).toEqual({
@@ -88,25 +102,54 @@ describe("terminal placement planning", () => {
       direction: "right",
     });
 
-    // Строка добрала колонок — следующая панель уходит новой строкой вниз.
+    // В строке ещё есть место — панель остаётся в ней, следом за последней.
     expect(
       planTerminalPlacement(geometry([["a", "b"]], 1400, 800), "balanced"),
+    ).toEqual({ referenceGroupId: "b", direction: "right" });
+
+    // Строка добрала колонок — следующая уходит новой строкой вниз.
+    expect(
+      planTerminalPlacement(geometry([["a", "b", "c"]], 1400, 800), "balanced"),
     ).toEqual({ direction: "below" });
 
     expect(simulate("balanced", 6)).toEqual([
-      ["1", "2", "5"],
-      ["3", "4", "6"],
+      ["1", "2", "3"],
+      ["4", "5", "6"],
     ]);
   });
 
   it("fills every other row backwards in snake mode", () => {
     expect(simulate("snake", 6)).toEqual([
-      ["1", "2", "6"],
-      ["5", "4", "3"],
+      ["1", "2", "3"],
+      ["6", "5", "4"],
     ]);
   });
 
-  it("keeps the snake growing along the bottom row instead of backfilling", () => {
+  it("puts each new terminal next to the one before it", () => {
+    // То, ради чего всё и считается: нажал плюс — панель появилась там, куда
+    // смотришь. Прыжок через полсетки читается как чужое действие.
+    for (const mode of ["balanced", "snake"] as TerminalSpawnMode[]) {
+      for (const [width, height] of [
+        [1400, 800],
+        [900, 900],
+        [700, 1200],
+      ]) {
+        for (let count = 2; count <= 12; count += 1) {
+          const rows = simulate(mode, count, width, height);
+          const total = rows.reduce((sum, row) => sum + row.length, 0);
+          if (total < count) {
+            break;
+          }
+          expect(
+            adjacent(rows, String(count - 1), String(count)),
+            `${mode} ${width}x${height}: ${count} не рядом с ${count - 1} в ${JSON.stringify(rows)}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("keeps both orders growing along the same row", () => {
     const rows = geometry(
       [
         ["a", "b"],
@@ -116,10 +159,10 @@ describe("terminal placement planning", () => {
       800,
     );
 
-    // Порядок «по строкам» вернулся бы в верхнюю строку, змейка продолжает
-    // нижнюю — и следующий терминал встаёт рядом с предыдущим.
+    // Обе раскладки продолжают ту строку, которую наполняют, — и различаются
+    // только концом, с которого встают.
     expect(planTerminalPlacement(rows, "balanced")).toEqual({
-      referenceGroupId: "b",
+      referenceGroupId: "d",
       direction: "right",
     });
     expect(planTerminalPlacement(rows, "snake")).toEqual({
@@ -135,7 +178,7 @@ describe("terminal placement planning", () => {
     });
     // Строки тоже чередуются: первая новая строка встаёт сверху, вторая снизу.
     expect(
-      planTerminalPlacement(geometry([["a", "b"]], 1400, 800), "centerOut"),
+      planTerminalPlacement(geometry([["a", "b", "c"]], 1400, 800), "centerOut"),
     ).toEqual({ direction: "above" });
     expect(
       planTerminalPlacement(
@@ -149,11 +192,11 @@ describe("terminal placement planning", () => {
         ),
         "centerOut",
       ),
-    ).toEqual({ direction: "below" });
+    ).toEqual({ referenceGroupId: "a", direction: "left" });
 
     expect(simulate("centerOut", 6)).toEqual([
-      ["4", "3", "5"],
-      ["2", "1", "6"],
+      ["5", "4", "6"],
+      ["2", "1", "3"],
     ]);
   });
 
@@ -173,6 +216,17 @@ describe("terminal placement planning", () => {
         }
       }
     }
+  });
+
+  it("follows the shape of the window, not a bare square", () => {
+    // Шесть терминалов в широком окне ложатся строками, в узком — колонкой:
+    // иначе в широком выходили бы узкие высокие панели, в узком плоские.
+    const wide = simulate("balanced", 6, 1600, 700);
+    const tall = simulate("balanced", 6, 700, 1400);
+    expect(Math.max(...wide.map((row) => row.length))).toBeGreaterThan(
+      Math.max(...tall.map((row) => row.length)),
+    );
+    expect(tall.length).toBeGreaterThan(wide.length);
   });
 
   it("refuses placement when no split respects the minimum panel size", () => {
