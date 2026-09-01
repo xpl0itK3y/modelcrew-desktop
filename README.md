@@ -4,21 +4,30 @@
 
 # ModelCrew
 
-[![Release](https://img.shields.io/github/v/release/xpl0itK3y/modelcrew-desktop?label=release&color=e8567c)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
-[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-backend-CE412B?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
-[![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)](https://vitejs.dev)
-[![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-supported-4fb864)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
-[![License](https://img.shields.io/badge/license-MIT-6f7bde)](LICENSE)
-
 ### A fast terminal workspace for running AI coding agents side by side
 
 Six agents, six panels — with live git diffs, per-panel history,
 and a nudge the moment one of them needs you.
 
-[**How it works**](#how-it-works) · [**Features**](#features) · [**Supported agents**](#supported-agents) · [**Install**](#install) · [**Shortcuts**](#keyboard-shortcuts) · [**Development**](#development)
+[![Release](https://img.shields.io/github/v/release/xpl0itK3y/modelcrew-desktop?label=release&color=e8567c)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
+[![Downloads](https://img.shields.io/github/downloads/xpl0itK3y/modelcrew-desktop/total?label=downloads&color=4fb864)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/xpl0itK3y/modelcrew-desktop/ci.yml?branch=main&label=CI)](https://github.com/xpl0itK3y/modelcrew-desktop/actions/workflows/ci.yml)
+[![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-supported-5c6472)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
+[![License](https://img.shields.io/badge/license-MIT-6f7bde)](LICENSE)
+
+[![Download](https://img.shields.io/badge/%E2%AC%87%20Download-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-e8567c?style=for-the-badge)](https://github.com/xpl0itK3y/modelcrew-desktop/releases/latest)
+
+<!-- ─────────────────────────────────────────────────────────────
+     HERO — the product itself, before any diagram.
+     Record ~12s: empty grid → panels split in → agents start in two
+     of them → one edits a file → diffs run in the git panel → a
+     banner arrives from a panel that is off screen.
+     Then delete this comment and uncomment the line below.
+
+<img src="docs/assets/hero.gif" alt="Six terminal panels in one window, each running an agent, with live git diffs beside them" width="100%" />
+     ───────────────────────────────────────────────────────────── -->
+
+[**Why ModelCrew**](#why-modelcrew) · [**Features**](#features) · [**Agents**](#supported-agents) · [**Install**](#install) · [**Shortcuts**](#keyboard-shortcuts) · [**Development**](#development) · [**Website**](https://modelcrew-com.vercel.app/)
 
 </div>
 
@@ -31,6 +40,135 @@ and say when one of them is waiting for you.
 
 Built on **Tauri 2** with a Rust **portable-pty** backend, **React 18**,
 **TypeScript**, **Vite**, **xterm.js** and **dockview**.
+
+## Why ModelCrew
+
+A grid of terminals is easy to get from tmux or any split-pane terminal. What
+is hard is everything that starts happening once real agents are running
+inside them:
+
+- **They collide.** Two agents in one folder overwrite each other's work.
+  ModelCrew makes a file claim first, and refuses a write over a stale read.
+- **They wait in silence.** An agent that finished, or that needs permission,
+  sits in a panel you are not looking at. ModelCrew comes and finds you.
+- **They lose the thread.** Reopening a terminal normally starts a fresh chat.
+  Here each panel resumes **its own** conversation, exactly the one it had.
+- **They share your history.** In split panes, arrow-up shows a neighbour's
+  commands. Every panel here keeps a shell history of its own.
+
+## Supported agents
+
+Each panel remembers **which** conversation it was running and resumes exactly
+that one — six Claude Code panels get six different chats. Four CLIs are
+recognized:
+
+<div align="center">
+
+`Claude Code` · `Codex` · `GitHub Copilot` · `OpenCode`
+
+</div>
+
+## Features
+
+| Feature | What it does |
+|---|---|
+| **Fleet grid layout** | New terminals split the grid automatically; any panel zooms to the full window. |
+| **Session restore** | Terminals reopen with their previous text, and each panel resumes its own agent conversation. |
+| **One project, several agents** | A file is claimed before it is edited; a file a neighbour holds is refused, and so is a stale write. |
+| **Live git panel** | Uncommitted changes in real time: per-file diffs, a commit box, one-click revert, branches, history graph. |
+| **Project tree and editor** | The project's files beside the terminals, with search by name and syntax highlighting. |
+| **Agent alerts** | A sound, a system banner and a badge on the app icon when an out-of-sight agent needs you. |
+| **Per-panel history** | Arrow-up never leaks commands between panels — zsh, bash and fish each kept apart. |
+| **Resilient updates** | Signed auto-updates download in the background; a restart never re-downloads them. |
+
+<!-- ─────────────────────────────────────────────────────────────
+     SCREENSHOTS — one row of three, once they exist:
+     docs/assets/screen-git.png     · the git panel with a live diff
+     docs/assets/screen-editor.png  · tree and the open file
+     docs/assets/screen-themes.png  · settings, nine themes
+
+<div align="center">
+  <img src="docs/assets/screen-git.png" width="32%" alt="The git panel showing a live diff" />
+  <img src="docs/assets/screen-editor.png" width="32%" alt="The project tree beside an open file" />
+  <img src="docs/assets/screen-themes.png" width="32%" alt="Settings with nine themes and eighteen accents" />
+</div>
+     ───────────────────────────────────────────────────────────── -->
+
+<details>
+<summary><b>The same features, in full</b></summary>
+
+<br>
+
+- **Session restore.** Every session of a project comes back alive at launch —
+  terminals reopen with their previous text and each panel resumes **its own**
+  agent conversation, bound precisely per panel.
+- **One project, several agents.** Before an agent edits a file it claims it;
+  a file already taken is left to its neighbour, and a write over a stale read
+  is refused. Each agent hears the refusal in its own protocol — an exit code,
+  a JSON decision, a plugin error.
+- **Live git panel.** Uncommitted changes in real time as agents edit files:
+  per-file diffs with live counters, a commit box, one-click revert, a branch
+  switcher and history with a graph. An unfinished merge, rebase, cherry-pick
+  or revert is named by a banner with Continue and Abort, and a commit is
+  refused while conflict markers are still in the files.
+- **Project tree and editor.** The project's files beside the terminals: a
+  tree that follows the disk, search by name, and a column of its own for the
+  open file with syntax highlighting and line numbers.
+- **Agent alerts.** When an out-of-sight agent finishes or waits for your
+  decision, ModelCrew plays a sound, shows a system banner naming the agent
+  and project, and badges the app icon with the count of waiting panels.
+- **Resilient updates.** Signed auto-updates download in the background into a
+  persistent cache — a restart never re-downloads — with progress and release
+  notes in the notification center. A downloaded update keeps its badge until
+  it is installed, so reading the notification never hides it.
+
+**Also inside:** projects → sessions → terminals (one folder = one project,
+enforced by the backend, friendly codenames like `amber-lynx`) · native PTY
+backend with batched output and WebGL rendering · titles that follow the
+foreground process · nine themes, eighteen accent colors, shell picker, font
+size and notification sounds · English / Russian interface · macOS, Windows
+and Linux installers with auto-update.
+
+</details>
+
+## One project, several agents
+
+Two agents in one folder used to overwrite each other's work. Now a file is
+claimed before it is edited, and a write over a stale read is refused.
+
+<div align="center">
+<img src="docs/assets/claims.gif" alt="Claude Code claims src/app.ts and is granted it; Codex asks for the same file, is refused, and claims src/api.ts instead" width="100%" />
+</div>
+
+The handshake in full: Claude Code asks for `src/app.ts` and gets it. Codex
+asks for the same file a moment later, is told it is taken, and goes to
+`src/api.ts` instead — which it gets. Nothing was queued and nothing was
+lost; the second agent simply did the next thing.
+
+The refusal arrives in the shape each agent expects: exit code 2 with a
+reason on stderr for Claude Code and Codex, a JSON decision for Copilot, a
+thrown plugin error for OpenCode. The reason matters as much as the refusal —
+told only "no", an agent reaches for the same file again, or writes it through
+the shell behind the guard's back.
+
+## When an agent needs you
+
+<div align="center">
+<img src="docs/assets/alerts.gif" alt="An agent event checks whether its panel is in use; if it is not, a sound, a system banner and a dock badge go out, and one click opens that very panel" width="100%" />
+</div>
+
+The agent says so itself, through its hook — nothing here is guessed from
+what scrolled past in the terminal. ModelCrew then asks one question: are you
+already in that panel? That means all three at once — the panel is on screen,
+the caret is in it, and the window is focused. If it is, nothing happens;
+you are looking straight at it. Otherwise the panel is marked as waiting, and
+a sound, a system banner naming the agent and the project, and a badge on the
+app icon go out. Any of them opens that exact panel — the right project, the
+right session, the right terminal.
+
+Repeat signals from one panel are held to one every fifteen seconds, unless
+the new one asks for more than the last did: a permission request arriving a
+second after "finished" is never the one that gets swallowed.
 
 ## How it works
 
@@ -56,77 +194,6 @@ Reading the diagram from the top:
 - **Back to you** — the dashed lines. Edits show up as live diffs in the git
   panel, and a waiting agent finds you wherever you are in the app.
 
-## Features
-
-| Feature | What it does |
-|---|---|
-| **Fleet grid layout** | New terminals split the grid automatically, while any panel can still be zoomed to the full window. |
-| **Session restore** | Every session of a project comes back alive at launch — terminals reopen with their previous text and each panel resumes **its own** agent conversation, bound precisely per panel. |
-| **One project, several agents** | Before an agent edits a file it claims it; a file already taken is left to its neighbour, and a write over a stale read is refused. Each agent hears the refusal in its own protocol — an exit code, a JSON decision, a plugin error. |
-| **Live git panel** | Uncommitted changes in real time as agents edit files: per-file diffs with live counters, a commit box, one-click revert, a branch switcher and history with a graph. An unfinished merge, rebase, cherry-pick or revert is named by a banner with Continue and Abort, and a commit is refused while conflict markers are still in the files. |
-| **Project tree and editor** | The project's files beside the terminals: a tree that follows the disk, search by name, and a column of its own for the open file with syntax highlighting and line numbers. |
-| **Agent alerts** | When an out-of-sight agent finishes or waits for your decision, ModelCrew plays a sound, shows a system banner naming the agent and project, and badges the app icon with the count of waiting panels. |
-| **Per-panel history** | Each terminal keeps its own shell history (zsh, bash, fish), so pressing arrow-up never leaks commands between panels. |
-| **Resilient updates** | Signed auto-updates download in the background into a persistent cache — a restart never re-downloads — with progress and release notes in the notification center. A downloaded update keeps its badge until it is installed, so reading the notification never hides it. |
-
-**Also inside:** projects → sessions → terminals (one folder = one project,
-enforced by the backend, friendly codenames like `amber-lynx`) · native PTY
-backend with batched output and WebGL rendering · titles that follow the
-foreground process · nine themes, eighteen accent colors, shell picker, font
-size and notification sounds · English / Russian interface · macOS, Windows
-and Linux installers with auto-update.
-
-### One project, several agents
-
-Two agents in one folder used to overwrite each other's work. Now a file is
-claimed before it is edited, and a write over a stale read is refused.
-
-<div align="center">
-<img src="docs/assets/claims.gif" alt="Claude Code claims src/app.ts and is granted it; Codex asks for the same file, is refused, and claims src/api.ts instead" width="100%" />
-</div>
-
-The handshake in full: Claude Code asks for `src/app.ts` and gets it. Codex
-asks for the same file a moment later, is told it is taken, and goes to
-`src/api.ts` instead — which it gets. Nothing was queued and nothing was
-lost; the second agent simply did the next thing.
-
-The refusal arrives in the shape each agent expects: exit code 2 with a
-reason on stderr for Claude Code and Codex, a JSON decision for Copilot, a
-thrown plugin error for OpenCode. The reason matters as much as the refusal —
-told only "no", an agent reaches for the same file again, or writes it through
-the shell behind the guard's back.
-
-### When an agent needs you
-
-<div align="center">
-<img src="docs/assets/alerts.gif" alt="An agent event checks whether its panel is in use; if it is not, a sound, a system banner and a dock badge go out, and one click opens that very panel" width="100%" />
-</div>
-
-The agent says so itself, through its hook — nothing here is guessed from
-what scrolled past in the terminal. ModelCrew then asks one question: are you
-already in that panel? That means all three at once — the panel is on screen,
-the caret is in it, and the window is focused. If it is, nothing happens;
-you are looking straight at it. Otherwise the panel is marked as waiting, and
-a sound, a system banner naming the agent and the project, and a badge on the
-app icon go out. Any of them opens that exact panel — the right project, the
-right session, the right terminal.
-
-Repeat signals from one panel are held to one every fifteen seconds, unless
-the new one asks for more than the last did: a permission request arriving a
-second after "finished" is never the one that gets swallowed.
-
-## Supported agents
-
-Each panel remembers **which** conversation it was running and resumes exactly
-that one — six Claude Code panels get six different chats. Four CLIs are
-recognized:
-
-<div align="center">
-
-`Claude Code` · `Codex` · `GitHub Copilot` · `OpenCode`
-
-</div>
-
 ## Install
 
 Download installers from the
@@ -137,6 +204,11 @@ Download installers from the
 | **macOS** | `.dmg` (Apple Silicon, Intel) |
 | **Windows** | setup `.exe`, `.msi` |
 | **Linux** | `.AppImage`, `.deb`, `.rpm`, `.pkg.tar.zst` |
+
+<details>
+<summary><b>Arch Linux packages</b></summary>
+
+<br>
 
 On Arch Linux, prefer the native package:
 
@@ -150,6 +222,13 @@ will run with. Every package declares what ModelCrew runs at runtime — `git`
 for the change panel, `pkexec` for installing updates, `xdg-open` for links,
 plus WebKitGTK, GStreamer audio plugins and tray support. The AppImage carries
 GStreamer itself so notification sounds work out of the box.
+
+</details>
+
+<details>
+<summary><b>Linux: notifications, AppImage requirements, a black window</b></summary>
+
+<br>
 
 > **Linux notifications:** system banners use the standard
 > `org.freedesktop.Notifications` D-Bus service. Desktop environments
@@ -173,6 +252,8 @@ GStreamer itself so notification sounds work out of the box.
 > ```bash
 > WEBKIT_DISABLE_COMPOSITING_MODE=1 modelcrew-desktop
 > ```
+
+</details>
 
 ## Keyboard shortcuts
 
@@ -253,6 +334,30 @@ Key setup, package formats, and manual verification are described in
 
 </details>
 
+## Contributing
+
+Issues and pull requests are welcome. Two good places to start:
+
+- [**`good first issue`**](https://github.com/xpl0itK3y/modelcrew-desktop/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  — small, self-contained tasks with the context already written down.
+- [**`help wanted`**](https://github.com/xpl0itK3y/modelcrew-desktop/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+  — larger pieces looking for an owner.
+
+Found a bug, or does an agent CLI you use behave differently?
+[Open an issue](https://github.com/xpl0itK3y/modelcrew-desktop/issues/new) —
+the shape of each agent's protocol is the part most worth reporting.
+
+Conventions for the codebase are in [`AGENTS.md`](AGENTS.md); the full history
+of changes is in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## License
 
 [MIT](LICENSE)
+
+<div align="center">
+<br>
+
+If ModelCrew saves you a window, a tab or an overwritten file —
+[**star the repository**](https://github.com/xpl0itK3y/modelcrew-desktop/stargazers).
+
+</div>
