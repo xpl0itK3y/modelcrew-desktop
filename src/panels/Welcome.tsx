@@ -6,12 +6,13 @@ import { FolderIcon, PlusIcon } from "../ui/Icons";
 
 // Watermark dockview: онбординг без проекта или пустая сессия без терминалов.
 //
-// Знак приложения стоит над словом «MODELCREW»: пустой экран — единственное
-// место, где приложение показывает само себя, а не работу пользователя.
-// Подпись у картинки пустая — она повторила бы слово, стоящее прямо под ней,
-// и читалка назвала бы его дважды. Файл берётся с той же иконки, из которой
-// собран бандл, в удвоенном размере: 256 точек на 56 пикселей хватает любому
-// экрану.
+// Знак приложения — вся марка, какая здесь есть: пустой экран единственное
+// место, где приложение показывает само себя, а не работу пользователя, и
+// названия по буквам под знаком тут не нужно — оно стоит и в титлбаре, и в
+// доке, и в меню. Подпись у картинки пустая: имя приложения на пустом экране
+// не сообщение, а фон, и читалке объявлять его нечем. Файл берётся с той же
+// иконки, из которой собран бандл, в удвоенном размере: 256 точек на 56
+// пикселей хватает любому экрану.
 export function Welcome(_props: IWatermarkPanelProps) {
   const { t } = useI18n();
   const actions = useAppActions();
@@ -29,7 +30,6 @@ export function Welcome(_props: IWatermarkPanelProps) {
           height={56}
           alt=""
         />
-        <div className="welcome-badge">MODELCREW</div>
         <h1 className="welcome-title">{t("welcome.title")}</h1>
         <p className="welcome-subtitle">{t("welcome.chooseProject")}</p>
         <button
@@ -57,7 +57,6 @@ export function Welcome(_props: IWatermarkPanelProps) {
         height={56}
         alt=""
       />
-      <div className="welcome-badge">MODELCREW</div>
       <h1 className="welcome-title">{t("welcome.title")}</h1>
       <p className="welcome-subtitle">{t("welcome.terminalsTogether")}</p>
       <button
