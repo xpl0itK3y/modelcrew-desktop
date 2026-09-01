@@ -5,6 +5,13 @@ import { useI18n } from "../i18n";
 import { FolderIcon, PlusIcon } from "../ui/Icons";
 
 // Watermark dockview: онбординг без проекта или пустая сессия без терминалов.
+//
+// Знак приложения стоит над словом «MODELCREW»: пустой экран — единственное
+// место, где приложение показывает само себя, а не работу пользователя.
+// Подпись у картинки пустая — она повторила бы слово, стоящее прямо под ней,
+// и читалка назвала бы его дважды. Файл берётся с той же иконки, из которой
+// собран бандл, в удвоенном размере: 256 точек на 56 пикселей хватает любому
+// экрану.
 export function Welcome(_props: IWatermarkPanelProps) {
   const { t } = useI18n();
   const actions = useAppActions();
@@ -15,6 +22,13 @@ export function Welcome(_props: IWatermarkPanelProps) {
   if (!actions.hasActiveWorkspace()) {
     return (
       <div className="welcome">
+        <img
+          className="welcome-logo"
+          src="/logo.png"
+          width={56}
+          height={56}
+          alt=""
+        />
         <div className="welcome-badge">MODELCREW</div>
         <h1 className="welcome-title">{t("welcome.title")}</h1>
         <p className="welcome-subtitle">{t("welcome.chooseProject")}</p>
@@ -36,6 +50,13 @@ export function Welcome(_props: IWatermarkPanelProps) {
   // Воркспейс есть, но все терминалы закрыты.
   return (
     <div className="welcome">
+      <img
+        className="welcome-logo"
+        src="/logo.png"
+        width={56}
+        height={56}
+        alt=""
+      />
       <div className="welcome-badge">MODELCREW</div>
       <h1 className="welcome-title">{t("welcome.title")}</h1>
       <p className="welcome-subtitle">{t("welcome.terminalsTogether")}</p>
