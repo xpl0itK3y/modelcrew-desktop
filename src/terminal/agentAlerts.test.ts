@@ -40,6 +40,7 @@ import {
 } from "./agentAlerts";
 import {
   resetAgentAlertBurst,
+  setPanelSessionResolver,
   setPanelTailResolver,
   setWorkspaceNameResolver,
 } from "./alertDelivery";
@@ -73,6 +74,7 @@ afterEach(() => {
   resetAgentAlertBurst();
   resetAlertThrottle();
   resetHookChannels();
+  setPanelSessionResolver(() => null);
   vi.useRealTimers();
 });
 
@@ -764,5 +766,23 @@ describe("agents that report themselves through a hook", () => {
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
     // Позвать всё-таки позвали: отметка держится до ответа пользователя.
     expect(isAgentPanelWaiting("nag-panel")).toBe(true);
+  });
+
+  it("names the session so two panels of one agent differ", async () => {
+    // Заголовок и проект у них совпадают до буквы: без сессии два разных
+    // события читаются как одно, показанное дважды.
+    setPanelSessionResolver((panelId) =>
+      panelId === "left-panel" ? "Вёрстка" : "Релиз",
+    );
+
+    void raiseAgentAlert("left-panel", "permission", hidden);
+    await settle();
+    void raiseAgentAlert("right-panel", "permission", hidden);
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const bodies = mocks.systemNotification.mock.calls.map((call) => call[1]);
+    expect(bodies.join("\n")).toContain("Вёрстка");
+    expect(bodies.join("\n")).toContain("Релиз");
   });
 });

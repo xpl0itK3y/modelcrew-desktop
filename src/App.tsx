@@ -64,9 +64,13 @@ import {
 import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
 import { watchPanelClaims } from "./crew/claimPolling";
-import { setWorkspaceNameResolver } from "./terminal/alertDelivery";
+import {
+  setPanelSessionResolver,
+  setWorkspaceNameResolver,
+} from "./terminal/alertDelivery";
 import { subscribeAgentAttention } from "./terminal/attentionStore";
 import {
+  describeWaitingPanel,
   describeWaitingPanels,
   type WaitingPanel,
 } from "./terminal/waitingPanels";
@@ -418,8 +422,10 @@ export default function App() {
     (workspace) => workspace.id === workspaces.activeId,
   );
 
-  // Уведомления «агент ждёт» подписывают именем проекта: резолвер отдаёт
-  // отображаемое имя воркспейса по id.
+  // Уведомления «агент ждёт» подписывают именем проекта и сессии: резолверы
+  // отдают отображаемое имя воркспейса по id и имя сессии, которой принадлежит
+  // панель. Без второго два одинаковых агента одного проекта дают баннеры,
+  // неотличимые друг от друга.
   useEffect(() => {
     setWorkspaceNameResolver(
       (workspaceId) =>
@@ -427,6 +433,15 @@ export default function App() {
           ?.displayName ?? null,
     );
   }, [workspacesRef]);
+
+  useEffect(() => {
+    setPanelSessionResolver(
+      (panelId) =>
+        describeWaitingPanel(panelId, workspacesRef.current.list, (index) =>
+          t("session.defaultName", { index }),
+        ).session,
+    );
+  }, [workspacesRef, t]);
 
   // Живой агрегат git-изменений активного проекта для бейджа в титлбаре.
   const [gitSummaryState, setGitSummaryState] = useState<{

@@ -18,28 +18,34 @@ export type WaitingPanel = {
   session: string | null;
 };
 
+export function describeWaitingPanel(
+  panelId: string,
+  workspaces: readonly Workspace[],
+  formatDefaultSession: (index: number) => string,
+): WaitingPanel {
+  const workspaceId = getTerminalWorkspaceId(panelId);
+  const workspace = workspaces.find((item) => item.id === workspaceId);
+  // Сессию ищем по сохранённой раскладке — панель может быть в скрытой.
+  const session = workspace?.sessions.find(
+    (item) => item.layout?.panels?.[panelId],
+  );
+  const agentId = getAgentRecord(panelId)?.agentId;
+  return {
+    panelId,
+    agent: agentId
+      ? (AGENTS.find((entry) => entry.id === agentId)?.label ?? agentId)
+      : null,
+    title: getAutoTitle(panelId) ?? null,
+    project: workspace?.displayName ?? null,
+    session: session ? sessionDisplayName(session, formatDefaultSession) : null,
+  };
+}
+
 export function describeWaitingPanels(
   workspaces: readonly Workspace[],
   formatDefaultSession: (index: number) => string,
 ): WaitingPanel[] {
-  return getWaitingPanelIds().map((panelId) => {
-    const workspaceId = getTerminalWorkspaceId(panelId);
-    const workspace = workspaces.find((item) => item.id === workspaceId);
-    // Сессию ищем по сохранённой раскладке — панель может быть в скрытой.
-    const session = workspace?.sessions.find(
-      (item) => item.layout?.panels?.[panelId],
-    );
-    const agentId = getAgentRecord(panelId)?.agentId;
-    return {
-      panelId,
-      agent: agentId
-        ? (AGENTS.find((entry) => entry.id === agentId)?.label ?? agentId)
-        : null,
-      title: getAutoTitle(panelId) ?? null,
-      project: workspace?.displayName ?? null,
-      session: session
-        ? sessionDisplayName(session, formatDefaultSession)
-        : null,
-    };
-  });
+  return getWaitingPanelIds().map((panelId) =>
+    describeWaitingPanel(panelId, workspaces, formatDefaultSession),
+  );
 }

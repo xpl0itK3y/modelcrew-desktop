@@ -365,6 +365,7 @@ export const ru = {
   "terminal.agentCompleted": "{agent} закончил работу",
   "terminal.agentError": "{agent} остановился с ошибкой",
   "terminal.agentProject": "Проект: {project}",
+  "terminal.agentSession": "Сессия: {session}",
   "terminal.agentsWaitingMore": "Ждут ответа ещё {count}",
   "settings.terminalHistory": "История команд",
   "settings.terminalHistoryPerPanel": "Своя у каждой панели",
