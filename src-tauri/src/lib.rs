@@ -533,7 +533,7 @@ fn workspace_unregister_root(
 fn agent_hook_channels(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
-) -> CommandResult<Vec<String>> {
+) -> CommandResult<agent_hooks::AgentHookChannels> {
     ensure_main_window(&window)?;
     Ok(agent_hooks::notification_channels(&app))
 }

@@ -1082,19 +1082,45 @@ const SUPPORTED_AGENTS: [&str; 4] = [
     "opencode",
 ];
 
+/// Агенты, чей хук сообщает не только о конце хода, но и о том, что агент
+/// чего-то ждёт: разрешения, ответа на вопрос.
+///
+/// Такой список нужен отдельно от списка установленных, потому что хуки у
+/// агентов покрывают разное. Claude Code присылает `Notification` — и на
+/// вопрос, и на запрос разрешения. У copilot мы ставим `agentStop` (конец
+/// хода) и `PreToolUse` (заявка на файл, это про другое), у opencode —
+/// только `session.idle`. Их запрос разрешения хук не заметит вовсе, и
+/// единственный сигнал о нём — звонок BEL из вывода панели.
+const PROMPT_CHANNEL_AGENTS: [&str; 1] = ["claude"];
+
 /// Агенты, чей канал уведомлений подключён прямо сейчас.
 ///
 /// Такой агент рассказывает о себе сам — раньше и точнее, чем догадки по
-/// выводу панели, — поэтому фронтенд по этому списку отключает догадки для
+/// выводу панели, — поэтому фронтенд по этому списку придерживает догадки для
 /// его панелей. Спрашиваем состояние на диске, а не список поддержанных:
 /// хук мог не встать (битый конфиг, недоступный каталог), и тогда догадки
 /// обязаны остаться единственным источником сигналов.
-pub fn notification_channels(app: &tauri::AppHandle) -> Vec<String> {
-    SUPPORTED_AGENTS
+pub fn notification_channels(app: &tauri::AppHandle) -> AgentHookChannels {
+    let installed: Vec<String> = SUPPORTED_AGENTS
         .iter()
         .filter(|agent| hook_state(app, agent).installed)
         .map(|agent| (*agent).to_string())
-        .collect()
+        .collect();
+    let prompts = installed
+        .iter()
+        .filter(|agent| PROMPT_CHANNEL_AGENTS.contains(&agent.as_str()))
+        .cloned()
+        .collect();
+    AgentHookChannels { installed, prompts }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentHookChannels {
+    /// Хук стоит: догадка по тишине уступает ему первое слово.
+    pub installed: Vec<String>,
+    /// Хук говорит и о запросах: звонок от такого агента ничего не добавит.
+    pub prompts: Vec<String>,
 }
 
 /// Ставить хук только тем, кто у пользователя действительно есть: наличие

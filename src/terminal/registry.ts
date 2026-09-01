@@ -188,7 +188,7 @@ if (isTauri) {
     const agentId = getAgentRecord(entry.id)?.agentId ?? event.payload.agent;
     // Канал доказан делом — на случай, если хук встал уже после старта
     // приложения и в загруженный список попасть не успел.
-    noteHookChannel(agentId);
+    noteHookChannel(agentId, alert.kind);
     void raiseAgentHookAlert(
       entry.id,
       agentId,

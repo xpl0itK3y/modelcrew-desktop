@@ -668,7 +668,7 @@ describe("agents that report themselves through a hook", () => {
   });
 
   it("lets the hook speak first before guessing out loud", async () => {
-    noteHookChannel("claude");
+    noteHookChannel("claude", "completed");
 
     await fallSilentAfterWorking("guess-panel");
 
@@ -682,7 +682,7 @@ describe("agents that report themselves through a hook", () => {
     // Хук установлен — не значит сработал: его могли отключить в отдельном
     // проекте. Догадка отступает, но не исчезает, иначе панель замолчала бы
     // навсегда.
-    noteHookChannel("claude");
+    noteHookChannel("claude", "completed");
 
     await fallSilentAfterWorking("mute-hook-panel");
     await vi.advanceTimersByTimeAsync(AGENT_HOOK_IDLE_GRACE_MS + 100);
@@ -695,7 +695,7 @@ describe("agents that report themselves through a hook", () => {
   it("drops its own bell in favour of the hook", async () => {
     // Звонок звучал первым, и следом хук пробивал окно тишины как более
     // важный — два баннера на одно событие.
-    noteHookChannel("claude");
+    noteHookChannel("claude", "permission");
     const tracker = createAgentAlertTracker();
     markAgentPanelEngaged(tracker, "bell-hook-panel");
 
@@ -705,10 +705,27 @@ describe("agents that report themselves through a hook", () => {
     expect(mocks.systemNotification).not.toHaveBeenCalled();
   });
 
+  it("still rings for an agent whose hook only reports the end of a turn", async () => {
+    // У copilot и opencode хук сообщает только конец хода: `agentStop` и
+    // `session.idle`. Их запрос разрешения он не заметит, и звонок BEL —
+    // единственный сигнал о нём. Заглушив звонок по одному факту «хук есть»,
+    // мы не позвали бы вовсе: ни баннера, ни точки в шапке, ни счётчика.
+    noteHookChannel("copilot", "completed");
+    mocks.record.value = { agentId: "copilot", command: "copilot" };
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "copilot-bell-panel");
+
+    trackAgentOutput(tracker, "copilot-bell-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("copilot-bell-panel")).toBe(true);
+  });
+
   it("still guesses for an agent that has no hook of its own", async () => {
     // Канал есть у claude, а в панели другой CLI: для него догадка по тишине
     // остаётся единственным источником сигналов, и молчать ей нельзя.
-    noteHookChannel("claude");
+    noteHookChannel("claude", "completed");
     mocks.record.value = { agentId: "aider", command: "aider" };
 
     await fallSilentAfterWorking("aider-panel");
@@ -722,7 +739,7 @@ describe("agents that report themselves through a hook", () => {
     // или ждёт», следом хук приносил «ждёт разрешения» — и второй баннер
     // законно пробивал окно тишины, потому что был важнее. Два баннера на одно
     // событие, причём первый ещё и неверный.
-    noteHookChannel("claude");
+    noteHookChannel("claude", "permission");
 
     await fallSilentAfterWorking("dup-panel");
     void raiseAgentHookAlert(
@@ -749,7 +766,7 @@ describe("agents that report themselves through a hook", () => {
     // Claude Code переспрашивает про неотвеченное разрешение каждые полминуты.
     // Окно тишины короче этого интервала, поэтому раньше каждый повтор давал
     // свой баннер со звуком.
-    noteHookChannel("claude");
+    noteHookChannel("claude", "permission");
     for (let attempt = 0; attempt < 3; attempt += 1) {
       void raiseAgentHookAlert(
         "nag-panel",
