@@ -198,6 +198,44 @@ describe("agent catalog", () => {
     ).toBe("claude --continue");
   });
 
+  it("keeps a chat claimed by a panel that stepped out to the shell", () => {
+    // Ровно состояние из отчёта: у первой панели агент вышел в оболочку, и её
+    // запись потеряла id, хотя диалог остался за ней. Пока владение считали по
+    // одним записям, чат становился ничьим.
+    rememberAgentProcess("panel-1", "claude");
+    bindAgentSession("panel-1", "chat-of-panel-1");
+    rememberAgentProcess("panel-1", "zsh");
+    expect(getAgentRecord("panel-1")).toBeNull();
+
+    rememberAgentProcess("panel-2", "claude");
+    // Локатор соседки обязан пропустить этот чат.
+    expect(boundAgentSessionIds("claude", "panel-2")).toEqual([
+      "chat-of-panel-1",
+    ]);
+    // И привязать его к соседке нельзя даже напрямую.
+    expect(bindAgentSession("panel-2", "chat-of-panel-1")).toBe(false);
+    // А своя панель этот чат по-прежнему продолжает.
+    expect(rememberedSessionId("panel-1", "claude")).toBe("chat-of-panel-1");
+  });
+
+  it("strips duplicate remembered chats during pruning", () => {
+    localStorage.setItem(
+      "modelcrew.agentSessions",
+      JSON.stringify({
+        "panel-1": { agentId: "claude", sessionId: "one-chat" },
+        "panel-2": { agentId: "claude", sessionId: "one-chat" },
+        "panel-3": { agentId: "codex", sessionId: "one-chat" },
+      }),
+    );
+    pruneAgentRecords(["panel-1", "panel-2", "panel-3"]);
+    // Диалог остаётся за первой панелью, у второй запасного варианта больше
+    // нет — она возобновится списком и перепривяжется к своему.
+    expect(rememberedSessionId("panel-1", "claude")).toBe("one-chat");
+    expect(rememberedSessionId("panel-2", "claude")).toBeUndefined();
+    // У другого агента id из своего пространства имён — его не трогаем.
+    expect(rememberedSessionId("panel-3", "codex")).toBe("one-chat");
+  });
+
   it("strips duplicate session bindings during pruning", () => {
     rememberAgentProcess("panel-1", "opencode");
     rememberAgentProcess("panel-2", "opencode");
@@ -363,16 +401,19 @@ describe("agent catalog", () => {
     expect(rememberedSessionId("panel-1", "claude")).toBeUndefined();
   });
 
-  it("does not hand a remembered session to a panel that already lost it", () => {
+  it("does not let two panels end up in one chat", () => {
     rememberAgentProcess("panel-1", "codex");
     bindAgentSession("panel-1", "shared-session");
     rememberAgentProcess("panel-1", "zsh");
 
-    // Тот же диалог успела занять другая панель: вести туда вторую нельзя.
+    // Соседка тянется к тому же диалогу. Раньше захват проходил, а чат потом
+    // отбирали у обеих; теперь его отклоняют сразу — владелец остаётся один.
     rememberAgentProcess("panel-2", "codex");
-    bindAgentSession("panel-2", "shared-session");
+    expect(bindAgentSession("panel-2", "shared-session")).toBe(false);
 
-    expect(rememberedSessionId("panel-1", "codex")).toBeUndefined();
+    expect(rememberedSessionId("panel-1", "codex")).toBe("shared-session");
+    expect(rememberedSessionId("panel-2", "codex")).toBeUndefined();
+    expect(getAgentRecord("panel-2")!.sessionId).toBeUndefined();
   });
 
   it("forgets the remembered session together with the panel", () => {

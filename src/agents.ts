@@ -385,6 +385,24 @@ export function pruneAgentRecords(keepIds: string[]): void {
   if (changed) {
     saveRecords(records);
   }
+  // То же и для запомненных диалогов. Раньше чистили одни записи, а дубль
+  // оставался здесь — и переживал перезапуск, потому что именно отсюда
+  // панель берёт чат, когда свежей привязки нет.
+  const claimed = new Set<string>();
+  let duplicates = false;
+  for (const id of Object.keys(sessions).sort()) {
+    const session = sessions[id];
+    const key = `${session.agentId}:${session.sessionId}`;
+    if (claimed.has(key)) {
+      delete sessions[id];
+      duplicates = true;
+    } else {
+      claimed.add(key);
+    }
+  }
+  if (duplicates) {
+    saveSessions(sessions);
+  }
 }
 
 export function getAgentRecord(terminalId: string): AgentRecord | null {
@@ -410,14 +428,10 @@ export function bindAgentSession(
   // Локаторы панелей бегут параллельно: пока эта панель ждала ответа, другая
   // могла занять тот же id (exclude его ещё не знал). Тогда привязку
   // отклоняем — вызывающий повторит поиск уже с обновлённым exclude.
-  for (const [otherId, other] of Object.entries(records)) {
-    if (
-      otherId !== terminalId &&
-      other.agentId === record.agentId &&
-      other.sessionId === sessionId
-    ) {
-      return false;
-    }
+  // Спрашиваем по обеим картам: у соседки, чей агент вышел в оболочку, id
+  // остался только в запомненных диалогах, но чат всё равно её.
+  if (boundAgentSessionIds(record.agentId, terminalId).includes(sessionId)) {
+    return false;
   }
   records[terminalId] = { ...record, sessionId };
   saveRecords(records);
@@ -429,21 +443,32 @@ export function bindAgentSession(
 
 // Сессии этого агента, уже занятые другими панелями: локатор их пропускает,
 // чтобы шесть клаудов в одном проекте получили шесть разных чатов.
+//
+// Считаем по обеим картам. Запись живёт, только пока агент — foreground-
+// процесс: вышел в оболочку — и id из неё пропал, хотя диалог остался за
+// панелью и она возобновит именно его. Пока здесь смотрели в одни записи,
+// такой чат становился ничьим: локатор соседа его не исключал, привязка не
+// отклонялась, и две панели уходили в один разговор.
 export function boundAgentSessionIds(
   agentId: string,
   exceptTerminalId: string,
 ): string[] {
-  const ids: string[] = [];
+  const ids = new Set<string>();
   for (const [terminalId, record] of Object.entries(loadRecords())) {
     if (
       terminalId !== exceptTerminalId &&
       record.agentId === agentId &&
       record.sessionId
     ) {
-      ids.push(record.sessionId);
+      ids.add(record.sessionId);
     }
   }
-  return ids;
+  for (const [terminalId, session] of Object.entries(loadSessions())) {
+    if (terminalId !== exceptTerminalId && session.agentId === agentId) {
+      ids.add(session.sessionId);
+    }
+  }
+  return [...ids];
 }
 
 // Собирает shell-строку возобновления. picker: в этой папке уже возобновлялась
