@@ -198,6 +198,28 @@ export function rememberedSessionId(
     : stored.sessionId;
 }
 
+// Дописывает папку уже привязанной сессии. Нужно двум приходящим: панелям от
+// прежних версий, где поля ещё не было, и панелям, чей чат привязан давно —
+// локатор к ним больше не заходит (у записи есть id, и он уходит первым же
+// return'ом), так что сама привязка папку дописать не может. Без папки такая
+// сессия считается соседской в любом проекте, и «продолжить последний чат»
+// пропал бы у всех навсегда.
+export function noteSessionWorkspace(
+  terminalId: string,
+  workspaceId: string,
+): void {
+  if (!workspaceId) {
+    return;
+  }
+  const sessions = loadSessions();
+  const session = sessions[terminalId];
+  if (!session || session.workspaceId !== undefined) {
+    return;
+  }
+  sessions[terminalId] = { ...session, workspaceId };
+  saveSessions(sessions);
+}
+
 // «Продолжить последний диалог» — единственная команда возобновления, которой
 // нельзя сказать «кроме этих». Она открывает самый свежий чат папки, а он
 // запросто принадлежит соседней панели, которая возобновится по точному id:
@@ -425,12 +447,24 @@ export function pruneAgentRecords(keepIds: string[]): void {
   // То же и для запомненных диалогов. Раньше чистили одни записи, а дубль
   // оставался здесь — и переживал перезапуск, потому что именно отсюда
   // панель берёт чат, когда свежей привязки нет.
+  //
+  // Владелец дубля — панель, за которой чат числится в записи: она возобновится
+  // по нему точно, и отнять его у неё нельзя. Порядок ключей решает, только
+  // когда записи нет ни у одной из панелей: id панелей — случайные uuid, так
+  // что это жребий, а не право.
+  const holders = new Map<string, string>();
+  for (const [id, record] of Object.entries(records)) {
+    if (record.sessionId) {
+      holders.set(`${record.agentId}:${record.sessionId}`, id);
+    }
+  }
   const claimed = new Set<string>();
   let duplicates = false;
   for (const id of Object.keys(sessions).sort()) {
     const session = sessions[id];
     const key = `${session.agentId}:${session.sessionId}`;
-    if (claimed.has(key)) {
+    const holder = holders.get(key);
+    if (holder !== undefined ? holder !== id : claimed.has(key)) {
       delete sessions[id];
       duplicates = true;
     } else {
@@ -461,13 +495,6 @@ export function bindAgentSession(
     return false;
   }
   if (record.sessionId === sessionId) {
-    // Привязка уже есть, но папку могла не знать та версия, что её ставила.
-    const sessions = loadSessions();
-    const known = sessions[terminalId];
-    if (workspaceId && known?.workspaceId === undefined) {
-      sessions[terminalId] = { ...known, agentId: record.agentId, sessionId, workspaceId };
-      saveSessions(sessions);
-    }
     return true;
   }
   // Локаторы панелей бегут параллельно: пока эта панель ждала ответа, другая
@@ -619,6 +646,7 @@ export function scheduleAgentSessionBinding(
   cwd: string,
   workspaceId: string,
 ): void {
+  noteSessionWorkspace(terminalId, workspaceId);
   startBinding(terminalId, { cwd, workspaceId });
 }
 

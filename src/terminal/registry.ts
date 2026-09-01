@@ -19,6 +19,7 @@ import {
   discardAgentRecord,
   getAgentRecord,
   loadAgentResumeMode,
+  noteSessionWorkspace,
   rememberedSessionId,
   retryAgentSessionBinding,
 } from "../agents";
@@ -607,6 +608,10 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
   if (!record) {
     return;
   }
+  // Первый запуск после обновления: у запомненного чата папки ещё нет, а
+  // решение принимается уже сейчас. Дописываем до вопроса — иначе панель
+  // сочтёт соседкой саму себя из прошлой версии.
+  noteSessionWorkspace(entry.id, workspaceId);
   const key = `${workspaceId}:${record.agentId}`;
   // Список диалогов вместо последнего чата нужен в двух случаях: панель этого
   // агента в этой папке уже возобновлялась в этом запуске, либо чат в папке

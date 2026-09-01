@@ -10,6 +10,7 @@ import {
   isShellProcess,
   loadAgentResumeMode,
   matchAgent,
+  noteSessionWorkspace,
   pruneAgentRecords,
   rememberAgentProcess,
   rememberedSessionId,
@@ -246,6 +247,71 @@ describe("agent catalog", () => {
     );
     expect(agentChatClaimedNearby("claude", "panel-2", "ws-1")).toBe(true);
     expect(agentChatClaimedNearby("claude", "panel-2", "ws-9")).toBe(true);
+  });
+
+  it("fills the folder in for a chat bound before the field existed", async () => {
+    vi.useFakeTimers();
+    try {
+      // Панель обновилась с привязанным чатом. Локатор к ней больше не зайдёт —
+      // у записи есть id, — так что дописать папку может только watcher.
+      rememberAgentProcess("panel-1", "claude");
+      bindAgentSession("panel-1", "old-chat");
+      localStorage.setItem(
+        "modelcrew.agentSessions",
+        JSON.stringify({ "panel-1": { agentId: "claude", sessionId: "old-chat" } }),
+      );
+      // Без папки соседкой считается любая панель в любом проекте.
+      expect(agentChatClaimedNearby("claude", "panel-2", "ws-2")).toBe(true);
+
+      scheduleAgentSessionBinding("panel-1", "/tmp/proj", "ws-1");
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(rememberedSessionId("panel-1", "claude")).toBe("old-chat");
+      // Чужой проект больше не заложник давней привязки.
+      expect(agentChatClaimedNearby("claude", "panel-2", "ws-2")).toBe(false);
+      expect(agentChatClaimedNearby("claude", "panel-2", "ws-1")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a duplicate chat with the panel whose record holds it", () => {
+    // Наследие: агент panel-a вышел в оболочку и запись потерял, а чат числится
+    // за panel-b. Ключи сортируются в пользу panel-a — но право у записи.
+    rememberAgentProcess("panel-b", "claude");
+    localStorage.setItem(
+      "modelcrew.terminalAgents",
+      JSON.stringify({
+        "panel-b": {
+          agentId: "claude",
+          command: "claude",
+          detectedAt: 1,
+          sessionId: "one-chat",
+        },
+      }),
+    );
+    localStorage.setItem(
+      "modelcrew.agentSessions",
+      JSON.stringify({
+        "panel-a": { agentId: "claude", sessionId: "one-chat", workspaceId: "ws-1" },
+        "panel-b": { agentId: "claude", sessionId: "one-chat", workspaceId: "ws-1" },
+      }),
+    );
+    pruneAgentRecords(["panel-a", "panel-b"]);
+
+    expect(rememberedSessionId("panel-b", "claude")).toBe("one-chat");
+    expect(rememberedSessionId("panel-a", "claude")).toBeUndefined();
+    // И panel-a видит, что чат в этой папке занят: список диалогов, а не
+    // --continue, который открыл бы тот же самый разговор.
+    expect(agentChatClaimedNearby("claude", "panel-a", "ws-1")).toBe(true);
+  });
+
+  it("keeps the folder a session already knows", () => {
+    rememberAgentProcess("panel-1", "claude");
+    bindAgentSession("panel-1", "chat-1", "ws-1");
+    noteSessionWorkspace("panel-1", "ws-9");
+    expect(agentChatClaimedNearby("claude", "panel-2", "ws-1")).toBe(true);
+    expect(agentChatClaimedNearby("claude", "panel-2", "ws-9")).toBe(false);
   });
 
   it("strips duplicate remembered chats during pruning", () => {
