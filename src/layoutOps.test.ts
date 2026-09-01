@@ -83,6 +83,10 @@ function single(
 
 // Соседство: новый терминал встал вплотную к предыдущему — рядом в той же
 // строке или в соседней строке, если предыдущая закончилась.
+//
+// В разных строках мало соседних номеров: панель у левого края второй строки
+// от панели у правого края первой — через всю сетку. Поэтому требуем, чтобы
+// новый встал с края своей строки, а предыдущий занимал край предыдущей.
 function adjacent(rows: Grid, previous: string, next: string): boolean {
   for (const cells of rows) {
     const from = cells.indexOf(previous);
@@ -92,7 +96,20 @@ function adjacent(rows: Grid, previous: string, next: string): boolean {
     }
   }
   const rowOf = (id: string) => rows.findIndex((cells) => cells.includes(id));
-  return Math.abs(rowOf(previous) - rowOf(next)) === 1;
+  const previousRow = rowOf(previous);
+  const nextRow = rowOf(next);
+  // Пропавший id ищется как -1 и с любой строкой сходился бы за соседа.
+  if (previousRow < 0 || nextRow < 0) {
+    return false;
+  }
+  if (Math.abs(previousRow - nextRow) !== 1) {
+    return false;
+  }
+  const atEdge = (row: number, id: string) => {
+    const cells = rows[row];
+    return cells[0] === id || cells[cells.length - 1] === id;
+  };
+  return atEdge(previousRow, previous) && atEdge(nextRow, next);
 }
 
 describe("terminal placement planning", () => {
@@ -143,6 +160,39 @@ describe("terminal placement planning", () => {
           expect(
             adjacent(rows, String(count - 1), String(count)),
             `${mode} ${width}x${height}: ${count} не рядом с ${count - 1} в ${JSON.stringify(rows)}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("never drops a terminal into the middle of a row", () => {
+    // Соседство с предыдущим — правило balanced и snake; centerOut растит
+    // строку от середины в обе стороны, и третий терминал встаёт через одну от
+    // второго нарочно. Общее у всех трёх — то, что новый встаёт с края своей
+    // строки: вклиниться между двумя открытыми раньше он не может ни в одном
+    // режиме, иначе сетка перетасовывалась бы под рукой.
+    for (const mode of TERMINAL_SPAWN_MODES) {
+      for (const [width, height] of [
+        [1400, 800],
+        [900, 900],
+        [700, 1200],
+      ]) {
+        for (let count = 2; count <= 12; count += 1) {
+          const rows = simulate(mode, count, width, height);
+          const total = rows.reduce((sum, row) => sum + row.length, 0);
+          if (total < count) {
+            break;
+          }
+          const id = String(count);
+          const row = rows.find((cells) => cells.includes(id));
+          expect(
+            row,
+            `${mode} ${width}x${height}: ${count} потерялся в ${JSON.stringify(rows)}`,
+          ).toBeDefined();
+          expect(
+            row![0] === id || row![row!.length - 1] === id,
+            `${mode} ${width}x${height}: ${count} вклинился в середину ${JSON.stringify(rows)}`,
           ).toBe(true);
         }
       }
