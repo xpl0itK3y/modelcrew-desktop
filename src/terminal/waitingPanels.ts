@@ -26,9 +26,15 @@ export function describeWaitingPanel(
   const workspaceId = getTerminalWorkspaceId(panelId);
   const workspace = workspaces.find((item) => item.id === workspaceId);
   // Сессию ищем по сохранённой раскладке — панель может быть в скрытой.
-  const session = workspace?.sessions.find(
-    (item) => item.layout?.panels?.[panelId],
-  );
+  //
+  // Не нашлась ни в одной — значит, это активная сессия: её раскладка в
+  // persist пишется снимком (при переключении сессии, проекта, правках их
+  // списка), а живые панели добавляются в dockview между снимками. Без этой
+  // развилки имя пропадало ровно у тех панелей, ради различения которых оно
+  // и появилось: у двух только что открытых в текущей сессии.
+  const session =
+    workspace?.sessions.find((item) => item.layout?.panels?.[panelId]) ??
+    workspace?.sessions.find((item) => item.id === workspace.activeSessionId);
   const agentId = getAgentRecord(panelId)?.agentId;
   return {
     panelId,
