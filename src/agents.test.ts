@@ -108,7 +108,9 @@ describe("agent catalog", () => {
     rememberAgentProcess("panel-3", "opencode");
     const opencode = getAgentRecord("panel-3")!;
     expect(buildAgentResume(opencode, false)).toBe("opencode --continue");
-    expect(buildAgentResume(opencode, true)).toBe("opencode --continue");
+    // Выбирать диалог при запуске opencode нечем: вместо чужого чата — свой,
+    // чистый.
+    expect(buildAgentResume(opencode, true)).toBe("opencode");
 
     rememberAgentProcess("panel-copilot", "copilot");
     const copilot = getAgentRecord("panel-copilot")!;
@@ -185,6 +187,29 @@ describe("agent catalog", () => {
         false,
       ),
     ).toBeNull();
+  });
+
+  it("never hands two panels the same chat through the fallback", () => {
+    // Единственная команда возобновления без «кроме этих» — «продолжить
+    // последний». Ни один агент не должен получать её, когда чат в этой папке
+    // уже за кем-то числится: у кого есть список диалогов — покажет список, у
+    // кого нет — начнёт с чистого.
+    for (const agent of AGENTS) {
+      const line = buildAgentResume(
+        { agentId: agent.id, command: agent.processNames[0]! },
+        true,
+      );
+      expect(line, `${agent.id}: нет запасного варианта`).not.toBeNull();
+      expect(
+        line,
+        `${agent.id}: список диалогов совпал с «продолжить последний»`,
+      ).not.toBe(
+        buildAgentResume(
+          { agentId: agent.id, command: agent.processNames[0]! },
+          false,
+        ),
+      );
+    }
   });
 
   it("rejects malformed session ids everywhere", () => {
