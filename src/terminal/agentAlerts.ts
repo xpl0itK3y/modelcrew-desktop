@@ -199,6 +199,16 @@ export function markAgentPanelEngaged(
   acknowledgeAgentPanel(tracker, terminalId);
 }
 
+// Разговор с панелью окончен. Отметка «ждёт» и окно тишины живут в разных
+// модулях, но означают одно, и снимать их порознь нельзя: пока панель числится
+// ждущей, окно тишины не истекает вовсе — снял одну отметку без другой, и
+// панель замолчала до конца запуска. Поэтому у пары одно имя на всё
+// приложение, и мест, где её можно разделить, не осталось.
+export function forgetAgentPanel(terminalId: string): void {
+  clearAgentAttention(terminalId);
+  forgetAlertThrottle(terminalId);
+}
+
 function clearHookGrace(tracker: AgentAlertTracker): void {
   if (tracker.hookGraceTimer !== undefined) {
     window.clearTimeout(tracker.hookGraceTimer);
@@ -211,10 +221,9 @@ export function acknowledgeAgentPanel(
   tracker: AgentAlertTracker,
   terminalId: string,
 ): void {
-  clearAgentAttention(terminalId);
-  // Вместе с отметкой снимаем и окно тишины: разговор закончен, и следующий
-  // сигнал этой панели должен звучать, даже если он спокойнее предыдущего.
-  forgetAlertThrottle(terminalId);
+  // Разговор закончен: следующий сигнал этой панели должен звучать, даже если
+  // он спокойнее предыдущего.
+  forgetAgentPanel(terminalId);
   tracker.activityBytes = 0;
   if (tracker.quietTimer !== undefined) {
     window.clearTimeout(tracker.quietTimer);
@@ -308,6 +317,10 @@ async function deliverAgentAlert(
   // Ждала ли панель до этого сигнала. Спрашиваем раньше пометки: окно тишины
   // держится именно на неотвеченном сигнале, а пометку мы сейчас поставим сами
   // и ответ на свой же вопрос получили бы всегда утвердительный.
+  //
+  // Отсюда и параметр у shouldThrottleAlert: сам он это прочитать не может —
+  // к моменту проверки отметка уже стоит. Перенести чтение внутрь значит
+  // получить там всегда true и заглушить панель навсегда.
   const wasWaiting = isAgentPanelWaiting(terminalId);
 
   // Отметку ставим до окна тишины: мигающая точка в шапке и счётчик на

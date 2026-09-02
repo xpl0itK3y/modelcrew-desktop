@@ -27,6 +27,7 @@ import {
   acknowledgeAgentPanel,
   createAgentAlertTracker,
   disposeAgentAlertTracker,
+  forgetAgentPanel,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   muteAlertsWhileRedrawing,
@@ -35,10 +36,8 @@ import {
   type AgentAlertTracker,
 } from "./agentAlerts";
 import { setPanelTailResolver } from "./alertDelivery";
-import { clearAgentAttention } from "./attentionStore";
 import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
 import { loadHookChannels, noteHookChannel } from "./hookChannel";
-import { forgetAlertThrottle } from "./alertPolicy";
 import { isMouseReport } from "./terminalInput";
 import {
   forgetAutoTitle,
@@ -244,8 +243,7 @@ export function acknowledgeTerminalPanel(id: string): void {
   }
   // Панель из скрытой сессии могла ещё не попасть в реестр: снимаем хотя бы
   // то, что живёт отдельно от неё.
-  clearAgentAttention(id);
-  forgetAlertThrottle(id);
+  forgetAgentPanel(id);
 }
 
 export function applyTerminalTheme(themeId: ThemeId): void {
@@ -803,8 +801,7 @@ export async function destroyTerminal(id: string): Promise<void> {
   // Закрытие панели — намеренное: её история больше не восстановится.
   discardSnapshot(id);
   discardAgentRecord(id);
-  clearAgentAttention(id);
-  forgetAlertThrottle(id);
+  forgetAgentPanel(id);
   entry.outputGeneration += 1;
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
