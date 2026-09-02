@@ -120,22 +120,21 @@ function ensureEventListener(): void {
   if (!isTauri || eventUnlisten) {
     return;
   }
-  try {
-    eventUnlisten = listen<{
-      workspaceId: string;
-      summary: GitChangesSummary;
-    }>("git-changes", (event) => {
-      const entry = watches.get(event.payload.workspaceId);
-      if (entry && entry.listeners.size > 0) {
-        publish(entry, event.payload.summary);
-      }
-    });
-  } catch {
-    // Канал событий не поднялся. Это не повод ронять того, кто подписался:
-    // сводку он получит опросом — тем самым, который здесь и держат на этот
-    // случай. Раньше отсюда летело исключение прямо в эффект подписчика.
+  eventUnlisten = listen<{
+    workspaceId: string;
+    summary: GitChangesSummary;
+  }>("git-changes", (event) => {
+    const entry = watches.get(event.payload.workspaceId);
+    if (entry && entry.listeners.size > 0) {
+      publish(entry, event.payload.summary);
+    }
+  }).catch(() => {
+    // Канал не поднялся. Ронять из-за этого того, кто подписался, незачем:
+    // сводку донесёт опрос — тот самый, который здесь и держат на этот
+    // случай. Отказ никто не ждал, и обещание уходило в пустоту необработанным.
     eventUnlisten = null;
-  }
+    return () => {};
+  });
 }
 
 export function getGitSummary(workspaceId: string): GitChangesSummary | null {

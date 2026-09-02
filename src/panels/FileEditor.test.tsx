@@ -866,6 +866,27 @@ describe("FileView beside git", () => {
     );
   });
 
+  it("marks the tab of a file that is not committed yet", async () => {
+    // Колонку держат открытой подолгу, и вкладка остаётся единственным следом
+    // файла, когда дерево прокручено совсем в другое место.
+    gitSummary.mockReturnValue({
+      isRepo: true,
+      headHash: "abc",
+      files: [{ path: "a.txt", status: "modified" }],
+    });
+    readWorkspaceFile.mockResolvedValue(file("одна"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("одна"),
+    );
+
+    await waitFor(() =>
+      expect(
+        document.querySelector(".file-tab")?.className,
+      ).toContain("is-git-modified"),
+    );
+  });
+
   it("stays out of the way where there is no repository", async () => {
     readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
     open();

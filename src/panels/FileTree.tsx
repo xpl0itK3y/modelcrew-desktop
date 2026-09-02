@@ -38,6 +38,8 @@ import {
 } from "./FileTreeMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { treeKeyAction } from "../files/treeKeys";
+import { useGitStatuses } from "../git/useGitStatuses";
+import type { GitFileStatus } from "../git/gitChanges";
 import {
   ChevronRightIcon,
   CloseIcon,
@@ -50,6 +52,27 @@ import {
 /// Корень проекта в карте каталогов лежит под пустым путём — тем же, каким его
 /// спрашивает бэкенд.
 const ROOT = "";
+
+/// Буква статуса — та же, что во всех редакторах: её узнают, не читая
+/// подсказку. Конфликт помечен восклицанием, а не буквой: это не разряд
+/// правки, а требование вмешаться.
+const STATUS_LETTER: Record<GitFileStatus, string> = {
+  modified: "M",
+  added: "A",
+  deleted: "D",
+  renamed: "R",
+  untracked: "U",
+  conflicted: "!",
+};
+
+const STATUS_LABEL = {
+  modified: "git.status.modified",
+  added: "git.status.added",
+  deleted: "git.status.deleted",
+  renamed: "git.status.renamed",
+  untracked: "git.status.untracked",
+  conflicted: "git.status.conflicted",
+} as const;
 
 type Row = TreeEntry & { depth: number };
 
@@ -67,6 +90,10 @@ export function FileTree(props: {
 }) {
   const { t } = useI18n();
   const { workspaceId } = props;
+  // Что в проекте изменено. Дерево — то место, где на файл смотрят чаще всего,
+  // и до сих пор оно ничем не отличало правленый файл от нетронутого: узнать
+  // это можно было только в отдельной колонке, которую ещё надо открыть.
+  const git = useGitStatuses(workspaceId);
   const [listings, setListings] = useState<Map<string, TreeListing>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
@@ -609,6 +636,9 @@ export function FileTree(props: {
           );
         }
         const glyph = fileGlyph(row.name);
+        const status = git.of(row.path);
+        // У свёрнутой папки видно только имя, а изменённое лежит внутри.
+        const holds = !status && row.isDir && git.inside(row.path);
         // Создаём внутри этой папки — строка ввода встаёт под ней и с её
         // вложенностью. Сверху списка она сообщала бы не то место.
         const inside =
@@ -624,6 +654,8 @@ export function FileTree(props: {
               row.path === activePath ? "is-active" : ""
             } ${arriving.has(row.path) ? "is-arriving" : ""} ${
               fresh.has(row.path) ? "is-fresh" : ""
+            } ${status ? `is-git is-git-${status}` : ""} ${
+              holds ? "is-git-inside" : ""
             }`}
             style={{ "--file-depth": row.depth } as CSSProperties}
             title={row.path}
@@ -656,6 +688,17 @@ export function FileTree(props: {
             <span className="file-name">{row.name}</span>
             {searching && parentOf(row.path) && (
               <span className="file-row-where">{parentOf(row.path)}</span>
+            )}
+            {/* Буква у правого края, последней в строке: при поиске рядом
+                стоит ещё и путь, и место ей остаётся только за ним. */}
+            {status && (
+              <span
+                className="file-row-status"
+                title={t(STATUS_LABEL[status])}
+                aria-label={t(STATUS_LABEL[status])}
+              >
+                {STATUS_LETTER[status]}
+              </span>
             )}
           </button>
         );

@@ -332,6 +332,29 @@
   white-space: nowrap;
 }
 
+/* Тот же словарь статусов, что в дереве и в колонке номеров. Красится имя, а
+   не вся вкладка: активная вкладка узнаётся по фону, и спорить с ним цветом
+   значит потерять и то, и другое. */
+.file-tab.is-git {
+  --tab-git: var(--mc-git-modified);
+}
+.file-tab.is-git-added,
+.file-tab.is-git-untracked {
+  --tab-git: var(--mc-git-added);
+}
+.file-tab.is-git-deleted {
+  --tab-git: var(--mc-git-deleted);
+}
+.file-tab.is-git-renamed {
+  --tab-git: var(--mc-git-renamed);
+}
+.file-tab.is-git-conflicted {
+  --tab-git: var(--mc-git-conflicted);
+}
+.file-tab.is-git .file-tab-name {
+  color: var(--tab-git);
+}
+
 /* Точка вместо звёздочки: она не спорит с именем файла за внимание и не
    меняет ширину вкладки, когда правка появляется и исчезает. */
 .file-tab-dirty {
@@ -738,6 +761,47 @@ body.is-resizing .sidebar-rail {
 
 /* В находках имя одно и то же встречается часто, и без каталога их не
    различить. Путь приписан сбоку и приглушён: он подсказка, а не заголовок. */
+/* Файл, который git ещё не видел. Цвет берётся из общего словаря статусов:
+   панель «Изменения», дерево и полоска в редакторе говорят об одном и том же,
+   и говорить об этом разными цветами им нельзя.
+
+   Правило стоит после наклона папок нарочно: у них та же вес, и решает
+   порядок — изменённая папка обязана перекрашиваться, оставаясь наклонной. */
+.file-row.is-git {
+  --row-git: var(--mc-git-modified);
+}
+.file-row.is-git-added,
+.file-row.is-git-untracked {
+  --row-git: var(--mc-git-added);
+}
+.file-row.is-git-deleted {
+  --row-git: var(--mc-git-deleted);
+}
+.file-row.is-git-renamed {
+  --row-git: var(--mc-git-renamed);
+}
+.file-row.is-git-conflicted {
+  --row-git: var(--mc-git-conflicted);
+}
+.file-row.is-git .file-name {
+  color: var(--row-git);
+}
+/* Свёрнутая папка прячет всё, что в ней тронули. Приглушённый оттенок того же
+   цвета говорит «загляни внутрь», не крича на всю колонку именем папки. */
+.file-row.is-git-inside .file-name {
+  color: color-mix(in srgb, var(--mc-git-modified) 55%, var(--mc-text));
+}
+
+.file-row-status {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--row-git);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .file-row-where {
   margin-left: auto;
   padding-left: 8px;

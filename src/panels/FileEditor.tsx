@@ -11,6 +11,7 @@ import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 import { fileGlyph } from "../files/fileGlyph";
 import { fileName } from "../crew/claimLabel";
 import { FileView } from "./FileView";
+import { useGitStatuses } from "../git/useGitStatuses";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 // Столько же живёт то же число в file-tree.css: по нему колонка возвращается
@@ -33,6 +34,9 @@ export function FileEditor(props: {
 }) {
   const { t } = useI18n();
   const { files, activePath } = props;
+  // Незакоммиченное видно и на вкладке: колонку открывают надолго, и вкладка
+  // остаётся единственным следом файла, когда дерево прокручено в другое место.
+  const git = useGitStatuses(props.workspaceId);
   // Несохранённое помечается на вкладке: иначе закрытая вкладка уносит правку
   // молча. Держим по всем открытым, а не только по видимому: переключился —
   // метка соседа не должна пропасть.
@@ -140,10 +144,13 @@ export function FileEditor(props: {
         {files.map((path) => {
           const glyph = fileGlyph(fileName(path));
           const active = path === current;
+          const status = git.of(path);
           return (
             <div
               key={path}
-              className={`file-tab ${active ? "is-active" : ""}`}
+              className={`file-tab ${active ? "is-active" : ""} ${
+                status ? `is-git is-git-${status}` : ""
+              }`}
               role="tab"
               aria-selected={active}
             >
