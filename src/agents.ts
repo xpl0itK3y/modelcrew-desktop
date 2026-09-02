@@ -184,10 +184,134 @@ function loadSessions(): Record<string, RememberedSession> {
 }
 
 function saveSessions(sessions: Record<string, RememberedSession>): void {
+  // Что изменилось, знает только сравнение с прежним состоянием: вызывающие
+  // отдают карту целиком, а в файл незачем переписывать всё подряд.
+  const previous = loadSessions();
   try {
     writeSetting(KEYS.agentSessions, JSON.stringify(sessions));
   } catch {
     // Non-fatal: останется прежний поиск сессии локатором.
+  }
+  for (const [terminalId, session] of Object.entries(sessions)) {
+    const before = previous[terminalId];
+    if (
+      !before ||
+      before.agentId !== session.agentId ||
+      before.sessionId !== session.sessionId ||
+      before.workspaceId !== session.workspaceId
+    ) {
+      rememberDurably(terminalId, session);
+    }
+  }
+  for (const terminalId of Object.keys(previous)) {
+    if (!sessions[terminalId]) {
+      forgetDurably(terminalId);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Долговечная копия привязок: файл в данных приложения, а не хранилище вебвью.
+//
+// Разговор — единственное, что приложение не умеет восстановить само. Раскладку,
+// текст панели и историю команд оно соберёт заново; чат агент отдаёт только по
+// точному id, и потерянный id значит, что пользователь открыл приложение и не
+// нашёл ни одной своей беседы. Хранилище вебвью для этого негодный дом: оно
+// чистится вместе с данными сайта, у dev- и установленной сборки оно разное и
+// переустановку не переживает.
+//
+// localStorage остаётся рабочей копией — он синхронный, и его читают на каждый
+// чих, — а файл ведётся рядом и на старте наполняет его обратно.
+
+type StoredSession = {
+  panelId: string;
+  agentId: string;
+  sessionId: string;
+  workspaceId?: string;
+  updatedAt: number;
+};
+
+function rememberDurably(
+  terminalId: string,
+  session: RememberedSession,
+): void {
+  if (!isTauri) {
+    return;
+  }
+  void invoke("agent_sessions_remember", {
+    panelId: terminalId,
+    agentId: session.agentId,
+    sessionId: session.sessionId,
+    workspaceId: session.workspaceId ?? null,
+  }).catch(() => {
+    // Файл недоступен — привязка живёт хотя бы до закрытия приложения.
+  });
+}
+
+function forgetDurably(terminalId: string): void {
+  if (!isTauri) {
+    return;
+  }
+  void invoke("agent_sessions_forget", { panelId: terminalId }).catch(() => {});
+}
+
+// Наполняет рабочую копию из файла до того, как появится первая панель.
+// Список живых панелей обязателен: файл переживает и те панели, которых уже
+// нет, и воскрешать их в хранилище вебвью незачем.
+export async function hydrateAgentSessions(
+  livePanelIds: string[],
+): Promise<void> {
+  if (!isTauri) {
+    return;
+  }
+  let stored: StoredSession[];
+  try {
+    stored = await invoke<StoredSession[]>("agent_sessions_all");
+  } catch {
+    return; // файла нет или он недоступен: остаётся прежняя рабочая копия
+  }
+  const alive = new Set(livePanelIds);
+  const sessions = loadSessions();
+  let changed = false;
+  for (const item of stored) {
+    if (!alive.has(item.panelId) || !SESSION_ID_PATTERN.test(item.sessionId)) {
+      continue;
+    }
+    const current = sessions[item.panelId];
+    if (
+      current?.agentId === item.agentId &&
+      current.sessionId === item.sessionId &&
+      current.workspaceId === item.workspaceId
+    ) {
+      continue;
+    }
+    sessions[item.panelId] = {
+      agentId: item.agentId,
+      sessionId: item.sessionId,
+      ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}),
+    };
+    changed = true;
+  }
+  if (changed) {
+    // Мимо saveSessions: писать в файл то, что из него же и пришло, незачем.
+    try {
+      writeSetting(KEYS.agentSessions, JSON.stringify(sessions));
+    } catch {
+      // Non-fatal: привязки останутся только в файле, до следующего старта.
+    }
+  }
+  // Первый запуск после обновления: привязки есть только в вебвью — переносим
+  // их в файл, иначе «фишка» начнётся с чистого листа у всех разом.
+  const known = new Set(stored.map((item) => item.panelId));
+  for (const [terminalId, session] of Object.entries(sessions)) {
+    if (alive.has(terminalId) && !known.has(terminalId)) {
+      rememberDurably(terminalId, session);
+    }
+  }
+  try {
+    await invoke("agent_sessions_keep", { keep: [...alive] });
+  } catch {
+    // Подчистится при следующем запуске.
   }
 }
 

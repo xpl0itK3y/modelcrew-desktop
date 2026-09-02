@@ -11,6 +11,7 @@ compile_error!(
 
 mod agent_hook_cli;
 mod agent_hooks;
+mod agent_session_store;
 mod agent_sessions;
 mod clipboard_images;
 mod command_error;
@@ -32,6 +33,9 @@ mod update_cache;
 mod win_proc;
 mod workspace_roots;
 
+use agent_session_store::{
+    agent_sessions_all, agent_sessions_forget, agent_sessions_keep, agent_sessions_remember,
+};
 use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
@@ -985,6 +989,10 @@ pub fn run() {
             terminal_clipboard_image_save,
             agent_session_locate,
             agent_hook_channels,
+            agent_sessions_all,
+            agent_sessions_remember,
+            agent_sessions_forget,
+            agent_sessions_keep,
             crew_claims,
             panel_snapshots,
             panel_snapshot_restore,
@@ -1078,6 +1086,7 @@ mod tests {
         ("lib.rs", LIB_RS),
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
+        ("agent_session_store.rs", include_str!("agent_session_store.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
@@ -1106,6 +1115,10 @@ mod tests {
     const EXPECTED_COMMANDS: &[&str] = &[
         "agent_hook_channels",
         "agent_session_locate",
+        "agent_sessions_all",
+        "agent_sessions_forget",
+        "agent_sessions_keep",
+        "agent_sessions_remember",
         "app_set_badge",
         "app_set_locale",
         "crew_claims",

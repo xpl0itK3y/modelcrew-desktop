@@ -7,6 +7,7 @@ import {
   boundAgentSessionIds,
   buildAgentResume,
   getAgentRecord,
+  hydrateAgentSessions,
   discardAgentRecord,
   isShellProcess,
   loadAgentResumeMode,
@@ -29,6 +30,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 describe("agent catalog", () => {
   beforeEach(() => {
     localStorage.clear();
+    // Настоящий invoke всегда возвращает промис — иначе долговечное зеркало
+    // привязок падало бы на .catch там, где тест о нём и не думает.
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(null);
   });
 
   it("matches known agent processes case-insensitively", () => {
@@ -612,6 +617,110 @@ describe("agent catalog", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("writes every binding through to the durable store", async () => {
+    // Хранилище вебвью — рабочая копия, а не дом: чистка данных сайта, другая
+    // сборка, переустановка — и разговоров нет. В файл уходит каждое движение.
+    rememberAgentProcess("panel-1", "codex");
+    invokeMock.mockClear();
+
+    bindAgentSession("panel-1", "01a060ed-d936", "ws-1");
+    expect(invokeMock).toHaveBeenCalledWith("agent_sessions_remember", {
+      panelId: "panel-1",
+      agentId: "codex",
+      sessionId: "01a060ed-d936",
+      workspaceId: "ws-1",
+    });
+
+    invokeMock.mockClear();
+    discardAgentRecord("panel-1");
+    expect(invokeMock).toHaveBeenCalledWith("agent_sessions_forget", {
+      panelId: "panel-1",
+    });
+  });
+
+  it("does not rewrite the store when nothing about the binding changed", async () => {
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "01a060ed-d936", "ws-1");
+    invokeMock.mockClear();
+
+    // Та же привязка ещё раз — и папка та же: писать в файл нечего.
+    bindAgentSession("panel-1", "01a060ed-d936", "ws-1");
+    noteSessionWorkspace("panel-1", "ws-1");
+
+    expect(
+      invokeMock.mock.calls.filter(
+        ([command]) => command === "agent_sessions_remember",
+      ),
+    ).toEqual([]);
+  });
+
+  it("brings conversations back from the store when the webview store is empty", async () => {
+    // Ровно тот случай, ради которого всё затевалось: пользователь открыл
+    // приложение, у вебвью пусто — а разговоры на месте.
+    invokeMock.mockImplementation((command: string) =>
+      command === "agent_sessions_all"
+        ? Promise.resolve([
+            {
+              panelId: "panel-1",
+              agentId: "codex",
+              sessionId: "01a060ed-d936",
+              workspaceId: "ws-1",
+              updatedAt: 1,
+            },
+            {
+              panelId: "panel-gone",
+              agentId: "claude",
+              sessionId: "closed-panel-chat",
+              updatedAt: 2,
+            },
+          ])
+        : Promise.resolve(null),
+    );
+
+    await hydrateAgentSessions(["panel-1"]);
+
+    rememberAgentProcess("panel-1", "codex");
+    expect(rememberedSessionId("panel-1", "codex")).toBe("01a060ed-d936");
+    // Панели больше нет — воскрешать её разговор незачем, и файл об этом
+    // узнает тем же заходом.
+    expect(rememberedSessionId("panel-gone", "claude")).toBeUndefined();
+    expect(invokeMock).toHaveBeenCalledWith("agent_sessions_keep", {
+      keep: ["panel-1"],
+    });
+  });
+
+  it("carries bindings from an older version into the store", async () => {
+    // До этой версии привязки жили только в вебвью. Первый запуск обязан их
+    // перенести, иначе «фишка» у всех разом начнётся с чистого листа.
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "01a060ed-d936", "ws-1");
+    invokeMock.mockClear();
+    invokeMock.mockImplementation((command: string) =>
+      command === "agent_sessions_all"
+        ? Promise.resolve([])
+        : Promise.resolve(null),
+    );
+
+    await hydrateAgentSessions(["panel-1"]);
+
+    expect(invokeMock).toHaveBeenCalledWith("agent_sessions_remember", {
+      panelId: "panel-1",
+      agentId: "codex",
+      sessionId: "01a060ed-d936",
+      workspaceId: "ws-1",
+    });
+  });
+
+  it("keeps the working copy when the store cannot be read", async () => {
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "01a060ed-d936", "ws-1");
+    invokeMock.mockRejectedValue(new Error("файл недоступен"));
+
+    await hydrateAgentSessions(["panel-1"]);
+
+    expect(rememberedSessionId("panel-1", "codex")).toBe("01a060ed-d936");
   });
 
   it("stays quiet for a panel without an agent", async () => {
