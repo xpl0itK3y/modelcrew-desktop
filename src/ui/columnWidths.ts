@@ -49,3 +49,90 @@ export function saveWidth(column: Column, width: number): void {
 export function widthLimits(column: Column): Limits {
   return LIMITS[column];
 }
+
+// Сколько места обязано остаться сетке терминалов. Границы выше — про саму
+// колонку и ничего не знают об окне: 480 + 560 + 1200 это 2240 пикселей, и на
+// любом ноутбуке сетка уезжает за правый край задолго до того, как хоть одна
+// колонка упрётся в свой предел. Терминал при этом не сжимается, а именно
+// уходит за край — вернуть его можно только обратным перетаскиванием вслепую.
+export const MIN_DOCK_WIDTH = 360;
+
+/**
+ * Границы колонки с оглядкой на то, сколько сейчас занимает сетка.
+ *
+ * Расширение колонки забирает ровно столько, сколько прибавили: попросив
+ * ширину `w`, мы оставим сетке `dock - (w - current)`. Отсюда и предел —
+ * `current + dock - MIN_DOCK_WIDTH`; он точен на любом шаге перетаскивания,
+ * потому что считается по свежей паре «текущая ширина, текущая сетка».
+ *
+ * Сетку ещё не измерили (первый рендер) — отдаём прежние границы: лучше один
+ * кадр без ограничения, чем схлопнутая в минимум колонка на старте.
+ */
+export function widthLimitsWithin(
+  column: Column,
+  current: number,
+  dockWidth: number,
+): Limits {
+  const limits = LIMITS[column];
+  if (!Number.isFinite(dockWidth) || dockWidth <= 0 || !Number.isFinite(current)) {
+    return limits;
+  }
+  const room = Math.round(current + dockWidth - MIN_DOCK_WIDTH);
+  return {
+    ...limits,
+    // Места может уже не хватать — тогда колонку остаётся только сужать.
+    max: Math.max(limits.min, Math.min(limits.max, room)),
+  };
+}
+
+export function clampWithin(
+  column: Column,
+  width: number,
+  current: number,
+  dockWidth: number,
+): number {
+  if (!Number.isFinite(width)) {
+    return LIMITS[column].fallback;
+  }
+  const { min, max } = widthLimitsWithin(column, current, dockWidth);
+  return Math.min(max, Math.max(min, Math.round(width)));
+}
+
+// Колонки в том порядке, в каком у них отбирают место: редактор шире всех и
+// переживёт потерю первым, дерево следом, боковая панель последней — в ней
+// список проектов, по которому переключаются.
+const SHRINK_ORDER: Column[] = ["editor", "tree", "sidebar"];
+
+/**
+ * Ужимает видимые колонки так, чтобы сетке досталось не меньше положенного.
+ *
+ * Нужно не для перетаскивания, а для встречи с окном: сохранённые ширины
+ * пришли с прошлого запуска, где экран мог быть больше, — и на новом сетка
+ * оказывается за краем ещё до того, как пользователь тронет разделитель.
+ * Сохранять ужатое не будем: это уступка нынешнему окну, а не новая воля
+ * пользователя.
+ */
+export function fitColumns(
+  widths: Record<Column, number>,
+  visible: readonly Column[],
+  dockWidth: number,
+): Record<Column, number> {
+  if (!Number.isFinite(dockWidth) || dockWidth >= MIN_DOCK_WIDTH) {
+    return widths;
+  }
+  const fitted = { ...widths };
+  let missing = MIN_DOCK_WIDTH - Math.round(dockWidth);
+  for (const column of SHRINK_ORDER) {
+    if (missing <= 0) {
+      break;
+    }
+    if (!visible.includes(column)) {
+      continue;
+    }
+    const { min } = LIMITS[column];
+    const give = Math.min(missing, Math.max(0, fitted[column] - min));
+    fitted[column] -= give;
+    missing -= give;
+  }
+  return fitted;
+}

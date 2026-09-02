@@ -19,10 +19,12 @@ import { FileEditor } from "./panels/FileEditor";
 import { ResizeHandle } from "./ui/ResizeHandle";
 import { closeUnder, moveUnder } from "./files/openFiles";
 import {
-  clampWidth,
+  clampWithin,
+  fitColumns,
   loadWidth,
   saveWidth,
   widthLimits,
+  widthLimitsWithin,
   type Column,
 } from "./ui/columnWidths";
 import { invoke } from "@tauri-apps/api/core";
@@ -481,8 +483,31 @@ export default function App() {
     tree: loadWidth("tree"),
     editor: loadWidth("editor"),
   }));
+  // Ширина сетки терминалов: без неё границы колонок ничего не знают об окне,
+  // и любая из них может выдавить сетку за правый край. Считает её ResizeObserver
+  // по живому элементу — так не нужно знать ни про разделители, ни про то, какие
+  // колонки сейчас видны.
+  const dockRef = useRef<HTMLElement | null>(null);
+  const dockWidthRef = useRef(0);
+  const [dockWidth, setDockWidth] = useState(0);
+  useEffect(() => {
+    const element = dockRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      const width = element.clientWidth;
+      dockWidthRef.current = width;
+      setDockWidth(width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const resizeColumn = useCallback((column: Column, width: number) => {
-    setWidths((current) => ({ ...current, [column]: clampWidth(column, width) }));
+    setWidths((current) => ({
+      ...current,
+      [column]: clampWithin(column, width, current[column], dockWidthRef.current),
+    }));
   }, []);
   const rememberColumn = useCallback((column: Column, width: number) => {
     saveWidth(column, width);
@@ -558,6 +583,30 @@ export default function App() {
     COLUMN_EXIT_MS,
   );
 
+  // Окно бывает уже, чем сохранённые ширины: они пришли с прошлого запуска, где
+  // экран мог быть больше, и сетка оказывается за краем ещё до того, как
+  // разделитель кто-нибудь тронет. Уступаем нынешнему окну, в хранилище не
+  // лезем — воля пользователя там записана верно, просто сейчас не помещается.
+  //
+  // Правим состояние, а не то, что рисуем: иначе ужатая колонка вернула бы
+  // сетке место, следующее измерение сочло бы всё в порядке, колонка прыгнула
+  // бы обратно — и так до бесконечности.
+  useEffect(() => {
+    if (dockWidth <= 0) {
+      return;
+    }
+    const visible: Column[] = [];
+    if (sidebarVisible) {
+      visible.push("sidebar");
+    }
+    if (treePresence) {
+      visible.push("tree");
+    }
+    if (editorPresence) {
+      visible.push("editor");
+    }
+    setWidths((current) => fitColumns(current, visible, dockWidth));
+  }, [dockWidth, sidebarVisible, treePresence, editorPresence]);
   // Оверлей поверх терминалов: панель изменений не двигает раскладку.
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
@@ -674,7 +723,7 @@ export default function App() {
           <ResizeHandle
             width={widths.sidebar}
             min={widthLimits("sidebar").min}
-            max={widthLimits("sidebar").max}
+            max={widthLimitsWithin("sidebar", widths.sidebar, dockWidth).max}
             label={t("sidebar.title")}
             onResize={(width) => resizeColumn("sidebar", width)}
             onResizeEnd={(width) => rememberColumn("sidebar", width)}
@@ -710,7 +759,7 @@ export default function App() {
           <ResizeHandle
             width={widths.tree}
             min={widthLimits("tree").min}
-            max={widthLimits("tree").max}
+            max={widthLimitsWithin("tree", widths.tree, dockWidth).max}
             label={t("files.panelTitle")}
             onResize={(width) => resizeColumn("tree", width)}
             onResizeEnd={(width) => rememberColumn("tree", width)}
@@ -734,14 +783,14 @@ export default function App() {
           <ResizeHandle
             width={widths.editor}
             min={widthLimits("editor").min}
-            max={widthLimits("editor").max}
+            max={widthLimitsWithin("editor", widths.editor, dockWidth).max}
             label={t("files.editorTitle")}
             onResize={(width) => resizeColumn("editor", width)}
             onResizeEnd={(width) => rememberColumn("editor", width)}
             onReset={() => resetColumn("editor")}
           />
         )}
-        <main className="dock-area">
+        <main className="dock-area" ref={dockRef}>
           {rootRegistryReady ? (
             <AppActionsProvider actions={appActions}>
               <DockviewReact
