@@ -412,6 +412,17 @@
   color: var(--mc-text-muted);
 }
 
+/* Переключатель просмотра стоит перед «Сохранить»: и то, и другое относится к
+   файлу, а не к колонке, и живут они в одном углу. Место им освобождает сам
+   путь — он растянут на всё остальное. */
+.file-view-preview {
+  flex: 0 0 auto;
+}
+.file-view-preview[aria-pressed="true"] {
+  color: var(--mc-text-bright);
+  background: var(--mc-hover-strong);
+}
+
 .file-view-save {
   padding: 2px 9px;
   border: 1px solid var(--mc-border);
@@ -621,6 +632,175 @@
   color: var(--mc-text-muted);
 }
 
+/* Разметка. Заголовок ярче текста и плотнее — он и на бумаге такой; вставка
+   кода тем же цветом, что строка в коде; ссылка подчёркнута пунктиром, чтобы
+   отличаться от выделения не только цветом. */
+.tok-heading {
+  color: var(--mc-text-bright);
+  font-weight: 600;
+}
+
+.tok-code {
+  color: #9ccfa0;
+}
+
+.tok-emphasis {
+  color: #d8a657;
+}
+
+.tok-link {
+  color: #7fb3d5;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+
+/* Просмотр разметки. Читают его подолгу и подряд, поэтому строки шире и
+   воздуха больше, чем в коде: это текст, а не листинг. */
+.markdown-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px 24px;
+  color: var(--mc-text);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: break-word;
+}
+
+.md-heading {
+  margin: 20px 0 8px;
+  color: var(--mc-text-bright);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-view > .md-heading:first-child {
+  margin-top: 0;
+}
+h1.md-heading {
+  font-size: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--mc-panel-border);
+}
+h2.md-heading {
+  font-size: 17px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--mc-panel-border);
+}
+h3.md-heading {
+  font-size: 15px;
+}
+h4.md-heading,
+h5.md-heading,
+h6.md-heading {
+  font-size: 13px;
+  color: var(--mc-text);
+}
+
+.md-paragraph {
+  margin: 0 0 10px;
+  /* Перевод строки внутри абзаца автор поставил сам — сохраняем его, а
+     длинные строки всё равно переносим по ширине колонки. */
+  white-space: pre-wrap;
+}
+
+.md-list {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.md-list .md-list {
+  margin: 4px 0 0;
+}
+.md-list li {
+  margin: 2px 0;
+}
+/* Внутри пункта абзац не отбивается: это одна строка списка, а не раздел. */
+.md-list li > .md-paragraph {
+  margin: 0;
+}
+
+.md-quote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--mc-panel-border);
+  color: var(--mc-text-muted);
+}
+.md-quote > :last-child {
+  margin-bottom: 0;
+}
+
+.md-rule {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--mc-panel-border);
+}
+
+.md-code {
+  padding: 1px 5px;
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-hover-subtle);
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+
+.md-block-code {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--mc-panel-border);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface-raised);
+  /* Длинная строка кода уезжает внутри блока, а не растягивает всю колонку. */
+  overflow-x: auto;
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+.md-block-code code {
+  font: inherit;
+}
+
+.md-link {
+  color: #7fb3d5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+/* Ссылка на соседний файл или на якорь: увести по ней некуда, и вести себя
+   как ссылка она не должна — только выглядеть иначе, чем текст. */
+.md-link.is-local {
+  color: var(--mc-text-muted);
+  text-decoration: underline dotted;
+  cursor: default;
+}
+
+.md-image {
+  padding: 1px 6px;
+  border: 1px dashed var(--mc-panel-border);
+  border-radius: var(--mc-radius-xs);
+  color: var(--mc-text-muted);
+  font-size: 12px;
+}
+
+.md-table-scroll {
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+.md-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.md-table th,
+.md-table td {
+  padding: 4px 10px;
+  border: 1px solid var(--mc-panel-border);
+  text-align: left;
+}
+.md-table th {
+  background: var(--mc-hover-subtle);
+  color: var(--mc-text-bright);
+  font-weight: 600;
+}
 
 /* Разделители колонок. */
 

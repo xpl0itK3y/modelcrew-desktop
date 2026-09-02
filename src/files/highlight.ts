@@ -16,7 +16,13 @@ export type TokenKind =
   | "string"
   | "number"
   | "keyword"
-  | "punct";
+  | "punct"
+  // Разряды разметки: у неё свои части, и звать заголовок ключевым словом, а
+  // ссылку строкой значило бы красить их чужими цветами.
+  | "heading"
+  | "code"
+  | "emphasis"
+  | "link";
 
 export type Token = { text: string; kind: TokenKind };
 
@@ -423,10 +429,14 @@ const GRAMMARS: Record<string, Grammar> = {
   nix: grammar(["#"], ["/*", "*/"], ['"'], NIX_WORDS),
 };
 
+/// Markdown в таблицу не входит: он разбирается своим сканером ниже. Здесь он
+/// всё равно нужен — правило «ничего не терять» касается и его.
+const MARKDOWN = "md";
+
 /// Все разборы, какие есть. Список берётся из самой таблицы, а не пишется
 /// рядом с ней руками: главное свойство разбора — ничего не терять — обязано
 /// проверяться на каждом языке, включая тот, который добавят завтра.
-export const languages: string[] = Object.keys(GRAMMARS);
+export const languages: string[] = [...Object.keys(GRAMMARS), MARKDOWN];
 
 /// Расширение → разбор. Родственники делят разбор: разница между `.js` и
 /// `.ts` для подсветки — пара слов в списке, а не другой язык.
@@ -441,6 +451,8 @@ const BY_EXTENSION: Record<string, string> = {
   hbs: "html", ejs: "html", plist: "html", xaml: "html", xsd: "html",
   yml: "yaml", yaml: "yaml",
   toml: "toml",
+  md: MARKDOWN, markdown: MARKDOWN, mdown: MARKDOWN, mkd: MARKDOWN,
+  mdx: MARKDOWN, rmd: MARKDOWN,
   sh: "sh", bash: "sh", zsh: "sh", fish: "sh", ksh: "sh", env: "sh",
   py: "py", pyi: "py", pyw: "py", pyx: "py",
   go: "go",
@@ -459,7 +471,7 @@ const BY_EXTENSION: Record<string, string> = {
   sql: "sql", psql: "sql", ddl: "sql",
   lua: "lua",
   pl: "perl", pm: "perl",
-  r: "r", rmd: "r",
+  r: "r",
   jl: "julia",
   hs: "haskell", lhs: "haskell", elm: "haskell", purs: "haskell",
   ex: "elixir", exs: "elixir",
@@ -512,6 +524,170 @@ export function grammarOf(name: string): string | null {
   const at = plain.lastIndexOf(".");
   const extension = at <= 0 ? "" : plain.slice(at + 1);
   return BY_EXTENSION[extension] ?? null;
+}
+
+// ——— Markdown ———
+//
+// Своим сканером, а не строкой в таблице выше. У разметки значение имеет начало
+// строки — решётка, кавычка, дефис, ограда кода, — а таблица умеет смотреть
+// только на отдельный символ, где бы он ни стоял. Заголовок она покрасила бы
+// как комментарий в скрипте, а список — никак.
+const FENCE = /^ {0,3}(```|~~~)/;
+const HEADING = /^ {0,3}#{1,6}(\s|$)/;
+const QUOTE = /^ {0,3}>/;
+// Три и больше одинаковых знака в строке — черта, а не список из одного пункта.
+const RULE = /^ {0,3}([-*_])[ \t]*(\1[ \t]*){2,}$/;
+const BULLET = /^(\s*)([-*+]|\d{1,9}[.)])(\s+)/;
+/// Схема в угловых скобках: `<https://…>`, `<mailto:…>`.
+const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/// Разбор внутри строки: код, выделение, ссылки. Разметку красим вместе с тем,
+/// что она размечает: в исходнике звёздочки — часть текста, и оставлять их
+/// серыми посреди цветного значит рвать слово надвое.
+function markdownInline(
+  line: string,
+  push: (value: string, kind: TokenKind) => void,
+): void {
+  let at = 0;
+  while (at < line.length) {
+    const first = line[at];
+
+    if (first === "`") {
+      // Сколько апострофов открыло вставку, столько её и закроет.
+      let ticks = 1;
+      while (line[at + ticks] === "`") {
+        ticks += 1;
+      }
+      const mark = "`".repeat(ticks);
+      const close = line.indexOf(mark, at + ticks);
+      const stop = close === -1 ? line.length : close + ticks;
+      push(line.slice(at, stop), "code");
+      at = stop;
+      continue;
+    }
+
+    if (first === "*" || first === "_") {
+      const mark = line[at + 1] === first ? first + first : first;
+      const close = line.indexOf(mark, at + mark.length);
+      // Пустое выделение — не выделение, а два знака подряд: `**` в тексте.
+      if (close > at + mark.length) {
+        push(line.slice(at, close + mark.length), "emphasis");
+        at = close + mark.length;
+        continue;
+      }
+    }
+
+    if (first === "[" || (first === "!" && line[at + 1] === "[")) {
+      const opened = first === "!" ? at + 1 : at;
+      const text = line.indexOf("]", opened + 1);
+      if (text !== -1 && line[text + 1] === "(") {
+        const url = line.indexOf(")", text + 2);
+        if (url !== -1) {
+          push(line.slice(at, url + 1), "link");
+          at = url + 1;
+          continue;
+        }
+      }
+    }
+
+    if (first === "<") {
+      const close = line.indexOf(">", at + 1);
+      if (close !== -1 && SCHEME.test(line.slice(at + 1, close))) {
+        push(line.slice(at, close + 1), "link");
+        at = close + 1;
+        continue;
+      }
+    }
+
+    push(first, "plain");
+    at += 1;
+  }
+}
+
+function markdownTokens(text: string): Token[] {
+  const tokens: Token[] = [];
+  // Соседние куски одного разряда склеиваются на месте: слой подсветки рисует
+  // по элементу на кусок, и абзац прозы иначе стал бы сотней пустых span-ов.
+  const push = (value: string, kind: TokenKind) => {
+    if (!value) {
+      return;
+    }
+    const last = tokens[tokens.length - 1];
+    if (last && last.kind === kind) {
+      last.text += value;
+      return;
+    }
+    tokens.push({ text: value, kind });
+  };
+
+  // Открытая ограда: всё до закрывающей — код, чем бы оно ни выглядело.
+  let fence: string | null = null;
+  let at = 0;
+  for (;;) {
+    const end = text.indexOf("\n", at);
+    const stop = end === -1 ? text.length : end;
+    const line = text.slice(at, stop);
+
+    if (fence) {
+      push(line, "code");
+      if (line.trimStart().startsWith(fence)) {
+        fence = null;
+      }
+    } else {
+      const opened = FENCE.exec(line);
+      if (opened) {
+        fence = opened[1];
+        push(line, "code");
+      } else if (HEADING.test(line)) {
+        push(line, "heading");
+      } else if (QUOTE.test(line)) {
+        // Цитата серым курсивом — тем же, чем комментарий: она и есть речь
+        // рядом с текстом, а не сам текст.
+        push(line, "comment");
+      } else if (RULE.test(line)) {
+        push(line, "punct");
+      } else {
+        const bullet = BULLET.exec(line);
+        if (bullet) {
+          push(bullet[1], "plain");
+          push(bullet[2], "punct");
+          push(bullet[3], "plain");
+        }
+        markdownInline(line.slice(bullet ? bullet[0].length : 0), push);
+      }
+    }
+
+    if (end === -1) {
+      return tokens;
+    }
+    push("\n", "plain");
+    at = end + 1;
+  }
+}
+
+/// Разбор по метке у ограды кода: ```ts, ```python, ```bash. Метки пишут
+/// словом, а таблица расширений знает их сокращениями — здесь только то, что
+/// в ней не сходится.
+const BY_TAG: Record<string, string> = {
+  typescript: "ts", javascript: "ts", node: "ts",
+  rust: "rs",
+  python: "py", python3: "py",
+  shell: "sh", console: "sh", terminal: "sh", shellsession: "sh",
+  golang: "go",
+  "c++": "cpp", cplusplus: "cpp", cxx: "cpp",
+  csharp: "cs", "c#": "cs",
+  "objective-c": "objc", objectivec: "objc",
+  kotlin: "kotlin", ruby: "ruby", perl: "perl", julia: "julia",
+  haskell: "haskell", elixir: "elixir", erlang: "erlang", clojure: "lisp",
+  scheme: "lisp", ocaml: "ocaml", fsharp: "ocaml",
+  powershell: "powershell", pwsh: "powershell",
+  terraform: "hcl", dockerfile: "docker", makefile: "make",
+  protobuf: "proto", solidity: "solidity",
+};
+
+export function grammarForTag(tag: string): string | null {
+  const key = tag.trim().toLowerCase();
+  return BY_TAG[key] ?? BY_EXTENSION[key] ?? null;
 }
 
 /// Смещение начала каждой строки. По нему берут кусок текста под окно показа,
@@ -585,6 +761,9 @@ const NUMBER = /[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?/y;
 const WORD = /[A-Za-z_$][A-Za-z0-9_$]*/y;
 
 export function tokenize(text: string, language: string | null): Token[] {
+  if (language === MARKDOWN) {
+    return markdownTokens(text);
+  }
   const rules = language ? GRAMMARS[language] : undefined;
   if (!rules || text.length === 0) {
     return text ? [{ text, kind: "plain" }] : [];

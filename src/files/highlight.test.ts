@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  grammarForTag,
   grammarOf,
   languages,
   lineOffsets,
@@ -263,5 +264,97 @@ describe("the languages beyond the ones this app is written in", () => {
     for (const [name, language] of Object.entries(expected)) {
       expect(grammarOf(name), name).toBe(language);
     }
+  });
+});
+
+describe("markdown", () => {
+  it("reads the file by the start of its lines", () => {
+    const doc = [
+      "# Заголовок",
+      "",
+      "Обычный абзац.",
+      "",
+      "- пункт списка",
+      "1. и нумерованный",
+      "",
+      "> цитата",
+      "",
+      "---",
+    ].join("\n");
+    const marked = kinds(tokenize(doc, "md"));
+
+    expect(marked).toContainEqual(["heading", "# Заголовок"]);
+    expect(marked).toContainEqual(["comment", "> цитата"]);
+    expect(marked).toContainEqual(["punct", "-"]);
+    expect(marked).toContainEqual(["punct", "1."]);
+    expect(marked).toContainEqual(["punct", "---"]);
+    // Абзац остаётся текстом: красить в разметке нечего.
+    expect(marked.some(([, text]) => text.includes("Обычный абзац"))).toBe(false);
+  });
+
+  it("keeps everything inside a fence out of the parser's hands", () => {
+    // В примере кода решётка — комментарий, а звёздочка — умножение. Разбирать
+    // их как разметку значит красить чужой язык своими правилами.
+    const doc = [
+      "```py",
+      "# это комментарий, а не заголовок",
+      "x = a * b",
+      "```",
+      "# а вот это заголовок",
+    ].join("\n");
+    const marked = kinds(tokenize(doc, "md"));
+
+    expect(marked).toContainEqual(["code", "```py"]);
+    expect(marked).toContainEqual([
+      "code",
+      "# это комментарий, а не заголовок",
+    ]);
+    expect(marked).toContainEqual(["heading", "# а вот это заголовок"]);
+  });
+
+  it("leaves an unclosed fence closed to the end of the file", () => {
+    // Ровно так его и прочитает любой просмотрщик разметки: ограда без пары
+    // тянется до конца, и видеть это полезнее, чем догадываться.
+    const marked = kinds(tokenize("```\nкод\n# не заголовок", "md"));
+
+    expect(marked.every(([kind]) => kind === "code")).toBe(true);
+  });
+
+  it("marks what is written inside a line", () => {
+    const marked = kinds(
+      tokenize(
+        "текст с `кодом`, **жирным**, _наклонным_ и [ссылкой](https://ya.ru)",
+        "md",
+      ),
+    );
+
+    expect(marked).toContainEqual(["code", "`кодом`"]);
+    expect(marked).toContainEqual(["emphasis", "**жирным**"]);
+    expect(marked).toContainEqual(["emphasis", "_наклонным_"]);
+    expect(marked).toContainEqual(["link", "[ссылкой](https://ya.ru)"]);
+  });
+
+  it("does not take a lone asterisk for the start of a word in bold", () => {
+    // Звёздочка без пары — обычный знак, и покрасить с неё половину строки
+    // значит соврать про весь остаток абзаца.
+    const marked = kinds(tokenize("5 * 3 = 15, и это не разметка", "md"));
+
+    expect(marked.filter(([kind]) => kind === "emphasis")).toHaveLength(0);
+  });
+
+  it("knows a markdown file by its name", () => {
+    expect(grammarOf("README.md")).toBe("md");
+    expect(grammarOf("SPEC.markdown")).toBe("md");
+    expect(grammarOf("page.mdx")).toBe("md");
+  });
+
+  it("reads the tag written at the fence, however it was spelled", () => {
+    // У ограды пишут словом, а таблица расширений знает сокращения.
+    expect(grammarForTag("typescript")).toBe("ts");
+    expect(grammarForTag("Python")).toBe("py");
+    expect(grammarForTag("bash")).toBe("sh");
+    expect(grammarForTag("rs")).toBe("rs");
+    expect(grammarForTag("")).toBeNull();
+    expect(grammarForTag("нетакого")).toBeNull();
   });
 });
