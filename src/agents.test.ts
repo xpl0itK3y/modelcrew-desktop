@@ -11,6 +11,7 @@ import {
   isShellProcess,
   loadAgentResumeMode,
   matchAgent,
+  noteResumedAgentSession,
   noteSessionWorkspace,
   pruneAgentRecords,
   rememberAgentProcess,
@@ -82,6 +83,59 @@ describe("agent catalog", () => {
     // Watcher пришлёт только один zsh: этого достаточно.
     rememberAgentProcess("panel-1", "zsh");
     expect(getAgentRecord("panel-1")).toBeNull();
+  });
+
+  it("keeps the resumed chat when the watcher rebuilds the record", () => {
+    // Полный перезапуск приложения: панель возобновляется в своём чате, но
+    // watcher успевает увидеть оболочку раньше, чем поднимется агент, — запись
+    // стирается и пересоздаётся уже без id. Панель при этом сидит в известном
+    // разговоре, и локатору её искать нечего: без этой заметки он считал бы её
+    // ничьей и мог отдать ей чат соседки.
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "01a060ed-d936-7471-8504-125f981fd64a", "ws-1");
+
+    noteResumedAgentSession("panel-1", "01a060ed-d936-7471-8504-125f981fd64a");
+    rememberAgentProcess("panel-1", "zsh");
+    expect(getAgentRecord("panel-1")).toBeNull();
+    rememberAgentProcess("panel-1", "codex");
+
+    expect(getAgentRecord("panel-1")?.sessionId).toBe(
+      "01a060ed-d936-7471-8504-125f981fd64a",
+    );
+  });
+
+  it("does not stamp the resumed chat onto one started later by hand", () => {
+    // Заметка одноразовая: она про один переход «оболочка → агент» сразу после
+    // возобновления. Если потом агент вышел в prompt и пользователь запустил
+    // его заново, это уже новый разговор — id ему приписывать нельзя, иначе
+    // после перезапуска панель откроет не тот чат.
+    rememberAgentProcess("panel-1", "codex");
+    bindAgentSession("panel-1", "01a060ed-d936-7471-8504-125f981fd64a", "ws-1");
+
+    noteResumedAgentSession("panel-1", "01a060ed-d936-7471-8504-125f981fd64a");
+    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "codex");
+
+    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "codex");
+    expect(getAgentRecord("panel-1")?.sessionId).toBeUndefined();
+  });
+
+  it("does not hand the resumed chat to a panel that lost it to a neighbour", () => {
+    // Чат числится за соседкой — заметка устарела, и повторять ею старую
+    // ошибку нельзя: две панели в одном разговоре мешают друг другу.
+    rememberAgentProcess("panel-1", "codex");
+    rememberAgentProcess("panel-2", "codex");
+    bindAgentSession("panel-2", "01a060ed-d936-7471-8504-125f981fd64a", "ws-1");
+
+    noteResumedAgentSession("panel-1", "01a060ed-d936-7471-8504-125f981fd64a");
+    rememberAgentProcess("panel-1", "zsh");
+    rememberAgentProcess("panel-1", "codex");
+
+    expect(getAgentRecord("panel-1")?.sessionId).toBeUndefined();
+    expect(getAgentRecord("panel-2")?.sessionId).toBe(
+      "01a060ed-d936-7471-8504-125f981fd64a",
+    );
   });
 
   it("recognizes Unix and Windows shell names from the title watcher", () => {

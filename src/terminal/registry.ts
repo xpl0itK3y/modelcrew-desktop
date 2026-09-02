@@ -20,6 +20,7 @@ import {
   discardAgentRecord,
   getAgentRecord,
   loadAgentResumeMode,
+  noteResumedAgentSession,
   noteSessionWorkspace,
   rememberedSessionId,
   retryAgentSessionBinding,
@@ -660,14 +661,21 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
   // приложения, и запись пересоздалась уже без id. Тогда берём последнюю
   // известную сессию этой панели — она вернее и «последнего чата папки»,
   // и списка диалогов.
+  const sessionId =
+    record.sessionId ?? rememberedSessionId(entry.id, record.agentId);
   const line = buildAgentResume(
-    record.sessionId
-      ? record
-      : { ...record, sessionId: rememberedSessionId(entry.id, record.agentId) },
+    sessionId ? { ...record, sessionId } : record,
     picker,
   );
   if (!line) {
     return;
+  }
+  // Команда несёт точный id — значит панель садится в известный чат. Watcher
+  // сейчас сотрёт запись (в панели пока оболочка) и пересоздаст её без id;
+  // заметка вернёт id обратно, когда агент поднимется. Проверяем по самой
+  // команде: у агента без адресного resume в строке никакого id нет.
+  if (sessionId && line.includes(sessionId)) {
+    noteResumedAgentSession(entry.id, sessionId);
   }
   // Команда вводится после паузы в выводе (оболочка напечатала приглашение),
   // иначе байты перемешиваются с инициализацией шелла.

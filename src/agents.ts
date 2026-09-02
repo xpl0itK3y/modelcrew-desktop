@@ -255,6 +255,51 @@ export function agentChatClaimedNearby(
 }
 
 
+// Диалог, в который панель возобновилась при запуске приложения. Запись об
+// агенте эфемерна: watcher стирает её, едва увидит оболочку, — а после полного
+// перезапуска оболочка и есть первое, что он видит, потому что команду
+// возобновления мы вводим уже в приглашение. К моменту, когда агент поднялся,
+// запись пересоздаётся с нуля и об id не помнит, хотя панель всё это время
+// сидит в известном чате. Локатор такую панель считает ничьей и по свежести
+// файлов может отдать ей разговор соседки — так две панели и оказываются в
+// одном чате. Заметка закрывает ровно этот промежуток.
+//
+// Одноразовая и недолгая: она про один переход «оболочка → агент» сразу после
+// возобновления. Если тот же агент позже запустится в панели снова, это уже
+// новый разговор, и приписывать ему старый id нельзя.
+const RESUMED_SESSION_TRUST_MS = 2 * 60_000;
+
+const resumedSessions = new Map<string, { sessionId: string; at: number }>();
+
+export function noteResumedAgentSession(
+  terminalId: string,
+  sessionId: string,
+): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return;
+  }
+  resumedSessions.set(terminalId, { sessionId, at: Date.now() });
+}
+
+function takeResumedSession(
+  terminalId: string,
+  agentId: string,
+): string | undefined {
+  const noted = resumedSessions.get(terminalId);
+  if (!noted) {
+    return undefined;
+  }
+  resumedSessions.delete(terminalId);
+  if (Date.now() - noted.at > RESUMED_SESSION_TRUST_MS) {
+    return undefined;
+  }
+  // Пока панель поднималась, чат мог достаться соседке (например, по хуку).
+  // Повторять старую привязку поверх чужой — снова сажать двоих в один чат.
+  return boundAgentSessionIds(agentId, terminalId).includes(noted.sessionId)
+    ? undefined
+    : noted.sessionId;
+}
+
 function loadRecords(): Record<string, AgentRecord> {
   try {
     const raw = readSetting(KEYS.terminalAgents);
@@ -364,10 +409,13 @@ export function rememberAgentProcess(
     ) {
       return true;
     }
+    // Агент поднялся после возобновления: свой чат панель знает и без локатора.
+    const resumed = takeResumedSession(terminalId, matched.agent.id);
     records[terminalId] = {
       agentId: matched.agent.id,
       command: matched.command,
       detectedAt: Date.now(),
+      ...(resumed ? { sessionId: resumed } : {}),
     };
     saveRecords(records);
     return true;
@@ -397,6 +445,7 @@ export function rememberAgentProcess(
 export function discardAgentRecord(terminalId: string): void {
   agentMisses.delete(terminalId);
   bindingRoots.delete(terminalId);
+  resumedSessions.delete(terminalId);
   const sessions = loadSessions();
   if (sessions[terminalId]) {
     delete sessions[terminalId];
