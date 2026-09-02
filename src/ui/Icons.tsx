@@ -74,6 +74,23 @@ export function ChevronRightIcon(props: IconProps) {
   );
 }
 
+/// Стрелки шага: ими ходят по совпадениям поиска.
+export function ChevronUpIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 10 8 5.5l4.5 4.5" />
+    </svg>
+  );
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 6 8 10.5 12.5 6" />
+    </svg>
+  );
+}
+
 export function MoreIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

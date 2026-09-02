@@ -33,6 +33,7 @@ import {
   lineOffsets,
   paintLines,
 } from "../files/highlight";
+import { findAll, lineAt, nearest, NO_MATCHES } from "../files/search";
 import {
   breakLine,
   deleteLines,
@@ -47,7 +48,13 @@ import {
 import { imageMimeOf, svgSource } from "../files/media";
 import { useLineMarks } from "../git/useLineMarks";
 import { MarkdownView } from "./MarkdownView";
-import { CodeIcon, EyeIcon } from "../ui/Icons";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CloseIcon,
+  CodeIcon,
+  EyeIcon,
+} from "../ui/Icons";
 import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import { fileName } from "../crew/claimLabel";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
@@ -398,6 +405,7 @@ export function FileView(props: {
   useEffect(() => setWindow({ from: 0, to: WHOLE }), [workspaceId, path]);
 
   const paintRef = useRef<HTMLPreElement | null>(null);
+  const foundRef = useRef<HTMLPreElement | null>(null);
   const gutterRef = useRef<HTMLPreElement | null>(null);
 
   // Прокрутка ведёт за собой оба нижних слоя и, если ушла за край окна,
@@ -410,6 +418,10 @@ export function FileView(props: {
     if (paintRef.current) {
       paintRef.current.scrollTop = element.scrollTop;
       paintRef.current.scrollLeft = element.scrollLeft;
+    }
+    if (foundRef.current) {
+      foundRef.current.scrollTop = element.scrollTop;
+      foundRef.current.scrollLeft = element.scrollLeft;
     }
     if (gutterRef.current) {
       gutterRef.current.scrollTop = element.scrollTop;
@@ -431,6 +443,120 @@ export function FileView(props: {
         : current,
     );
   }, [lineCount]);
+
+  // Поиск по файлу. Пока строка не открыта, ничего не считается и ничего не
+  // рисуется: у закрытого поиска нет ни запроса, ни совпадений.
+  const [query, setQuery] = useState<string | null>(null);
+  const [current, setCurrent] = useState(0);
+  const queryRef = useRef<HTMLInputElement | null>(null);
+  const found = useMemo(
+    () => (query ? findAll(text, query) : NO_MATCHES),
+    [text, query],
+  );
+
+  const openFind = () => {
+    const field = textRef.current;
+    // Выделенное слово и есть то, что ищут: это первое, что делают руками.
+    const picked =
+      field && field.selectionEnd > field.selectionStart
+        ? text.slice(field.selectionStart, field.selectionEnd)
+        : null;
+    setQuery((was) => (picked && !picked.includes("\n") ? picked : (was ?? "")));
+    setCurrent(0);
+    // Строка уже открыта — щелчок по ⌘F ставит курсор обратно в неё.
+    globalThis.requestAnimationFrame(() => queryRef.current?.select());
+  };
+
+  const closeFind = () => {
+    setQuery(null);
+    textRef.current?.focus();
+  };
+
+  /// Перейти к совпадению по кругу: за последним идёт первое.
+  const step = (delta: number) => {
+    if (found.at.length === 0) {
+      return;
+    }
+    setCurrent((was) => (was + delta + found.at.length) % found.at.length);
+  };
+
+  // Показать текущее совпадение: выделить его в поле и подвинуть прокрутку.
+  // Прокрутка полем, а не элементом внутри слоя подсветки: слой рисует только
+  // окно показа, и того, что за его краем, в нём просто нет.
+  useEffect(() => {
+    const field = textRef.current;
+    const at = found.at[current];
+    if (!field || at === undefined || !visible) {
+      return;
+    }
+    field.setSelectionRange(at, at + found.length);
+    const perLine = field.scrollHeight / Math.max(1, lineCount);
+    if (perLine > 0) {
+      const line = lineAt(offsets, at);
+      const top = line * perLine;
+      // Двигаемся, только если совпадение вне видимого: иначе каждая буква в
+      // строке поиска дёргала бы файл под руками.
+      if (top < field.scrollTop || top > field.scrollTop + field.clientHeight - perLine) {
+        field.scrollTop = Math.max(0, top - field.clientHeight / 2);
+        follow();
+      }
+    }
+  }, [found, current, visible, lineCount, offsets, follow]);
+
+  const countLabel =
+    query === null || query === ""
+      ? ""
+      : found.at.length === 0
+        ? t("files.findNone")
+        : t(found.capped ? "files.findCapped" : "files.findCount", {
+            index: String(current + 1),
+            total: String(found.at.length),
+          });
+
+  // Запрос сменился — идём к тому совпадению, что ближе к прежнему месту.
+  useEffect(() => {
+    const field = textRef.current;
+    setCurrent(nearest(found.at, field ? field.selectionStart : 0));
+    // Только на смену набора совпадений: в остальном шагами двигает человек.
+  }, [found]);
+
+  /// Совпадения в окне показа, кусками текста и метками. Слой лежит между
+  /// подсветкой и полем ввода, поэтому у меток только фон — цвет букв виден
+  /// сквозь них, с нижнего слоя.
+  const highlighted = useMemo(() => {
+    if (!query || found.at.length === 0) {
+      return null;
+    }
+    const start = offsets[shown.from] ?? 0;
+    const end = shown.to >= lineCount ? text.length : offsets[shown.to] - 1;
+    const parts: ReactNode[] = [];
+    let at = start;
+    for (let index = 0; index < found.at.length; index += 1) {
+      const from = found.at[index];
+      if (from + found.length <= start) {
+        continue;
+      }
+      if (from >= end) {
+        break;
+      }
+      // Совпадение, начавшееся выше окна, показываем с его края: слоя выше нет,
+      // и лишние буквы сдвинули бы всё, что ниже.
+      const left = Math.max(from, start);
+      const right = Math.min(from + found.length, end);
+      parts.push(text.slice(at, left));
+      parts.push(
+        <mark
+          key={index}
+          className={index === current ? "file-found is-current" : "file-found"}
+        >
+          {text.slice(left, right)}
+        </mark>,
+      );
+      at = right;
+    }
+    parts.push(text.slice(at, end));
+    return parts;
+  }, [query, found, current, shown.from, shown.to, offsets, text, lineCount]);
 
   // Не только на прокрутку: колонку тянут за разделитель, окно приложения
   // меняет высоту — видно становится больше строк, чем нарисовано.
@@ -527,6 +653,13 @@ export function FileView(props: {
                 кончается раньше, и подсветка отстаёт на строку. */}
             {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
           </pre>
+          {highlighted && (
+            <pre ref={foundRef} className="file-view-found" aria-hidden="true">
+              {"\n".repeat(shown.from)}
+              {highlighted}
+              {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+            </pre>
+          )}
           <textarea
             ref={textRef}
             className="file-view-text"
@@ -541,6 +674,16 @@ export function FileView(props: {
               if (meta && pressed(event, "KeyS", "s")) {
                 event.preventDefault();
                 requestSave();
+                return;
+              }
+              if (meta && pressed(event, "KeyF", "f")) {
+                event.preventDefault();
+                openFind();
+                return;
+              }
+              if (event.key === "Escape" && query !== null) {
+                event.preventDefault();
+                closeFind();
                 return;
               }
               // Правки — только там, где правят: у двоичного и слишком
@@ -598,6 +741,62 @@ export function FileView(props: {
                 один короче, чем у слоя подсветки: вместе они дают ту же высоту. */}
             {"\n".repeat(Math.max(0, lineCount - shown.to))}
           </pre>
+          {query !== null && (
+            /* Строка поиска лежит поверх текста, а не над ним: появившись в
+               потоке, она сдвинула бы файл под курсором на свою высоту. */
+            <div className="file-find">
+              <input
+                ref={queryRef}
+                className="file-find-query"
+                value={query}
+                placeholder={t("files.findQuery")}
+                aria-label={t("files.find")}
+                spellCheck={false}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    step(event.shiftKey ? -1 : 1);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeFind();
+                  }
+                }}
+              />
+              <span className="file-find-count">{countLabel}</span>
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.findPrevious")}
+                aria-label={t("files.findPrevious")}
+                disabled={found.at.length === 0}
+                onClick={() => step(-1)}
+              >
+                <ChevronUpIcon />
+              </button>
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.findNext")}
+                aria-label={t("files.findNext")}
+                disabled={found.at.length === 0}
+                onClick={() => step(1)}
+              >
+                <ChevronDownIcon />
+              </button>
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.findClose")}
+                aria-label={t("files.findClose")}
+                onClick={closeFind}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          )}
         </div>
       )}
       {asking && (

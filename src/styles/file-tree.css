@@ -571,6 +571,7 @@
 }
 
 .file-view-paint,
+.file-view-found,
 .file-view-text,
 .file-view-lines {
   position: absolute;
@@ -589,6 +590,7 @@
 /* Место под номера отдают оба слоя сразу: текст начинается за колонкой, а не
    под ней. */
 .file-view-paint,
+.file-view-found,
 .file-view-text {
   padding-left: calc(var(--file-gutter) + 10px);
 }
@@ -653,6 +655,76 @@
   pointer-events: none;
   color: var(--mc-text);
   overflow: hidden;
+}
+
+/* Найденное. Слой лежит между подсветкой и полем: буквы в нём прозрачные, у
+   меток только фон — и цвет букв виден сквозь него, с нижнего слоя. */
+.file-view-found {
+  pointer-events: none;
+  color: transparent;
+  overflow: hidden;
+}
+
+.file-found {
+  background: #d8a65740;
+  color: transparent;
+  border-radius: 2px;
+}
+
+/* Текущее совпадение — то, к которому только что перешли: его видно среди
+   остальных, иначе счётчик «3 из 40» не про что. */
+.file-found.is-current {
+  background: #d8a657a0;
+}
+
+/* Строка поиска. Поверх текста, а не над ним: появившись в потоке, она
+   сдвинула бы файл под курсором на свою высоту. */
+.file-find {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px 4px 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-panel);
+  box-shadow: 0 6px 18px #0006;
+}
+
+.file-find-query {
+  width: 180px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12px;
+}
+
+.file-find-query:focus-visible {
+  outline: 0;
+}
+
+.file-find-count {
+  min-width: 58px;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+  text-align: right;
+  /* Счётчик меняется на каждую букву: без своего места строка дёргалась бы
+     вслед за ним. */
+  font-variant-numeric: tabular-nums;
+}
+
+.file-find-step {
+  flex: 0 0 auto;
+}
+
+.file-find-step:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .file-view-text {

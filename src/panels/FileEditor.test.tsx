@@ -1154,3 +1154,104 @@ describe("FileEditor keys", () => {
     expect(found).toHaveValue("двоичное");
   });
 });
+
+describe("FileEditor find", () => {
+  const doc = ["первая дом", "вторая", "третья дом и ДОМ"].join("\n");
+
+  async function opened(content = doc) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const found = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(found).toHaveValue(content));
+    fireEvent.keyDown(found, { key: "f", code: "KeyF", metaKey: true });
+    return found;
+  }
+
+  it("opens on the shortcut and counts what it found", async () => {
+    await opened();
+    const query = screen.getByLabelText("Найти в файле");
+
+    fireEvent.change(query, { target: { value: "дом" } });
+
+    // Три совпадения, регистр не в счёт.
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+    expect(document.querySelectorAll(".file-found")).toHaveLength(3);
+    expect(document.querySelectorAll(".file-found.is-current")).toHaveLength(1);
+  });
+
+  it("walks the matches in a circle", async () => {
+    await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+
+    fireEvent.click(screen.getByLabelText("Следующее совпадение"));
+    expect(screen.getByText("2 из 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Следующее совпадение"));
+    fireEvent.click(screen.getByLabelText("Следующее совпадение"));
+    // За последним идёт первое, а не тупик.
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Предыдущее совпадение"));
+    expect(screen.getByText("3 из 3")).toBeInTheDocument();
+  });
+
+  it("selects the match in the field, ready to be edited", async () => {
+    const field = await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "третья" },
+    });
+
+    expect(field.selectionStart).toBe(doc.indexOf("третья"));
+    expect(field.selectionEnd).toBe(doc.indexOf("третья") + "третья".length);
+  });
+
+  it("says plainly when there is nothing", async () => {
+    await opened();
+
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "такого нет" },
+    });
+
+    expect(screen.getByText("Ничего")).toBeInTheDocument();
+    expect(document.querySelectorAll(".file-found")).toHaveLength(0);
+  });
+
+  it("takes the word under the cursor as the query", async () => {
+    // Выделили слово, нажали ⌘F — искать собирались именно его.
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    open("app.ts");
+    const field = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue(doc));
+    field.setSelectionRange(7, 10);
+
+    fireEvent.keyDown(field, { key: "f", code: "KeyF", metaKey: true });
+
+    expect(screen.getByLabelText("Найти в файле")).toHaveValue("дом");
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+  });
+
+  it("keeps the layer of matches letter for letter over the highlighting", async () => {
+    // Слои лежат друг на друге; разойдись они на один знак — и метка встанет
+    // не на то слово, а строкой ниже уедет всё остальное.
+    await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+
+    const paint = document.querySelector(".file-view-paint")?.textContent;
+    const marks = document.querySelector(".file-view-found")?.textContent;
+    expect(marks).toBe(paint);
+  });
+
+  it("closes on escape and leaves nothing painted", async () => {
+    await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+
+    fireEvent.keyDown(screen.getByLabelText("Найти в файле"), { key: "Escape" });
+
+    expect(screen.queryByLabelText("Найти в файле")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".file-found")).toHaveLength(0);
+  });
+});
