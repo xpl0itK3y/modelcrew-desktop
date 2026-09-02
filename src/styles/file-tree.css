@@ -225,16 +225,47 @@
    не дерево и не список проектов: по ним переключаются, и прятать их значит
    заставить свернуть редактор только ради того, чтобы открыть соседний файл.
    Выше подноса изменений (120), чтобы поверх было именно поверх. */
-.file-editor.is-maximized {
+.file-editor.is-overlay {
   position: absolute;
   top: var(--mc-gap);
   bottom: var(--mc-gap);
+  z-index: 130;
+  margin: 0;
+}
+
+/* Разворот и возврат — движение, а не подмена кадра. Без него колонка просто
+   оказывалась то узкой, то во весь экран, и понять, что именно произошло,
+   было нечем: ни направления, ни того, откуда она приехала.
+   200 мс — то же число, что у ухода колонки (COLUMN_EXIT_MS) и у MAXIMIZE_MS
+   в FileEditor: по нему снимается подставка, и разъехаться им нельзя. */
+.file-editor.is-overlay.is-maximized {
   /* Правый край — там же, где правый край сетки; ширину задаёт раскладка,
      потому что только она знает, сколько сетка сейчас занимает. */
   right: var(--mc-gap);
   width: var(--maximized-width);
-  z-index: 130;
-  margin: 0;
+  animation: editor-spread 200ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.file-editor.is-overlay.is-restoring {
+  right: var(--collapsed-right);
+  width: var(--column-width);
+  animation: editor-gather 200ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Растём и возвращаемся только правым краем: левый стоит на месте колонки,
+   поэтому текст под курсором не уезжает. */
+@keyframes editor-spread {
+  from {
+    right: var(--collapsed-right);
+    width: var(--column-width);
+  }
+}
+
+@keyframes editor-gather {
+  from {
+    right: var(--mc-gap);
+    width: var(--maximized-width);
+  }
 }
 
 /* Место, которое развёрнутый редактор занимал в ряду: пока он поверх всего,
@@ -824,6 +855,8 @@ body.is-resizing .sidebar-rail {
 @media (prefers-reduced-motion: reduce) {
   .file-editor,
   .file-editor.is-leaving,
+  .file-editor.is-overlay.is-maximized,
+  .file-editor.is-overlay.is-restoring,
   .file-tree-column,
   .file-tree-column.is-leaving,
   .file-tab {

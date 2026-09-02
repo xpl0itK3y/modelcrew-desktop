@@ -13,6 +13,10 @@ import { fileName } from "../crew/claimLabel";
 import { FileView } from "./FileView";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
+// Столько же живёт то же число в file-tree.css: по нему колонка возвращается
+// на место, и разъехаться им нельзя.
+const MAXIMIZE_MS = 200;
+
 export function FileEditor(props: {
   workspaceId: string;
   /// Открытые файлы, в порядке открытия.
@@ -36,11 +40,38 @@ export function FileEditor(props: {
   // Какую вкладку закрывают с несохранённой правкой. Спрашиваем: закрытая
   // вкладка уносит работу, а вернуть её неоткуда.
   const [asking, setAsking] = useState<string | null>(null);
-  // Развёрнутый редактор ложится поверх всего, как развёрнутая панель
-  // терминала. Колонка ограничена ради сетки — и правильно ограничена, — но
-  // читать длинную строку в ней всё равно тесно, а тянуть разделитель туда и
-  // обратно ради одного файла утомительно.
+  // Развёрнутый редактор ложится поверх сетки, как развёрнутая панель
+  // терминала. Колонка ограничена ради этой сетки — и правильно ограничена, —
+  // но читать длинную строку в ней всё равно тесно, а тянуть разделитель туда
+  // и обратно ради одного файла утомительно.
   const [maximized, setMaximized] = useState(false);
+  // Пока идёт разворот — и пока идёт возврат — колонка лежит поверх раскладки
+  // и её место в ряду держит подставка. Состояние отдельное от maximized:
+  // обратная анимация играет уже после того, как разворот отменён, и всё это
+  // время элементу нужны и позиция поверх, и подставка под ним.
+  const [overlay, setOverlay] = useState(false);
+  const restoring = overlay && !maximized;
+
+  // Возврат снимает подставку не сразу: сперва колонка должна доехать до
+  // своего места, иначе она исчезнет из-под курсора и появится левее.
+  useEffect(() => {
+    if (!restoring) {
+      return;
+    }
+    const timer = window.setTimeout(() => setOverlay(false), MAXIMIZE_MS);
+    return () => window.clearTimeout(timer);
+  }, [restoring]);
+
+  const toggleMaximized = () => {
+    if (maximized) {
+      setMaximized(false);
+      return;
+    }
+    // Оба разом, одним обновлением: сначала позиция поверх, и уже из неё
+    // растём — иначе первый кадр рисует колонку на прежнем месте.
+    setOverlay(true);
+    setMaximized(true);
+  };
 
   // Esc возвращает — это первое, что пробуют, когда что-то заняло весь экран.
   useEffect(() => {
@@ -57,10 +88,12 @@ export function FileEditor(props: {
   }, [maximized]);
 
   // Последний файл закрыт — разворачивать нечего, и остаться развёрнутым
-  // редактор не должен: вернётся он уже пустым и поверх всего.
+  // редактор не должен: вернётся он уже пустым и поверх всего. Анимацию
+  // возврата здесь не играем: играть её не на чем, колонка уже уходит.
   useEffect(() => {
     if (files.length === 0) {
       setMaximized(false);
+      setOverlay(false);
     }
   }, [files.length]);
 
@@ -74,7 +107,7 @@ export function FileEditor(props: {
       {/* Развёрнутый редактор уходит из потока, и без подставки сетка
           разъехалась бы на его место — а вернувшись, схлопнулась бы обратно.
           Пять терминалов пережили бы два лишних SIGWINCH ни за чем. */}
-      {maximized && (
+      {overlay && (
         <div
           className="file-editor-placeholder"
           aria-hidden="true"
@@ -83,8 +116,8 @@ export function FileEditor(props: {
       )}
       <section
         className={`file-editor ${props.leaving ? "is-leaving" : ""} ${
-          maximized ? "is-maximized" : ""
-        }`}
+          overlay ? "is-overlay" : ""
+        } ${maximized ? "is-maximized" : ""} ${restoring ? "is-restoring" : ""}`}
         aria-label={t("files.editorTitle")}
         style={
           {
@@ -95,7 +128,11 @@ export function FileEditor(props: {
             "--maximized-width": `calc(${
               props.width + props.dockWidth
             }px + var(--mc-gap))`,
-            ...(maximized ? {} : { width: "var(--column-width)" }),
+            // Правый край колонки на своём месте, считая от правого края
+            // сетки: из этой точки разворот растёт и в неё же возвращается,
+            // так что левый край не дёргается ни туда, ни обратно.
+            "--collapsed-right": `calc(var(--mc-gap) * 2 + ${props.dockWidth}px)`,
+            ...(overlay ? {} : { width: "var(--column-width)" }),
           } as CSSProperties
         }
       >
@@ -155,7 +192,7 @@ export function FileEditor(props: {
           title={maximized ? t("files.restore") : t("files.maximize")}
           aria-label={maximized ? t("files.restore") : t("files.maximize")}
           aria-pressed={maximized}
-          onClick={() => setMaximized((on) => !on)}
+          onClick={toggleMaximized}
         >
           <MaximizeIcon />
         </button>

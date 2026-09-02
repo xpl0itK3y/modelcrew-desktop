@@ -716,10 +716,19 @@ describe("FileView and the disk under it", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Вернуть редактор в колонку" }),
     );
-    expect(editor.className).not.toContain("is-maximized");
-    expect(
-      container.querySelector(".file-editor-placeholder"),
-    ).not.toBeInTheDocument();
+    // Возврат — это движение обратно, а не подмена кадра: пока оно идёт,
+    // колонка ещё поверх раскладки, и подставка держит её место. Снять их
+    // сразу значило бы, что колонка исчезнет из-под курсора и появится левее.
+    expect(editor.className).toContain("is-restoring");
+    expect(editor.className).toContain("is-overlay");
+    expect(container.querySelector(".file-editor-placeholder")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(".file-editor-placeholder"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(editor.className).not.toContain("is-overlay");
   });
 
   it("comes back on Escape, the first thing anyone presses", async () => {
@@ -733,6 +742,11 @@ describe("FileView and the disk under it", () => {
 
     expect(container.querySelector(".file-editor")!.className).not.toContain(
       "is-maximized",
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".file-editor")!.className).not.toContain(
+        "is-overlay",
+      ),
     );
   });
 });
