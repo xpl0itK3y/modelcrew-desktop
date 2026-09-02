@@ -841,6 +841,39 @@ const NO_GRAMMAR = new Set([
   "otf", "eot",
 ]);
 
+/// Чем в этом языке отмечают комментарий. Знак берётся из того же разбора,
+/// который красит файл: два списка знаков комментария разошлись бы на первом
+/// же новом языке, и ⌘/ ставил бы не тот знак, который потом сам же и красит.
+export function commentMarks(language: string | null): {
+  line: string | null;
+  block: [string, string] | null;
+} {
+  if (!language) {
+    return { line: null, block: null };
+  }
+  const scanned = SCANNER_MARKS[language];
+  if (scanned) {
+    return scanned;
+  }
+  const rules = GRAMMARS[language];
+  if (!rules) {
+    return { line: null, block: null };
+  }
+  return { line: rules.line[0] ?? null, block: rules.block };
+}
+
+/// У языков со своим сканером таблицы нет, а знаки комментария есть.
+const SCANNER_MARKS: Record<
+  string,
+  { line: string | null; block: [string, string] | null }
+> = {
+  [MARKDOWN]: { line: null, block: ["<!--", "-->"] },
+  [HTML]: { line: null, block: ["<!--", "-->"] },
+  [CSS]: { line: null, block: ["/*", "*/"] },
+  // Заплату не комментируют: это не язык, а запись о правке.
+  [DIFF]: { line: null, block: null },
+};
+
 /// Какой разбор применить к файлу. Знакомое расширение — свой разбор,
 /// незнакомое — общий: комментарии, строки и числа устроены одинаково почти
 /// везде, и показать хотя бы их лучше, чем оставить файл серым. Проза и

@@ -11,10 +11,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
@@ -25,7 +27,23 @@ import {
   writeWorkspaceFile,
   type FileContent,
 } from "../files/fileTree";
-import { grammarOf, lineOffsets, paintLines } from "../files/highlight";
+import {
+  commentMarks,
+  grammarOf,
+  lineOffsets,
+  paintLines,
+} from "../files/highlight";
+import {
+  breakLine,
+  deleteLines,
+  duplicateLines,
+  indent,
+  indentUnitOf,
+  moveLines,
+  outdent,
+  toggleComment,
+  type Edit,
+} from "../files/editing";
 import { imageMimeOf, svgSource } from "../files/media";
 import { useLineMarks } from "../git/useLineMarks";
 import { MarkdownView } from "./MarkdownView";
@@ -115,6 +133,70 @@ export function FileView(props: {
     : markdown
       ? "files.preview"
       : "files.previewImage";
+
+  // Отступ берём у самого файла: чужой файл правят его отступом, каким бы он
+  // ни был. Считаем по версии с диска, а не по каждому нажатию: она меняется
+  // раз в сохранение, а нажатий между ними тысяча.
+  const unit = useMemo(() => indentUnitOf(loaded?.text ?? ""), [loaded?.text]);
+  const comment = useMemo(() => commentMarks(language), [language]);
+
+  // Куда поставить выделение после того, как React перерисует поле. Раньше
+  // ставить нельзя: значение поля задаёт React, и до его отрисовки в поле ещё
+  // старый текст, а выделение считается по новому.
+  const pending = useRef<{ from: number; to: number } | null>(null);
+  useLayoutEffect(() => {
+    const place = pending.current;
+    const field = textRef.current;
+    if (!place || !field) {
+      return;
+    }
+    pending.current = null;
+    field.setSelectionRange(place.from, place.to);
+  }, [text]);
+
+  /// Записать правку в поле руками браузера, а не в обход него: тогда у поля
+  /// остаётся собственная отмена, и ⌘Z возвращает то, что было до Tab, а не
+  /// откатывает всё до последней перерисовки.
+  const apply = (edit: Edit | null) => {
+    const field = textRef.current;
+    if (!edit || !field || edit.text === text) {
+      return;
+    }
+    // Заменяем не весь текст, а тот кусок, которым две версии отличаются:
+    // браузер запомнит в отмене именно его.
+    let head = 0;
+    const before = field.value;
+    const shortest = Math.min(before.length, edit.text.length);
+    while (head < shortest && before[head] === edit.text[head]) {
+      head += 1;
+    }
+    let tail = 0;
+    while (
+      tail < shortest - head &&
+      before[before.length - 1 - tail] === edit.text[edit.text.length - 1 - tail]
+    ) {
+      tail += 1;
+    }
+    const inserted = edit.text.slice(head, edit.text.length - tail);
+    field.setSelectionRange(head, before.length - tail);
+    const written =
+      inserted === ""
+        ? document.execCommand?.("delete")
+        : document.execCommand?.("insertText", false, inserted);
+    if (!written) {
+      // Движок без execCommand — пишем напрямую. Отмена в поле при этом теряет
+      // эту правку, но потерять саму правку было бы хуже.
+      field.value = edit.text;
+    }
+    pending.current = { from: edit.from, to: edit.to };
+    setText(edit.text);
+  };
+
+  /// Сочетание клавиш по месту клавиши, а не по букве на ней: на русской
+  /// раскладке ⌘S — это «ы», и проверка по букве молча перестаёт работать
+  /// ровно тогда, когда человек переключил язык.
+  const pressed = (event: KeyboardEvent | ReactKeyboardEvent, code: string, key: string) =>
+    event.code === code || event.key.toLowerCase() === key;
 
   const dirty = loaded !== null && text !== loaded.text;
   const dirtyRef = useRef(dirty);
@@ -455,9 +537,54 @@ export function FileView(props: {
             onChange={(event) => setText(event.target.value)}
             onScroll={follow}
             onKeyDown={(event) => {
-              if (event.key === "s" && (event.metaKey || event.ctrlKey)) {
+              const meta = event.metaKey || event.ctrlKey;
+              if (meta && pressed(event, "KeyS", "s")) {
                 event.preventDefault();
                 requestSave();
+                return;
+              }
+              // Правки — только там, где правят: у двоичного и слишком
+              // большого файла поле только для чтения.
+              if (loaded === null || loaded.blocked !== null) {
+                return;
+              }
+              const field = event.currentTarget;
+              const from = field.selectionStart;
+              const to = field.selectionEnd;
+              if (event.key === "Tab") {
+                // Tab уводил фокус из поля — на этом спотыкаются первым делом:
+                // в текстовом поле он должен ставить отступ.
+                event.preventDefault();
+                apply(
+                  event.shiftKey
+                    ? outdent(text, from, to, unit)
+                    : indent(text, from, to, unit),
+                );
+                return;
+              }
+              if (event.key === "Enter" && !meta && !event.altKey) {
+                event.preventDefault();
+                apply(breakLine(text, from, to, unit));
+                return;
+              }
+              if (meta && pressed(event, "Slash", "/")) {
+                event.preventDefault();
+                apply(toggleComment(text, from, to, comment));
+                return;
+              }
+              if (meta && event.shiftKey && pressed(event, "KeyD", "d")) {
+                event.preventDefault();
+                apply(duplicateLines(text, from, to));
+                return;
+              }
+              if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+                event.preventDefault();
+                apply(moveLines(text, from, to, event.key === "ArrowUp" ? -1 : 1));
+                return;
+              }
+              if (meta && event.key === "Backspace") {
+                event.preventDefault();
+                apply(deleteLines(text, from, to));
               }
             }}
           />

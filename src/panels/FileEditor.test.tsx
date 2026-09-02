@@ -1044,3 +1044,113 @@ describe("FileEditor pictures", () => {
     expect(decodeURIComponent(source.split(",")[1])).toBe("<svg><circle /></svg>");
   });
 });
+
+describe("FileEditor keys", () => {
+  /// Поле открытого файла с курсором, поставленным в нужное место.
+  async function field(content: string, from: number, to = from) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const found = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(found).toHaveValue(content));
+    found.setSelectionRange(from, to);
+    return found;
+  }
+
+  it("puts an indent in the field instead of leaving it", async () => {
+    const found = await field("const a = 1;", 12);
+
+    fireEvent.keyDown(found, { key: "Tab", code: "Tab" });
+
+    expect(found).toHaveValue("const a = 1;  ");
+  });
+
+  it("takes the indent back on shift", async () => {
+    const found = await field("  const a = 1;", 14);
+
+    fireEvent.keyDown(found, { key: "Tab", code: "Tab", shiftKey: true });
+
+    expect(found).toHaveValue("const a = 1;");
+  });
+
+  it("starts the new line under the one before it", async () => {
+    const found = await field("  const a = {", 13);
+
+    fireEvent.keyDown(found, { key: "Enter", code: "Enter" });
+
+    expect(found).toHaveValue("  const a = {\n    ");
+  });
+
+  it("comments the line with the mark of its own language", async () => {
+    const found = await field("const a = 1;", 0, 12);
+
+    fireEvent.keyDown(found, { key: "/", code: "Slash", metaKey: true });
+
+    expect(found).toHaveValue("// const a = 1;");
+  });
+
+  it("answers the shortcut whatever the keyboard is set to", async () => {
+    // На русской раскладке ⌘/ приходит другой буквой, а клавиша та же.
+    const found = await field("const a = 1;", 0, 12);
+
+    fireEvent.keyDown(found, { key: ".", code: "Slash", metaKey: true });
+
+    expect(found).toHaveValue("// const a = 1;");
+  });
+
+  it("doubles the line under the cursor", async () => {
+    const found = await field("a();\nb();", 5);
+
+    fireEvent.keyDown(found, {
+      key: "d",
+      code: "KeyD",
+      metaKey: true,
+      shiftKey: true,
+    });
+
+    expect(found).toHaveValue("a();\nb();\nb();");
+  });
+
+  it("carries a line up and back down", async () => {
+    const found = await field("a();\nb();\nc();", 5);
+
+    fireEvent.keyDown(found, { key: "ArrowUp", code: "ArrowUp", altKey: true });
+    expect(found).toHaveValue("b();\na();\nc();");
+
+    fireEvent.keyDown(found, {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      altKey: true,
+    });
+    expect(found).toHaveValue("a();\nb();\nc();");
+  });
+
+  it("deletes the line together with its break", async () => {
+    const found = await field("a();\nb();\nc();", 5);
+
+    fireEvent.keyDown(found, {
+      key: "Backspace",
+      code: "Backspace",
+      metaKey: true,
+    });
+
+    expect(found).toHaveValue("a();\nc();");
+  });
+
+  it("leaves a file it must not edit alone", async () => {
+    readWorkspaceFile.mockResolvedValue({
+      content: "двоичное",
+      isBinary: true,
+      tooLarge: false,
+      exists: true,
+    });
+    open("icon.icns");
+    const found = (await screen.findByLabelText(
+      "icon.icns",
+    )) as HTMLTextAreaElement;
+    found.setSelectionRange(0, 0);
+
+    fireEvent.keyDown(found, { key: "Tab", code: "Tab" });
+
+    expect(found).toHaveValue("двоичное");
+  });
+});
