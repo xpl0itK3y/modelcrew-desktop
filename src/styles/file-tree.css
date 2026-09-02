@@ -443,6 +443,68 @@
   cursor: default;
 }
 
+/* Настоящий размер против вписанного в окно. Кнопкой со словом, а не значком:
+   значка, который читался бы как «один к одному», не существует. */
+.file-view-zoom {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.file-view-zoom:hover {
+  background: var(--mc-button-hover);
+  color: var(--mc-text-bright);
+}
+
+.file-view-zoom[aria-pressed="true"] {
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+}
+
+/* Лист под картинкой. Клетка — чтобы прозрачное читалось прозрачным: на
+   светлой теме белый фон съел бы белую иконку, на тёмной — тёмную. Клетка не
+   зависит от темы нарочно, по той же причине, по какой она вообще есть. */
+.picture-sheet {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background-color: #6a6a6a1a;
+  background-image:
+    linear-gradient(45deg, #8080801f 25%, transparent 25%),
+    linear-gradient(-45deg, #8080801f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #8080801f 75%),
+    linear-gradient(-45deg, transparent 75%, #8080801f 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Вписанная картинка не выходит за лист ни по одной стороне; настоящий размер
+   выходит, и тогда лист прокручивается. */
+.picture-shown {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Настоящий размер: картинка больше листа — лист прокручивается, и прижимать
+   её к центру при этом нельзя, иначе левый верхний угол уедет за край. */
+.picture-sheet.is-actual {
+  place-items: start;
+}
+
+.picture-sheet.is-actual .picture-shown {
+  max-width: none;
+  max-height: none;
+}
+
 .file-view-error {
   padding: 8px 10px;
   background: var(--mc-danger-soft);

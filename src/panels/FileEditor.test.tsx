@@ -55,6 +55,18 @@ vi.mock("../git/gitChanges", async () => {
   };
 });
 
+/// Картинка приезжает из бэкенда в base64. Настоящая ходит в Tauri, которого
+/// в тестах нет.
+const readWorkspaceMedia = vi.fn();
+vi.mock("../files/media", async () => {
+  const actual =
+    await vi.importActual<typeof import("../files/media")>("../files/media");
+  return {
+    ...actual,
+    readWorkspaceMedia: (...args: unknown[]) => readWorkspaceMedia(...args),
+  };
+});
+
 const { FileEditor } = await import("./FileEditor");
 
 function file(content: string) {
@@ -93,6 +105,14 @@ beforeEach(() => {
     exists: false,
   });
   watchers.clear();
+  readWorkspaceMedia.mockReset();
+  readWorkspaceMedia.mockResolvedValue({
+    mime: "image/png",
+    data: "iVBOR",
+    bytes: 4096,
+    tooLarge: false,
+    exists: true,
+  });
   setLocale("ru");
 });
 
@@ -978,5 +998,49 @@ describe("FileView on a markdown file", () => {
     );
 
     expect(screen.queryByLabelText("Показать разметку")).not.toBeInTheDocument();
+  });
+});
+
+describe("FileEditor pictures", () => {
+  it("opens a picture as a picture, not as a binary file", async () => {
+    open("assets/logo.png");
+    const shown = await screen.findByAltText("logo.png");
+    expect(shown.getAttribute("src")).toBe("data:image/png;base64,iVBOR");
+    // Текстового поля у картинки нет: править в ней нечего.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    // И на диск за текстом никто не ходил.
+    expect(readWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps a drawing editable and still lets it be seen", async () => {
+    const drawing = '<svg xmlns="http://www.w3.org/2000/svg"><rect /></svg>';
+    readWorkspaceFile.mockResolvedValue(file(drawing));
+    open("mark.svg");
+    await waitFor(() =>
+      expect(screen.getByLabelText("mark.svg")).toHaveValue(drawing),
+    );
+    // Разметку SVG подсвечиваем как разметку: значение атрибута — строка.
+    expect(
+      document.querySelector(".file-view-paint .tok-string")?.textContent,
+    ).toBe('"http://www.w3.org/2000/svg"');
+
+    fireEvent.click(screen.getByLabelText("Показать картинку"));
+
+    const shown = screen.getByAltText("mark.svg");
+    const source = shown.getAttribute("src") ?? "";
+    expect(source.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
+    expect(decodeURIComponent(source.split(",")[1])).toBe(drawing);
+  });
+
+  it("draws what is in the buffer, not what is on disk", async () => {
+    readWorkspaceFile.mockResolvedValue(file("<svg><rect /></svg>"));
+    open("mark.svg");
+    const field = await screen.findByLabelText("mark.svg");
+    fireEvent.change(field, { target: { value: "<svg><circle /></svg>" } });
+
+    fireEvent.click(screen.getByLabelText("Показать картинку"));
+
+    const source = screen.getByAltText("mark.svg").getAttribute("src") ?? "";
+    expect(decodeURIComponent(source.split(",")[1])).toBe("<svg><circle /></svg>");
   });
 });

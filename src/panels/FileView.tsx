@@ -26,6 +26,7 @@ import {
   type FileContent,
 } from "../files/fileTree";
 import { grammarOf, lineOffsets, paintLines } from "../files/highlight";
+import { imageMimeOf, svgSource } from "../files/media";
 import { useLineMarks } from "../git/useLineMarks";
 import { MarkdownView } from "./MarkdownView";
 import { CodeIcon, EyeIcon } from "../ui/Icons";
@@ -86,25 +87,34 @@ export function FileView(props: {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const name = path.split("/").pop() ?? path;
   // Язык от имени файла, а не от содержимого: имя мы знаем сразу, а угадывать
   // язык по тексту — отдельная задача с собственными ошибками.
-  const language = grammarOf(path.split("/").pop() ?? path);
+  const language = grammarOf(name);
 
   // Разметку можно не только править, но и читать: заголовки заголовками,
-  // списки списками. Выбор запоминается на всё приложение — тот, кто открывает
-  // .md чтобы прочитать, открывает так каждый раз, и щёлкать глазом на каждом
-  // файле ему незачем.
+  // списки списками. То же и с SVG: это текст, но текст, который нарисован.
+  // Выбор запоминается на всё приложение — тот, кто открывает .md чтобы
+  // прочитать, открывает так каждый раз, и щёлкать глазом на каждом файле ему
+  // незачем.
   const markdown = language === "md";
+  const vector = imageMimeOf(name) === "image/svg+xml";
   const [preview, setPreview] = useState(
-    () => readSetting(KEYS.markdownPreview) === "1",
+    () => readSetting(KEYS.filePreview) === "1",
   );
-  const showPreview = markdown && preview;
+  const showPreview = (markdown || vector) && preview;
   const togglePreview = () => {
     setPreview((current) => {
-      writeSetting(KEYS.markdownPreview, current ? "0" : "1");
+      writeSetting(KEYS.filePreview, current ? "0" : "1");
       return !current;
     });
   };
+
+  const previewLabel = showPreview
+    ? "files.source"
+    : markdown
+      ? "files.preview"
+      : "files.previewImage";
 
   const dirty = loaded !== null && text !== loaded.text;
   const dirtyRef = useRef(dirty);
@@ -357,12 +367,12 @@ export function FileView(props: {
         {loaded?.blocked && (
           <span className="file-view-note">{t(BLOCKED_TEXT[loaded.blocked])}</span>
         )}
-        {markdown && loaded !== null && loaded.blocked === null && (
+        {(markdown || vector) && loaded !== null && loaded.blocked === null && (
           <button
             type="button"
             className="file-view-preview icon-button"
-            title={t(showPreview ? "files.source" : "files.preview")}
-            aria-label={t(showPreview ? "files.source" : "files.preview")}
+            title={t(previewLabel)}
+            aria-label={t(previewLabel)}
             aria-pressed={showPreview}
             onClick={togglePreview}
           >
@@ -396,11 +406,18 @@ export function FileView(props: {
       )}
       {loaded === null && !error ? (
         <div className="file-view-empty">{t("files.loading")}</div>
-      ) : showPreview && loaded?.blocked === null ? (
+      ) : showPreview && markdown && loaded?.blocked === null ? (
         /* Показываем то, что в поле, а не то, что на диске: несохранённая
            правка обязана быть видна и здесь, иначе просмотр врёт про файл,
            который прямо сейчас правят. */
         <MarkdownView text={text} />
+      ) : showPreview && loaded?.blocked === null ? (
+        /* SVG уезжает в адрес картинки, а не в разметку страницы. Внутри
+           `<img>` не выполняется ни скрипт, ни обработчик события — а SVG
+           умеет и то и другое, и пишет его агент. */
+        <div className="picture-sheet">
+          <img className="picture-shown" src={svgSource(text)} alt={name} />
+        </div>
       ) : (
         <div
           className="file-view-code"

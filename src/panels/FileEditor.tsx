@@ -11,6 +11,8 @@ import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 import { fileGlyph } from "../files/fileGlyph";
 import { fileName } from "../crew/claimLabel";
 import { FileView } from "./FileView";
+import { ImageView } from "./ImageView";
+import { drawnAsImage } from "../files/media";
 import { useGitStatuses } from "../git/useGitStatuses";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
@@ -214,25 +216,37 @@ export function FileEditor(props: {
           className="file-view-slot"
           style={{ display: path === current ? "flex" : "none" }}
         >
-          <FileView
-            workspaceId={props.workspaceId}
-            path={path}
-            visible={path === current}
-            onDirtyChange={(isDirty) =>
-              setDirty((marked) => {
-                if (marked.has(path) === isDirty) {
-                  return marked;
-                }
-                const next = new Set(marked);
-                if (isDirty) {
-                  next.add(path);
-                } else {
-                  next.delete(path);
-                }
-                return next;
-              })
-            }
-          />
+          {/* Картинку не правят — на неё смотрят, и текстовое поле ей ни к
+              чему. Выбор здесь, а не внутри вида: это два разных набора
+              состояний, и один компонент, умеющий и то и другое, звал бы
+              половину своих хуков вхолостую. */}
+          {drawnAsImage(path) ? (
+            <ImageView
+              workspaceId={props.workspaceId}
+              path={path}
+              visible={path === current}
+            />
+          ) : (
+            <FileView
+              workspaceId={props.workspaceId}
+              path={path}
+              visible={path === current}
+              onDirtyChange={(isDirty) =>
+                setDirty((marked) => {
+                  if (marked.has(path) === isDirty) {
+                    return marked;
+                  }
+                  const next = new Set(marked);
+                  if (isDirty) {
+                    next.add(path);
+                  } else {
+                    next.delete(path);
+                  }
+                  return next;
+                })
+              }
+            />
+          )}
         </div>
       ))}
       {asking && (
