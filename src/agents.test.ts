@@ -529,7 +529,16 @@ describe("agent catalog", () => {
     vi.useFakeTimers();
     try {
       rememberAgentProcess("panel-1", "codex");
-      invokeMock.mockResolvedValueOnce(null).mockResolvedValueOnce("late-id");
+      // По имени команды, а не по счёту вызовов: этим путём ходит не один
+      // локатор, и очередь ответов доставалась бы кому попало.
+      let attempt = 0;
+      invokeMock.mockImplementation((command: string) => {
+        if (command !== "agent_session_locate") {
+          return Promise.resolve(null);
+        }
+        attempt += 1;
+        return Promise.resolve(attempt === 1 ? null : "late-id");
+      });
 
       scheduleAgentSessionBinding("panel-1", "/tmp/proj", "ws-1");
       await vi.advanceTimersByTimeAsync(2_000);
@@ -617,6 +626,36 @@ describe("agent catalog", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("starts watching an agent store the first time that agent appears", async () => {
+    // Каталог разговоров создаёт сам агент: пока он ни разу не запускался,
+    // следить не за чем. Поэтому проба повторяется на каждого нового агента.
+    // Модуль берём свежий: список уже опрошенных агентов живёт ровно один
+    // запуск приложения, а в файле тестов их много.
+    vi.resetModules();
+    const agents = await import("./agents");
+    const watchCalls = () =>
+      invokeMock.mock.calls.filter(
+        ([command]) => command === "agent_sessions_watch",
+      ).length;
+
+    agents.rememberAgentProcess("panel-1", "codex");
+    invokeMock.mockClear();
+    agents.scheduleAgentSessionBinding("panel-1", "/project", "ws-1");
+    expect(watchCalls()).toBe(1);
+
+    // Тот же агент во второй панели — повторять незачем.
+    agents.rememberAgentProcess("panel-2", "codex");
+    invokeMock.mockClear();
+    agents.scheduleAgentSessionBinding("panel-2", "/project", "ws-1");
+    expect(watchCalls()).toBe(0);
+
+    // Новый агент — новая проба: его каталог мог появиться только что.
+    agents.rememberAgentProcess("panel-3", "claude");
+    invokeMock.mockClear();
+    agents.scheduleAgentSessionBinding("panel-3", "/project", "ws-1");
+    expect(watchCalls()).toBe(1);
   });
 
   it("writes every binding through to the durable store", async () => {

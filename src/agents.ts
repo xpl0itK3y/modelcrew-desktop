@@ -877,6 +877,23 @@ function startBinding(
   window.setTimeout(tryLocate, LOCATE_ATTEMPT_DELAYS_MS[0]);
 }
 
+// Хранилища разговоров под наблюдением: у агента, который ни разу не
+// запускался, каталога ещё нет и следить не за чем. К моменту, когда агент
+// опознан в панели, каталог создан им самим — поэтому проба повторяется на
+// каждого нового агента, а не один раз за запуск.
+const watchedAgentStores = new Set<string>();
+
+function watchAgentStores(agentId: string): void {
+  if (!isTauri || watchedAgentStores.has(agentId)) {
+    return;
+  }
+  watchedAgentStores.add(agentId);
+  void invoke("agent_sessions_watch").catch(() => {
+    // Не поднялось — остаётся прежний путь: попытки по таймеру и по вводу.
+    watchedAgentStores.delete(agentId);
+  });
+}
+
 // Зовётся watcher'ом при обнаружении агента в панели.
 export function scheduleAgentSessionBinding(
   terminalId: string,
@@ -884,6 +901,10 @@ export function scheduleAgentSessionBinding(
   workspaceId: string,
 ): void {
   noteSessionWorkspace(terminalId, workspaceId);
+  const agentId = getAgentRecord(terminalId)?.agentId;
+  if (agentId) {
+    watchAgentStores(agentId);
+  }
   startBinding(terminalId, { cwd, workspaceId });
 }
 

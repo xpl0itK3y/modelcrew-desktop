@@ -12,6 +12,7 @@ compile_error!(
 mod agent_hook_cli;
 mod agent_hooks;
 mod agent_session_store;
+mod agent_session_watch;
 mod agent_sessions;
 mod clipboard_images;
 mod command_error;
@@ -36,6 +37,7 @@ mod workspace_roots;
 use agent_session_store::{
     agent_sessions_all, agent_sessions_forget, agent_sessions_keep, agent_sessions_remember,
 };
+use agent_session_watch::agent_sessions_watch;
 use agent_sessions::agent_session_locate;
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
@@ -972,6 +974,7 @@ pub fn run() {
         .manage(SelfUpdaterState::default())
         .manage(GitWatchState::default())
         .manage(TreeWatchState::default())
+        .manage(agent_session_watch::AgentStoreWatchState::default())
         .manage(crew::CrewRegistry::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
@@ -993,6 +996,7 @@ pub fn run() {
             agent_sessions_remember,
             agent_sessions_forget,
             agent_sessions_keep,
+            agent_sessions_watch,
             crew_claims,
             panel_snapshots,
             panel_snapshot_restore,
@@ -1087,6 +1091,7 @@ mod tests {
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
         ("agent_session_store.rs", include_str!("agent_session_store.rs")),
+        ("agent_session_watch.rs", include_str!("agent_session_watch.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
@@ -1119,6 +1124,7 @@ mod tests {
         "agent_sessions_forget",
         "agent_sessions_keep",
         "agent_sessions_remember",
+        "agent_sessions_watch",
         "app_set_badge",
         "app_set_locale",
         "crew_claims",

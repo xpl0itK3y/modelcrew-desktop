@@ -313,19 +313,19 @@ fn file_mentions_cwd(path: &Path, cwd: &str) -> bool {
         .is_some_and(|encoded| head.contains(&encoded))
 }
 
-fn claude_config_dir(home: &Path) -> PathBuf {
+pub(crate) fn claude_config_dir(home: &Path) -> PathBuf {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".claude"))
 }
 
-fn codex_home_dir(home: &Path) -> PathBuf {
+pub(crate) fn codex_home_dir(home: &Path) -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".codex"))
 }
 
-fn copilot_home_dir(home: &Path) -> PathBuf {
+pub(crate) fn copilot_home_dir(home: &Path) -> PathBuf {
     std::env::var_os("COPILOT_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".copilot"))
@@ -338,7 +338,7 @@ fn xdg_data_home(home: &Path) -> PathBuf {
 }
 
 /// OPENCODE_DATA_DIR может быть списком через запятую.
-fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
+pub(crate) fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
     if let Some(raw) = std::env::var_os("OPENCODE_DATA_DIR") {
         return raw
             .to_string_lossy()
