@@ -898,3 +898,85 @@ describe("FileView beside git", () => {
     expect(marks()).toEqual([]);
   });
 });
+
+describe("FileView on a markdown file", () => {
+  function view(): HTMLElement | null {
+    return document.querySelector(".markdown-view");
+  }
+
+  const doc = [
+    "# Заголовок",
+    "",
+    "Абзац со **важным** и `кодом`.",
+    "",
+    "- пункт",
+    "- второй",
+    "",
+    "```ts",
+    "const a = 1;",
+    "```",
+  ].join("\n");
+
+  it("shows the document instead of its source when the eye is pressed", async () => {
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    open("README.md");
+    await waitFor(() =>
+      expect(screen.getByLabelText("README.md")).toHaveValue(doc),
+    );
+    // Пока не просили — редактор остаётся редактором.
+    expect(view()).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Показать разметку"));
+
+    const shown = view();
+    expect(shown).not.toBeNull();
+    expect(shown?.querySelector("h1")?.textContent).toBe("Заголовок");
+    expect(shown?.querySelector("strong")?.textContent).toBe("важным");
+    expect(shown?.querySelectorAll("li")).toHaveLength(2);
+    // Кодовый блок подсвечен своим языком, а не разметкой.
+    expect(shown?.querySelector(".md-block-code .tok-keyword")?.textContent).toBe(
+      "const",
+    );
+    // Поле ввода уходит вместе с исходником: показывать оба разом негде.
+    expect(screen.queryByLabelText("README.md")).not.toBeInTheDocument();
+  });
+
+  it("shows what is in the buffer, not what is on disk", async () => {
+    // Файл правят прямо сейчас, и просмотр обязан показывать правку: иначе он
+    // рассказывает про версию, которой уже нет.
+    readWorkspaceFile.mockResolvedValue(file("# Было"));
+    open("README.md");
+    const field = await screen.findByLabelText("README.md");
+    fireEvent.change(field, { target: { value: "# Стало" } });
+
+    fireEvent.click(screen.getByLabelText("Показать разметку"));
+
+    expect(view()?.querySelector("h1")?.textContent).toBe("Стало");
+  });
+
+  it("remembers the choice for every markdown file after it", async () => {
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    const first = open("README.md");
+    await waitFor(() =>
+      expect(screen.getByLabelText("README.md")).toHaveValue(doc),
+    );
+    fireEvent.click(screen.getByLabelText("Показать разметку"));
+    expect(view()).not.toBeNull();
+    first.unmount();
+
+    // Тот, кто открывает разметку чтобы прочитать, открывает так каждый раз.
+    open("OTHER.md");
+    await waitFor(() => expect(view()).not.toBeNull());
+    expect(screen.getByLabelText("Показать исходник")).toBeInTheDocument();
+  });
+
+  it("offers the eye only where there is markup to show", async () => {
+    readWorkspaceFile.mockResolvedValue(file("const a = 1;"));
+    open("app.ts");
+    await waitFor(() =>
+      expect(screen.getByLabelText("app.ts")).toHaveValue("const a = 1;"),
+    );
+
+    expect(screen.queryByLabelText("Показать разметку")).not.toBeInTheDocument();
+  });
+});

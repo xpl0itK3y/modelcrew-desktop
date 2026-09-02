@@ -27,6 +27,9 @@ import {
 } from "../files/fileTree";
 import { grammarOf, lineOffsets, paintLines } from "../files/highlight";
 import { useLineMarks } from "../git/useLineMarks";
+import { MarkdownView } from "./MarkdownView";
+import { CodeIcon, EyeIcon } from "../ui/Icons";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import { fileName } from "../crew/claimLabel";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
@@ -86,6 +89,22 @@ export function FileView(props: {
   // Язык от имени файла, а не от содержимого: имя мы знаем сразу, а угадывать
   // язык по тексту — отдельная задача с собственными ошибками.
   const language = grammarOf(path.split("/").pop() ?? path);
+
+  // Разметку можно не только править, но и читать: заголовки заголовками,
+  // списки списками. Выбор запоминается на всё приложение — тот, кто открывает
+  // .md чтобы прочитать, открывает так каждый раз, и щёлкать глазом на каждом
+  // файле ему незачем.
+  const markdown = language === "md";
+  const [preview, setPreview] = useState(
+    () => readSetting(KEYS.markdownPreview) === "1",
+  );
+  const showPreview = markdown && preview;
+  const togglePreview = () => {
+    setPreview((current) => {
+      writeSetting(KEYS.markdownPreview, current ? "0" : "1");
+      return !current;
+    });
+  };
 
   const dirty = loaded !== null && text !== loaded.text;
   const dirtyRef = useRef(dirty);
@@ -338,6 +357,18 @@ export function FileView(props: {
         {loaded?.blocked && (
           <span className="file-view-note">{t(BLOCKED_TEXT[loaded.blocked])}</span>
         )}
+        {markdown && loaded !== null && loaded.blocked === null && (
+          <button
+            type="button"
+            className="file-view-preview icon-button"
+            title={t(showPreview ? "files.source" : "files.preview")}
+            aria-label={t(showPreview ? "files.source" : "files.preview")}
+            aria-pressed={showPreview}
+            onClick={togglePreview}
+          >
+            {showPreview ? <CodeIcon /> : <EyeIcon />}
+          </button>
+        )}
         {loaded !== null && loaded.blocked === null && (
           <button
             type="button"
@@ -365,6 +396,11 @@ export function FileView(props: {
       )}
       {loaded === null && !error ? (
         <div className="file-view-empty">{t("files.loading")}</div>
+      ) : showPreview && loaded?.blocked === null ? (
+        /* Показываем то, что в поле, а не то, что на диске: несохранённая
+           правка обязана быть видна и здесь, иначе просмотр врёт про файл,
+           который прямо сейчас правят. */
+        <MarkdownView text={text} />
       ) : (
         <div
           className="file-view-code"

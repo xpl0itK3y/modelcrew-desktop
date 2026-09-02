@@ -13,6 +13,7 @@ export const KEYS = {
   locale: "modelcrew.locale",
   shell: "modelcrew.shell",
   diffView: "modelcrew.diffView",
+  markdownPreview: "modelcrew.markdownPreview",
   workspaces: "modelcrew.workspaces",
   sidebarWidth: "modelcrew.sidebarWidth",
   treeWidth: "modelcrew.treeWidth",

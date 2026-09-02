@@ -334,6 +334,24 @@ export function NewFolderIcon(props: IconProps) {
 }
 
 /// Свернуть всё: две стрелки навстречу друг другу.
+export function EyeIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z" />
+      <circle cx="8" cy="8" r="1.9" />
+    </svg>
+  );
+}
+
+export function CodeIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5.5 4.5L2 8l3.5 3.5" />
+      <path d="M10.5 4.5L14 8l-3.5 3.5" />
+    </svg>
+  );
+}
+
 export function CollapseIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
