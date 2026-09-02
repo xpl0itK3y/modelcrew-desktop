@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.0.21
+
+### Русский
+
+Панели агентов возвращаются каждая в свой диалог, а уведомления перестали дублироваться, теряться и глохнуть. Новый терминал открывается рядом с предыдущим.
+
+- Две панели одного агента больше не открывают после перезапуска один и тот же чат
+- Диалог остаётся за своей панелью и после того, как агент вышел в оболочку
+- «Продолжить последний чат» не предлагается, когда чат в этой папке уже за другой панелью
+- У opencode вторая панель начинает свой разговор: выбирать диалог при запуске ему нечем
+- Одно событие агента — один баннер, а не звонок и следом хук про то же самое
+- В баннере названы проект и сессия, поэтому две панели не читаются как одна
+- Запрос разрешения от copilot и opencode больше не теряется: их хук о запросах не сообщает
+- Догадка о простое переживает перерисовку строки состояния и не зовёт после ответа
+- Панель, к которой перешли из колокольчика, снова подаёт голос
+- Терминал открывается рядом с предыдущим, а не через полсетки
+- Быстрое повторное добавление панели больше не мерит сетку на лету анимации
+- Шапка окна получила высоту по своему содержимому
+- На пустом экране стоит знак приложения
+- Список хук-каналов запрашивается вне главного потока и не задерживает первый кадр
+
+### English
+
+Agent panels each resume their own conversation, and alerts no longer double up, go missing, or fall silent. A new terminal opens next to the one before it.
+
+- Two panels of the same agent no longer reopen the same chat after a restart
+- A conversation stays with its panel after the agent steps out to the shell
+- The last-chat fallback is withheld when another panel already owns a chat in that folder
+- A second opencode panel starts its own conversation: it has no way to pick one at launch
+- One event from an agent is one banner, not a bell followed by a hook saying the same thing
+- The banner names the project and the session, so two panels never read as one
+- A permission prompt from copilot or opencode is no longer lost: their hook never reports one
+- The idle guess survives a status-line redraw and stops calling after the user has answered
+- A panel reached from the bell can speak up again
+- A terminal opens beside the previous one instead of half a grid away
+- Adding panels in quick succession no longer measures the grid mid-animation
+- The title bar takes its height from what it holds
+- The empty screen carries the application mark
+- The hook channel list is fetched off the main thread and no longer delays the first frame
+
 ## 0.0.20
 
 ### Русский
