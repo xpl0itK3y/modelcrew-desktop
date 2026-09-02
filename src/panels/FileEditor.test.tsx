@@ -672,4 +672,42 @@ describe("FileView and the disk under it", () => {
       screen.queryByText("Файл изменился на диске, пока вы его правили"),
     ).not.toBeInTheDocument();
   });
+  it("spreads over everything and comes back where it was", async () => {
+    // Колонка ограничена ради сетки терминалов — и правильно ограничена, — но
+    // читать длинную строку в ней тесно. Разворот лежит поверх всего, а
+    // раскладка под ним остаётся нетронутой и ждёт.
+    const { container } = open();
+    const editor = container.querySelector(".file-editor")!;
+    expect(editor.className).not.toContain("is-maximized");
+
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть редактор" }));
+    expect(editor.className).toContain("is-maximized");
+    // Место колонки в ряду занимает подставка: иначе сетка разъехалась бы на
+    // него, а на возврате схлопнулась обратно.
+    const placeholder = container.querySelector(".file-editor-placeholder");
+    expect(placeholder).toBeInTheDocument();
+    expect((placeholder as HTMLElement).style.width).toBe("520px");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Вернуть редактор в колонку" }),
+    );
+    expect(editor.className).not.toContain("is-maximized");
+    expect(
+      container.querySelector(".file-editor-placeholder"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("comes back on Escape, the first thing anyone presses", async () => {
+    const { container } = open();
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть редактор" }));
+    expect(container.querySelector(".file-editor")!.className).toContain(
+      "is-maximized",
+    );
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(container.querySelector(".file-editor")!.className).not.toContain(
+      "is-maximized",
+    );
+  });
 });

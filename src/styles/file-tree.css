@@ -219,6 +219,35 @@
   background: var(--mc-panel);
 }
 
+/* Развёрнутый редактор: та же мысль, что у развёрнутой панели терминала —
+   на время чтения он занимает всё, а раскладка остаётся нетронутой и ждёт.
+   Выше подноса изменений (120), чтобы поверх было именно поверх. */
+.file-editor.is-maximized {
+  position: absolute;
+  inset: var(--mc-gap);
+  z-index: 130;
+  margin: 0;
+  width: auto;
+}
+
+/* Место, которое развёрнутый редактор занимал в ряду: пока он поверх всего,
+   колонки стоят там же, где стояли. */
+.file-editor-placeholder {
+  flex: 0 0 auto;
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+}
+
+/* Кнопка прижата к правому краю полосы вкладок и не уезжает вместе с ними
+   при прокрутке: вкладок бывает больше, чем помещается. */
+.file-editor-maximize {
+  flex: 0 0 auto;
+  margin-left: auto;
+  position: sticky;
+  right: 0;
+  align-self: center;
+  background: var(--mc-panel-header);
+}
+
 .file-editor-tabs {
   display: flex;
   align-items: stretch;

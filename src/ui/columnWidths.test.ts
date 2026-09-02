@@ -67,10 +67,16 @@ describe("widthLimitsWithin", () => {
 describe("fitColumns", () => {
   it("gives the grid its room back when the window is smaller than last time", () => {
     const widths = { sidebar: 400, tree: 500, editor: 1_100 };
-    const fitted = fitColumns(widths, ALL, 100);
+    const short = 100;
+    const fitted = fitColumns(widths, ALL, short);
 
-    // Не хватало 260 — их отдал редактор, самый широкий и первый в очереди.
-    expect(fitted).toEqual({ sidebar: 400, tree: 500, editor: 840 });
+    // Недостачу отдаёт редактор — самый широкий и первый в очереди; соседей
+    // не трогаем, пока ему есть что отдать.
+    expect(fitted).toEqual({
+      sidebar: 400,
+      tree: 500,
+      editor: 1_100 - (MIN_DOCK_WIDTH - short),
+    });
   });
 
   it("moves on to the next column when one has nothing left to give", () => {

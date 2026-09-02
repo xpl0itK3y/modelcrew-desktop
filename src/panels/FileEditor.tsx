@@ -5,9 +5,9 @@
 // сохранения, и файл среди них выглядит как ещё один терминал, которым он не
 // является.
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useI18n } from "../i18n";
-import { CloseIcon } from "../ui/Icons";
+import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 import { fileGlyph } from "../files/fileGlyph";
 import { fileName } from "../crew/claimLabel";
 import { FileView } from "./FileView";
@@ -34,6 +34,33 @@ export function FileEditor(props: {
   // Какую вкладку закрывают с несохранённой правкой. Спрашиваем: закрытая
   // вкладка уносит работу, а вернуть её неоткуда.
   const [asking, setAsking] = useState<string | null>(null);
+  // Развёрнутый редактор ложится поверх всего, как развёрнутая панель
+  // терминала. Колонка ограничена ради сетки — и правильно ограничена, — но
+  // читать длинную строку в ней всё равно тесно, а тянуть разделитель туда и
+  // обратно ради одного файла утомительно.
+  const [maximized, setMaximized] = useState(false);
+
+  // Esc возвращает — это первое, что пробуют, когда что-то заняло весь экран.
+  useEffect(() => {
+    if (!maximized) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMaximized(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [maximized]);
+
+  // Последний файл закрыт — разворачивать нечего, и остаться развёрнутым
+  // редактор не должен: вернётся он уже пустым и поверх всего.
+  useEffect(() => {
+    if (files.length === 0) {
+      setMaximized(false);
+    }
+  }, [files.length]);
 
   if (files.length === 0) {
     return null;
@@ -41,16 +68,29 @@ export function FileEditor(props: {
   const current = activePath && files.includes(activePath) ? activePath : files[0];
 
   return (
-    <section
-      className={`file-editor ${props.leaving ? "is-leaving" : ""}`}
-      aria-label={t("files.editorTitle")}
-      style={
-        {
-          "--column-width": `${props.width}px`,
-          width: "var(--column-width)",
-        } as CSSProperties
-      }
-    >
+    <>
+      {/* Развёрнутый редактор уходит из потока, и без подставки сетка
+          разъехалась бы на его место — а вернувшись, схлопнулась бы обратно.
+          Пять терминалов пережили бы два лишних SIGWINCH ни за чем. */}
+      {maximized && (
+        <div
+          className="file-editor-placeholder"
+          aria-hidden="true"
+          style={{ width: props.width }}
+        />
+      )}
+      <section
+        className={`file-editor ${props.leaving ? "is-leaving" : ""} ${
+          maximized ? "is-maximized" : ""
+        }`}
+        aria-label={t("files.editorTitle")}
+        style={
+          {
+            "--column-width": `${props.width}px`,
+            ...(maximized ? {} : { width: "var(--column-width)" }),
+          } as CSSProperties
+        }
+      >
       <div className="file-editor-tabs" role="tablist">
         {files.map((path) => {
           const glyph = fileGlyph(fileName(path));
@@ -101,6 +141,16 @@ export function FileEditor(props: {
             </div>
           );
         })}
+        <button
+          type="button"
+          className="file-editor-maximize icon-button"
+          title={maximized ? t("files.restore") : t("files.maximize")}
+          aria-label={maximized ? t("files.restore") : t("files.maximize")}
+          aria-pressed={maximized}
+          onClick={() => setMaximized((on) => !on)}
+        >
+          <MaximizeIcon />
+        </button>
       </div>
       {/* Каждый открытый файл остаётся смонтированным, а видно один. Раньше
           вид перемонтировался по пути, и переключение вкладок уносило
@@ -146,6 +196,7 @@ export function FileEditor(props: {
           onCancel={() => setAsking(null)}
         />
       )}
-    </section>
+      </section>
+    </>
   );
 }
