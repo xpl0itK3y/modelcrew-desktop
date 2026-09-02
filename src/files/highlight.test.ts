@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   grammarOf,
+  languages,
   lineOffsets,
   paintLines,
   tokenize,
@@ -158,5 +159,109 @@ describe("grammarOf", () => {
     expect(grammarOf("LICENSE")).toBeNull();
     expect(grammarOf("icon.png")).toBeNull();
     expect(grammarOf(".gitignore")).toBeNull();
+  });
+});
+
+describe("the languages beyond the ones this app is written in", () => {
+  /// То же свойство, что и выше, но на всех грамматиках разом. Свежий язык
+  /// добавляют одной строкой в таблицу, и проверять его отдельно никто не
+  /// вспомнит — а разъедется от него весь редактор целиком.
+  it("never loses or invents a character, in any language it knows", () => {
+    const samples = [
+      'x = "строка" # хвост',
+      "/* незакрытый /* вложенный",
+      "'''\nтройная\n'''",
+      '"""\nтройная\n"""',
+      "-- [[ полуоткрытый",
+      "{- } -} <# #> (* *) =begin =end",
+      "1_000.5e3 0xff 42",
+      "",
+      "просто текст без всякого языка",
+    ];
+    for (const language of languages) {
+      for (const sample of samples) {
+        expect(
+          joined(tokenize(sample, language)),
+          `${language}: ${JSON.stringify(sample)}`,
+        ).toBe(sample);
+      }
+    }
+  });
+
+  it("lets a docstring span the lines it is written across", () => {
+    const tokens = tokenize('def f():\n    """что делает\n    функция"""\n', "py");
+
+    expect(kinds(tokens)).toContainEqual([
+      "string",
+      '"""что делает\n    функция"""',
+    ]);
+    expect(kinds(tokens)).toContainEqual(["keyword", "def"]);
+  });
+
+  it("knows a SQL keyword however it was shouted", () => {
+    // Один и тот же запрос пишут и строчными, и прописными — и в одном файле
+    // вперемешку. Регистр здесь ничего не значит.
+    for (const word of ["select", "SELECT", "Select"]) {
+      expect(kinds(tokenize(`${word} 1`, "sql"))).toContainEqual([
+        "keyword",
+        word,
+      ]);
+    }
+    // А там, где регистр значение имеет, слово остаётся словом.
+    expect(kinds(tokenize("CONST x = 1", "ts"))).not.toContainEqual([
+      "keyword",
+      "CONST",
+    ]);
+  });
+
+  it("opens a block comment that starts like a line comment", () => {
+    // `--[[` в Lua и `#=` в Julia начинаются тем же, чем однострочный
+    // комментарий: примерь его первым — и закрывающая скобка осталась бы
+    // кодом, а с ней и весь остаток блока.
+    const lua = tokenize("--[[ пояснение\nна две строки ]]\nlocal x = 1", "lua");
+    expect(kinds(lua)).toContainEqual([
+      "comment",
+      "--[[ пояснение\nна две строки ]]",
+    ]);
+    expect(kinds(lua)).toContainEqual(["keyword", "local"]);
+
+    const julia = tokenize("#= пояснение\nна две строки =#\nconst x = 1", "julia");
+    expect(kinds(julia)).toContainEqual(["keyword", "const"]);
+  });
+
+  it("does not take a lisp quote for the start of a string", () => {
+    const tokens = tokenize("(def xs '(1 2 3))\n(def ys 4)", "lisp");
+
+    // Приняв апостроф за кавычку, разбор покрасил бы строкой весь остаток
+    // файла — а апостроф в этом семействе стоит чуть ли не в каждой строке.
+    expect(kinds(tokens).filter(([kind]) => kind === "string")).toHaveLength(0);
+    expect(kinds(tokens).filter(([kind]) => kind === "keyword")).toHaveLength(2);
+  });
+
+  it("reads the language of a file that has no extension at all", () => {
+    expect(grammarOf("Dockerfile")).toBe("docker");
+    expect(grammarOf("build/Makefile")).toBeNull();
+    expect(grammarOf("Makefile")).toBe("make");
+    expect(grammarOf("Gemfile")).toBe("ruby");
+    expect(grammarOf(".zshrc")).toBe("sh");
+  });
+
+  it("covers the languages people actually write in", () => {
+    const expected: Record<string, string> = {
+      "main.py": "py", "server.go": "go", "App.java": "java",
+      "Main.kt": "kotlin", "build.sbt": "scala", "core.c": "c",
+      "engine.cpp": "cpp", "View.mm": "objc", "Program.cs": "cs",
+      "index.php": "php", "app.rb": "ruby", "App.swift": "swift",
+      "main.dart": "dart", "schema.sql": "sql", "init.lua": "lua",
+      "tool.pl": "perl", "plot.R": "r", "model.jl": "julia",
+      "Main.hs": "haskell", "app.ex": "elixir", "node.erl": "erlang",
+      "core.clj": "lisp", "main.zig": "zig", "parser.ml": "ocaml",
+      "deploy.ps1": "powershell", "main.tf": "hcl", "schema.graphql": "graphql",
+      "api.proto": "proto", "Token.sol": "solidity", "flake.nix": "nix",
+      "setup.cfg": "ini", "Component.vue": "html",
+    };
+    for (const [name, language] of Object.entries(expected)) {
+      expect(grammarOf(name), name).toBe(language);
+    }
   });
 });
