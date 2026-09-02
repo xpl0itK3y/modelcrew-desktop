@@ -646,6 +646,7 @@ const bindingRoots = new Map<string, BindingRoot>();
 async function locateOnce(
   terminalId: string,
   root: BindingRoot,
+  since: number,
 ): Promise<boolean> {
   const record = getAgentRecord(terminalId);
   if (!record || record.sessionId) {
@@ -659,7 +660,7 @@ async function locateOnce(
     const found = await invoke<string | null>("agent_session_locate", {
       agent: record.agentId,
       cwd: root.cwd,
-      sinceEpochMs: Math.max(0, Math.round(record.detectedAt)),
+      sinceEpochMs: Math.max(0, Math.round(since)),
       exclude: boundAgentSessionIds(record.agentId, terminalId),
     });
     if (found && bindAgentSession(terminalId, found, root.workspaceId)) {
@@ -671,15 +672,27 @@ async function locateOnce(
   return false;
 }
 
-function startBinding(terminalId: string, root: BindingRoot): void {
+// Момент, вокруг которого локатор ищет файл сессии. При обнаружении агента
+// это его запуск: файл появится через секунды. На повторе — сам повтор, а не
+// запуск: повтор вызывает первый ввод пользователя, и файл создаётся именно
+// сейчас. Пока сюда всегда шёл момент запуска, окно поиска у бэкенда (десять
+// минут после него) успевало закрыться, и панель, в которой заговорили
+// позже, не привязывалась уже никогда — а непривязанная панель и есть та,
+// что потом тянется к чужому диалогу.
+function startBinding(
+  terminalId: string,
+  root: BindingRoot,
+  since?: number,
+): void {
   if (!isTauri || pendingBindings.has(terminalId)) {
     return;
   }
   pendingBindings.add(terminalId);
   bindingRoots.set(terminalId, root);
+  const anchor = since ?? getAgentRecord(terminalId)?.detectedAt ?? Date.now();
   let attempt = 0;
   const tryLocate = () => {
-    void locateOnce(terminalId, root).then((done) => {
+    void locateOnce(terminalId, root, anchor).then((done) => {
       attempt += 1;
       if (done || attempt >= LOCATE_ATTEMPT_DELAYS_MS.length) {
         pendingBindings.delete(terminalId);
@@ -719,6 +732,6 @@ export function retryAgentSessionBinding(terminalId: string): void {
   }
   const root = bindingRoots.get(terminalId);
   if (root) {
-    startBinding(terminalId, root);
+    startBinding(terminalId, root, Date.now());
   }
 }

@@ -483,6 +483,38 @@ describe("agent catalog", () => {
     }
   });
 
+  it("searches around the retry, not around the launch", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      rememberAgentProcess("panel-late", "codex");
+      invokeMock.mockResolvedValue(null);
+      scheduleAgentSessionBinding("panel-late", "/tmp/proj", "ws-1");
+      await vi.advanceTimersByTimeAsync(30_000);
+      // При обнаружении отсчёт идёт от запуска агента.
+      expect(invokeMock).toHaveBeenCalledWith(
+        "agent_session_locate",
+        expect.objectContaining({ sinceEpochMs: 1_000_000 }),
+      );
+
+      // Пользователь написал через полчаса: окно бэкенда вокруг запуска давно
+      // закрылось, и искать надо вокруг этой минуты.
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      invokeMock.mockClear();
+      invokeMock.mockResolvedValue("late-session");
+      retryAgentSessionBinding("panel-late");
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(invokeMock).toHaveBeenCalledWith(
+        "agent_session_locate",
+        expect.objectContaining({ sinceEpochMs: 1_000_000 + 30_000 + 30 * 60_000 }),
+      );
+      expect(getAgentRecord("panel-late")!.sessionId).toBe("late-session");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("binds the session when the user writes long after the panel opened", async () => {
     vi.useFakeTimers();
     try {
