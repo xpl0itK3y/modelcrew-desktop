@@ -44,6 +44,7 @@ use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
 use file_tree::{
     workspace_create_entry, workspace_delete_entry, workspace_read_dir, workspace_read_file,
+    workspace_read_media,
     workspace_rename_entry, workspace_reveal_entry, workspace_search_tree, workspace_tree_unwatch,
     workspace_tree_watch, workspace_write_file, TreeWatchState,
 };
@@ -1037,6 +1038,7 @@ pub fn run() {
             workspace_delete_entry,
             workspace_read_dir,
             workspace_read_file,
+            workspace_read_media,
             workspace_rename_entry,
             workspace_search_tree,
             workspace_reveal_entry,
@@ -1193,6 +1195,7 @@ mod tests {
         "workspace_pick_root",
         "workspace_read_dir",
         "workspace_read_file",
+        "workspace_read_media",
         "workspace_reconcile_roots",
         "workspace_register_root",
         "workspace_rename_entry",
