@@ -447,3 +447,87 @@ describe("the formats that are not languages", () => {
     expect(marked.filter(([kind]) => kind === "keyword")).toHaveLength(0);
   });
 });
+
+describe("markup and styles", () => {
+  it("reads a page as a page", () => {
+    const page = [
+      "<!DOCTYPE html>",
+      '<div class="row" data-id=1>',
+      "  текст &amp; ещё <!-- заметка -->",
+      "</div>",
+    ].join("\n");
+    const marked = kinds(tokenize(page, "html"));
+
+    expect(marked).toContainEqual(["keyword", "<!DOCTYPE html>"]);
+    expect(marked).toContainEqual(["keyword", "div"]);
+    expect(marked).toContainEqual(["attr", "class"]);
+    expect(marked).toContainEqual(["string", '"row"']);
+    expect(marked).toContainEqual(["attr", "data-id"]);
+    expect(marked).toContainEqual(["number", "&amp;"]);
+    expect(marked).toContainEqual(["comment", "<!-- заметка -->"]);
+  });
+
+  it("does not take a less-than sign for a tag", () => {
+    const marked = kinds(tokenize("if a < b and b > c", "html"));
+
+    expect(marked.filter(([kind]) => kind === "keyword")).toHaveLength(0);
+  });
+
+  it("reads a stylesheet as a stylesheet", () => {
+    const sheet = [
+      "/* заметка */",
+      "@media (max-width: 600px) {",
+      ".row > a:hover {",
+      "  color: #ffcc00;",
+      "  margin: 0 12px 1.5rem;",
+      '  content: "«»" !important;',
+      "}",
+      "}",
+    ].join("\n");
+    const marked = kinds(tokenize(sheet, "css"));
+
+    expect(marked).toContainEqual(["comment", "/* заметка */"]);
+    expect(marked).toContainEqual(["keyword", "@media"]);
+    expect(marked).toContainEqual(["heading", ".row > a:hover"]);
+    expect(marked).toContainEqual(["attr", "color"]);
+    expect(marked).toContainEqual(["number", "#ffcc00"]);
+    expect(marked).toContainEqual(["number", "12px"]);
+    expect(marked).toContainEqual(["number", "1.5rem"]);
+    expect(marked).toContainEqual(["string", '"«»"']);
+    expect(marked).toContainEqual(["keyword", "!important"]);
+  });
+
+  it("tells a nested rule from a property", () => {
+    // В scss на месте свойства оказывается селектор, и отличить их можно
+    // только по тому, чем предложение кончится.
+    const marked = kinds(tokenize(".card {\n  color: red;\n  &:hover { color: blue; }\n}", "css"));
+
+    expect(marked).toContainEqual(["attr", "color"]);
+    expect(marked).toContainEqual(["heading", "&:hover"]);
+  });
+
+  it("never loses a character of a page or a stylesheet", () => {
+    const samples = [
+      "<a href='x'>текст</a>",
+      "<img src=logo.png />",
+      "<незакрытый",
+      "<!-- незакрытый комментарий",
+      "a<b>c",
+      "&amp;&#169;&nope",
+      ".a{color:red}",
+      "@import url(x.css);",
+      "a { b: c",
+      "/* незакрытый",
+      "мусор без всякого смысла",
+      "",
+    ];
+    for (const language of ["html", "css"]) {
+      for (const sample of samples) {
+        expect(
+          joined(tokenize(sample, language)),
+          `${language}: ${JSON.stringify(sample)}`,
+        ).toBe(sample);
+      }
+    }
+  });
+});

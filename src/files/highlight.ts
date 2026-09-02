@@ -27,7 +27,10 @@ export type TokenKind =
   // редактора: добавленное зелёное и убранное красное — это одно и то же
   // знание, показанное дважды.
   | "inserted"
-  | "deleted";
+  | "deleted"
+  // Имя атрибута в разметке и имя свойства в стилях: одна и та же роль —
+  // «как называется то, чему сейчас задают значение».
+  | "attr";
 
 export type Token = { text: string; kind: TokenKind };
 
@@ -512,8 +515,6 @@ const GRAMMARS: Record<string, Grammar> = {
   ts: grammar(["//"], ["/*", "*/"], ['"', "'", "`"], TS_WORDS),
   rs: grammar(["//"], ["/*", "*/"], ['"'], RUST_WORDS),
   json: grammar([], null, ['"'], ["true", "false", "null"]),
-  css: grammar([], ["/*", "*/"], CQ, [], { numbers: false }),
-  html: grammar([], ["<!--", "-->"], CQ, [], { numbers: false }),
   yaml: grammar(["#"], null, CQ, ["true", "false", "null"], { numbers: false }),
   toml: grammar(["#"], null, CQ, ["true", "false"], { numbers: false }),
   sh: grammar(["#"], null, CQ, SHELL_WORDS, { numbers: false }),
@@ -590,6 +591,8 @@ const GRAMMARS: Record<string, Grammar> = {
 /// Здесь они всё равно нужны — правило «ничего не терять» касается и их.
 const MARKDOWN = "md";
 const DIFF = "diff";
+const HTML = "html";
+const CSS = "css";
 
 /// Все разборы, какие есть. Список берётся из самой таблицы, а не пишется
 /// рядом с ней руками: главное свойство разбора — ничего не терять — обязано
@@ -598,6 +601,8 @@ export const languages: string[] = [
   ...Object.keys(GRAMMARS),
   MARKDOWN,
   DIFF,
+  HTML,
+  CSS,
 ];
 
 /// Расширение → разбор. Родственники делят разбор: разница между `.js` и
@@ -1091,6 +1096,285 @@ const NUMBER = /[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?/y;
 const WORD = /[A-Za-z_$][A-Za-z0-9_$]*/y;
 
 
+// ——— Страницы и стили ———
+//
+// Тоже своими сканерами. Разбор из таблицы умеет комментарии, строки, числа и
+// слова из списка — а в разметке значение имеет место: `div` внутри угловых
+// скобок это тег, а в тексте абзаца это просто слово. Списком ключевых слов
+// такое не выражается, и html с css оставались почти серыми: красилось
+// значение атрибута, и больше ничего.
+
+/// Имя тега или атрибута.
+const TAG_NAME = /[a-zA-Z_][\w:.-]*/y;
+const ATTR_NAME = /[^\s=/>"'<]+/y;
+/// Мнемоника: `&amp;`, `&#169;`, `&#x2014;`.
+const ENTITY = /&#?[a-zA-Z0-9]{1,10};/y;
+
+/// Склейка соседних кусков одного разряда: слой подсветки рисует по элементу
+/// на кусок, и абзац текста иначе стал бы сотней пустых span-ов.
+function joiner(tokens: Token[]) {
+  return (value: string, kind: TokenKind) => {
+    if (!value) {
+      return;
+    }
+    const last = tokens[tokens.length - 1];
+    if (last && last.kind === kind) {
+      last.text += value;
+      return;
+    }
+    tokens.push({ text: value, kind });
+  };
+}
+
+function htmlTokens(text: string): Token[] {
+  const tokens: Token[] = [];
+  const push = joiner(tokens);
+
+  const between = (open: string, close: string, kind: TokenKind): number => {
+    const end = text.indexOf(close, at + open.length);
+    // Незакрытое тянется до конца файла — ровно так его прочитает и браузер.
+    const stop = end === -1 ? text.length : end + close.length;
+    push(text.slice(at, stop), kind);
+    return stop;
+  };
+
+  let at = 0;
+  while (at < text.length) {
+    if (text.startsWith("<!--", at)) {
+      at = between("<!--", "-->", "comment");
+      continue;
+    }
+    // Объявление типа документа и обработчик: `<!DOCTYPE html>`, `<?php`.
+    // Внутрь не заглядываем — снаружи их и читают целиком.
+    if (text.startsWith("<!", at) || text.startsWith("<?", at)) {
+      at = between("<", ">", "keyword");
+      continue;
+    }
+
+    if (text[at] === "<") {
+      const opened = at + (text[at + 1] === "/" ? 2 : 1);
+      TAG_NAME.lastIndex = opened;
+      const name = TAG_NAME.exec(text)?.[0];
+      if (!name) {
+        // Угловая скобка не открыла тег — это знак меньше в тексте.
+        push("<", "punct");
+        at += 1;
+        continue;
+      }
+      push(text.slice(at, opened), "punct");
+      push(name, "keyword");
+      at = opened + name.length;
+
+      // Внутри тега: имена атрибутов, знаки равенства, значения в кавычках.
+      while (at < text.length) {
+        const first = text[at];
+        if (first === ">") {
+          push(">", "punct");
+          at += 1;
+          break;
+        }
+        if (text.startsWith("/>", at)) {
+          push("/>", "punct");
+          at += 2;
+          break;
+        }
+        if (first === '"' || first === "'") {
+          const end = text.indexOf(first, at + 1);
+          // Кавычка внутри тега многострочна: длинный `style` переносят.
+          const stop = end === -1 ? text.length : end + 1;
+          push(text.slice(at, stop), "string");
+          at = stop;
+          continue;
+        }
+        if (first === "=") {
+          push("=", "punct");
+          at += 1;
+          continue;
+        }
+        if (first === " " || first === "\n" || first === "\t" || first === "\r") {
+          push(first, "plain");
+          at += 1;
+          continue;
+        }
+        ATTR_NAME.lastIndex = at;
+        const attr = ATTR_NAME.exec(text)?.[0];
+        if (!attr) {
+          push(first, "punct");
+          at += 1;
+          continue;
+        }
+        push(attr, "attr");
+        at += attr.length;
+      }
+      continue;
+    }
+
+    if (text[at] === "&") {
+      ENTITY.lastIndex = at;
+      const entity = ENTITY.exec(text)?.[0];
+      if (entity) {
+        push(entity, "number");
+        at += entity.length;
+        continue;
+      }
+    }
+
+    push(text[at], "plain");
+    at += 1;
+  }
+  return tokens;
+}
+
+/// Число со своей единицей и цвет: `12px`, `1.5rem`, `50%`, `#ffcc00`.
+const CSS_VALUE_NUMBER = /(#[0-9a-fA-F]{3,8}\b|[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?[a-zA-Z%]*)/y;
+const CSS_WORD = /[-\w]+/y;
+
+/// Чем кончится начатое здесь предложение: блоком или объявлением. Заглядываем
+/// вперёд, потому что отличить `.foo` от `color` можно только по тому, что
+/// стоит дальше — и во вложенных правилах scss на месте свойства оказывается
+/// селектор.
+function cssStatement(text: string, from: number): "block" | "declaration" {
+  let at = from;
+  while (at < text.length) {
+    if (text.startsWith("/*", at)) {
+      const end = text.indexOf("*/", at + 2);
+      at = end === -1 ? text.length : end + 2;
+      continue;
+    }
+    const first = text[at];
+    if (first === '"' || first === "'") {
+      const end = text.indexOf(first, at + 1);
+      at = end === -1 ? text.length : end + 1;
+      continue;
+    }
+    if (first === "{") {
+      return "block";
+    }
+    if (first === ";" || first === "}") {
+      return "declaration";
+    }
+    at += 1;
+  }
+  return "declaration";
+}
+
+function cssTokens(text: string): Token[] {
+  const tokens: Token[] = [];
+  const push = joiner(tokens);
+
+  /// Значение свойства: до точки с запятой или до конца правила.
+  const value = (at: number): number => {
+    while (at < text.length) {
+      const first = text[at];
+      if (first === ";" || first === "}") {
+        return at;
+      }
+      if (text.startsWith("/*", at)) {
+        const end = text.indexOf("*/", at + 2);
+        const stop = end === -1 ? text.length : end + 2;
+        push(text.slice(at, stop), "comment");
+        at = stop;
+        continue;
+      }
+      if (first === '"' || first === "'") {
+        const end = text.indexOf(first, at + 1);
+        const stop = end === -1 ? text.length : end + 1;
+        push(text.slice(at, stop), "string");
+        at = stop;
+        continue;
+      }
+      if (text.startsWith("!important", at)) {
+        push("!important", "keyword");
+        at += "!important".length;
+        continue;
+      }
+      if (first === "#" || first === "." || (first >= "0" && first <= "9")) {
+        CSS_VALUE_NUMBER.lastIndex = at;
+        const number = CSS_VALUE_NUMBER.exec(text)?.[0];
+        if (number) {
+          push(number, "number");
+          at += number.length;
+          continue;
+        }
+      }
+      CSS_WORD.lastIndex = at;
+      const word = CSS_WORD.exec(text)?.[0];
+      if (word) {
+        push(word, "plain");
+        at += word.length;
+        continue;
+      }
+      push(first, first === " " || first === "\n" ? "plain" : "punct");
+      at += 1;
+    }
+    return at;
+  };
+
+  let at = 0;
+  while (at < text.length) {
+    const first = text[at];
+    if (text.startsWith("/*", at)) {
+      const end = text.indexOf("*/", at + 2);
+      const stop = end === -1 ? text.length : end + 2;
+      push(text.slice(at, stop), "comment");
+      at = stop;
+      continue;
+    }
+    if (first === "}" || first === ";" || first === "{") {
+      push(first, "punct");
+      at += 1;
+      continue;
+    }
+    if (first === " " || first === "\n" || first === "\t" || first === "\r") {
+      push(first, "plain");
+      at += 1;
+      continue;
+    }
+    if (first === "@") {
+      CSS_WORD.lastIndex = at + 1;
+      const word = CSS_WORD.exec(text)?.[0] ?? "";
+      push(text.slice(at, at + 1 + word.length), "keyword");
+      at += 1 + word.length;
+      continue;
+    }
+
+    if (cssStatement(text, at) === "block") {
+      // Селектор: всё до открывающей скобки. Он и есть заголовок правила, и
+      // читается так же — по нему находят нужное место в файле.
+      let stop = at;
+      while (stop < text.length && text[stop] !== "{") {
+        stop += 1;
+      }
+      // Перевод строки в конце селектора отдаём обычным текстом: иначе пустая
+      // строка перед `{` красилась бы заголовком.
+      const selector = text.slice(at, stop).replace(/\s+$/, "");
+      push(selector, "heading");
+      at += selector.length;
+      continue;
+    }
+
+    CSS_WORD.lastIndex = at;
+    const property = CSS_WORD.exec(text)?.[0];
+    if (!property) {
+      push(first, "punct");
+      at += 1;
+      continue;
+    }
+    push(property, "attr");
+    at += property.length;
+    // Двоеточие и значение за ним — если объявление вообще дошло до значения.
+    while (at < text.length && (text[at] === " " || text[at] === "\t")) {
+      push(text[at], "plain");
+      at += 1;
+    }
+    if (text[at] === ":") {
+      push(":", "punct");
+      at = value(at + 1);
+    }
+  }
+  return tokens;
+}
+
 // ——— Заплаты ———
 //
 // Тоже своим сканером: у заплаты значение имеет первый знак строки, и он же
@@ -1153,6 +1437,12 @@ export function tokenize(text: string, language: string | null): Token[] {
   }
   if (language === DIFF) {
     return diffTokens(text);
+  }
+  if (language === HTML) {
+    return htmlTokens(text);
+  }
+  if (language === CSS) {
+    return cssTokens(text);
   }
   const rules = language ? GRAMMARS[language] : undefined;
   if (!rules || text.length === 0) {
