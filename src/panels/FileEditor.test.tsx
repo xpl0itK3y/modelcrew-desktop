@@ -1255,3 +1255,66 @@ describe("FileEditor find", () => {
     expect(document.querySelectorAll(".file-found")).toHaveLength(0);
   });
 });
+
+describe("FileEditor wrapping", () => {
+  const doc = ["первая", "вторая длинная строка", "третья"].join("\n");
+
+  // Выбор запоминается на всё приложение, а тесты идут в одном окне: соседям
+  // он достаться не должен.
+  beforeEach(() => localStorage.removeItem("modelcrew.wrapLines"));
+  afterEach(() => localStorage.removeItem("modelcrew.wrapLines"));
+
+  async function wrapped() {
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    open("app.ts");
+    await waitFor(() => expect(screen.getByLabelText("app.ts")).toHaveValue(doc));
+    fireEvent.click(screen.getByLabelText("Переносить длинные строки"));
+  }
+
+  it("keeps the layers letter for letter once the lines wrap", async () => {
+    // Пока строки не переносятся, за окном показа лежат одни переводы строки:
+    // строка там ровно одна строка высотой. С переносом это неверно, и за
+    // окном обязан лежать сам текст — иначе подсветка уедет вверх.
+    await wrapped();
+
+    expect(document.querySelector(".file-view-code")).toHaveClass("is-wrapped");
+    expect(document.querySelector(".file-view-paint")?.textContent).toBe(
+      doc + "\n",
+    );
+  });
+
+  it("carries each number along with its own line", async () => {
+    await wrapped();
+
+    const numbers = document.querySelectorAll(".file-no");
+    expect([...numbers].map((row) => row.textContent)).toEqual([
+      "1 ",
+      "2 ",
+      "3 ",
+    ]);
+    // Номер лежит в одном потоке с текстом своей строки — иначе ему не за чем
+    // ехать, когда строка занимает два ряда.
+    expect(document.querySelector(".file-view-lines")?.textContent).toBe(
+      "1 первая\n2 вторая длинная строка\n3 третья\n",
+    );
+  });
+
+  it("goes back to one line per row", async () => {
+    await wrapped();
+
+    fireEvent.click(screen.getByLabelText("Не переносить длинные строки"));
+
+    expect(document.querySelector(".file-view-code")).not.toHaveClass(
+      "is-wrapped",
+    );
+    expect(document.querySelector(".file-view-lines")?.textContent).toBe(
+      "1 \n2 \n3 \n",
+    );
+  });
+
+  it("remembers the choice for the next file", async () => {
+    await wrapped();
+
+    expect(localStorage.getItem("modelcrew.wrapLines")).toBe("1");
+  });
+});

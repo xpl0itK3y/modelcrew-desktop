@@ -615,6 +615,45 @@
   user-select: none;
 }
 
+/* Перенос длинных строк. Правила одни на всю стопку слоёв: разъедься они хоть
+   одним свойством — и буквы в поле встанут не над своими же буквами в
+   подсветке. Строка без единого пробела — минифицированный json, base64 —
+   иначе не переносится вовсе, и переключатель на ней ничего бы не сделал. */
+.file-view-code.is-wrapped .file-view-paint,
+.file-view-code.is-wrapped .file-view-found,
+.file-view-code.is-wrapped .file-view-text,
+.file-view-code.is-wrapped .file-view-lines {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* При переносе колонка номеров занимает всю ширину: в ней лежит тот же текст,
+   что и в поле, — невидимый, но переносящийся точно так же. Иначе номеру не за
+   чем ехать: строк на экране больше, чем строк в файле, и посчитать, где какая,
+   без самого текста нечем. */
+.file-view-code.is-wrapped .file-view-lines {
+  right: 0;
+  width: auto;
+  padding: 10px 12px 10px calc(var(--file-gutter) + 10px);
+  background: transparent;
+  border-right: 0;
+  color: transparent;
+  text-align: left;
+}
+
+/* Сам номер. Ширины не занимает: коробка сдвинута отрицательным полем ровно на
+   свою ширину влево, так что перенос строки от неё не меняется ни на знак, а
+   рисуется она в отступе — там же, где колонка номеров без переноса. */
+.file-no {
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--file-gutter);
+  margin-left: calc(-1 * var(--file-gutter));
+  padding-right: 6px;
+  color: var(--mc-text-faint);
+  text-align: right;
+}
+
 /* Полоска правки у самого края колонки номеров — там же, где её рисует любой
    редактор: между номером и кодом. Занимает место обычного пробела, который
    стоит после номера на каждой строке, покрашена она или нет, поэтому текст

@@ -54,6 +54,7 @@ import {
   CloseIcon,
   CodeIcon,
   EyeIcon,
+  WrapIcon,
 } from "../ui/Icons";
 import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import { fileName } from "../crew/claimLabel";
@@ -520,6 +521,62 @@ export function FileView(props: {
     // Только на смену набора совпадений: в остальном шагами двигает человек.
   }, [found]);
 
+  // Перенос длинных строк. Длинный JSON и абзац в README уезжают вбок на
+  // километр, и читать их можно только тягая полосу прокрутки.
+  const [wrap, setWrap] = useState(() => readSetting(KEYS.wrapLines) === "1");
+  const toggleWrap = () => {
+    setWrap((current) => {
+      writeSetting(KEYS.wrapLines, current ? "0" : "1");
+      return !current;
+    });
+  };
+
+  // Текст выше и ниже окна показа. Пока строки не переносятся, это ровно
+  // столько переводов строки, сколько там строк: пустая строка в `pre` той же
+  // высоты, что любая другая, и слои сходятся без единого вычисления.
+  //
+  // С переносом это неверно: перенесённая строка занимает два ряда, а перевод
+  // строки — один, и слой подсветки уехал бы вверх на разницу. Поэтому при
+  // переносе за окном лежит сам текст — он и переносится так же, как в поле.
+  // Это один узел на всё, а не по элементу на строку, и стоит он не дороже
+  // того, что поле рисует и так.
+  const head = offsets[shown.from] ?? 0;
+  const foot = shown.to >= lineCount ? text.length : offsets[shown.to] - 1;
+  const above = wrap ? text.slice(0, head) : "\n".repeat(shown.from);
+  const below =
+    (wrap ? text.slice(foot) : "\n".repeat(Math.max(0, lineCount - shown.to))) +
+    "\n";
+
+  // Номера при переносе: каждый едет со своей строкой, а для этого лежит с ней
+  // в одном потоке — вместе с самим текстом строки, невидимым, но переносящимся
+  // точно так же. Сам номер ширины не занимает: его коробка отрицательным полем
+  // сдвинута ровно на свою ширину влево, и перенос от неё не меняется ни на
+  // знак.
+  const wrappedNumbers = useMemo(() => {
+    if (!wrap) {
+      return null;
+    }
+    const rows: ReactNode[] = [];
+    for (let line = shown.from; line < shown.to; line += 1) {
+      const mark = marks.get(line);
+      const start = offsets[line];
+      const end = line + 1 < lineCount ? offsets[line + 1] - 1 : text.length;
+      rows.push(
+        <span key={line} className="file-no">
+          {String(line + 1)}
+          {mark ? (
+            <span className={`file-mark is-${mark}`}> </span>
+          ) : (
+            " "
+          )}
+        </span>,
+      );
+      rows.push(text.slice(start, end));
+      rows.push("\n");
+    }
+    return rows;
+  }, [wrap, shown.from, shown.to, marks, offsets, text, lineCount]);
+
   /// Совпадения в окне показа, кусками текста и метками. Слой лежит между
   /// подсветкой и полем ввода, поэтому у меток только фон — цвет букв виден
   /// сквозь них, с нижнего слоя.
@@ -587,6 +644,18 @@ export function FileView(props: {
             {showPreview ? <CodeIcon /> : <EyeIcon />}
           </button>
         )}
+        {loaded !== null && !showPreview && (
+          <button
+            type="button"
+            className="file-view-preview icon-button"
+            title={t(wrap ? "files.wrapOff" : "files.wrap")}
+            aria-label={t(wrap ? "files.wrapOff" : "files.wrap")}
+            aria-pressed={wrap}
+            onClick={toggleWrap}
+          >
+            <WrapIcon />
+          </button>
+        )}
         {loaded !== null && loaded.blocked === null && (
           <button
             type="button"
@@ -628,7 +697,7 @@ export function FileView(props: {
         </div>
       ) : (
         <div
-          className="file-view-code"
+          className={`file-view-code ${wrap ? "is-wrapped" : ""}`}
           style={
             { "--file-digits": `${String(lineCount).length}ch` } as CSSProperties
           }
@@ -643,7 +712,7 @@ export function FileView(props: {
               высоту, что и любая другая, поэтому окно встаёт на своё место без
               единого вычисления в пикселях: разъехаться тут нечему. */}
           <pre ref={paintRef} className="file-view-paint" aria-hidden="true">
-            {"\n".repeat(shown.from)}
+            {above}
             {painted.map((token, index) => (
               <span key={index} className={`tok-${token.kind}`}>
                 {token.text}
@@ -651,13 +720,13 @@ export function FileView(props: {
             ))}
             {/* Хвост и последняя строка без перевода: без них слой ниже поля
                 кончается раньше, и подсветка отстаёт на строку. */}
-            {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+            {below}
           </pre>
           {highlighted && (
             <pre ref={foundRef} className="file-view-found" aria-hidden="true">
-              {"\n".repeat(shown.from)}
+              {above}
               {highlighted}
-              {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+              {below}
             </pre>
           )}
           <textarea
@@ -735,11 +804,13 @@ export function FileView(props: {
               строка уезжает под них, а не поверх. Мышь их не видит — щелчок
               по номеру должен попадать в текст. */}
           <pre ref={gutterRef} className="file-view-lines" aria-hidden="true">
-            {"\n".repeat(shown.from)}
-            {numbers}
+            {wrap ? text.slice(0, head) : "\n".repeat(shown.from)}
+            {wrap ? wrappedNumbers : numbers}
             {/* Перевод строки у каждой строки уже свой, поэтому хвост здесь на
                 один короче, чем у слоя подсветки: вместе они дают ту же высоту. */}
-            {"\n".repeat(Math.max(0, lineCount - shown.to))}
+            {wrap
+              ? text.slice(foot + 1)
+              : "\n".repeat(Math.max(0, lineCount - shown.to))}
           </pre>
           {query !== null && (
             /* Строка поиска лежит поверх текста, а не над ним: появившись в

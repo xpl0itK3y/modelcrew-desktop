@@ -32,6 +32,8 @@ export const ru = {
   "files.restore": "Вернуть редактор в колонку",
   "files.preview": "Показать разметку",
   "files.source": "Показать исходник",
+  "files.wrap": "Переносить длинные строки",
+  "files.wrapOff": "Не переносить длинные строки",
   "files.find": "Найти в файле",
   "files.findQuery": "Что искать",
   "files.findCount": "{index} из {total}",

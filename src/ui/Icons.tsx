@@ -91,6 +91,18 @@ export function ChevronDownIcon(props: IconProps) {
   );
 }
 
+/// Перенос длинных строк: строка, уходящая вправо, и стрелка, возвращающая её
+/// на следующую.
+export function WrapIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M2 4h12M2 12h5" />
+      <path d="M2 8h9.5a2.5 2.5 0 0 1 0 5H8.5" />
+      <path d="m10 11-1.5 2L10 15" />
+    </svg>
+  );
+}
+
 export function MoreIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

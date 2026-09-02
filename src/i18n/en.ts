@@ -33,6 +33,8 @@ export const en: Record<MessageKey, string> = {
   "files.restore": "Return the editor to its column",
   "files.preview": "Show the rendered document",
   "files.source": "Show the source",
+  "files.wrap": "Wrap long lines",
+  "files.wrapOff": "Stop wrapping long lines",
   "files.find": "Find in the file",
   "files.findQuery": "What to find",
   "files.findCount": "{index} of {total}",
