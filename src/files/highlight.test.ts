@@ -156,10 +156,33 @@ describe("grammarOf", () => {
     expect(grammarOf("deploy.YAML")).toBe("yaml");
   });
 
-  it("admits when it does not know the language", () => {
+  it("knows the files whose name is the whole language", () => {
+    expect(grammarOf(".gitignore")).toBe("ignore");
+    expect(grammarOf(".dockerignore")).toBe("ignore");
+    expect(grammarOf("CODEOWNERS")).toBe("ignore");
+    expect(grammarOf("go.mod")).toBe("ignore");
+    expect(grammarOf(".editorconfig")).toBe("ini");
+    expect(grammarOf("nginx.conf")).toBe("nginx");
+    expect(grammarOf(".vimrc")).toBe("vim");
+    expect(grammarOf("Cargo.lock")).toBe("toml");
+  });
+
+  it("gives an unknown extension the common reading rather than nothing", () => {
+    // Комментарии, строки и числа устроены почти везде одинаково, и показать
+    // хотя бы их лучше, чем оставить файл целиком серым.
+    expect(grammarOf("app.wizzle")).toBe("plain");
+    expect(grammarOf("build.qqq")).toBe("plain");
+  });
+
+  it("leaves prose, pictures and binaries alone", () => {
+    // Файл без расширения — это `LICENSE` и `AUTHORS`: текст, а не язык,
+    // которого мы не знаем.
     expect(grammarOf("LICENSE")).toBeNull();
     expect(grammarOf("icon.png")).toBeNull();
-    expect(grammarOf(".gitignore")).toBeNull();
+    expect(grammarOf("notes.txt")).toBeNull();
+    expect(grammarOf("run.log")).toBeNull();
+    expect(grammarOf("table.csv")).toBeNull();
+    expect(grammarOf("bundle.woff2")).toBeNull();
   });
 });
 
@@ -356,5 +379,71 @@ describe("markdown", () => {
     expect(grammarForTag("rs")).toBe("rs");
     expect(grammarForTag("")).toBeNull();
     expect(grammarForTag("нетакого")).toBeNull();
+  });
+});
+
+describe("the formats that are not languages", () => {
+  it("reads a list of exclusions as a list, not as code", () => {
+    const marked = kinds(
+      tokenize("# сборка\nnode_modules/\n*.log\n!keep.log", "ignore"),
+    );
+
+    expect(marked).toContainEqual(["comment", "# сборка"]);
+    // Двойка в `logs/2` — часть пути, а не число, и красить её числом значит
+    // показывать структуру, которой здесь нет.
+    expect(marked.filter(([kind]) => kind === "number")).toHaveLength(0);
+    expect(marked.filter(([kind]) => kind === "string")).toHaveLength(0);
+  });
+
+  it("tells an added line from a subtraction", () => {
+    const patch = [
+      "diff --git a/main.rs b/main.rs",
+      "@@ -1,4 +1,4 @@",
+      " let a = 1;",
+      "-let b = a - 1;",
+      "+let b = a + 1;",
+    ].join("\n");
+    const marked = kinds(tokenize(patch, "diff"));
+
+    expect(marked).toContainEqual(["comment", "diff --git a/main.rs b/main.rs"]);
+    expect(marked).toContainEqual(["heading", "@@ -1,4 +1,4 @@"]);
+    expect(marked).toContainEqual(["deleted", "-let b = a - 1;"]);
+    expect(marked).toContainEqual(["inserted", "+let b = a + 1;"]);
+    // Знак решает только в начале строки: внутри это сложение.
+    expect(marked.filter(([kind]) => kind === "inserted")).toHaveLength(1);
+  });
+
+  it("keeps a quoted apostrophe out of the languages that comment with one", () => {
+    // В этом семействе апостроф начинает комментарий, а не строку: приняв его
+    // за кавычку, мы покрасили бы строкой весь остаток файла.
+    const marked = kinds(tokenize("Dim x ' что это такое\nSet y = 2", "basic"));
+
+    expect(marked).toContainEqual(["comment", "' что это такое"]);
+    expect(marked).toContainEqual(["keyword", "Set"]);
+  });
+
+  it("takes the keywords of a case-blind language in any spelling", () => {
+    expect(kinds(tokenize("PROCEDURE Main;", "pascal"))).toContainEqual([
+      "keyword",
+      "PROCEDURE",
+    ]);
+    expect(kinds(tokenize("procedure Main;", "pascal"))).toContainEqual([
+      "keyword",
+      "procedure",
+    ]);
+  });
+
+  it("gives an unknown format the three commonest comment marks", () => {
+    const marked = kinds(
+      tokenize('# один\n// два\n/* три */\nкод "строка" 42', "plain"),
+    );
+
+    expect(marked).toContainEqual(["comment", "# один"]);
+    expect(marked).toContainEqual(["comment", "// два"]);
+    expect(marked).toContainEqual(["comment", "/* три */"]);
+    expect(marked).toContainEqual(["string", '"строка"']);
+    expect(marked).toContainEqual(["number", "42"]);
+    // Ключевых слов у неизвестного языка нет: придумывать ему костяк не из чего.
+    expect(marked.filter(([kind]) => kind === "keyword")).toHaveLength(0);
   });
 });

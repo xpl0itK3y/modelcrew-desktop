@@ -22,7 +22,12 @@ export type TokenKind =
   | "heading"
   | "code"
   | "emphasis"
-  | "link";
+  | "link"
+  // Разряды заплаты. Цвета у них те же, что у меток изменённых строк на полях
+  // редактора: добавленное зелёное и убранное красное — это одно и то же
+  // знание, показанное дважды.
+  | "inserted"
+  | "deleted";
 
 export type Token = { text: string; kind: TokenKind };
 
@@ -378,6 +383,128 @@ const NIX_WORDS = [
   "or", "import", "builtins", "true", "false", "null",
 ];
 
+const VIM_WORDS = [
+  "function", "endfunction", "if", "elseif", "else", "endif", "for",
+  "endfor", "while", "endwhile", "try", "catch", "endtry", "finally",
+  "return", "let", "set", "setlocal", "call", "execute", "source", "map",
+  "nmap", "imap", "vmap", "nnoremap", "inoremap", "vnoremap", "autocmd",
+  "augroup", "command", "highlight", "syntax", "colorscheme", "normal",
+];
+
+const ASM_WORDS = [
+  "mov", "movl", "movq", "push", "pop", "lea", "add", "sub", "mul", "imul",
+  "div", "idiv", "inc", "dec", "cmp", "test", "jmp", "je", "jne", "jz",
+  "jnz", "jg", "jge", "jl", "jle", "call", "ret", "leave", "nop", "int",
+  "syscall", "and", "or", "xor", "not", "shl", "shr", "section", "global",
+  "extern", "db", "dw", "dd", "dq", "equ", "resb", "align", "byte", "word",
+  "dword", "qword", "ptr",
+];
+
+const TEX_WORDS = [
+  "begin", "end", "documentclass", "usepackage", "section", "subsection",
+  "subsubsection", "chapter", "part", "paragraph", "item", "label", "ref",
+  "cite", "caption", "textbf", "textit", "emph", "newcommand",
+  "renewcommand", "def", "input", "include", "bibliography", "title",
+  "author", "date", "maketitle", "footnote", "left", "right", "frac",
+];
+
+const FORTRAN_WORDS = [
+  "program", "end", "subroutine", "function", "module", "use", "implicit",
+  "none", "integer", "real", "complex", "logical", "character",
+  "dimension", "parameter", "allocatable", "allocate", "deallocate",
+  "if", "then", "else", "elseif", "endif", "do", "enddo", "while",
+  "select", "case", "call", "return", "contains", "interface", "type",
+  "intent", "in", "out", "inout", "print", "write", "read", "stop",
+  "true", "false",
+];
+
+const PASCAL_WORDS = [
+  "program", "unit", "uses", "interface", "implementation", "begin", "end",
+  "var", "const", "type", "procedure", "function", "record", "array", "of",
+  "if", "then", "else", "case", "for", "to", "downto", "do", "while",
+  "repeat", "until", "with", "try", "except", "finally", "raise", "class",
+  "constructor", "destructor", "inherited", "nil", "true", "false", "and",
+  "or", "not", "div", "mod", "in", "set", "string", "integer", "boolean",
+];
+
+const BASIC_WORDS = [
+  "Dim", "As", "Set", "Let", "If", "Then", "Else", "ElseIf", "End",
+  "Select", "Case", "For", "To", "Step", "Next", "Each", "While", "Wend",
+  "Do", "Loop", "Until", "Function", "Sub", "Call", "Return", "Exit",
+  "Public", "Private", "Const", "New", "Nothing", "True", "False", "And",
+  "Or", "Not", "Option", "Explicit", "On", "Error", "Resume", "GoTo",
+  "Class", "Property", "Get", "Byte", "Integer", "Long", "String",
+  "Boolean", "Object", "Variant",
+];
+
+const TCL_WORDS = [
+  "proc", "set", "unset", "if", "elseif", "else", "switch", "for",
+  "foreach", "while", "break", "continue", "return", "expr", "puts",
+  "global", "variable", "upvar", "uplevel", "namespace", "package",
+  "source", "catch", "error", "array", "list", "lindex", "llength",
+  "lappend", "string", "incr", "eval", "exec", "open", "close",
+];
+
+const AWK_WORDS = [
+  "BEGIN", "END", "if", "else", "while", "for", "do", "break", "continue",
+  "next", "exit", "return", "function", "print", "printf", "getline",
+  "delete", "in", "length", "substr", "index", "split", "sub", "gsub",
+  "match", "sprintf", "NR", "NF", "FS", "OFS", "RS", "ORS", "FILENAME",
+];
+
+const NGINX_WORDS = [
+  "server", "location", "upstream", "http", "events", "stream", "listen",
+  "server_name", "root", "index", "proxy_pass", "proxy_set_header",
+  "return", "rewrite", "try_files", "include", "error_page", "access_log",
+  "error_log", "worker_processes", "worker_connections", "gzip",
+  "ssl_certificate", "ssl_certificate_key", "add_header", "if", "set",
+  "map", "limit_req", "client_max_body_size",
+];
+
+const VERILOG_WORDS = [
+  "module", "endmodule", "input", "output", "inout", "wire", "reg",
+  "logic", "parameter", "localparam", "assign", "always", "always_ff",
+  "always_comb", "initial", "begin", "end", "if", "else", "case",
+  "endcase", "casez", "default", "for", "while", "repeat", "function",
+  "endfunction", "task", "endtask", "generate", "endgenerate", "posedge",
+  "negedge", "integer", "genvar", "typedef", "struct", "enum", "package",
+  "import", "interface", "endinterface", "class", "endclass",
+];
+
+const VHDL_WORDS = [
+  "entity", "architecture", "of", "is", "begin", "end", "port", "map",
+  "signal", "variable", "constant", "process", "if", "then", "else",
+  "elsif", "case", "when", "for", "loop", "while", "type", "subtype",
+  "array", "record", "component", "generic", "library", "use", "package",
+  "body", "function", "procedure", "return", "others", "downto", "to",
+  "std_logic", "std_logic_vector", "integer", "in", "out", "inout",
+];
+
+const ADA_WORDS = [
+  "package", "body", "is", "begin", "end", "procedure", "function",
+  "return", "declare", "type", "subtype", "record", "array", "of",
+  "constant", "with", "use", "if", "then", "else", "elsif", "case", "when",
+  "loop", "for", "while", "exit", "goto", "task", "entry", "accept",
+  "protected", "exception", "raise", "new", "abstract", "tagged", "access",
+  "in", "out", "null", "others", "and", "or", "not", "range",
+];
+
+const NIM_WORDS = [
+  "proc", "func", "method", "iterator", "template", "macro", "converter",
+  "type", "object", "ref", "ptr", "var", "let", "const", "if", "elif",
+  "else", "case", "of", "when", "while", "for", "in", "notin", "break",
+  "continue", "return", "yield", "discard", "import", "export", "include",
+  "from", "as", "try", "except", "finally", "raise", "defer", "block",
+  "static", "and", "or", "not", "nil", "true", "false", "result",
+];
+
+const BATCH_WORDS = [
+  "echo", "set", "if", "else", "for", "in", "do", "goto", "call", "exit",
+  "setlocal", "endlocal", "shift", "pause", "start", "cd", "copy", "move",
+  "del", "mkdir", "rmdir", "type", "findstr", "errorlevel", "not",
+  "defined", "exist", "equ", "neq", "lss", "gtr",
+];
+
 /// Кавычки языков семейства C: двойная для строки, одинарная для символа.
 const CQ = ['"', "'"];
 
@@ -427,16 +554,51 @@ const GRAMMARS: Record<string, Grammar> = {
   make: grammar(["#"], null, CQ, MAKE_WORDS, { numbers: false }),
   ini: grammar(["#", ";"], null, CQ, ["true", "false"], { numbers: false }),
   nix: grammar(["#"], ["/*", "*/"], ['"'], NIX_WORDS),
+  vim: grammar(['"'], null, ["'"], VIM_WORDS, { numbers: false }),
+  asm: grammar([";", "#"], null, CQ, ASM_WORDS, { fold: true }),
+  tex: grammar(["%"], null, [], TEX_WORDS, { numbers: false }),
+  fortran: grammar(["!"], null, CQ, FORTRAN_WORDS, { fold: true }),
+  pascal: grammar(["//"], ["{", "}"], ["'"], PASCAL_WORDS, { fold: true }),
+  // Апостроф здесь начинает комментарий, а не строку: `' комментарий` — самая
+  // частая строка в этом семействе, и принять её за строку значит покрасить
+  // ею весь файл.
+  basic: grammar(["'", "REM ", "rem "], null, ['"'], BASIC_WORDS, {
+    fold: true,
+  }),
+  tcl: grammar(["#"], null, ['"'], TCL_WORDS),
+  awk: grammar(["#"], null, ['"'], AWK_WORDS),
+  nginx: grammar(["#"], null, CQ, NGINX_WORDS, { numbers: false }),
+  verilog: grammar(["//"], ["/*", "*/"], ['"'], VERILOG_WORDS),
+  vhdl: grammar(["--"], null, ['"'], VHDL_WORDS, { fold: true }),
+  ada: grammar(["--"], null, ['"'], ADA_WORDS, { fold: true }),
+  nim: grammar(["#"], ["#[", "]#"], ['"""', '"'], NIM_WORDS),
+  batch: grammar(["::", "REM ", "rem "], null, ['"'], BATCH_WORDS, {
+    fold: true,
+  }),
+  // Списки исключений и владельцев: решётка комментарием, всё остальное —
+  // шаблон пути. Ни строк, ни чисел здесь нет, и красить `2` в `logs/2`
+  // числом значит показывать структуру, которой нет.
+  ignore: grammar(["#"], null, [], [], { numbers: false }),
+  // Пустая грамматика для незнакомых расширений: комментарии трёх самых частых
+  // видов и двойная кавычка. Ключевых слов нет нарочно — язык неизвестен, и
+  // придумывать ему костяк не из чего. Одинарная кавычка тоже не строка: в
+  // английском тексте это апостроф, и от него загорелась бы половина файла.
+  plain: grammar(["#", "//"], ["/*", "*/"], ['"'], []),
 };
 
-/// Markdown в таблицу не входит: он разбирается своим сканером ниже. Здесь он
-/// всё равно нужен — правило «ничего не терять» касается и его.
+/// Markdown и заплаты в таблицу не входят: их разбирают свои сканеры ниже.
+/// Здесь они всё равно нужны — правило «ничего не терять» касается и их.
 const MARKDOWN = "md";
+const DIFF = "diff";
 
 /// Все разборы, какие есть. Список берётся из самой таблицы, а не пишется
 /// рядом с ней руками: главное свойство разбора — ничего не терять — обязано
 /// проверяться на каждом языке, включая тот, который добавят завтра.
-export const languages: string[] = [...Object.keys(GRAMMARS), MARKDOWN];
+export const languages: string[] = [
+  ...Object.keys(GRAMMARS),
+  MARKDOWN,
+  DIFF,
+];
 
 /// Расширение → разбор. Родственники делят разбор: разница между `.js` и
 /// `.ts` для подсветки — пара слов в списке, а не другой язык.
@@ -489,6 +651,77 @@ const BY_EXTENSION: Record<string, string> = {
   mk: "make", cmake: "make",
   ini: "ini", cfg: "ini", conf: "ini", properties: "ini", desktop: "ini",
   nix: "nix",
+  vim: "vim", vimrc: "vim",
+  asm: "asm", s: "asm", nasm: "asm", ll: "asm",
+  tex: "tex", sty: "tex", cls: "tex", bib: "tex", ltx: "tex",
+  f: "fortran", f90: "fortran", f95: "fortran", f03: "fortran",
+  for: "fortran", f77: "fortran",
+  pas: "pascal", pp: "pascal", dpr: "pascal", lpr: "pascal",
+  vb: "basic", vbs: "basic", bas: "basic", frm: "basic",
+  tcl: "tcl", tk: "tcl", itcl: "tcl",
+  awk: "awk", gawk: "awk",
+  verilog: "verilog", sv: "verilog", svh: "verilog", vh: "verilog",
+  v: "verilog",
+  vhd: "vhdl", vhdl: "vhdl",
+  adb: "ada", ads: "ada", ada: "ada",
+  nim: "nim", nims: "nim", nimble: "nim",
+  bat: "batch", cmd: "batch",
+  // Списки исключений: у них расширения нет вовсе, но `.gitignore` в подпапке
+  // проекта встречается и как `something.gitignore`.
+  gitignore: "ignore", dockerignore: "ignore", npmignore: "ignore",
+  eslintignore: "ignore", prettierignore: "ignore", hgignore: "ignore",
+  gitattributes: "ignore", codeowners: "ignore",
+  diff: "diff", patch: "diff", rej: "diff",
+  // Родня уже известных разборов: другой язык, тот же костяк.
+  hx: "java", hxml: "java", jenkinsfile: "java", nc: "java",
+  gd: "py", pyz: "py", bzl: "py", star: "py", coffee: "py", sage: "py",
+  cr: "ruby", ru: "ruby", podspec: "ruby", thor: "ruby",
+  raku: "perl", rakumod: "perl", p6: "perl", pod: "perl", t: "perl",
+  prolog: "erlang", plt: "erlang", escript: "erlang",
+  vala: "cs", vapi: "cs", aidl: "java",
+  d: "cpp", di: "cpp", odin: "cpp", ec: "cpp", pde: "cpp",
+  move: "rs", cairo: "rs",
+  bicep: "ts", res: "ts", resi: "ts", re: "ts", rei: "ts", flow: "ts",
+  qml: "ts", gs: "ts", jsonl: "json", ndjson: "json", geojson: "json",
+  topojson: "json", webmanifest: "json", avsc: "json", jsonnet: "hcl",
+  libsonnet: "hcl", tfstate: "json", tfplan: "hcl", workflow: "hcl",
+  pkl: "hcl", cue: "hcl",
+  wat: "lisp", wast: "lisp", lsp: "lisp", cl: "lisp",
+  scpt: "haskell", applescript: "haskell", idr: "haskell", agda: "haskell",
+  cabal: "haskell",
+  fnl: "lisp", janet: "lisp", scrbl: "lisp",
+  sqlite: "sql", mysql: "sql", pgsql: "sql", hql: "sql", cql: "sql",
+  ninja: "make", just: "make", justfile: "make", mak: "make", am: "make",
+  ac: "sh", spec: "sh", pkgbuild: "sh", ebuild: "sh",
+  bats: "sh", zshrc: "sh", cshrc: "sh", tcshrc: "sh", profile: "sh",
+  service: "ini", socket: "ini", timer: "ini", target: "ini", mount: "ini",
+  path: "ini", automount: "ini", slice: "ini", scope: "ini",
+  reg: "ini", inf: "ini", editorconfig: "ini", gitconfig: "ini",
+  npmrc: "ini", yarnrc: "ini", flake8: "ini", pylintrc: "ini",
+  htaccess: "ini", curlrc: "ini", wgetrc: "ini", netrc: "ini",
+  crontab: "ini", terraformrc: "ini", pypirc: "ini", gitmodules: "ini",
+  lock: "toml",
+  cnf: "ini", ovpn: "ini", repo: "ini",
+  po: "ignore", pot: "ignore",
+  cshtml: "html", vbhtml: "html", razor: "html", jinja: "html",
+  jinja2: "html", j2: "html", twig: "html", liquid: "html",
+  mustache: "html", handlebars: "html", njk: "html", tpl: "html",
+  wxml: "html", ux: "html", rss: "html", atom: "html",
+  xsl: "html", xslt: "html", dtd: "html", ent: "html", storyboard: "html",
+  xib: "html", nuspec: "html", csproj: "html", vbproj: "html",
+  fsproj: "html", vcxproj: "html", props: "html", targets: "html",
+  axml: "html", resx: "html",
+  postcss: "css", pcss: "css", sss: "css",
+  glsl: "c", vert: "c", frag: "c", comp: "c", geom: "c", tesc: "c",
+  hlsl: "c", metal: "cpp", wgsl: "rs",
+  ipp: "cpp", tpp: "cpp", inl: "cpp", cppm: "cpp", ixx: "cpp",
+  m4: "sh", sed: "sh", exp: "tcl",
+  psc1: "powershell", pssc: "powershell", ps1xml: "html",
+  proto3: "proto", capnp: "proto", fbs: "proto",
+  smithy: "proto", avdl: "proto", ice: "proto",
+  vy: "py", huff: "asm",
+  csh: "sh", tcsh: "sh", ash: "sh",
+  dash: "sh", elv: "sh", nu: "sh",
 };
 
 /// Файлы, у которых имя и есть язык: расширения у них нет вовсе, а разбор
@@ -511,10 +744,103 @@ const BY_NAME: Record<string, string> = {
   ".bash_profile": "sh",
   ".zprofile": "sh",
   ".profile": "sh",
+  ".gitignore": "ignore",
+  ".dockerignore": "ignore",
+  ".npmignore": "ignore",
+  ".eslintignore": "ignore",
+  ".prettierignore": "ignore",
+  ".hgignore": "ignore",
+  ".gcloudignore": "ignore",
+  ".vercelignore": "ignore",
+  ".helmignore": "ignore",
+  ".gitattributes": "ignore",
+  codeowners: "ignore",
+  ".gitmodules": "ini",
+  ".gitconfig": "ini",
+  ".editorconfig": "ini",
+  ".npmrc": "ini",
+  ".yarnrc": "ini",
+  ".flake8": "ini",
+  ".pylintrc": "ini",
+  ".coveragerc": "ini",
+  ".htaccess": "ini",
+  ".curlrc": "ini",
+  ".netrc": "ini",
+  ".inputrc": "ini",
+  "nginx.conf": "nginx",
+  crontab: "ini",
+  ".crontab": "ini",
+  ".vimrc": "vim",
+  ".gvimrc": "vim",
+  ".ideavimrc": "vim",
+  ".tmux.conf": "ignore",
+  ".screenrc": "ignore",
+  "go.mod": "ignore",
+  "go.sum": "ignore",
+  "go.work": "ignore",
+  "requirements.txt": "ignore",
+  "constraints.txt": "ignore",
+  procfile: "ignore",
+  ".ripgreprc": "ignore",
+  ".prettierrc": "json",
+  ".babelrc": "json",
+  ".eslintrc": "json",
+  ".swcrc": "json",
+  ".stylelintrc": "json",
+  ".markdownlintrc": "json",
+  ".huskyrc": "json",
+  ".nvmrc": "ignore",
+  ".node-version": "ignore",
+  ".python-version": "ignore",
+  ".ruby-version": "ignore",
+  ".tool-versions": "ignore",
+  "cargo.lock": "toml",
+  "poetry.lock": "toml",
+  "pipfile": "toml",
+  "pipfile.lock": "json",
+  "build": "py",
+  "workspace": "py",
+  "snapfile": "ruby",
+  "fastfile": "ruby",
+  "appfile": "ruby",
+  "capfile": "ruby",
+  "guardfile": "ruby",
+  "berksfile": "ruby",
+  "justfile": "make",
+  ".justfile": "make",
+  "meson.build": "py",
+  "sconstruct": "py",
+  "sconscript": "py",
+  "build.ninja": "make",
+  ".bash_aliases": "sh",
+  ".bash_logout": "sh",
+  ".cshrc": "sh",
+  ".kshrc": "sh",
+  ".xinitrc": "sh",
+  ".xprofile": "sh",
 };
 
-/// Какой разбор применить к файлу. Незнакомое расширение — без подсветки:
-/// выдуманная разметка мешает сильнее, чем её отсутствие.
+/// Расширения, которым подсветка не нужна. Проза — потому что в ней нечего
+/// показывать: строка не строка, число не число, и любой разбор здесь только
+/// придумает структуру, которой нет. Двоичные — потому что до редактора они и
+/// не доходят, но соврать про них тоже незачем.
+const NO_GRAMMAR = new Set([
+  "txt", "text", "log", "csv", "tsv", "rst", "org", "adoc", "asciidoc",
+  "nfo", "srt", "vtt", "ics", "vcf", "out", "err", "man", "me", "ms",
+  "png", "apng", "jpg", "jpeg", "jfif", "gif", "webp", "avif", "bmp",
+  "ico", "cur", "tif", "tiff", "psd", "ai", "eps", "pdf",
+  "mp3", "wav", "ogg", "flac", "m4a", "mp4", "mov", "avi", "mkv", "webm",
+  "zip", "gz", "bz2", "xz", "zst", "7z", "rar", "tar", "jar", "war",
+  "exe", "dll", "so", "dylib", "bin", "dat", "db", "sqlite3", "class",
+  "o", "obj", "a", "lib", "pyc", "pyo", "wasm", "woff", "woff2", "ttf",
+  "otf", "eot",
+]);
+
+/// Какой разбор применить к файлу. Знакомое расширение — свой разбор,
+/// незнакомое — общий: комментарии, строки и числа устроены одинаково почти
+/// везде, и показать хотя бы их лучше, чем оставить файл серым. Проза и
+/// двоичное остаются без подсветки, и файл без расширения — тоже: `LICENSE` и
+/// `AUTHORS` это текст, а не язык, которого мы не знаем.
 export function grammarOf(name: string): string | null {
   const plain = name.toLowerCase();
   const named = BY_NAME[plain];
@@ -523,7 +849,11 @@ export function grammarOf(name: string): string | null {
   }
   const at = plain.lastIndexOf(".");
   const extension = at <= 0 ? "" : plain.slice(at + 1);
-  return BY_EXTENSION[extension] ?? null;
+  const known = BY_EXTENSION[extension];
+  if (known) {
+    return known;
+  }
+  return extension && !NO_GRAMMAR.has(extension) ? "plain" : null;
 }
 
 // ——— Markdown ———
@@ -760,9 +1090,69 @@ export function paintLines(
 const NUMBER = /[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?/y;
 const WORD = /[A-Za-z_$][A-Za-z0-9_$]*/y;
 
+
+// ——— Заплаты ———
+//
+// Тоже своим сканером: у заплаты значение имеет первый знак строки, и он же
+// решает всё. Плюс и минус посреди строки — это сложение и вычитание, а в
+// начале — добавленная и убранная строка, и таблица разбора этой разницы не
+// видит.
+
+/// Заголовки файла в заплате: до них она рассказывает про файлы, а не про
+/// строки.
+const PATCH_HEAD = [
+  "diff ", "index ", "--- ", "+++ ", "old mode", "new mode", "new file",
+  "deleted file", "similarity index", "rename from", "rename to", "copy from",
+  "copy to", "GIT binary patch", "Binary files", "\\ No newline",
+];
+
+function diffTokens(text: string): Token[] {
+  const tokens: Token[] = [];
+  const push = (value: string, kind: TokenKind) => {
+    if (!value) {
+      return;
+    }
+    const last = tokens[tokens.length - 1];
+    if (last && last.kind === kind) {
+      last.text += value;
+      return;
+    }
+    tokens.push({ text: value, kind });
+  };
+
+  let at = 0;
+  for (;;) {
+    const end = text.indexOf("\n", at);
+    const stop = end === -1 ? text.length : end;
+    const line = text.slice(at, stop);
+
+    if (line.startsWith("@@")) {
+      // Заголовок куска: единственная строка, по которой видно, где мы в файле.
+      push(line, "heading");
+    } else if (PATCH_HEAD.some((start) => line.startsWith(start))) {
+      push(line, "comment");
+    } else if (line.startsWith("+")) {
+      push(line, "inserted");
+    } else if (line.startsWith("-")) {
+      push(line, "deleted");
+    } else {
+      push(line, "plain");
+    }
+
+    if (end === -1) {
+      return tokens;
+    }
+    push("\n", "plain");
+    at = end + 1;
+  }
+}
+
 export function tokenize(text: string, language: string | null): Token[] {
   if (language === MARKDOWN) {
     return markdownTokens(text);
+  }
+  if (language === DIFF) {
+    return diffTokens(text);
   }
   const rules = language ? GRAMMARS[language] : undefined;
   if (!rules || text.length === 0) {
