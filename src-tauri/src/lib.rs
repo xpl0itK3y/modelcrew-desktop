@@ -53,7 +53,8 @@ use git_branches::{
 };
 use git_changes::{
     git_abort_operation, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_continue_operation, git_file_diff, git_read_file, git_revert_file, git_write_file,
+    git_continue_operation, git_file_diff, git_head_file, git_read_file, git_revert_file,
+    git_write_file,
     GitWatchState,
 };
 use git_history::{git_commit_action, git_delete_tag, git_drop_commit, git_reword_commit};
@@ -1008,6 +1009,7 @@ pub fn run() {
             git_continue_operation,
             git_abort_operation,
             git_revert_file,
+            git_head_file,
             git_read_file,
             git_write_file,
             git_branches,
@@ -1146,6 +1148,7 @@ mod tests {
         "git_drop_commit",
         "git_fetch_upstream",
         "git_file_diff",
+        "git_head_file",
         "git_log",
         "git_merge_ref",
         "git_publish_branch",

@@ -58,6 +58,11 @@ pub struct GitChangesSummary {
     // единого слова — хотя приложение само туда и приводит.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<&'static str>,
+    // Где корень проекта лежит внутри репозитория. Проектом открывают и
+    // подкаталог монорепозитория, а пути в `files` идут от корня репозитория:
+    // без этой приставки дерево не узнаёт в них свои же файлы.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
     pub files: Vec<GitChangedFile>,
 }
 
@@ -73,6 +78,7 @@ impl GitChangesSummary {
             ahead: None,
             behind: None,
             operation: None,
+            prefix: None,
             files: Vec::new(),
         }
     }
@@ -517,6 +523,19 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
             })
     });
 
+    // Спрашиваем сам git, а не вычитаем один путь из другого: на macOS корень
+    // проекта приходит через `/var`, а `--show-toplevel` отвечает
+    // `/private/var`, и вычитание не сошлось бы ни разу.
+    let prefix = run_git(root, &["rev-parse", "--show-prefix"])
+        .ok()
+        .map(|raw| {
+            String::from_utf8_lossy(&raw)
+                .trim()
+                .trim_end_matches('/')
+                .to_owned()
+        })
+        .filter(|prefix| !prefix.is_empty());
+
     Ok(GitChangesSummary {
         is_repo: true,
         git_missing: false,
@@ -527,6 +546,7 @@ pub fn collect_summary(root: &Path) -> CommandResult<GitChangesSummary> {
         ahead: status.ahead,
         behind: status.behind,
         operation: repository_operation(&toplevel)?,
+        prefix,
         files,
     })
 }
@@ -685,6 +705,61 @@ pub fn read_repo_file(root: &Path, path: &str) -> CommandResult<GitFileContent> 
     })
 }
 
+/// Файл таким, каким он лежит в последнем коммите.
+///
+/// Не для показа, а для сравнения: по нему редактор считает, какие строки в
+/// открытом файле появились, а какие изменились. Берём объект из истории, а не
+/// файл с диска, — на диске лежит уже правленое, и сравнивать его не с чем.
+///
+/// Отсутствие ответа здесь — обычное дело, а не отказ: файла может не быть в
+/// HEAD, потому что его только что создали, потому что коммитов ещё нет вовсе
+/// или потому что папку открыли до `git init`. Во всех трёх случаях сравнивать
+/// не с чем, и это не ошибка, а «новый файл целиком».
+pub fn read_head_file(root: &Path, path: &str) -> CommandResult<GitFileContent> {
+    if !is_safe_repo_path(path) {
+        return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
+    }
+    let missing = || GitFileContent {
+        content: String::new(),
+        is_binary: false,
+        too_large: false,
+        exists: false,
+    };
+    let Some(toplevel) = repo_toplevel(root)? else {
+        return Ok(missing());
+    };
+    // `cat-file blob`, а не `show`: у `show` на каталоге получается листинг
+    // дерева, и он приехал бы сюда как содержимое файла.
+    let Ok(bytes) = run_git(&toplevel, &["cat-file", "blob", &format!("HEAD:{path}")]) else {
+        return Ok(missing());
+    };
+    if bytes.len() as u64 > MAX_EDIT_BYTES {
+        return Ok(GitFileContent {
+            content: String::new(),
+            is_binary: false,
+            too_large: true,
+            exists: true,
+        });
+    }
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(text) if count_text_lines(&bytes).is_some() => text,
+        _ => {
+            return Ok(GitFileContent {
+                content: String::new(),
+                is_binary: true,
+                too_large: false,
+                exists: true,
+            });
+        }
+    };
+    Ok(GitFileContent {
+        content: text.to_owned(),
+        is_binary: false,
+        too_large: false,
+        exists: true,
+    })
+}
+
 pub fn write_repo_file(root: &Path, path: &str, content: &str) -> CommandResult<()> {
     if !is_safe_repo_path(path) {
         return Err(CommandError::new(ErrorCode::GitCommandFailed).with_context("path", path));
@@ -717,6 +792,20 @@ pub async fn git_read_file(
     super::ensure_main_window(&window)?;
     let root = roots.resolve(&workspace_id)?;
     tauri::async_runtime::spawn_blocking(move || read_repo_file(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_head_file(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> CommandResult<GitFileContent> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || read_head_file(&root, &path))
         .await
         .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
 }
