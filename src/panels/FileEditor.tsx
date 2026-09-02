@@ -22,6 +22,8 @@ export function FileEditor(props: {
   onClose: (path: string) => void;
   /// Ширину задаёт раскладка: колонку тянут за разделитель справа.
   width: number;
+  /// Ширина сетки терминалов: её редактор и накрывает, когда развёрнут.
+  dockWidth: number;
   /// Колонка уезжает: последний файл закрыт, но кадр исчезания ещё идёт.
   leaving?: boolean;
 }) {
@@ -87,6 +89,12 @@ export function FileEditor(props: {
         style={
           {
             "--column-width": `${props.width}px`,
+            // Своя колонка плюс сетка плюс зазор между ними: правым краем
+            // развёрнутый редактор встаёт туда же, где кончалась сетка, и
+            // дальше влево не заходит — дерево и список проектов на месте.
+            "--maximized-width": `calc(${
+              props.width + props.dockWidth
+            }px + var(--mc-gap))`,
             ...(maximized ? {} : { width: "var(--column-width)" }),
           } as CSSProperties
         }

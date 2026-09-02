@@ -776,6 +776,10 @@ export default function App() {
             onSelect={setActiveFilePath}
             onClose={dropFiles}
             width={widths.editor}
+            // Развёрнутый редактор накрывает свою колонку и сетку, но не
+            // дерево с боковой панелью — а для этого ему нужно знать, сколько
+            // сейчас занимает сетка.
+            dockWidth={dockWidth}
             leaving={editorPresence.closing}
           />
         )}
