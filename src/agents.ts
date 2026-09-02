@@ -528,6 +528,48 @@ export function bindAgentSession(
   return true;
 }
 
+// Хук назвал и панель, и диалог: это не догадка по каталогу, а слово самого
+// агента, и в один диалог два процесса всё равно не пишут. Поэтому такая
+// привязка сильнее локаторной — если id числится за другой панелью, он попал
+// туда прежней догадкой, и снять его оттуда правильнее, чем отказать здесь.
+export function bindAgentSessionFromHook(
+  terminalId: string,
+  sessionId: string,
+  workspaceId?: string,
+): boolean {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return false;
+  }
+  const records = loadRecords();
+  const record = records[terminalId];
+  if (!record) {
+    return false; // агента в панели ещё не опознали — привязывать не к чему
+  }
+  let stripped = false;
+  for (const [otherId, other] of Object.entries(records)) {
+    if (otherId !== terminalId && other.agentId === record.agentId && other.sessionId === sessionId) {
+      const { sessionId: _wrong, ...rest } = other;
+      records[otherId] = rest;
+      stripped = true;
+    }
+  }
+  const sessions = loadSessions();
+  let forgotten = false;
+  for (const [otherId, other] of Object.entries(sessions)) {
+    if (otherId !== terminalId && other.agentId === record.agentId && other.sessionId === sessionId) {
+      delete sessions[otherId];
+      forgotten = true;
+    }
+  }
+  if (stripped) {
+    saveRecords(records);
+  }
+  if (forgotten) {
+    saveSessions(sessions);
+  }
+  return bindAgentSession(terminalId, sessionId, workspaceId);
+}
+
 // Сессии этого агента, уже занятые другими панелями: локатор их пропускает,
 // чтобы шесть клаудов в одном проекте получили шесть разных чатов.
 //

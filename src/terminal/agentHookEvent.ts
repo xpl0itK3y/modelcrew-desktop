@@ -12,6 +12,9 @@ export type AgentHookEvent = {
   agent: string;
   event: string;
   message: string;
+  // Диалог, из которого пришло событие. Claude Code и copilot присылают его в
+  // каждом вызове хука; у остальных пусто.
+  sessionId?: string;
 };
 
 // Имена событий у агентов свои, смысл общий. Ключи в нижнем регистре без

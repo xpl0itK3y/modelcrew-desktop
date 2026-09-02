@@ -15,7 +15,7 @@ use tauri::Manager;
 const LOCATE_SLACK_BEFORE: Duration = Duration::from_secs(15);
 const LOCATE_WINDOW_AFTER: Duration = Duration::from_secs(10 * 60);
 
-fn is_session_id(value: &str) -> bool {
+pub(crate) fn is_session_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value

@@ -3,6 +3,7 @@ import {
   AGENTS,
   agentChatClaimedNearby,
   bindAgentSession,
+  bindAgentSessionFromHook,
   boundAgentSessionIds,
   buildAgentResume,
   getAgentRecord,
@@ -210,6 +211,39 @@ describe("agent catalog", () => {
         ),
       );
     }
+  });
+
+  it("takes the agent's own word over a locator guess", () => {
+    // Локатор угадал чужой диалог для panel-1 — окно времени широкое, файлы
+    // соседей рядом. Потом хук самой panel-2 назвал этот диалог своим: два
+    // процесса в один чат не пишут, значит догадка была неверной.
+    rememberAgentProcess("panel-1", "claude");
+    rememberAgentProcess("panel-2", "claude");
+    bindAgentSession("panel-1", "chat-x", "ws-1");
+    // Обычная привязка отступила бы: id занят.
+    expect(bindAgentSession("panel-2", "chat-x", "ws-1")).toBe(false);
+
+    expect(bindAgentSessionFromHook("panel-2", "chat-x", "ws-1")).toBe(true);
+    expect(getAgentRecord("panel-2")!.sessionId).toBe("chat-x");
+    expect(rememberedSessionId("panel-2", "claude")).toBe("chat-x");
+    // У ошибшейся панели догадка снята — она перепривяжется к своему.
+    expect(getAgentRecord("panel-1")!.sessionId).toBeUndefined();
+    expect(rememberedSessionId("panel-1", "claude")).toBeUndefined();
+  });
+
+  it("ignores a hook binding for a panel with no agent yet", () => {
+    expect(bindAgentSessionFromHook("panel-unknown", "chat-x", "ws-1")).toBe(
+      false,
+    );
+    expect(rememberedSessionId("panel-unknown", "claude")).toBeUndefined();
+  });
+
+  it("refuses a malformed id from a hook", () => {
+    rememberAgentProcess("panel-1", "claude");
+    expect(bindAgentSessionFromHook("panel-1", "bad id; rm -rf /", "ws-1")).toBe(
+      false,
+    );
+    expect(getAgentRecord("panel-1")!.sessionId).toBeUndefined();
   });
 
   it("rejects malformed session ids everywhere", () => {

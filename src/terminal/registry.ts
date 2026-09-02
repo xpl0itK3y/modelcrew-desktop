@@ -15,6 +15,7 @@ import {
 } from "./snapshots";
 import {
   agentChatClaimedNearby,
+  bindAgentSessionFromHook,
   buildAgentResume,
   discardAgentRecord,
   getAgentRecord,
@@ -193,6 +194,18 @@ if (isTauri) {
     // приложение, и одна неверная запись заглушила бы звонки у всех панелей
     // агента, у которого хука нет и не будет.
     noteHookChannel(event.payload.agent, alert.kind);
+    // Агент назвал свой диалог сам. Это лучше всего, что может дать поиск по
+    // каталогу сессий: без окна времени, без гонки соседних панелей и без
+    // догадки о том, чей файл появился первым. Панель запоминает его сразу,
+    // и следующий запуск возобновляет её точно — даже когда одинаковых
+    // агентов в проекте несколько.
+    if (event.payload.sessionId) {
+      bindAgentSessionFromHook(
+        entry.id,
+        event.payload.sessionId,
+        entry.workspaceId ?? undefined,
+      );
+    }
     void raiseAgentHookAlert(
       entry.id,
       agentId,

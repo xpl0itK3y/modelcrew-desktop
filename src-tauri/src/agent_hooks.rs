@@ -153,6 +153,11 @@ struct AgentEventPayload {
     event: String,
     // Текст сообщения, если хук его передал.
     message: String,
+    // Диалог, из которого пришло событие. Claude Code и copilot кладут его в
+    // каждый вызов хука, и это единственный источник, который не гадает: сам
+    // агент называет и панель, и свою сессию разом. Пусто у тех, кто такого
+    // поля не присылает, — им остаётся поиск по каталогу сессий.
+    session_id: String,
 }
 
 pub fn events_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -482,11 +487,21 @@ fn parse_event(raw: &str) -> Option<AgentEventPayload> {
     }
     let payload = value.get("payload").cloned().unwrap_or(Value::Null);
     let (event, message) = normalize(&agent, &payload);
+    // Написание у агентов разное, а поле одно и то же. Заведомо негодное
+    // значение отбрасываем здесь, чтобы наружу не уходило то, что всё равно
+    // не станет командой возобновления.
+    let session_id = text(&payload, &["session_id", "sessionId", "sessionID"]);
+    let session_id = if crate::agent_sessions::is_session_id(&session_id) {
+        session_id
+    } else {
+        String::new()
+    };
     Some(AgentEventPayload {
         panel_id,
         agent,
         event,
         message,
+        session_id,
     })
 }
 
@@ -671,7 +686,17 @@ export const ModelCrewNotify = async () => ({
     if (!dir() || !panel()) return;
     try {
       mkdirSync(dir(), { recursive: true });
-      put({ agent: "__AGENT__", panelId: panel(), payload: { type: "session.idle" } });
+      // Диалог, если он в событии есть: с ним панель возобновится точно, а
+      // без него останется поиск по базе. Форма поля у шины менялась,
+      // поэтому читаем осторожно и отдаём только то, что похоже на id
+      // сессии opencode; чужое значение хуже отсутствия.
+      const raw =
+        arg.event.properties?.sessionID ??
+        arg.event.properties?.sessionId ??
+        arg.event.properties?.info?.id;
+      const sessionId =
+        typeof raw === "string" && /^ses[A-Za-z0-9_-]*$/.test(raw) ? raw : "";
+      put({ agent: "__AGENT__", panelId: panel(), payload: { type: "session.idle", session_id: sessionId } });
     } catch {
       // Уведомление — дополнение; его сбой не должен мешать сессии.
     }
@@ -1917,6 +1942,34 @@ mod tests {
 
         assert_eq!(event.event, "Notification");
         assert_eq!(event.message, "Claude needs your permission to run Bash");
+        // Диалог агент называет сам — искать его по каталогу больше не нужно.
+        assert_eq!(event.session_id, "abc");
+    }
+
+    #[test]
+    fn carries_the_session_whatever_the_agent_calls_the_field() {
+        for key in ["session_id", "sessionId", "sessionID"] {
+            let raw = format!(
+                r#"{{"agent":"claude","panelId":"p","payload":{{"hook_event_name":"Stop","{key}":"ses_9"}}}}"#
+            );
+            let event = parse_event(&raw).expect("событие должно разбираться");
+            assert_eq!(event.session_id, "ses_9", "ключ {key}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_session_that_could_not_be_one() {
+        // Наружу уходит только то, что имеет право стать частью команды
+        // возобновления: чужое значение хуже отсутствия.
+        let event = parse_event(
+            r#"{"agent":"claude","panelId":"p","payload":{
+                "hook_event_name":"Stop",
+                "session_id":"../../etc/passwd; rm -rf /"
+            }}"#,
+        )
+        .expect("событие должно разбираться");
+
+        assert_eq!(event.session_id, "");
     }
 
     #[test]
@@ -1933,5 +1986,6 @@ mod tests {
 
         assert_eq!(event.event, "");
         assert_eq!(event.message, "");
+        assert_eq!(event.session_id, "");
     }
 }
