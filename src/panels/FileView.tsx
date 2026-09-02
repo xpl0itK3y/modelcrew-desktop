@@ -490,6 +490,12 @@ export function FileView(props: {
     if (!field || at === undefined || !visible) {
       return;
     }
+    // Пока правят сам файл, поиск в него не лезет: набор совпадений меняется
+    // от каждой буквы, и курсор уезжал бы к ближайшему совпадению прямо
+    // из-под руки. Строка поиска при этом остаётся открытой и считает.
+    if (document.activeElement === field) {
+      return;
+    }
     field.setSelectionRange(at, at + found.length);
     const perLine = field.scrollHeight / Math.max(1, lineCount);
     if (perLine > 0) {

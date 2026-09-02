@@ -1230,6 +1230,23 @@ describe("FileEditor find", () => {
     expect(screen.getByText("1 из 3")).toBeInTheDocument();
   });
 
+  it("keeps out of the way while the file itself is being edited", async () => {
+    // Совпадения пересчитываются на каждую букву, и курсор уезжал бы к
+    // ближайшему прямо из-под руки.
+    const field = await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+    field.focus();
+
+    fireEvent.change(field, { target: { value: doc + " ещё дом" } });
+
+    // Курсор остался там, где его оставил набор, а не уехал к совпадению.
+    expect(field.selectionStart).not.toBe(doc.indexOf("дом"));
+    // Считать при этом поиск не перестаёт.
+    expect(screen.getByText(/из 4/)).toBeInTheDocument();
+  });
+
   it("keeps the layer of matches letter for letter over the highlighting", async () => {
     // Слои лежат друг на друге; разойдись они на один знак — и метка встанет
     // не на то слово, а строкой ниже уедет всё остальное.
