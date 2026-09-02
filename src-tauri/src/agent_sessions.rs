@@ -31,28 +31,41 @@ fn encode_claude_project_dir(cwd: &str) -> String {
         .collect()
 }
 
-fn file_instant(path: &Path) -> Option<SystemTime> {
+/// Когда сессия появилась и когда в неё писали в последний раз.
+///
+/// Появление — created; на ФС без birth-time откатываемся к modified. Берём
+/// раннее из доступных: у живого файла created ≤ modified.
+fn file_times(path: &Path) -> Option<(SystemTime, SystemTime)> {
     let meta = fs::metadata(path).ok()?;
-    // Момент появления сессии — created; на ФС без birth-time откатываемся к
-    // modified. Берём раннее из доступных: у живого файла created ≤ modified.
     match (meta.created().ok(), meta.modified().ok()) {
-        (Some(created), Some(modified)) => Some(created.min(modified)),
-        (Some(instant), None) | (None, Some(instant)) => Some(instant),
+        (Some(created), Some(modified)) => Some((created.min(modified), modified)),
+        (Some(instant), None) | (None, Some(instant)) => Some((instant, instant)),
         (None, None) => None,
     }
 }
 
-fn within_window(instant: SystemTime, since: SystemTime) -> bool {
-    let low = since.checked_sub(LOCATE_SLACK_BEFORE).unwrap_or(UNIX_EPOCH);
-    let high = since + LOCATE_WINDOW_AFTER;
-    instant >= low && instant <= high
+fn window_floor(since: SystemTime) -> SystemTime {
+    since.checked_sub(LOCATE_SLACK_BEFORE).unwrap_or(UNIX_EPOCH)
 }
 
-fn distance(instant: SystemTime, since: SystemTime) -> Duration {
-    instant
-        .duration_since(since)
-        .or_else(|_| since.duration_since(instant))
-        .unwrap_or(Duration::ZERO)
+fn within_window(instant: SystemTime, since: SystemTime) -> bool {
+    let high = since + LOCATE_WINDOW_AFTER;
+    instant >= window_floor(since) && instant <= high
+}
+
+/// Похожа ли сессия на принадлежащую этой панели.
+///
+/// Двумя способами, потому что панель приходит к диалогу двумя путями. Новый
+/// разговор — файл появляется рядом с запуском агента, это прежнее правило.
+/// Продолженный — файл создан хоть месяц назад, а пишут в него прямо сейчас,
+/// и по времени появления его не найти уже никогда.
+///
+/// Второй случай был дырой, и она сама себя воспроизводила: панель без
+/// привязки открывала список диалогов, пользователь выбирал старый разговор,
+/// локатор его не видел, привязка не появлялась — и в следующий раз панель
+/// снова открывала список. Ровно это и наблюдалось у codex.
+fn belongs_to_panel(created: SystemTime, modified: SystemTime, since: SystemTime) -> bool {
+    within_window(created, since) || modified >= window_floor(since)
 }
 
 /// Claude Code: `<config>/projects/<encoded-cwd>/<uuid>.jsonl`.
@@ -66,7 +79,7 @@ pub fn locate_claude_session(
         .join("projects")
         .join(encode_claude_project_dir(cwd));
     let entries = fs::read_dir(dir).ok()?;
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
@@ -78,15 +91,14 @@ pub fn locate_claude_session(
         {
             continue;
         }
-        let Some(instant) = file_instant(&path) else {
+        let Some((created, modified)) = file_times(&path) else {
             continue;
         };
-        if !within_window(instant, since) {
+        if !belongs_to_panel(created, modified, since) {
             continue;
         }
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-            best = Some((dist, stem.to_string()));
+        if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+            best = Some((modified, stem.to_string()));
         }
     }
     best.map(|(_, id)| id)
@@ -133,7 +145,7 @@ pub fn locate_codex_session(
     since: SystemTime,
     exclude: &[String],
 ) -> Option<String> {
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
     let mut stack = vec![(codex_home.join("sessions"), 0u8)];
     while let Some((dir, depth)) = stack.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -157,18 +169,17 @@ pub fn locate_codex_session(
             if exclude.iter().any(|id| id == uuid) {
                 continue;
             }
-            let Some(instant) = file_instant(&path) else {
+            let Some((created, modified)) = file_times(&path) else {
                 continue;
             };
-            if !within_window(instant, since) {
+            if !belongs_to_panel(created, modified, since) {
                 continue;
             }
             if codex_session_cwd(&path).as_deref() != Some(cwd) {
                 continue;
             }
-            let dist = distance(instant, since);
-            if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-                best = Some((dist, uuid.to_string()));
+            if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+                best = Some((modified, uuid.to_string()));
             }
         }
     }
@@ -184,7 +195,7 @@ pub fn locate_copilot_session(
     exclude: &[String],
 ) -> Option<String> {
     let entries = fs::read_dir(copilot_home.join("session-state")).ok()?;
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
 
     for entry in entries.flatten() {
         let session_dir = entry.path();
@@ -203,10 +214,11 @@ pub fn locate_copilot_session(
         if !events.is_file() {
             continue;
         }
-        let Some(instant) = file_instant(&events).or_else(|| file_instant(&session_dir)) else {
+        let Some((created, modified)) = file_times(&events).or_else(|| file_times(&session_dir))
+        else {
             continue;
         };
-        if !within_window(instant, since) {
+        if !belongs_to_panel(created, modified, since) {
             continue;
         }
         // Формат метаданных менялся между версиями CLI. Ищем cwd сначала в
@@ -215,9 +227,8 @@ pub fn locate_copilot_session(
             continue;
         }
 
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(best_dist, _)| dist < *best_dist) {
-            best = Some((dist, id.to_string()));
+        if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+            best = Some((modified, id.to_string()));
         }
     }
 
@@ -240,29 +251,33 @@ pub fn locate_opencode_session(
             .ok()?;
     let mut statement = connection
         .prepare(
-            "SELECT id, time_created FROM session \
+            "SELECT id, time_created, time_updated FROM session \
              WHERE directory = ?1 AND parent_id IS NULL \
-             ORDER BY time_created DESC LIMIT 50",
+             ORDER BY time_updated DESC LIMIT 50",
         )
         .ok()?;
     let rows = statement
         .query_map([cwd], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .ok()?;
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
     for row in rows.flatten() {
-        let (id, created_ms) = row;
+        let (id, created_ms, updated_ms) = row;
         if !is_session_id(&id) || exclude.iter().any(|entry| entry == &id) {
             continue;
         }
-        let instant = UNIX_EPOCH + Duration::from_millis(created_ms.max(0) as u64);
-        if !within_window(instant, since) {
+        let created = UNIX_EPOCH + Duration::from_millis(created_ms.max(0) as u64);
+        let modified = UNIX_EPOCH + Duration::from_millis(updated_ms.max(0) as u64);
+        if !belongs_to_panel(created, modified, since) {
             continue;
         }
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-            best = Some((dist, id));
+        if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+            best = Some((modified, id));
         }
     }
     best.map(|(_, id)| id)
@@ -399,6 +414,24 @@ mod tests {
             encode_claude_project_dir("/home/u/my_app.v2"),
             "-home-u-my-app-v2"
         );
+    }
+
+    #[test]
+    fn a_conversation_written_right_now_belongs_to_the_panel() {
+        let since = SystemTime::now();
+        let long_ago = since - Duration::from_secs(30 * 24 * 3600);
+        let just_after = since + Duration::from_secs(2);
+
+        // Новый разговор: файл появился рядом с запуском агента.
+        assert!(belongs_to_panel(just_after, just_after, since));
+
+        // Продолженный: заведён месяц назад, пишут в него прямо сейчас. Это и
+        // была дыра — панель без привязки открывала список, пользователь
+        // выбирал старый разговор, и найти его локатор уже не мог никогда.
+        assert!(belongs_to_panel(long_ago, just_after, since));
+
+        // Заброшенный чужой: и появился давно, и не трогали.
+        assert!(!belongs_to_panel(long_ago, long_ago, since));
     }
 
     #[test]
@@ -544,7 +577,8 @@ mod tests {
                     id TEXT PRIMARY KEY,
                     parent_id TEXT,
                     directory TEXT NOT NULL,
-                    time_created INTEGER NOT NULL
+                    time_created INTEGER NOT NULL,
+                    time_updated INTEGER NOT NULL
                 );",
             )
             .unwrap();
@@ -554,10 +588,10 @@ mod tests {
             .as_millis() as i64;
         connection
             .execute_batch(&format!(
-                "INSERT INTO session VALUES ('ses_target', NULL, '/tmp/proj', {now_ms});
-                 INSERT INTO session VALUES ('ses_other', NULL, '/tmp/other', {now_ms});
-                 INSERT INTO session VALUES ('ses_child', 'ses_target', '/tmp/proj', {now_ms});
-                 INSERT INTO session VALUES ('ses_old', NULL, '/tmp/proj', 1000);"
+                "INSERT INTO session VALUES ('ses_target', NULL, '/tmp/proj', {now_ms}, {now_ms});
+                 INSERT INTO session VALUES ('ses_other', NULL, '/tmp/other', {now_ms}, {now_ms});
+                 INSERT INTO session VALUES ('ses_child', 'ses_target', '/tmp/proj', {now_ms}, {now_ms});
+                 INSERT INTO session VALUES ('ses_old', NULL, '/tmp/proj', 1000, 1000);"
             ))
             .unwrap();
         drop(connection);
@@ -575,6 +609,21 @@ mod tests {
             locate_opencode_session(&dir.join("missing.db"), "/tmp/proj", since, &[]),
             None
         );
+
+        // Продолженный разговор: заведён давно, пишут в него сейчас. По времени
+        // появления его не найти уже никогда, а панель именно в нём.
+        let connection = rusqlite::Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(&format!(
+                "UPDATE session SET time_updated = {now_ms} + 5000 WHERE id = 'ses_old';"
+            ))
+            .unwrap();
+        drop(connection);
+        assert_eq!(
+            locate_opencode_session(&db_path, "/tmp/proj", since, &[]).as_deref(),
+            Some("ses_old")
+        );
+
         let _ = fs::remove_dir_all(dir);
     }
 
