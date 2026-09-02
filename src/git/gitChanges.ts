@@ -42,8 +42,33 @@ export type GitChangesSummary = {
   ahead?: number;
   behind?: number;
   operation?: GitOperation;
+  // Где корень проекта лежит внутри репозитория. Проектом открывают и
+  // подкаталог монорепозитория, а пути в `files` идут от корня репозитория:
+  // без этой приставки дерево не узнаёт в них свои же файлы.
+  prefix?: string;
   files: GitChangedFile[];
 };
+
+/// Путь файла проекта так, как его называет git.
+export function repoPathOf(
+  summary: GitChangesSummary | null,
+  path: string,
+): string {
+  return summary?.prefix ? `${summary.prefix}/${path}` : path;
+}
+
+/// И обратно. `null` — файл лежит в репозитории, но вне открытого проекта:
+/// показывать его дереву негде.
+export function projectPathOf(
+  summary: GitChangesSummary | null,
+  path: string,
+): string | null {
+  const prefix = summary?.prefix;
+  if (!prefix) {
+    return path;
+  }
+  return path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : null;
+}
 
 export type GitFileDiff = {
   path: string;
@@ -95,15 +120,22 @@ function ensureEventListener(): void {
   if (!isTauri || eventUnlisten) {
     return;
   }
-  eventUnlisten = listen<{
-    workspaceId: string;
-    summary: GitChangesSummary;
-  }>("git-changes", (event) => {
-    const entry = watches.get(event.payload.workspaceId);
-    if (entry && entry.listeners.size > 0) {
-      publish(entry, event.payload.summary);
-    }
-  });
+  try {
+    eventUnlisten = listen<{
+      workspaceId: string;
+      summary: GitChangesSummary;
+    }>("git-changes", (event) => {
+      const entry = watches.get(event.payload.workspaceId);
+      if (entry && entry.listeners.size > 0) {
+        publish(entry, event.payload.summary);
+      }
+    });
+  } catch {
+    // Канал событий не поднялся. Это не повод ронять того, кто подписался:
+    // сводку он получит опросом — тем самым, который здесь и держат на этот
+    // случай. Раньше отсюда летело исключение прямо в эффект подписчика.
+    eventUnlisten = null;
+  }
 }
 
 export function getGitSummary(workspaceId: string): GitChangesSummary | null {
@@ -262,6 +294,15 @@ export function readRepoFile(
   path: string,
 ): Promise<GitFileContent> {
   return invoke<GitFileContent>("git_read_file", { workspaceId, path });
+}
+
+/// Файл таким, каким он лежит в последнем коммите. `exists: false` — его там
+/// нет вовсе: он новый, коммитов ещё не было или это не репозиторий.
+export function readHeadFile(
+  workspaceId: string,
+  path: string,
+): Promise<GitFileContent> {
+  return invoke<GitFileContent>("git_head_file", { workspaceId, path });
 }
 
 export function writeRepoFile(

@@ -33,6 +33,28 @@ vi.mock("../files/fileTree", async () => {
   };
 });
 
+/// Сводка git и версия файла из истории: по ним редактор считает, какие строки
+/// ещё не закоммичены. Настоящие ходят в Tauri, которого в тестах нет.
+const gitSummary = vi.fn();
+const readHeadFile = vi.fn();
+vi.mock("../git/gitChanges", async () => {
+  const actual =
+    await vi.importActual<typeof import("../git/gitChanges")>(
+      "../git/gitChanges",
+    );
+  return {
+    ...actual,
+    subscribeGitChanges: (
+      _workspaceId: string,
+      listener: (summary: unknown) => void,
+    ) => {
+      listener(gitSummary());
+      return () => {};
+    },
+    readHeadFile: (...args: unknown[]) => readHeadFile(...args),
+  };
+});
+
 const { FileEditor } = await import("./FileEditor");
 
 function file(content: string) {
@@ -59,6 +81,17 @@ beforeEach(() => {
   readWorkspaceFile.mockReset();
   writeWorkspaceFile.mockReset();
   readWorkspaceFile.mockResolvedValue(file("текст"));
+  gitSummary.mockReset();
+  readHeadFile.mockReset();
+  // По умолчанию проект — не репозиторий: сравнивать не с чем, меток нет, и
+  // всё, что не про них, их не видит.
+  gitSummary.mockReturnValue({ isRepo: false, files: [] });
+  readHeadFile.mockResolvedValue({
+    content: "",
+    isBinary: false,
+    tooLarge: false,
+    exists: false,
+  });
   watchers.clear();
   setLocale("ru");
 });
@@ -462,7 +495,7 @@ describe("FileView on a long file", () => {
       ),
     );
 
-    expect(gutter()?.textContent).toBe("1\n2\n3\n");
+    expect(gutter()?.textContent).toBe("1 \n2 \n3 \n");
   });
 
   it("paints a window of a long file, not the whole of it", async () => {
@@ -507,7 +540,7 @@ describe("FileView on a long file", () => {
 
     // Окно уехало за взглядом…
     await waitFor(() =>
-      expect(gutter()?.textContent).toContain("\n2401\n"),
+      expect(gutter()?.textContent).toContain("\n2401 \n"),
     );
     const paint = document.querySelector(".file-view-paint");
     expect(paint?.textContent).toContain("строка 2401");
@@ -748,5 +781,99 @@ describe("FileView and the disk under it", () => {
         "is-overlay",
       ),
     );
+  });
+});
+
+describe("FileView beside git", () => {
+  function marks(): string[] {
+    return [...document.querySelectorAll(".file-mark")].map((mark) =>
+      mark.className.replace("file-mark ", ""),
+    );
+  }
+
+  /// Сводка репозитория, в котором открытый файл уже правили.
+  function inRepo(committed: string, prefix?: string) {
+    gitSummary.mockReturnValue({
+      isRepo: true,
+      headHash: "abc",
+      files: [],
+      ...(prefix ? { prefix } : {}),
+    });
+    readHeadFile.mockResolvedValue({
+      content: committed,
+      isBinary: false,
+      tooLarge: false,
+      exists: true,
+    });
+  }
+
+  it("marks the line that is not committed yet, and only it", async () => {
+    inRepo("первая\nтретья");
+    readWorkspaceFile.mockResolvedValue(file("первая\nвторая\nтретья"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue(
+        "первая\nвторая\nтретья",
+      ),
+    );
+
+    await waitFor(() => expect(marks()).toEqual(["is-added"]));
+    // Номера от полоски не съезжают: она занимает место пробела, который стоит
+    // после номера на каждой строке — покрашен он или нет.
+    expect(
+      document.querySelector(".file-view-lines")?.textContent,
+    ).toBe("1 \n2 \n3 \n");
+  });
+
+  it("follows the text as it is typed, without waiting for a save", async () => {
+    // Ради этого метки и считаются здесь, а не спрашиваются у `git diff`:
+    // ответ git относится к файлу на диске, и первая же набранная строка
+    // сдвинула бы все метки под ней на одну.
+    inRepo("одна\nдве");
+    readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
+    open();
+    const field = await screen.findByLabelText("a.txt");
+    await waitFor(() => expect(field).toHaveValue("одна\nдве"));
+    await waitFor(() => expect(marks()).toEqual([]));
+
+    fireEvent.change(field, { target: { value: "одна\nновая\nдве" } });
+
+    await waitFor(() => expect(marks()).toEqual(["is-added"]));
+    expect(writeWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it("tells a rewritten line from a new one and from a gone one", async () => {
+    inRepo("одна\nдве\nтри\nчетыре");
+    readWorkspaceFile.mockResolvedValue(file("одна\nДВЕ\nтри"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("одна\nДВЕ\nтри"),
+    );
+
+    // Вторую переписали, последняя пропала — и метка о пропаже стоит на строке
+    // над ней, потому что самой строки в файле уже нет.
+    await waitFor(() => expect(marks()).toEqual(["is-changed", "is-removed"]));
+  });
+
+  it("asks git for the file by the name git knows it under", async () => {
+    // Проектом открыли подкаталог монорепозитория: пути git идут от корня
+    // репозитория, и без приставки он ответил бы про несуществующий файл.
+    inRepo("одна", "apps/web");
+    readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
+    open();
+    await waitFor(() =>
+      expect(readHeadFile).toHaveBeenCalledWith("w1", "apps/web/a.txt"),
+    );
+  });
+
+  it("stays out of the way where there is no repository", async () => {
+    readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("одна\nдве"),
+    );
+
+    expect(readHeadFile).not.toHaveBeenCalled();
+    expect(marks()).toEqual([]);
   });
 });

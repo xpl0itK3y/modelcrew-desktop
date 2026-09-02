@@ -467,7 +467,11 @@
   /* Ширина колонки номеров — одно число на всех: по нему она рисуется и по
      нему же оба слоя отступают вправо. Разойдись они — и первые буквы строк
      уедут под номера. */
-  --file-gutter: calc(var(--file-digits, 3ch) + 22px);
+  --file-gutter: calc(var(--file-digits, 3ch) + 1ch + 22px);
+  /* Межстрочный интервал слоёв. Один на всех и отсюда же: полоска правки
+     тянется ровно на строку, и разойдись эти два числа — она поехала бы
+     относительно текста тем сильнее, чем ниже строка. */
+  --file-line: 1.5;
 }
 
 .file-view-paint,
@@ -480,7 +484,7 @@
   border: 0;
   font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: var(--file-line);
   tab-size: 2;
   white-space: pre;
   overflow: auto;
@@ -511,6 +515,41 @@
   /* Щелчок по номеру должен попадать в текст под ним. */
   pointer-events: none;
   user-select: none;
+}
+
+/* Полоска правки у самого края колонки номеров — там же, где её рисует любой
+   редактор: между номером и кодом. Занимает место обычного пробела, который
+   стоит после номера на каждой строке, покрашена она или нет, поэтому текст
+   слоя от неё не меняется ни на символ.
+
+   Высота ровно в строку, и от неё же: `inline-block` выше строки растянул бы
+   строку под себя, и колонка номеров поехала бы вниз относительно текста. */
+.file-mark {
+  display: inline-block;
+  width: 1ch;
+  height: calc(var(--file-line) * 1em);
+  vertical-align: top;
+  border-radius: 1px;
+  background: var(--mc-git-modified);
+}
+
+.file-mark.is-added {
+  background: var(--mc-git-added);
+}
+
+.file-mark.is-changed {
+  background: var(--mc-git-modified);
+}
+
+/* Удалённых строк в файле уже нет: метка стоит на последней уцелевшей над
+   пропажей и жмётся к её нижнему краю — туда, где строки не стало. */
+.file-mark.is-removed {
+  background: linear-gradient(
+    to bottom,
+    transparent 58%,
+    var(--mc-git-deleted) 58%
+  );
+  border-radius: 0 0 1px 1px;
 }
 
 .file-view-paint {

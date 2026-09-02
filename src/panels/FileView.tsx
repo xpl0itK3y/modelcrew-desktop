@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
@@ -25,6 +26,7 @@ import {
   type FileContent,
 } from "../files/fileTree";
 import { grammarOf, lineOffsets, paintLines } from "../files/highlight";
+import { useLineMarks } from "../git/useLineMarks";
 import { fileName } from "../crew/claimLabel";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
@@ -247,13 +249,39 @@ export function FileView(props: {
     () => paintLines(text, language, offsets, shown.from, shown.to),
     [text, language, offsets, shown.from, shown.to],
   );
+
+  // Какие строки git ещё не видел. Двоичный и слишком большой файл сравнивать
+  // не с чем: у первого нет строк, у второго нет содержимого.
+  const marks = useLineMarks(
+    workspaceId,
+    path,
+    text,
+    loaded !== null && loaded.blocked === null,
+  );
+
+  // Номера и полоска правок — один слой, а не два. Полоска обязана стоять
+  // строка в строку с номером, и двум отдельным слоям разъехаться было бы куда
+  // проще, чем сойтись. Текст в каждой строке один и тот же — номер и пробел, —
+  // меняется только то, покрашен пробел или нет; поэтому слой остаётся ровно
+  // такой же высоты, какой был.
   const numbers = useMemo(() => {
-    const rows: string[] = [];
+    const rows: ReactNode[] = [];
     for (let line = shown.from; line < shown.to; line += 1) {
+      const mark = marks.get(line);
       rows.push(String(line + 1));
+      rows.push(
+        mark ? (
+          <span key={line} className={`file-mark is-${mark}`}>
+            {" "}
+          </span>
+        ) : (
+          " "
+        ),
+      );
+      rows.push("\n");
     }
-    return rows.join("\n");
-  }, [shown.from, shown.to]);
+    return rows;
+  }, [shown.from, shown.to, marks]);
 
   // Открыли другой файл — окно начинается сверху.
   useEffect(() => setWindow({ from: 0, to: WHOLE }), [workspaceId, path]);
@@ -386,7 +414,9 @@ export function FileView(props: {
           <pre ref={gutterRef} className="file-view-lines" aria-hidden="true">
             {"\n".repeat(shown.from)}
             {numbers}
-            {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+            {/* Перевод строки у каждой строки уже свой, поэтому хвост здесь на
+                один короче, чем у слоя подсветки: вместе они дают ту же высоту. */}
+            {"\n".repeat(Math.max(0, lineCount - shown.to))}
           </pre>
         </div>
       )}

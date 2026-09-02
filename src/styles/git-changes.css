@@ -304,7 +304,7 @@
 }
 
 .git-branch-item.is-remote .git-branch-name {
-  color: #5c9de0;
+  color: var(--mc-git-renamed);
 }
 
 /* Ветка уже влита в текущую. */
@@ -312,8 +312,8 @@
   flex: none;
   padding: 1px 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, #4fb864 14%, transparent);
-  color: #4fb864;
+  background: color-mix(in srgb, var(--mc-git-added) 14%, transparent);
+  color: var(--mc-git-added);
   font-size: 10px;
 }
 
@@ -322,8 +322,8 @@
   flex: none;
   padding: 1px 6px;
   border-radius: 999px;
-  border: 1px dashed color-mix(in srgb, #d9a03f 55%, transparent);
-  color: #d9a03f;
+  border: 1px dashed color-mix(in srgb, var(--mc-git-modified) 55%, transparent);
+  color: var(--mc-git-modified);
   font-size: 10px;
 }
 
@@ -432,7 +432,7 @@
 }
 
 .git-graph-row.is-copied {
-  background: color-mix(in srgb, #4fb864 16%, transparent);
+  background: color-mix(in srgb, var(--mc-git-added) 16%, transparent);
 }
 
 .git-graph-lines {
@@ -672,7 +672,7 @@
 }
 
 .git-commit-hash.is-done {
-  color: #4fb864;
+  color: var(--mc-git-added);
 }
 
 .git-commit-author {
@@ -698,13 +698,13 @@
 
 /* Удалённые ветки (origin/…) — нейтральные, чтобы не выглядели тревогой. */
 .git-commit-ref.is-remote {
-  background: color-mix(in srgb, #5c9de0 16%, transparent);
-  color: #5c9de0;
+  background: color-mix(in srgb, var(--mc-git-renamed) 16%, transparent);
+  color: var(--mc-git-renamed);
 }
 
 .git-commit-ref.is-tag {
-  background: color-mix(in srgb, #d9a03f 16%, transparent);
-  color: #d9a03f;
+  background: color-mix(in srgb, var(--mc-git-modified) 16%, transparent);
+  color: var(--mc-git-modified);
 }
 
 .git-history-more {
@@ -795,7 +795,7 @@
 
 .git-commit-error {
   padding: 6px 12px 0;
-  color: #e05c5c;
+  color: var(--mc-git-deleted);
   font-size: 11.5px;
 }
 
@@ -889,15 +889,15 @@
 }
 
 .git-file-action.is-done {
-  color: #4fb864;
+  color: var(--mc-git-added);
 }
 
 .git-revert-confirm {
   padding: 3px 8px;
   border: none;
   border-radius: var(--mc-radius-xs);
-  background: color-mix(in srgb, #e05c5c 18%, transparent);
-  color: #e05c5c;
+  background: color-mix(in srgb, var(--mc-git-deleted) 18%, transparent);
+  color: var(--mc-git-deleted);
   font: inherit;
   font-size: 11px;
   font-weight: 650;
@@ -905,7 +905,7 @@
 }
 
 .git-revert-confirm:hover {
-  background: color-mix(in srgb, #e05c5c 30%, transparent);
+  background: color-mix(in srgb, var(--mc-git-deleted) 30%, transparent);
 }
 
 .git-file-status {
@@ -921,29 +921,29 @@
 }
 
 .git-file-status.is-modified {
-  color: #d9a03f;
-  background: color-mix(in srgb, #d9a03f 14%, transparent);
+  color: var(--mc-git-modified);
+  background: color-mix(in srgb, var(--mc-git-modified) 14%, transparent);
 }
 
 .git-file-status.is-added,
 .git-file-status.is-untracked {
-  color: #4fb864;
-  background: color-mix(in srgb, #4fb864 14%, transparent);
+  color: var(--mc-git-added);
+  background: color-mix(in srgb, var(--mc-git-added) 14%, transparent);
 }
 
 .git-file-status.is-deleted {
-  color: #e05c5c;
-  background: color-mix(in srgb, #e05c5c 14%, transparent);
+  color: var(--mc-git-deleted);
+  background: color-mix(in srgb, var(--mc-git-deleted) 14%, transparent);
 }
 
 .git-file-status.is-renamed {
-  color: #5c9de0;
-  background: color-mix(in srgb, #5c9de0 14%, transparent);
+  color: var(--mc-git-renamed);
+  background: color-mix(in srgb, var(--mc-git-renamed) 14%, transparent);
 }
 
 .git-file-status.is-conflicted {
-  color: #c95ce0;
-  background: color-mix(in srgb, #c95ce0 14%, transparent);
+  color: var(--mc-git-conflicted);
+  background: color-mix(in srgb, var(--mc-git-conflicted) 14%, transparent);
 }
 
 .git-file-path {
@@ -964,11 +964,11 @@
 }
 
 .git-count-add {
-  color: #4fb864;
+  color: var(--mc-git-added);
 }
 
 .git-count-del {
-  color: #e05c5c;
+  color: var(--mc-git-deleted);
 }
 
 .git-count-binary {
@@ -1050,19 +1050,19 @@
 }
 
 .git-diff-line.is-add {
-  background: color-mix(in srgb, #4fb864 12%, transparent);
+  background: color-mix(in srgb, var(--mc-git-added) 12%, transparent);
 }
 
 .git-diff-line.is-add .git-diff-text {
-  color: color-mix(in srgb, #4fb864 60%, var(--mc-text-bright));
+  color: color-mix(in srgb, var(--mc-git-added) 60%, var(--mc-text-bright));
 }
 
 .git-diff-line.is-del {
-  background: color-mix(in srgb, #e05c5c 12%, transparent);
+  background: color-mix(in srgb, var(--mc-git-deleted) 12%, transparent);
 }
 
 .git-diff-line.is-del .git-diff-text {
-  color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
+  color: color-mix(in srgb, var(--mc-git-deleted) 60%, var(--mc-text-bright));
 }
 
 /* ---------- Две колонки: было слева, стало справа ---------- */
@@ -1095,19 +1095,19 @@
 }
 
 .git-diff-half.is-add {
-  background: color-mix(in srgb, #4fb864 12%, transparent);
+  background: color-mix(in srgb, var(--mc-git-added) 12%, transparent);
 }
 
 .git-diff-half.is-add .git-diff-text {
-  color: color-mix(in srgb, #4fb864 60%, var(--mc-text-bright));
+  color: color-mix(in srgb, var(--mc-git-added) 60%, var(--mc-text-bright));
 }
 
 .git-diff-half.is-del {
-  background: color-mix(in srgb, #e05c5c 12%, transparent);
+  background: color-mix(in srgb, var(--mc-git-deleted) 12%, transparent);
 }
 
 .git-diff-half.is-del .git-diff-text {
-  color: color-mix(in srgb, #e05c5c 60%, var(--mc-text-bright));
+  color: color-mix(in srgb, var(--mc-git-deleted) 60%, var(--mc-text-bright));
 }
 
 /* Строки на этой стороне не существует. Штриховка отличает «пусто, потому что
@@ -1201,10 +1201,10 @@
 
 @keyframes git-line-fresh {
   from {
-    background: color-mix(in srgb, #4fb864 38%, transparent);
+    background: color-mix(in srgb, var(--mc-git-added) 38%, transparent);
   }
   to {
-    background: color-mix(in srgb, #4fb864 12%, transparent);
+    background: color-mix(in srgb, var(--mc-git-added) 12%, transparent);
   }
 }
 
@@ -1383,7 +1383,7 @@
 }
 
 .git-sync.is-synced {
-  color: color-mix(in srgb, #4fb864 80%, transparent);
+  color: color-mix(in srgb, var(--mc-git-added) 80%, transparent);
   font-size: 12px;
 }
 
