@@ -38,7 +38,7 @@ use agent_session_store::{
     agent_sessions_all, agent_sessions_forget, agent_sessions_keep, agent_sessions_remember,
 };
 use agent_session_watch::agent_sessions_watch;
-use agent_sessions::agent_session_locate;
+use agent_sessions::{agent_session_locate, agent_session_locate_turn};
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
@@ -993,6 +993,7 @@ pub fn run() {
             terminal_snapshots_prune,
             terminal_clipboard_image_save,
             agent_session_locate,
+            agent_session_locate_turn,
             agent_hook_channels,
             agent_sessions_all,
             agent_sessions_remember,
@@ -1124,6 +1125,7 @@ mod tests {
     const EXPECTED_COMMANDS: &[&str] = &[
         "agent_hook_channels",
         "agent_session_locate",
+        "agent_session_locate_turn",
         "agent_sessions_all",
         "agent_sessions_forget",
         "agent_sessions_keep",
