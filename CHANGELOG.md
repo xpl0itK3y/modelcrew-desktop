@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.0.22
+
+### Русский
+
+Редактор подсвечивает десятки языков, показывает markdown и картинки, отмечает правки git по строкам и ищет по файлу. Каждая панель агента сразу узнаёт свой чат.
+
+- Подсветка Python, Go, Java, C и C++, C#, PHP, Ruby, Swift, SQL и ещё десятков языков; файл с незнакомым расширением получает общую подсветку вместо серого
+- Markdown, HTML, CSS и патчи разбираются по своим правилам: заголовки, теги, селекторы, добавленные и удалённые строки
+- Markdown и SVG можно смотреть отрендеренными, и выбор запоминается; картинки открываются в просмотрщике с прозрачностью, размером и масштабом 1:1
+- На полях редактора отмечены новые, изменённые и удалённые строки относительно последнего коммита — сразу, ещё до сохранения
+- Дерево файлов и вкладки редактора красят файлы по статусу git, в том числе для пакета внутри монорепозитория
+- ⌘F ищет по файлу; Tab и ⇧Tab двигают отступ, Enter его сохраняет, ⌘/ комментирует, ⇧⌘D дублирует строку, ⌥↑/↓ переносит её, ⌘⌫ удаляет — и на русской раскладке тоже
+- Длинные строки можно переносить, и выбор запоминается
+- Редактор разворачивается поверх терминалов, оставляя дерево и список проектов на месте, а Esc возвращает его в колонку
+- Колонки больше не выталкивают терминалы за край окна
+- Claude, copilot и opencode сами называют свой чат через хук, и панель привязывается к нему сразу, без догадок
+- Две панели codex в одном проекте различаются по ходу, который начал Enter в своей панели
+- Привязка находит и чат, выбранный из списка диалогов, а не только новый
+- Привязки чатов хранятся в файле приложения и переживают очистку данных вебвью и переустановку
+- После перезапуска панели больше не меняются чатами, если первой написать не в ту
+- Запрос разрешения от copilot приходит через его хук уведомлений, от opencode — через плагин; раньше первый не доходил вовсе, а второй приходил с опозданием как «закончил»
+- Первый ответ агента в только что открытой панели больше не глушится, если ему уже написали
+- В списке не больше 10 проектов: кнопка «+» гаснет, а нажатие объясняет почему
+- Один человек с одной почтой показывается в истории git под одним именем
+
+### English
+
+The editor highlights dozens of languages, previews markdown and pictures, marks git changes line by line and finds text in a file. Every agent panel knows its own chat.
+
+- Highlighting for Python, Go, Java, C and C++, C#, PHP, Ruby, Swift, SQL and dozens more; a file with an unknown extension gets a common reading instead of grey
+- Markdown, HTML, CSS and patches are read by their own rules: headings, tags, selectors, added and removed lines
+- Markdown and SVG can be viewed rendered, and the choice is remembered; pictures open in a viewer with transparency, dimensions and a 1:1 scale
+- The editor margin marks lines added, changed and removed since the last commit — right away, before the file is saved
+- The file tree and editor tabs colour files by their git status, including a package inside a monorepo
+- ⌘F finds in the file; Tab and ⇧Tab move the indent, Enter keeps it, ⌘/ comments, ⇧⌘D duplicates a line, ⌥↑/↓ moves it, ⌘⌫ deletes it — on any keyboard layout
+- Long lines can wrap, and the choice is remembered
+- The editor spreads over the terminals while the tree and the project list stay in place, and Esc returns it to its column
+- Columns no longer push the terminals off the edge of the window
+- Claude, copilot and opencode name their own chat through the hook, and the panel binds to it at once, without guessing
+- Two codex panels in one project are told apart by the turn their own Enter started
+- Binding also finds a chat picked from the list of conversations, not only a new one
+- Chat bindings live in a file of the app and survive clearing the webview data and a reinstall
+- Panels no longer swap chats after a restart when the wrong one is written to first
+- A permission prompt from copilot arrives through its notification hook and from opencode through its plugin; before, the first never arrived and the second came late as "finished"
+- An agent's first answer in a freshly opened panel is no longer muted once it has been written to
+- The project list holds up to 10 projects: the plus button dims, and a click explains why
+- One person with one email address shows under one name in the git history
+
 ## 0.0.21
 
 ### Русский

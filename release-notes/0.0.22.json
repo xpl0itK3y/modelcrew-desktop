@@ -1,0 +1,25 @@
+{
+  "version": "0.0.22",
+  "ru": {
+    "title": "Редактор, в котором можно работать, и чаты, которые держатся своей панели",
+    "summary": "Редактор подсвечивает десятки языков, показывает markdown и картинки, отмечает правки git по строкам и ищет по файлу. Каждая панель агента сразу узнаёт свой чат.",
+    "highlights": [
+      "Подсветка десятков языков, предпросмотр markdown и SVG, просмотр картинок",
+      "Строки, изменённые после коммита, отмечены в редакторе, а файлы — цветом в дереве",
+      "Поиск по файлу, перенос строк, отступы и привычные клавиши редактора",
+      "Каждая панель агента сразу узнаёт свой чат — даже две панели codex в одном проекте",
+      "Запрос разрешения от copilot и opencode теперь действительно доходит"
+    ]
+  },
+  "en": {
+    "title": "An editor you can work in, and chats that stay with their panel",
+    "summary": "The editor highlights dozens of languages, previews markdown and pictures, marks git changes line by line and finds text in a file. Every agent panel knows its own chat.",
+    "highlights": [
+      "Highlighting for dozens of languages, markdown and SVG preview, and an image viewer",
+      "Lines changed since the last commit are marked in the editor, and files are coloured in the tree",
+      "Find in the file, line wrapping, indentation and the keys an editor is expected to have",
+      "Every agent panel finds its own chat right away, even two codex panels in one project",
+      "A permission prompt from copilot or opencode now really reaches you"
+    ]
+  }
+}
