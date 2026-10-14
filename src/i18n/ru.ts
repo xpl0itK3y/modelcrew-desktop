@@ -520,6 +520,8 @@ export const ru = {
   "workspace.rootOwnedBy": "Папка уже принадлежит проекту {workspaceId}",
   "workspace.alreadyOpen": "Папка уже открыта в «{name}»",
   "workspace.alreadyRegistered": "Папка уже открыта в другом проекте",
+  "workspace.limit":
+    "Больше {max} проектов не открыть — удалите один, чтобы добавить новый",
   "workspace.invalidBackendId":
     "Приложение получило неверный идентификатор проекта",
 

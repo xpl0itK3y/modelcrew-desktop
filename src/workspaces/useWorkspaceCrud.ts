@@ -10,6 +10,7 @@ import { DockviewApi } from "dockview";
 import { invoke } from "@tauri-apps/api/core";
 import { destroyTerminal } from "../terminal/registry";
 import { localizeBackendError, translate, type Locale } from "../i18n";
+import { MAX_WORKSPACES } from "../constants";
 import {
   activeSession,
   createDefaultSession,
@@ -81,6 +82,11 @@ export function useWorkspaceCrud({
       active && (!active.folder || rootErrorsRef.current[active.id])
         ? active
         : null;
+    // Перепривязка проект не добавляет — предел её не касается.
+    if (!relinking && current.list.length >= MAX_WORKSPACES) {
+      showToast(translate("workspace.limit", { max: MAX_WORKSPACES }));
+      return;
+    }
     const workspaceId = relinking?.id ?? crypto.randomUUID();
 
     let result: WorkspaceRootResult;

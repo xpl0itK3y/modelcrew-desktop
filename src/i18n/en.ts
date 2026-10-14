@@ -523,6 +523,8 @@ export const en: Record<MessageKey, string> = {
   "workspace.alreadyOpen": "The folder is already open in “{name}”",
   "workspace.alreadyRegistered":
     "The folder is already open in another workspace",
+  "workspace.limit":
+    "You can’t open more than {max} projects — delete one to add another",
   "workspace.invalidBackendId":
     "The app received an invalid workspace identifier",
 
