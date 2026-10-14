@@ -28,7 +28,9 @@ const EVENT_KINDS: Record<string, PreciseAgentAlertKind> = {
   sessionidle: "completed", // opencode
   permissionasked: "permission", // opencode
   agentstop: "completed", // copilot
-  permissionprompt: "permission", // copilot
+  // Вид уведомления, когда хук «Notification» его называет (claude, copilot).
+  permissionprompt: "permission",
+  elicitationdialog: "question", // MCP-сервер просит ответа
   notification: "waiting",
 };
 

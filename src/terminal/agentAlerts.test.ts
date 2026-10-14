@@ -766,20 +766,20 @@ describe("agents that report themselves through a hook", () => {
   });
 
   it("still rings for an agent whose hook only reports the end of a turn", async () => {
-    // У copilot и opencode хук сообщает только конец хода: `agentStop` и
-    // `session.idle`. Их запрос разрешения он не заметит, и звонок BEL —
-    // единственный сигнал о нём. Заглушив звонок по одному факту «хук есть»,
-    // мы не позвали бы вовсе: ни баннера, ни точки в шапке, ни счётчика.
-    noteHookChannel("copilot", "completed");
-    mocks.record.value = { agentId: "copilot", command: "copilot" };
+    // Хук, который сообщает только конец хода, запрос разрешения не заметит,
+    // и звонок BEL — единственный сигнал о нём. Заглушив звонок по одному
+    // факту «хук есть», мы не позвали бы вовсе: ни баннера, ни точки в шапке,
+    // ни счётчика. Так было у copilot, пока мы не ставили ему `notification`.
+    noteHookChannel("newcli", "completed");
+    mocks.record.value = { agentId: "newcli", command: "newcli" };
     const tracker = createAgentAlertTracker();
-    markAgentPanelEngaged(tracker, "copilot-bell-panel");
+    markAgentPanelEngaged(tracker, "newcli-bell-panel");
 
-    trackAgentOutput(tracker, "copilot-bell-panel", "\x07", () => hidden);
+    trackAgentOutput(tracker, "newcli-bell-panel", "\x07", () => hidden);
     await settle();
 
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
-    expect(isAgentPanelWaiting("copilot-bell-panel")).toBe(true);
+    expect(isAgentPanelWaiting("newcli-bell-panel")).toBe(true);
   });
 
   it("still guesses for an agent that has no hook of its own", async () => {

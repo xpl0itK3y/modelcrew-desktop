@@ -523,9 +523,14 @@ fn normalize(agent: &str, payload: &Value) -> (String, String) {
         ),
         // claude/copilot: {"hook_event_name":"Stop","message":"…"}
         _ => (
+            // У «Notification» имя события ничего не говорит: под ним
+            // приходят и запрос разрешения, и простой, и вопрос. Что именно
+            // случилось, лежит в `notification_type` — его и берём первым.
+            // Текст сообщения тут не подмога: у copilot это «Run command:
+            // mkdir x» без единого слова о разрешении.
             text(
                 payload,
-                &["hook_event_name", "type", "event", "notification_type"],
+                &["notification_type", "hook_event_name", "type", "event"],
             ),
             text(
                 payload,
@@ -588,6 +593,19 @@ fn own_file_body(agent: &str, helper: &Helper) -> Option<String> {
                 "version": 1,
                 "hooks": {
                     "agentStop": [{
+                        "type": "command",
+                        "bash": hook_command(helper, "copilot"),
+                        "timeoutSec": 5,
+                    }],
+                    // Запрос разрешения. Звонка copilot при нём не даёт, а
+                    // счётчик секунд на экране тикает, пока ждёт ответа, —
+                    // догадка по тишине не наступает никогда. Без этого хука
+                    // вставший запрос не доходил вовсе. Нагрузка как у claude:
+                    // `hook_event_name` «Notification» и `notification_type`
+                    // «permission_prompt» — проверено на живом 1.0.82.
+                    // `permissionRequest` не годится: он решает за
+                    // пользователя, а этот только сообщает и ничего не держит.
+                    "notification": [{
                         "type": "command",
                         "bash": hook_command(helper, "copilot"),
                         "timeoutSec": 5,
@@ -1112,11 +1130,10 @@ const SUPPORTED_AGENTS: [&str; 4] = [
 ///
 /// Такой список нужен отдельно от списка установленных, потому что хуки у
 /// агентов покрывают разное. Claude Code присылает `Notification` — и на
-/// вопрос, и на запрос разрешения. У copilot мы ставим `agentStop` (конец
-/// хода) и `PreToolUse` (заявка на файл, это про другое), у opencode —
-/// только `session.idle`. Их запрос разрешения хук не заметит вовсе, и
-/// единственный сигнал о нём — звонок BEL из вывода панели.
-const PROMPT_CHANNEL_AGENTS: [&str; 1] = ["claude"];
+/// вопрос, и на запрос разрешения; copilot шлёт его в той же форме. У
+/// opencode — только `session.idle`: его запрос разрешения хук не заметит
+/// вовсе, и единственный сигнал о нём — звонок BEL из вывода панели.
+const PROMPT_CHANNEL_AGENTS: [&str; 2] = ["claude", "copilot"];
 
 /// Агенты, чей канал уведомлений подключён прямо сейчас.
 ///
@@ -1874,6 +1891,16 @@ mod tests {
             value["hooks"]["agentStop"][0]["bash"],
             hook_command(&helper(), "copilot")
         );
+        // Запрос разрешения copilot сообщает только этим хуком: звонка нет, а
+        // счётчик на экране не даёт наступить тишине.
+        assert_eq!(
+            value["hooks"]["notification"][0]["bash"],
+            hook_command(&helper(), "copilot")
+        );
+        // Решающий хук мы не ставим: он отвечал бы за пользователя.
+        assert!(value["hooks"].get("permissionRequest").is_none());
+        // Раз хук говорит и о запросах, звонок от copilot ничего не добавит.
+        assert!(PROMPT_CHANNEL_AGENTS.contains(&"copilot"));
     }
 
     #[test]
@@ -1944,6 +1971,29 @@ mod tests {
         assert_eq!(event.message, "Claude needs your permission to run Bash");
         // Диалог агент называет сам — искать его по каталогу больше не нужно.
         assert_eq!(event.session_id, "abc");
+    }
+
+    #[test]
+    fn names_a_notification_by_what_actually_happened() {
+        // Нагрузка дословно с живого copilot 1.0.82 на запросе разрешения.
+        // В тексте о разрешении ни слова — понять, что это запрос, можно
+        // только по `notification_type`.
+        let event = parse_event(
+            r#"{"agent":"copilot","panelId":"panel-3","payload":{
+                "sessionId":"a098d99e-95f7-45a0-adf6-81ad3b58141c",
+                "timestamp":1791959355650,
+                "cwd":"/tmp/x",
+                "message":"Run command: mkdir probe-dir",
+                "title":"Permission needed",
+                "hook_event_name":"Notification",
+                "notification_type":"permission_prompt"
+            }}"#,
+        )
+        .expect("уведомление copilot должно разбираться");
+
+        assert_eq!(event.event, "permission_prompt");
+        assert_eq!(event.message, "Run command: mkdir probe-dir");
+        assert_eq!(event.session_id, "a098d99e-95f7-45a0-adf6-81ad3b58141c");
     }
 
     #[test]
