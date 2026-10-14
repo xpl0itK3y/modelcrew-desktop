@@ -30,6 +30,7 @@ import {
   acknowledgeAgentPanel,
   createAgentAlertTracker,
   disposeAgentAlertTracker,
+  endSpawnMuteOnSend,
   forgetAgentPanel,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
@@ -777,6 +778,7 @@ async function spawnTerminal(
     // проекте два и по свежести файлов их чаты не различить.
     if (data.includes("\r")) {
       noteAgentTurn(entry.id);
+      endSpawnMuteOnSend(entry.alerts);
     }
     if (!entry.exited) {
       void invoke("pty_write", { id: entry.id, data }).catch(() => {});

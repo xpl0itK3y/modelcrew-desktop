@@ -31,6 +31,7 @@ import {
   SPAWN_ALERT_MUTE_MS,
   acknowledgeAgentPanel,
   createAgentAlertTracker,
+  endSpawnMuteOnSend,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   muteAlertsWhileRedrawing,
@@ -441,6 +442,21 @@ describe("trackAgentOutput", () => {
     // законченная работа — у каждой панели по очереди.
     expect(mocks.playSound).not.toHaveBeenCalled();
     expect(getAgentAttentionCount()).toBe(0);
+  });
+
+  it("hears the first answer of a fresh panel once the user has sent it", async () => {
+    // Открыли панель, подняли codex, написали «привет» — и ушли. Ответ
+    // приходит раньше, чем истекают 25 секунд после запуска, и под
+    // глушением его звонок пропадал: ни баннера, ни точки.
+    const fresh = engaged("fresh-panel");
+    muteAlertsAfterSpawn(fresh);
+    endSpawnMuteOnSend(fresh);
+
+    trackAgentOutput(fresh, "fresh-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("fresh-panel")).toBe(true);
   });
 
   it("stays silent right after spawn, for plain shells and when watched", async () => {
