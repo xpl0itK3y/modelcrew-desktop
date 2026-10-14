@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AGENTS,
   agentChatClaimedNearby,
   bindAgentSession,
   bindAgentSessionFromHook,
+  bindAgentSessionFromTurn,
   boundAgentSessionIds,
   buildAgentResume,
   getAgentRecord,
@@ -12,6 +13,7 @@ import {
   isShellProcess,
   loadAgentResumeMode,
   matchAgent,
+  noteAgentTurn,
   noteResumedAgentSession,
   noteSessionWorkspace,
   pruneAgentRecords,
@@ -825,5 +827,173 @@ describe("agent catalog", () => {
     expect(loadAgentResumeMode()).toBe("insert");
     localStorage.setItem("modelcrew.agentResumeMode", "garbage");
     expect(loadAgentResumeMode()).toBe("auto");
+  });
+});
+
+describe("binding a codex panel by the turn its Enter started", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(null);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Ответы по имени команды: локатор по свежести бежит рядом и спрашивает о
+  // своём, а сюда должны приходить только вопросы про ход.
+  function answerTurns(answers: (string | null)[]): void {
+    invokeMock.mockImplementation((command: string) => {
+      if (command !== "agent_session_locate_turn") {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(answers.length > 0 ? answers.shift() : null);
+    });
+  }
+
+  function turnCalls(): unknown[][] {
+    return invokeMock.mock.calls.filter(
+      ([command]) => command === "agent_session_locate_turn",
+    );
+  }
+
+  function openCodex(panel: string): void {
+    rememberAgentProcess(panel, "codex");
+    scheduleAgentSessionBinding(panel, "/tmp/proj", "ws-1");
+  }
+
+  it("gives a free panel the conversation its turn began in", async () => {
+    vi.setSystemTime(5_000_000);
+    openCodex("turn-free");
+    answerTurns(["chat-mine"]);
+
+    noteAgentTurn("turn-free");
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(turnCalls()).toEqual([
+      [
+        "agent_session_locate_turn",
+        { agent: "codex", cwd: "/tmp/proj", turnEpochMs: 5_000_000 },
+      ],
+    ]);
+    expect(getAgentRecord("turn-free")!.sessionId).toBe("chat-mine");
+    // Привязка запомнена вместе с папкой — переживёт и выход агента.
+    rememberAgentProcess("turn-free", "zsh");
+    expect(rememberedSessionId("turn-free", "codex")).toBe("chat-mine");
+    expect(agentChatClaimedNearby("codex", "someone-else", "ws-1")).toBe(true);
+  });
+
+  it("asks again while the turn is not in the journal yet, then stops", async () => {
+    openCodex("turn-late");
+    answerTurns([null, null, "chat-late"]);
+
+    noteAgentTurn("turn-late");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getAgentRecord("turn-late")!.sessionId).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getAgentRecord("turn-late")!.sessionId).toBe("chat-late");
+
+    // Три вопроса на нажатие, и больше ни одного.
+    openCodex("turn-silent");
+    invokeMock.mockClear();
+    answerTurns([]);
+    noteAgentTurn("turn-silent");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(turnCalls()).toHaveLength(3);
+  });
+
+  it("listens to the latest Enter only", async () => {
+    vi.setSystemTime(7_000_000);
+    openCodex("turn-twice");
+    answerTurns([]);
+
+    noteAgentTurn("turn-twice");
+    await vi.advanceTimersByTimeAsync(1_000);
+    noteAgentTurn("turn-twice");
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // Первый вопрос так и не ушёл: его ход сошёл бы за второй голос.
+    expect(turnCalls()).toEqual([
+      [
+        "agent_session_locate_turn",
+        expect.objectContaining({ turnEpochMs: 7_001_000 }),
+      ],
+    ]);
+  });
+
+  it("leaves agents whose hook names the session alone", async () => {
+    rememberAgentProcess("turn-claude", "claude");
+    scheduleAgentSessionBinding("turn-claude", "/tmp/proj", "ws-1");
+
+    noteAgentTurn("turn-claude");
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(turnCalls()).toEqual([]);
+  });
+
+  it("forgets a pending question when the panel is closed", async () => {
+    openCodex("turn-closed");
+    noteAgentTurn("turn-closed");
+    discardAgentRecord("turn-closed");
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(turnCalls()).toEqual([]);
+  });
+
+  it("takes a neighbour's chat only on a second independent turn", () => {
+    rememberAgentProcess("turn-a", "codex");
+    rememberAgentProcess("turn-b", "codex");
+    // Догадка по свежести отдала соседке чужой чат.
+    bindAgentSession("turn-b", "chat-x", "ws-1");
+
+    // Один Enter мог и не начать ход: в окно попал ход самой соседки.
+    expect(bindAgentSessionFromTurn("turn-a", "chat-x", 1_000, "ws-1")).toBe(
+      false,
+    );
+    expect(getAgentRecord("turn-b")!.sessionId).toBe("chat-x");
+    // Окна пересекаются — это тот же ход, а не второй.
+    expect(bindAgentSessionFromTurn("turn-a", "chat-x", 6_000, "ws-1")).toBe(
+      false,
+    );
+
+    expect(bindAgentSessionFromTurn("turn-a", "chat-x", 12_000, "ws-1")).toBe(
+      true,
+    );
+    expect(getAgentRecord("turn-a")!.sessionId).toBe("chat-x");
+    expect(getAgentRecord("turn-b")!.sessionId).toBeUndefined();
+    expect(rememberedSessionId("turn-b", "codex")).toBeUndefined();
+  });
+
+  it("follows the panel into another conversation opened inside the agent", () => {
+    rememberAgentProcess("turn-switch", "codex");
+    bindAgentSession("turn-switch", "chat-old", "ws-1");
+
+    expect(
+      bindAgentSessionFromTurn("turn-switch", "chat-new", 0, "ws-1"),
+    ).toBe(false);
+    // Голос за другой чат начинает счёт заново.
+    expect(
+      bindAgentSessionFromTurn("turn-switch", "chat-other", 20_000, "ws-1"),
+    ).toBe(false);
+    expect(
+      bindAgentSessionFromTurn("turn-switch", "chat-new", 40_000, "ws-1"),
+    ).toBe(false);
+    expect(getAgentRecord("turn-switch")!.sessionId).toBe("chat-old");
+
+    expect(
+      bindAgentSessionFromTurn("turn-switch", "chat-new", 60_000, "ws-1"),
+    ).toBe(true);
+    expect(getAgentRecord("turn-switch")!.sessionId).toBe("chat-new");
+    expect(rememberedSessionId("turn-switch", "codex")).toBe("chat-new");
+  });
+
+  it("refuses an id that could not be a session", () => {
+    rememberAgentProcess("turn-hostile", "codex");
+    expect(
+      bindAgentSessionFromTurn("turn-hostile", "; rm -rf ~", 0, "ws-1"),
+    ).toBe(false);
+    expect(getAgentRecord("turn-hostile")!.sessionId).toBeUndefined();
   });
 });

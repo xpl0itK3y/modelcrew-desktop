@@ -30,6 +30,10 @@ export type AgentDefinition = {
   // Аргументы точного возобновления: id сессии добавляется последним.
   // Отсутствует у агентов без адресного resume.
   resumeSession?: string[];
+  // Журнал агента помечает временем начало каждого хода, и диалог панели
+  // находится по её собственному Enter. Нужно тем, чей хук своего id не
+  // называет.
+  bindsByTurn?: boolean;
 };
 
 // Флаги сверены с документацией CLI (июль 2026).
@@ -49,6 +53,7 @@ export const AGENTS: AgentDefinition[] = [
     resumeLast: ["resume", "--last"],
     resumePicker: ["resume"],
     resumeSession: ["resume"],
+    bindsByTurn: true,
   },
   {
     id: "copilot",
@@ -570,6 +575,7 @@ export function discardAgentRecord(terminalId: string): void {
   agentMisses.delete(terminalId);
   bindingRoots.delete(terminalId);
   resumedSessions.delete(terminalId);
+  forgetTurns(terminalId);
   const sessions = loadSessions();
   if (sessions[terminalId]) {
     delete sessions[terminalId];
@@ -928,4 +934,144 @@ export function retryAgentSessionBinding(terminalId: string): void {
   if (root) {
     startBinding(terminalId, root, Date.now());
   }
+}
+
+// ---------------------------------------------------------------------------
+// Привязка по началу хода. Локатор выше догадывается по свежести файлов, а
+// при двух одинаковых агентах в одном проекте свежими выглядят оба разговора:
+// какой из них чей, по времени записи не понять. Зато ход начинается от Enter
+// в своей панели, и codex пишет начало хода в журнал с меткой времени.
+// Бэкенд ищет разговор, где ход начался сразу после нажатия, и отвечает,
+// только когда такой разговор один.
+
+// Отсчёт от нажатия. Бэкенд ждёт начала хода до восьми секунд: первый ход
+// свежего разговора стартует, только когда поднимутся MCP-серверы.
+const TURN_CHECK_DELAYS_MS = [2_000, 5_000, 10_000];
+
+// Два совпадения считаются независимыми, только если их окна не
+// пересекаются: иначе один и тот же ход проголосовал бы дважды.
+const INDEPENDENT_TURN_GAP_MS = 10_000;
+
+const turnChecks = new Map<string, { timer?: number }>();
+
+// Совпадение, которому пока не поверили: см. bindAgentSessionFromTurn.
+const turnVotes = new Map<string, { sessionId: string; turnAt: number }>();
+
+function forgetTurns(terminalId: string): void {
+  const check = turnChecks.get(terminalId);
+  if (check?.timer !== undefined) {
+    window.clearTimeout(check.timer);
+  }
+  turnChecks.delete(terminalId);
+  turnVotes.delete(terminalId);
+}
+
+// Ответ про ход панели. Свободный чат панели без привязки достаётся ей сразу.
+// Сменить чат, который панель уже считает своим, или забрать чат у соседки
+// можно только по второму независимому ходу: Enter начинает ход не всегда
+// (подтверждение команды, выбор в меню), и тогда в окно мог попасть ход,
+// который соседка начала сама. Дважды подряд так случайно не совпадёт.
+//
+// Смена своего чата — не ошибка локатора, а обычное дело: внутри агента
+// открыли другой диалог (`/resume`, `/new`). Привязка идёт за панелью, и
+// после перезапуска откроется тот разговор, что был в ней последним.
+export function bindAgentSessionFromTurn(
+  terminalId: string,
+  sessionId: string,
+  turnAt: number,
+  workspaceId?: string,
+): boolean {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return false;
+  }
+  const record = getAgentRecord(terminalId);
+  if (!record) {
+    return false;
+  }
+  if (record.sessionId === sessionId) {
+    turnVotes.delete(terminalId);
+    return true;
+  }
+  const contested =
+    record.sessionId !== undefined ||
+    boundAgentSessionIds(record.agentId, terminalId).includes(sessionId);
+  if (!contested) {
+    turnVotes.delete(terminalId);
+    return bindAgentSession(terminalId, sessionId, workspaceId);
+  }
+  const vote = turnVotes.get(terminalId);
+  if (vote?.sessionId !== sessionId) {
+    turnVotes.set(terminalId, { sessionId, turnAt });
+    return false;
+  }
+  if (turnAt - vote.turnAt < INDEPENDENT_TURN_GAP_MS) {
+    return false;
+  }
+  turnVotes.delete(terminalId);
+  // Два хода подряд — слово того же веса, что и у хука: чат снимается с
+  // соседки, к которой он попал прежней догадкой.
+  return bindAgentSessionFromHook(terminalId, sessionId, workspaceId);
+}
+
+async function locateTurn(
+  agentId: string,
+  root: BindingRoot,
+  turnAt: number,
+): Promise<string | null> {
+  try {
+    return await invoke<string | null>("agent_session_locate_turn", {
+      agent: agentId,
+      cwd: root.cwd,
+      turnEpochMs: Math.max(0, Math.round(turnAt)),
+    });
+  } catch {
+    return null; // поиск best-effort: следующий Enter спросит снова
+  }
+}
+
+// Зовётся на Enter в панели. Каждое нажатие — новый вопрос, поэтому привязка
+// держится за панелью и тогда, когда она уже есть: точнее хода её всё равно
+// ничто не подтвердит.
+export function noteAgentTurn(terminalId: string): void {
+  if (!isTauri) {
+    return;
+  }
+  const record = getAgentRecord(terminalId);
+  const root = bindingRoots.get(terminalId);
+  const agent = AGENTS.find((entry) => entry.id === record?.agentId);
+  if (!record || !root || !agent?.bindsByTurn) {
+    return;
+  }
+  // Прежнее нажатие уступает новому. Его ответ уже не нужен, а услышанный
+  // дважды один и тот же ход сошёл бы за два.
+  const previous = turnChecks.get(terminalId);
+  if (previous?.timer !== undefined) {
+    window.clearTimeout(previous.timer);
+  }
+  const check: { timer?: number } = {};
+  turnChecks.set(terminalId, check);
+  const turnAt = Date.now();
+  let attempt = 0;
+  const tryLocate = () => {
+    check.timer = undefined;
+    void locateTurn(record.agentId, root, turnAt).then((found) => {
+      if (turnChecks.get(terminalId) !== check) {
+        return;
+      }
+      attempt += 1;
+      // Пока шёл поиск, агент в панели мог смениться.
+      if (found && getAgentRecord(terminalId)?.agentId === record.agentId) {
+        bindAgentSessionFromTurn(terminalId, found, turnAt, root.workspaceId);
+      }
+      if (found || attempt >= TURN_CHECK_DELAYS_MS.length) {
+        turnChecks.delete(terminalId);
+        return;
+      }
+      check.timer = window.setTimeout(
+        tryLocate,
+        TURN_CHECK_DELAYS_MS[attempt] - TURN_CHECK_DELAYS_MS[attempt - 1],
+      );
+    });
+  };
+  check.timer = window.setTimeout(tryLocate, TURN_CHECK_DELAYS_MS[0]);
 }

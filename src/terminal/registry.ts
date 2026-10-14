@@ -20,6 +20,7 @@ import {
   discardAgentRecord,
   getAgentRecord,
   loadAgentResumeMode,
+  noteAgentTurn,
   noteResumedAgentSession,
   noteSessionWorkspace,
   rememberedSessionId,
@@ -771,6 +772,12 @@ async function spawnTerminal(
     // Первое сообщение агенту создаёт файл его сессии — самый момент, чтобы
     // привязать её к панели, если при запуске файла ещё не было.
     retryAgentSessionBinding(entry.id);
+    // Enter отправляет агенту сообщение и начинает ход. По началу хода
+    // разговор панели находится точно, даже когда одинаковых агентов в
+    // проекте два и по свежести файлов их чаты не различить.
+    if (data.includes("\r")) {
+      noteAgentTurn(entry.id);
+    }
     if (!entry.exited) {
       void invoke("pty_write", { id: entry.id, data }).catch(() => {});
     }
