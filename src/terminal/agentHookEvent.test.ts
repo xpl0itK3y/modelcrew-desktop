@@ -49,6 +49,9 @@ describe("agentHookAlert", () => {
     expect(agentHookAlert(hook("permission.asked", "", "opencode"))?.kind).toBe(
       "permission",
     );
+    expect(agentHookAlert(hook("question.asked", "", "opencode"))?.kind).toBe(
+      "question",
+    );
     expect(
       agentHookAlert(hook("permission_prompt", "", "copilot"))?.kind,
     ).toBe("permission");

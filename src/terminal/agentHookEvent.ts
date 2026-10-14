@@ -27,6 +27,7 @@ const EVENT_KINDS: Record<string, PreciseAgentAlertKind> = {
   subagentstop: "completed",
   sessionidle: "completed", // opencode
   permissionasked: "permission", // opencode
+  questionasked: "question", // opencode
   agentstop: "completed", // copilot
   // Вид уведомления, когда хук «Notification» его называет (claude, copilot).
   permissionprompt: "permission",

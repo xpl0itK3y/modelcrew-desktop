@@ -639,12 +639,36 @@ fn opencode_plugin() -> String {
     OPENCODE_PLUGIN.replace("__AGENT__", "opencode")
 }
 
-const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew: заявки на файлы и сообщение о том, что агент затих.
+const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew: заявки на файлы и сообщение о том, что агент затих или
+// ждёт ответа.
 import { mkdirSync, renameSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = () => process.env.MODELCREW_EVENTS_DIR;
 const panel = () => process.env.MODELCREW_PANEL_ID;
+
+// Конец хода и всё, на чём агент встал и ждёт человека. Запрос разрешения
+// opencode не сопровождает ни звонком, ни выводом: без этих событий он
+// доходил только догадкой по тишине — на полминуты позже и без слова о том,
+// что просят разрешения.
+const REPORTED = new Set(["session.idle", "permission.asked", "question.asked"]);
+
+// Строка для баннера: о чём агент просит. Форма свойств у шины менялась,
+// поэтому читаем осторожно; не разобрали — пусто, баннер назовёт сам вид.
+function describe(type, props) {
+  if (type === "permission.asked") {
+    const patterns = Array.isArray(props?.patterns) ? props.patterns.join(" ") : "";
+    return [props?.permission, patterns]
+      .filter((part) => typeof part === "string" && part)
+      .join(": ");
+  }
+  if (type === "question.asked") {
+    const first = Array.isArray(props?.questions) ? props.questions[0] : undefined;
+    const text = first?.question ?? first?.header;
+    return typeof text === "string" ? text : "";
+  }
+  return "";
+}
 
 function put(body) {
   // Сначала временный файл, потом переименование: вотчер не должен прочитать
@@ -700,7 +724,8 @@ export const ModelCrewNotify = async () => ({
     }
   },
   event: async (arg) => {
-    if (arg?.event?.type !== "session.idle") return;
+    const type = arg?.event?.type;
+    if (!REPORTED.has(type)) return;
     if (!dir() || !panel()) return;
     try {
       mkdirSync(dir(), { recursive: true });
@@ -714,7 +739,11 @@ export const ModelCrewNotify = async () => ({
         arg.event.properties?.info?.id;
       const sessionId =
         typeof raw === "string" && /^ses[A-Za-z0-9_-]*$/.test(raw) ? raw : "";
-      put({ agent: "__AGENT__", panelId: panel(), payload: { type: "session.idle", session_id: sessionId } });
+      put({
+        agent: "__AGENT__",
+        panelId: panel(),
+        payload: { type, message: describe(type, arg.event.properties), session_id: sessionId },
+      });
     } catch {
       // Уведомление — дополнение; его сбой не должен мешать сессии.
     }
@@ -1130,10 +1159,11 @@ const SUPPORTED_AGENTS: [&str; 4] = [
 ///
 /// Такой список нужен отдельно от списка установленных, потому что хуки у
 /// агентов покрывают разное. Claude Code присылает `Notification` — и на
-/// вопрос, и на запрос разрешения; copilot шлёт его в той же форме. У
-/// opencode — только `session.idle`: его запрос разрешения хук не заметит
-/// вовсе, и единственный сигнал о нём — звонок BEL из вывода панели.
-const PROMPT_CHANNEL_AGENTS: [&str; 2] = ["claude", "copilot"];
+/// вопрос, и на запрос разрешения; copilot шлёт его в той же форме, а
+/// плагин opencode пересылает `permission.asked` и `question.asked`. Хук,
+/// который сообщает только конец хода, запрос разрешения не заметит вовсе,
+/// и тогда единственный сигнал о нём — звонок BEL из вывода панели.
+const PROMPT_CHANNEL_AGENTS: [&str; 3] = ["claude", "copilot", "opencode"];
 
 /// Агенты, чей канал уведомлений подключён прямо сейчас.
 ///
@@ -1867,7 +1897,13 @@ mod tests {
         // проверено на живой сессии, поэтому обработчик именно `event`.
         assert!(body.contains("event: async (arg)"), "{body}");
         assert!(!body.contains(r#""session.idle": async"#), "{body}");
-        assert!(body.contains(r#"arg?.event?.type !== "session.idle""#));
+        // Кроме конца хода — запрос разрешения и вопрос: проверено на живом
+        // opencode 1.19, ни звонка, ни вывода при них нет, и без этих
+        // событий запрос доходил только догадкой по тишине.
+        for event in ["session.idle", "permission.asked", "question.asked"] {
+            assert!(body.contains(&format!(r#""{event}""#)), "{event}");
+        }
+        assert!(PROMPT_CHANNEL_AGENTS.contains(&"opencode"));
         // Без окружения панели событие некуда привязать — молча выходим.
         assert!(body.contains("MODELCREW_PANEL_ID"));
         assert!(body.contains("MODELCREW_EVENTS_DIR"));
@@ -1994,6 +2030,23 @@ mod tests {
         assert_eq!(event.event, "permission_prompt");
         assert_eq!(event.message, "Run command: mkdir probe-dir");
         assert_eq!(event.session_id, "a098d99e-95f7-45a0-adf6-81ad3b58141c");
+    }
+
+    #[test]
+    fn reads_an_opencode_permission_prompt_from_its_plugin() {
+        // Так кладёт событие наш плагин opencode.
+        let event = parse_event(
+            r#"{"agent":"opencode","panelId":"panel-4","payload":{
+                "type":"permission.asked",
+                "message":"bash: ls",
+                "session_id":"ses_ec6e46e45ffekVer8M92xHZ1NS"
+            }}"#,
+        )
+        .expect("событие opencode должно разбираться");
+
+        assert_eq!(event.event, "permission.asked");
+        assert_eq!(event.message, "bash: ls");
+        assert_eq!(event.session_id, "ses_ec6e46e45ffekVer8M92xHZ1NS");
     }
 
     #[test]
