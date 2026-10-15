@@ -1601,6 +1601,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_session_open_since_before_the_switch_hears_why_it_is_over() {
         use std::io::{BufRead, BufReader, Write};
@@ -1670,6 +1671,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn carries_a_whole_conversation_over_a_real_socket() {
         use std::io::{BufRead, BufReader, Write};
