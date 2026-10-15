@@ -4,14 +4,15 @@
 //! Адрес, ожидание загрузки и снимок у каждой системы свои: WKWebView,
 //! WebKitGTK, WebView2. Проверить их можно только живыми, поэтому тест
 //! запускает приложение проверкой (`--browser-page-check`): оно открывает
-//! страницы сплошного цвета со своего сервера, снимает их и пишет отчёт. Здесь
-//! смотрим в отчёт и в сами кадры — размер и цвет посередине.
+//! страницы сплошного цвета со своего сервера, снимает их, читает их консоль и
+//! пишет отчёт. Здесь смотрим в отчёт и в сами кадры — размер и цвет
+//! посередине.
 
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 const APP: &str = env!("CARGO_BIN_EXE_modelcrew-desktop");
 
@@ -79,6 +80,23 @@ fn the_page_loads_shows_itself_and_closes() {
         "{green:#}"
     );
 
+    // Консоль: и то, что страница написала сама, и то, что с ней случилось.
+    let console = &report["green_console"];
+    for (level, text) in [
+        // Подстановки разобраны, а CSS из %c в текст не попал.
+        ("log", r#"зелёная страница {"n":1}"#),
+        ("warn", "осторожно"),
+        ("error", "сломалось"),
+        ("exception", "не поймали"),
+        ("rejection", "отказ"),
+        ("resource", "/missing.png"),
+    ] {
+        assert!(
+            said(console, level, text),
+            "в консоли нет {level} «{text}»: {console:#}"
+        );
+    }
+
     // Страница подогнана под ящик — и кадр с ней.
     let small = &report["small"];
     page_is(small, "green", pixels(FIT));
@@ -91,6 +109,13 @@ fn the_page_loads_shows_itself_and_closes() {
         centre(&out.path().join("blue.png")),
         Colour::Blue,
         "{blue:#}"
+    );
+    // У новой страницы консоль своя: от зелёной в ней ничего не осталось.
+    assert_eq!(
+        report["blue_console"]["messages"],
+        json!([{ "level": "info", "text": "синяя" }]),
+        "{:#}",
+        report["blue_console"]
     );
 
     assert_eq!(report["closed"], true, "страница не закрылась: {report:#}");
@@ -116,6 +141,18 @@ fn page_is(shot: &Value, name: &str, size: (f64, f64)) {
         (Some(size.0), Some(size.1)),
         "не тот размер кадра: {shot:#}"
     );
+}
+
+/// Есть ли в консоли сообщение этого уровня с таким текстом.
+fn said(console: &Value, level: &str, text: &str) -> bool {
+    console["messages"].as_array().is_some_and(|messages| {
+        messages.iter().any(|message| {
+            message["level"] == level
+                && message["text"]
+                    .as_str()
+                    .is_some_and(|said| said.contains(text))
+        })
+    })
 }
 
 #[derive(Debug, PartialEq)]

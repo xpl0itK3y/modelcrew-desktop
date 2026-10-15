@@ -3,8 +3,8 @@
 //! Юнит-тестом страницу не проверить: она живёт только в работающем
 //! приложении, с его циклом событий и окнами. Поэтому тест запускает само
 //! приложение с флагом, а оно открывает страницы со своего маленького
-//! сервера, снимает их и записывает, что увидело. В кадры смотрит уже тест —
-//! `tests/browser_page_live.rs`.
+//! сервера, снимает их, читает их консоль и записывает, что увидело. В кадры
+//! и в отчёт смотрит уже тест — `tests/browser_page_live.rs`.
 //!
 //! Вход есть только в отладочной сборке: в выпуске его нет вовсе.
 
@@ -39,6 +39,26 @@ const SETTLE_WAIT: Duration = Duration::from_secs(5);
 
 /// Размер, под который проверка подгоняет страницу.
 const FIT: (f64, f64) = (800.0, 600.0);
+
+/// Что зелёная страница пишет в консоль: всё, что запись обязана поймать, —
+/// подстановки с цветом, предупреждение, ошибку, исключение, которое никто не
+/// поймал, отказ промиса и картинку, которой нет.
+const GREEN_SCRIPT: &str = concat!(
+    "<img src=\"/missing.png\" alt=\"\">",
+    "<script>",
+    "console.log(\"%cзелёная%c %s\", \"color: green\", \"\", \"страница\", { n: 1 });",
+    "console.warn(\"осторожно\");",
+    "console.error(new Error(\"сломалось\"));",
+    "Promise.reject(new Error(\"отказ\"));",
+    "throw new Error(\"не поймали\");",
+    "</script>",
+);
+
+/// Сколько сообщений у зелёной страницы — по одному на строку выше.
+const GREEN_MESSAGES: usize = 6;
+
+/// Синяя страница пишет одно: после перехода консоль обязана начаться заново.
+const BLUE_SCRIPT: &str = "<script>console.info(\"синяя\");</script>";
 
 /// Чем закончилась проверка. Код, переданный в `exit`, Tauri возвращает не
 /// везде — на Linux он теряется, и проваленная проверка выходила бы нулём.
@@ -120,6 +140,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     browser_page::open(app, ROOT, &site.url("green"))?;
     let green = shot(app, out, "green")?;
+    let green_console = console(app, GREEN_MESSAGES)?;
 
     // Размер меняет система, и кадр в новом размере выходит не сразу.
     browser_page::fit(app, ROOT, FIT.0, FIT.1)?;
@@ -135,6 +156,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     browser_page::open(app, ROOT, &site.url("blue"))?;
     let blue = shot(app, out, "blue")?;
+    let blue_console = console(app, 1)?;
 
     let scale = app
         .get_webview_window(&browser_page::label_for(ROOT))
@@ -149,8 +171,10 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
     Ok(json!({
         "scale": scale,
         "green": green,
+        "green_console": green_console,
         "small": small,
         "blue": blue,
+        "blue_console": blue_console,
         "closed": !browser_page::is_open(app, ROOT),
     }))
 }
@@ -173,6 +197,26 @@ fn shot(app: &AppHandle, out: &Path, name: &str) -> Result<Value, String> {
     }))
 }
 
+/// Консоль страницы, когда в ней наберётся хотя бы столько сообщений.
+///
+/// Не всё приходит к концу загрузки: отказ промиса и незагрузившаяся картинка
+/// бывают и после. Не дождались — отдаём что есть, и разберётся тест.
+fn console(app: &AppHandle, at_least: usize) -> Result<Value, String> {
+    let deadline = Instant::now() + SETTLE_WAIT;
+    loop {
+        let log = browser_page::console(app, ROOT)?;
+        if log.messages.len() >= at_least || Instant::now() >= deadline {
+            let messages: Vec<Value> = log
+                .messages
+                .iter()
+                .map(|message| json!({ "level": message.level, "text": message.text }))
+                .collect();
+            return Ok(json!({ "messages": messages, "dropped": log.dropped }));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// Размер PNG из его заголовка — разбирать картинку целиком ради него незачем.
 fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -183,7 +227,8 @@ fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     Some((number(16), number(20)))
 }
 
-/// Сайт проверки: две страницы сплошного цвета на петле.
+/// Сайт проверки: две страницы сплошного цвета на петле. Всё прочее —
+/// «не найдено»: на это и рассчитана картинка, которой нет.
 ///
 /// Свой сервер, а не адрес в сети: проверка не должна зависеть от того, есть
 /// ли интернет на машине, где идут тесты.
@@ -226,10 +271,10 @@ fn answer(mut stream: TcpStream) {
     }
     let path = request.split_whitespace().nth(1).unwrap_or("/");
     let (status, body) = match path {
-        "/green" => ("200 OK", page("green", "#00c000")),
+        "/green" => ("200 OK", page("green", "#00c000", GREEN_SCRIPT)),
         "/blue" => {
             std::thread::sleep(SLOW_PAGE);
-            ("200 OK", page("blue", "#0000ff"))
+            ("200 OK", page("blue", "#0000ff", BLUE_SCRIPT))
         }
         _ => ("404 Not Found", String::new()),
     };
@@ -241,12 +286,12 @@ fn answer(mut stream: TcpStream) {
     );
 }
 
-fn page(name: &str, color: &str) -> String {
+fn page(name: &str, color: &str, body: &str) -> String {
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
          <title>ModelCrew check: {name}</title>\
          <style>html,body{{margin:0;height:100%;background:{color}}}</style>\
-         </head><body></body></html>"
+         </head><body>{body}</body></html>"
     )
 }
 

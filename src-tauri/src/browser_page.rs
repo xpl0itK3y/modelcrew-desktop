@@ -47,6 +47,18 @@ const LOAD_POLL: Duration = Duration::from_millis(100);
 /// самого приложения.
 const LABEL_PREFIX: &str = "page-";
 
+/// Запись консоли: ставится в каждую страницу раньше её собственных скриптов.
+const CONSOLE_SCRIPT: &str = include_str!("browser_console.js");
+
+/// Забрать записанное. Отвечает строкой JSON, а если записи на странице нет —
+/// `null`: подделать читателя страница не может, но и поставить его могло не
+/// успеть.
+const READ_CONSOLE: &str = concat!(
+    "(() => { try { const read = window.__modelcrewConsole; ",
+    "return typeof read === \"function\" ? read() : null; } ",
+    "catch (_) { return null; } })()",
+);
+
 /// Метка окна страницы проекта.
 ///
 /// Метка — отпечаток корня, а не сам путь: в пути есть разделители, пробелы и
@@ -80,7 +92,10 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
         .position(OFFSCREEN.0, OFFSCREEN.1)
         .decorations(false)
         .skip_taskbar(true)
-        .focused(false);
+        .focused(false)
+        // Консоль страницы не узнать задним числом: писать за ней надо с
+        // первой её строчки.
+        .initialization_script(CONSOLE_SCRIPT);
     #[cfg(windows)]
     let builder = system::watch_loading(builder, &label);
     #[cfg(target_os = "linux")]
@@ -196,6 +211,58 @@ pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
 /// Адрес и заголовок страницы — то, чем она подписывается агенту.
 pub fn info(app: &AppHandle, root: &str) -> Result<(String, String), String> {
     ask(app, root, system::info)
+}
+
+/// Что страница написала в консоль с тех пор, как загрузилась.
+#[derive(Debug, Default, PartialEq, serde::Deserialize)]
+pub struct ConsoleLog {
+    pub messages: Vec<ConsoleMessage>,
+    /// Сколько ранних сообщений вытеснено новыми.
+    #[serde(default)]
+    pub dropped: u64,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+pub struct ConsoleMessage {
+    /// Метод console — log, info, warn, error, debug, — либо то, что страница
+    /// не писала сама: exception, rejection, resource.
+    pub level: String,
+    pub text: String,
+}
+
+/// Консоль страницы проекта.
+///
+/// Платформенного кода здесь нет: спросить страницу и получить ответ JSON
+/// умеют все три webview, и Tauri даёт это одним вызовом.
+pub fn console(app: &AppHandle, root: &str) -> Result<ConsoleLog, String> {
+    let window = app
+        .get_webview_window(&label_for(root))
+        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    window
+        .eval_with_callback(READ_CONSOLE, move |answer| {
+            let _ = sender.send(answer);
+        })
+        .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+    // До первой загрузки wry держит скрипт в очереди и ответа не будет вовсе.
+    let answer = receiver
+        .recv_timeout(SNAPSHOT_WAIT)
+        .map_err(|_| "страница не ответила".to_string())?;
+    console_of(&answer)
+}
+
+/// Ответ страницы — JSON того, что вернул читатель: строка с записанным или
+/// пусто, если записи нет. Исключение WebKit отдаёт пустой строкой, а
+/// WebView2 — `null`.
+fn console_of(answer: &str) -> Result<ConsoleLog, String> {
+    let recorded = serde_json::from_str::<Option<String>>(answer)
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            "страница не отдала консоль: запись ставится при загрузке, откройте страницу заново"
+                .to_string()
+        })?;
+    serde_json::from_str(&recorded).map_err(|_| "консоль страницы не разобрать".to_string())
 }
 
 /// Дождаться, пока страница догрузится.
@@ -674,5 +741,42 @@ mod tests {
                 .all(|c| c.is_ascii_hexdigit()),
             "метка окна должна остаться простой: {label}"
         );
+    }
+
+    #[test]
+    fn the_console_comes_as_a_string_of_json_inside_json() {
+        // Читатель отдаёт строку, а webview — JSON того, что тот вернул.
+        let answer =
+            serde_json::to_string(r#"{"messages":[{"level":"error","text":"boom"}],"dropped":3}"#)
+                .unwrap();
+        assert_eq!(
+            console_of(&answer),
+            Ok(ConsoleLog {
+                messages: vec![ConsoleMessage {
+                    level: "error".to_string(),
+                    text: "boom".to_string(),
+                }],
+                dropped: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn a_page_without_the_recorder_is_not_a_page_without_errors() {
+        // Пустая консоль сказала бы агенту «ошибок нет», а их могли просто не
+        // записать. WebKit на исключение отдаёт пустую строку, WebView2 — null.
+        for answer in ["null", "", "42"] {
+            let refusal = console_of(answer).unwrap_err();
+            assert!(
+                refusal.contains("не отдала консоль"),
+                "{answer:?}: {refusal}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_console_the_page_tampered_with_is_refused() {
+        let answer = serde_json::to_string("pwned").unwrap();
+        assert!(console_of(&answer).is_err());
     }
 }
