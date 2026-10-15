@@ -82,7 +82,8 @@ jobs:
           toolchain: stable
 
       # Системные библиотеки нужны только Linux: на macOS и Windows вебвью
-      # часть операционной системы.
+      # часть операционной системы. Xvfb — экран для живой проверки страницы
+      # плагина: у раннера Linux своего экрана нет.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -93,7 +94,8 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             libwebkit2gtk-4.1-dev \
-            libxdo-dev
+            libxdo-dev \
+            xvfb
 
       # Без кеша каждый прогон компилирует весь tauri заново — на Windows это
       # самая долгая часть.
@@ -109,4 +111,11 @@ jobs:
           restore-keys: ${{ matrix.os }}-cargo-
 
       - name: Test Rust backend
+        if: runner.os != 'Linux'
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      # Страница плагина — настоящий webview GTK, и её живой проверке нужен
+      # дисплей, пусть и виртуальный.
+      - name: Test Rust backend
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum cargo test --locked --manifest-path src-tauri/Cargo.toml
