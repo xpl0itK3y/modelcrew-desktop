@@ -67,6 +67,15 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Threading",
 ] }
+# Страница плагина на Windows — это WebView2: снимок, адрес и заголовок даёт
+# он сам. Крейты уже в дереве через wry, и версии те же, что у него, —
+# новых зависимостей не добавляется.
+webview2-com = "0.38"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Значок-счётчик на иконке в панели задач. Tauri делает это через libunity и
@@ -75,6 +84,12 @@ windows-sys = { version = "0.59", features = [
 # Версия совпадает с той, что уже в дереве (через single-instance), — второй
 # экземпляр не тянется.
 zbus = "5"
+# Страница плагина на Linux — это WebKitGTK: снимок он отдаёт поверхностью
+# cairo, а в PNG её переводит сам cairo. Живёт страница в окне GTK без экрана.
+# Крейты уже в дереве через wry.
+webkit2gtk = "2.0"
+cairo-rs = { version = "0.18", features = ["png"] }
+gtk = "0.18"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"

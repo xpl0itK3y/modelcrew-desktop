@@ -7,8 +7,11 @@
 //! переживает. Поэтому страницу грузит webview самого ModelCrew: снаружи не
 //! появляется ничего, потому что появляться нечему.
 //!
-//! Окно страницы человеку не показывается — оно живёт за краем экранов, а
-//! видит его человек кадром в панели браузера, как и раньше.
+//! Окно страницы человеку не показывается, а видит её человек кадром в панели
+//! браузера, как и раньше. На macOS и Windows окно стоит за краем экранов. На
+//! Linux так нельзя: Wayland не даёт приложению ставить окна, и композитор
+//! вывел бы страницу прямо перед человеком. Там окно Tauri спрятано, а сама
+//! страница живёт в окне GTK без экрана.
 
 use std::time::Duration;
 
@@ -71,16 +74,27 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
             .navigate(target)
             .map_err(|error| format!("страница не перешла по адресу: {error}"));
     }
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::External(target))
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(target))
         .title("ModelCrew")
         .inner_size(VIEWPORT.0, VIEWPORT.1)
         .position(OFFSCREEN.0, OFFSCREEN.1)
         .decorations(false)
         .skip_taskbar(true)
-        .focused(false)
+        .focused(false);
+    #[cfg(windows)]
+    let builder = system::watch_loading(builder, &label);
+    #[cfg(target_os = "linux")]
+    let builder = builder.visible(false);
+    let page = builder
         .build()
-        .map(|_| ())
-        .map_err(|error| format!("страница не открылась: {error}"))
+        .map_err(|error| format!("страница не открылась: {error}"))?;
+    // Спрятанное окно WebKitGTK не снимает, поэтому на Linux страница
+    // переезжает в окно без экрана, а окно Tauri так и не покажется.
+    #[cfg(target_os = "linux")]
+    system::move_offscreen(&page)?;
+    #[cfg(not(target_os = "linux"))]
+    let _ = page;
+    Ok(())
 }
 
 /// Подогнать страницу под то место, где её показывают.
@@ -93,16 +107,23 @@ pub fn fit(app: &AppHandle, root: &str, width: f64, height: f64) -> Result<(), S
         .get_webview_window(&label_for(root))
         .ok_or_else(|| "страница ещё не открыта".to_string())?;
     let wanted = (width.max(MIN_VIEWPORT.0), height.max(MIN_VIEWPORT.1));
-    // Кадр просят раз в секунду, а перерисовка страницы стоит времени: меняем
-    // размер, только когда он и правда разъехался с местом.
-    if let Some(current) = logical_size(&window) {
-        if (current.0 - wanted.0).abs() < 1.0 && (current.1 - wanted.1).abs() < 1.0 {
-            return Ok(());
+    // На Linux размер страницы знает только окно без экрана: спрятанному
+    // окну Tauri система о его размере не сообщает.
+    #[cfg(target_os = "linux")]
+    return system::resize(&window, wanted.0, wanted.1);
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Кадр просят раз в секунду, а перерисовка страницы стоит времени:
+        // меняем размер, только когда он и правда разъехался с местом.
+        if let Some(current) = logical_size(&window) {
+            if (current.0 - wanted.0).abs() < 1.0 && (current.1 - wanted.1).abs() < 1.0 {
+                return Ok(());
+            }
         }
+        window
+            .set_size(tauri::LogicalSize::new(wanted.0, wanted.1))
+            .map_err(|error| format!("страницу не изменить в размере: {error}"))
     }
-    window
-        .set_size(tauri::LogicalSize::new(wanted.0, wanted.1))
-        .map_err(|error| format!("страницу не изменить в размере: {error}"))
 }
 
 /// Размер окна страницы в тех же единицах, в которых его задают, — точках, а
@@ -163,7 +184,7 @@ pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
         .with_webview(move |platform| {
             // Снимок начинает система и отвечает позже своим вызовом, поэтому
             // ответ уходит в канал, а не возвращается отсюда.
-            platform_snapshot(&platform, width, scale, sender);
+            system::snapshot(&platform, width, scale, sender);
         })
         .map_err(|error| format!("до страницы не достучаться: {error}"))?;
     match receiver.recv_timeout(SNAPSHOT_WAIT) {
@@ -174,7 +195,7 @@ pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
 
 /// Адрес и заголовок страницы — то, чем она подписывается агенту.
 pub fn info(app: &AppHandle, root: &str) -> Result<(String, String), String> {
-    ask(app, root, platform_info)
+    ask(app, root, system::info)
 }
 
 /// Дождаться, пока страница догрузится.
@@ -187,7 +208,7 @@ pub fn wait_ready(app: &AppHandle, root: &str, wait: Duration) -> bool {
     std::thread::sleep(LOAD_START);
     let deadline = std::time::Instant::now() + wait;
     while std::time::Instant::now() < deadline {
-        match ask(app, root, platform_is_loading) {
+        match system::is_loading(app, root) {
             Ok(false) => return true,
             // Окна нет — ждать нечего.
             Err(_) => return false,
@@ -221,113 +242,412 @@ fn ask<T: Send + 'static>(
     }
 }
 
-/// Адрес и заголовок глазами системы.
+/// Куда уходит готовый кадр: система снимает не сразу и отвечает своим
+/// вызовом.
+type Frame = std::sync::mpsc::Sender<Result<Vec<u8>, String>>;
+
+/// macOS: страница — это WKWebView.
 #[cfg(target_os = "macos")]
-fn platform_info(platform: &tauri::webview::PlatformWebview) -> Result<(String, String), String> {
-    let webview = unsafe { &*(platform.inner() as *mut objc2_web_kit::WKWebView) };
-    let url = unsafe { webview.URL() }
-        .and_then(|url| url.absoluteString())
-        .map(|text| text.to_string())
-        .unwrap_or_default();
-    let title = unsafe { webview.title() }
-        .map(|text| text.to_string())
-        .unwrap_or_default();
-    Ok((url, title))
+mod system {
+    use objc2_web_kit::WKWebView;
+    use tauri::{webview::PlatformWebview, AppHandle};
+
+    /// Указатель отдаёт сам Tauri, и отдаёт его на главном потоке — там же,
+    /// где живёт webview. Ничего другого по этому адресу быть не может.
+    fn webview(platform: &PlatformWebview) -> &WKWebView {
+        unsafe { &*(platform.inner() as *mut WKWebView) }
+    }
+
+    /// Адрес и заголовок глазами системы.
+    pub fn info(platform: &PlatformWebview) -> Result<(String, String), String> {
+        let webview = webview(platform);
+        let url = unsafe { webview.URL() }
+            .and_then(|url| url.absoluteString())
+            .map(|text| text.to_string())
+            .unwrap_or_default();
+        let title = unsafe { webview.title() }
+            .map(|text| text.to_string())
+            .unwrap_or_default();
+        Ok((url, title))
+    }
+
+    /// Идёт ли ещё загрузка.
+    pub fn is_loading(app: &AppHandle, root: &str) -> Result<bool, String> {
+        super::ask(app, root, |platform| {
+            Ok(unsafe { webview(platform).isLoading() })
+        })
+    }
+
+    /// Снимок средствами системы.
+    pub fn snapshot(platform: &PlatformWebview, width: u32, scale: f64, sender: super::Frame) {
+        use block2::RcBlock;
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::NSImage;
+        use objc2_foundation::{NSError, NSNumber};
+        use objc2_web_kit::WKSnapshotConfiguration;
+
+        // Tauri зовёт нас на главном потоке — там же, где живёт webview и куда
+        // AppKit пускает только оттуда. Если это вдруг не так, снимка не будет.
+        let Some(main_thread) = MainThreadMarker::new() else {
+            let _ = sender.send(Err("снимок просят не с главного потока".to_string()));
+            return;
+        };
+
+        let config = unsafe { WKSnapshotConfiguration::new(main_thread) };
+        // Ширину снимка система меряет в точках и отдаёт кадр в пикселях
+        // экрана: на ретине их вдвое больше по каждой стороне. Агенту кадр
+        // уходит картинкой в ответе, поэтому просим столько точек, чтобы
+        // пикселей вышло ровно по ширине страницы: вчетверо меньше байт при
+        // той же вёрстке.
+        let points = f64::from(width) / if scale > 0.0 { scale } else { 1.0 };
+        unsafe { config.setSnapshotWidth(Some(&NSNumber::new_f64(points))) };
+        let handler = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+            let _ = sender.send(unsafe { png_of(image, error) });
+        });
+        unsafe {
+            webview(platform)
+                .takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler)
+        };
+    }
+
+    /// Ответ системы на снимок: картинка или беда.
+    unsafe fn png_of(
+        image: *mut objc2_app_kit::NSImage,
+        error: *mut objc2_foundation::NSError,
+    ) -> Result<Vec<u8>, String> {
+        use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
+        use objc2_foundation::NSDictionary;
+
+        if let Some(error) = unsafe { error.as_ref() } {
+            return Err(format!(
+                "снимок не удался: {}",
+                error.localizedDescription()
+            ));
+        }
+        let image = unsafe { image.as_ref() }.ok_or_else(|| "снимка нет".to_string())?;
+        let tiff = image
+            .TIFFRepresentation()
+            .ok_or_else(|| "кадр пуст".to_string())?;
+        let rep = NSBitmapImageRep::imageRepWithData(&tiff)
+            .ok_or_else(|| "кадр не разобрать".to_string())?;
+        let png = unsafe {
+            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+        }
+        .ok_or_else(|| "PNG не собрался".to_string())?;
+        Ok(png.to_vec())
+    }
 }
 
-/// Идёт ли ещё загрузка.
-#[cfg(target_os = "macos")]
-fn platform_is_loading(platform: &tauri::webview::PlatformWebview) -> Result<bool, String> {
-    let webview = unsafe { &*(platform.inner() as *mut objc2_web_kit::WKWebView) };
-    Ok(unsafe { webview.isLoading() })
+/// Linux: страница — это WebKitGTK.
+#[cfg(target_os = "linux")]
+mod system {
+    use cairo::{Context, Format, ImageSurface};
+    use gtk::prelude::*;
+    use tauri::{webview::PlatformWebview, AppHandle};
+    use webkit2gtk::{SnapshotOptions, SnapshotRegion, WebViewExt};
+
+    /// Переселить страницу из окна Tauri в окно без экрана.
+    ///
+    /// Окно без экрана GTK рисует в память: композитор о нём не знает и
+    /// показать его не может, а страница в нём рисуется и снимается так же,
+    /// как в настоящем окне.
+    pub fn move_offscreen(window: &tauri::WebviewWindow) -> Result<(), String> {
+        window
+            .with_webview(|platform| {
+                let webview = platform.inner();
+                if let Some(parent) = webview.parent() {
+                    if let Ok(parent) = parent.downcast::<gtk::Container>() {
+                        parent.remove(&webview);
+                    }
+                }
+                let page = gtk::OffscreenWindow::new();
+                page.set_default_size(super::VIEWPORT.0 as i32, super::VIEWPORT.1 as i32);
+                page.add(&webview);
+                page.show_all();
+                // Закрывая окно, Tauri уничтожает webview, но не знает про
+                // окно без экрана — его убираем следом сами.
+                let page = page.downgrade();
+                webview.connect_destroy(move |_| {
+                    if let Some(page) = page.upgrade() {
+                        unsafe { page.destroy() };
+                    }
+                });
+            })
+            .map_err(|error| format!("страницу не убрать с экрана: {error}"))
+    }
+
+    /// Подогнать окно без экрана под размер страницы.
+    ///
+    /// Не дожидаясь ответа: зовут нас с рантайма команд, а размер меняется на
+    /// главном потоке. Тот же размер повторно не ставится — иначе страница
+    /// перекладывалась бы при каждом кадре.
+    pub fn resize(window: &tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+        let wanted = (width.round() as i32, height.round() as i32);
+        window
+            .with_webview(move |platform| {
+                let Some(page) = offscreen(&platform.inner()) else {
+                    return;
+                };
+                if page.default_size() != wanted {
+                    page.set_default_size(wanted.0, wanted.1);
+                }
+            })
+            .map_err(|error| format!("страницу не изменить в размере: {error}"))
+    }
+
+    fn offscreen(webview: &webkit2gtk::WebView) -> Option<gtk::OffscreenWindow> {
+        webview.toplevel()?.downcast::<gtk::OffscreenWindow>().ok()
+    }
+
+    /// Адрес и заголовок глазами системы.
+    pub fn info(platform: &PlatformWebview) -> Result<(String, String), String> {
+        let webview = platform.inner();
+        let url = webview
+            .uri()
+            .map(|text| text.to_string())
+            .unwrap_or_default();
+        let title = webview
+            .title()
+            .map(|text| text.to_string())
+            .unwrap_or_default();
+        Ok((url, title))
+    }
+
+    /// Идёт ли ещё загрузка.
+    pub fn is_loading(app: &AppHandle, root: &str) -> Result<bool, String> {
+        super::ask(app, root, |platform| Ok(platform.inner().is_loading()))
+    }
+
+    /// Снимок средствами системы.
+    pub fn snapshot(platform: &PlatformWebview, _width: u32, _scale: f64, sender: super::Frame) {
+        let webview = platform.inner();
+        // Ширину берём у самой страницы: окно Tauri спрятано, и его размер
+        // система не обновляет.
+        let width = u32::try_from(webview.allocated_width()).unwrap_or(0);
+        // Видимая часть, а не вся страница: агент должен увидеть то же, что
+        // показывают человеку в ящике.
+        webview.snapshot(
+            SnapshotRegion::Visible,
+            SnapshotOptions::NONE,
+            None::<&webkit2gtk::gio::Cancellable>,
+            move |result| {
+                let _ = sender.send(match result {
+                    Ok(surface) => png_of(surface, width),
+                    Err(error) => Err(format!("снимок не удался: {error}")),
+                });
+            },
+        );
+    }
+
+    /// Ответ системы на снимок — в PNG.
+    fn png_of(surface: cairo::Surface, width: u32) -> Result<Vec<u8>, String> {
+        let frame = ImageSurface::try_from(surface).map_err(|_| "кадр не картинка".to_string())?;
+        let frame = narrowed(frame, width)?;
+        let mut png = Vec::new();
+        frame
+            .write_to_png(&mut png)
+            .map_err(|error| format!("PNG не собрался: {error}"))?;
+        Ok(png)
+    }
+
+    /// Кадр шириной со страницу.
+    ///
+    /// На экране с увеличением система снимает в пикселях устройства, и кадр
+    /// выходит вдвое больше страницы. Агенту он уходит картинкой в ответе —
+    /// лишние пиксели здесь только лишние байты.
+    fn narrowed(frame: ImageSurface, width: u32) -> Result<ImageSurface, String> {
+        let width = i32::try_from(width).unwrap_or(i32::MAX);
+        if width <= 0 || frame.width() <= width {
+            return Ok(frame);
+        }
+        let factor = f64::from(width) / f64::from(frame.width());
+        let height = ((f64::from(frame.height()) * factor).round() as i32).max(1);
+        let small = ImageSurface::create(Format::ARgb32, width, height)
+            .map_err(|error| format!("кадр не уменьшить: {error}"))?;
+        // Увеличение уже сидит в самом кадре: оставь его — и cairo уменьшит
+        // кадр второй раз сам.
+        frame.set_device_scale(1.0, 1.0);
+        let context =
+            Context::new(&small).map_err(|error| format!("кадр не уменьшить: {error}"))?;
+        context.scale(factor, factor);
+        context
+            .set_source_surface(&frame, 0.0, 0.0)
+            .and_then(|()| context.paint())
+            .map_err(|error| format!("кадр не уменьшить: {error}"))?;
+        drop(context);
+        Ok(small)
+    }
 }
 
-/// Снимок средствами системы.
-#[cfg(target_os = "macos")]
-fn platform_snapshot(
-    platform: &tauri::webview::PlatformWebview,
-    width: u32,
-    scale: f64,
-    sender: std::sync::mpsc::Sender<Result<Vec<u8>, String>>,
-) {
-    use block2::RcBlock;
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSImage;
-    use objc2_foundation::{NSError, NSNumber};
-    use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
+/// Windows: страница — это WebView2.
+#[cfg(windows)]
+mod system {
+    use std::collections::BTreeSet;
+    use std::sync::Mutex;
 
-    // Tauri зовёт нас на главном потоке — там же, где живёт webview и куда
-    // AppKit пускает только оттуда. Если это вдруг не так, снимка не будет.
-    let Some(main_thread) = MainThreadMarker::new() else {
-        let _ = sender.send(Err("снимок просят не с главного потока".to_string()));
-        return;
+    use tauri::webview::{PageLoadEvent, PlatformWebview};
+    use tauri::{AppHandle, Manager, WebviewWindowBuilder};
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
     };
+    use webview2_com::{take_pwstr, CapturePreviewCompletedHandler};
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::HGLOBAL;
+    use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
+    use windows::Win32::System::Com::{IStream, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
 
-    // Указатель отдаёт сам Tauri, и отдаёт его на главном потоке — там же,
-    // где живёт webview. Ничего другого по этому адресу быть не может.
-    let webview: &WKWebView = unsafe { &*(platform.inner() as *mut WKWebView) };
-    let config = unsafe { WKSnapshotConfiguration::new(main_thread) };
-    // Ширину снимка система меряет в точках и отдаёт кадр в пикселях экрана:
-    // на ретине их вдвое больше по каждой стороне. Агенту кадр уходит
-    // картинкой в ответе, поэтому просим столько точек, чтобы пикселей вышло
-    // ровно по ширине страницы: вчетверо меньше байт при той же вёрстке.
-    let points = f64::from(width) / if scale > 0.0 { scale } else { 1.0 };
-    unsafe { config.setSnapshotWidth(Some(&NSNumber::new_f64(points))) };
-    let handler = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
-        let _ = sender.send(unsafe { png_of(image, error) });
-    });
-    unsafe { webview.takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler) };
-}
+    /// Страницы, у которых переход начался и ещё не закончился.
+    ///
+    /// Спросить у WebView2 «грузишься?» нельзя — такого вопроса у него нет,
+    /// о загрузке он только сообщает событиями. Их и запоминаем. Закрытую
+    /// страницу отсюда не вычёркиваем: о закрытой не спрашивают, а новая
+    /// страница того же проекта сама отметит свой переход.
+    static LOADING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
-/// Ответ системы на снимок: картинка или беда.
-#[cfg(target_os = "macos")]
-unsafe fn png_of(
-    image: *mut objc2_app_kit::NSImage,
-    error: *mut objc2_foundation::NSError,
-) -> Result<Vec<u8>, String> {
-    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
-    use objc2_foundation::NSDictionary;
-
-    if let Some(error) = unsafe { error.as_ref() } {
-        return Err(format!(
-            "снимок не удался: {}",
-            error.localizedDescription()
-        ));
+    fn mark(label: &str, loading: bool) {
+        let mut pages = LOADING
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if loading {
+            pages.insert(label.to_string());
+        } else {
+            pages.remove(label);
+        }
     }
-    let image = unsafe { image.as_ref() }.ok_or_else(|| "снимка нет".to_string())?;
-    let tiff = image
-        .TIFFRepresentation()
-        .ok_or_else(|| "кадр пуст".to_string())?;
-    let rep =
-        NSBitmapImageRep::imageRepWithData(&tiff).ok_or_else(|| "кадр не разобрать".to_string())?;
-    let png = unsafe {
-        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+
+    /// Следить за переходами страницы: начало — по запросу перехода, конец —
+    /// по его завершению, удачному или нет.
+    pub fn watch_loading<'a>(
+        builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+        label: &str,
+    ) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+        let started = label.to_string();
+        builder
+            .on_navigation(move |_| {
+                mark(&started, true);
+                true
+            })
+            .on_page_load(|window, payload| {
+                if matches!(payload.event(), PageLoadEvent::Finished) {
+                    mark(window.label(), false);
+                }
+            })
     }
-    .ok_or_else(|| "PNG не собрался".to_string())?;
-    Ok(png.to_vec())
+
+    /// Идёт ли ещё загрузка.
+    pub fn is_loading(app: &AppHandle, root: &str) -> Result<bool, String> {
+        let label = super::label_for(root);
+        if app.get_webview_window(&label).is_none() {
+            return Err("страница ещё не открыта".to_string());
+        }
+        let pages = LOADING
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(pages.contains(&label))
+    }
+
+    fn webview(platform: &PlatformWebview) -> Result<ICoreWebView2, String> {
+        unsafe { platform.controller().CoreWebView2() }
+            .map_err(|error| format!("до страницы не достучаться: {error}"))
+    }
+
+    /// Адрес и заголовок глазами системы.
+    pub fn info(platform: &PlatformWebview) -> Result<(String, String), String> {
+        let webview = webview(platform)?;
+        let mut text = PWSTR::null();
+        unsafe { webview.Source(&mut text) }
+            .map_err(|error| format!("адрес страницы не узнать: {error}"))?;
+        let url = take_pwstr(text);
+        let mut text = PWSTR::null();
+        unsafe { webview.DocumentTitle(&mut text) }
+            .map_err(|error| format!("заголовок страницы не узнать: {error}"))?;
+        Ok((url, take_pwstr(text)))
+    }
+
+    /// Снимок средствами системы.
+    ///
+    /// Ширину WebView2 не принимает: кадр выходит в пикселях устройства, и на
+    /// экране с увеличением он больше страницы. Вёрстка в нём та же.
+    pub fn snapshot(platform: &PlatformWebview, _width: u32, _scale: f64, sender: super::Frame) {
+        if let Err(error) = capture(platform, sender.clone()) {
+            let _ = sender.send(Err(error));
+        }
+    }
+
+    fn capture(platform: &PlatformWebview, sender: super::Frame) -> Result<(), String> {
+        let webview = webview(platform)?;
+        // Поток в памяти: система пишет в него PNG, а мы читаем, когда она
+        // скажет, что дописала.
+        let stream = unsafe { CreateStreamOnHGlobal(HGLOBAL::default(), true) }
+            .map_err(|error| format!("кадру некуда лечь: {error}"))?;
+        let written = stream.clone();
+        let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+            let _ = sender.send(
+                result
+                    .map_err(|error| format!("снимок не удался: {error}"))
+                    .and_then(|()| read_all(&written)),
+            );
+            Ok(())
+        }));
+        unsafe {
+            webview.CapturePreview(
+                COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                &stream,
+                &handler,
+            )
+        }
+        .map_err(|error| format!("снимок не начался: {error}"))
+    }
+
+    fn read_all(stream: &IStream) -> Result<Vec<u8>, String> {
+        let broken = |error: windows::core::Error| format!("кадр не прочитать: {error}");
+        let mut stat = STATSTG::default();
+        unsafe { stream.Stat(&mut stat, STATFLAG_NONAME) }.map_err(broken)?;
+        unsafe { stream.Seek(0, STREAM_SEEK_SET, None) }.map_err(broken)?;
+        let mut png = vec![0u8; usize::try_from(stat.cbSize).unwrap_or(0)];
+        let mut filled = 0;
+        while filled < png.len() {
+            let rest = &mut png[filled..];
+            let mut read = 0u32;
+            unsafe {
+                stream.Read(
+                    rest.as_mut_ptr().cast(),
+                    u32::try_from(rest.len()).unwrap_or(u32::MAX),
+                    Some(&mut read),
+                )
+            }
+            .ok()
+            .map_err(broken)?;
+            if read == 0 {
+                break;
+            }
+            filled += read as usize;
+        }
+        png.truncate(filled);
+        if png.is_empty() {
+            return Err("кадр пуст".to_string());
+        }
+        Ok(png)
+    }
 }
 
-/// На остальных системах webview ещё не научен рассказывать о себе.
-#[cfg(not(target_os = "macos"))]
-fn platform_info(_platform: &tauri::webview::PlatformWebview) -> Result<(String, String), String> {
-    Err("страница здесь пока не поддержана".to_string())
-}
+/// Остальные системы: страницы плагина там нет.
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+mod system {
+    use tauri::{webview::PlatformWebview, AppHandle};
 
-/// На остальных системах ждать нечего — считаем, что уже догрузилась.
-#[cfg(not(target_os = "macos"))]
-fn platform_is_loading(_platform: &tauri::webview::PlatformWebview) -> Result<bool, String> {
-    Ok(false)
-}
+    pub fn info(_platform: &PlatformWebview) -> Result<(String, String), String> {
+        Err("страница здесь не поддержана".to_string())
+    }
 
-/// На остальных системах снимок ещё не переведён на webview.
-#[cfg(not(target_os = "macos"))]
-fn platform_snapshot(
-    _platform: &tauri::webview::PlatformWebview,
-    _width: u32,
-    _scale: f64,
-    sender: std::sync::mpsc::Sender<Result<Vec<u8>, String>>,
-) {
-    let _ = sender.send(Err("снимок страницы здесь пока не поддержан".to_string()));
+    /// Ждать нечего — считаем, что уже догрузилась.
+    pub fn is_loading(_app: &AppHandle, _root: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    pub fn snapshot(_platform: &PlatformWebview, _width: u32, _scale: f64, sender: super::Frame) {
+        let _ = sender.send(Err("снимок страницы здесь не поддержан".to_string()));
+    }
 }
 
 #[cfg(test)]

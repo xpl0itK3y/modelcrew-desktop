@@ -2337,6 +2337,8 @@ version = "0.0.22"
 dependencies = [
  "base64 0.22.1",
  "block2",
+ "cairo-rs",
+ "gtk",
  "libc",
  "log",
  "minisign-verify",
@@ -2362,6 +2364,9 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tungstenite",
+ "webkit2gtk",
+ "webview2-com",
+ "windows",
  "windows-sys 0.59.0",
  "zbus",
 ]
