@@ -13,5 +13,10 @@ fn main() {
     if let Some(code) = modelcrew_desktop_lib::run_mcp_shim() {
         std::process::exit(code);
     }
+    // Живая проверка страницы плагина: её запускает тест, и только в
+    // отладочной сборке.
+    if let Some(code) = modelcrew_desktop_lib::run_browser_page_check() {
+        std::process::exit(code);
+    }
     modelcrew_desktop_lib::run()
 }

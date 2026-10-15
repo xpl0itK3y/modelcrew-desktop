@@ -15,6 +15,8 @@ mod agent_session_store;
 mod agent_session_watch;
 mod agent_sessions;
 mod browser_page;
+#[cfg(debug_assertions)]
+mod browser_page_check;
 mod browser_view;
 mod clipboard_images;
 mod command_error;
@@ -960,6 +962,23 @@ pub fn run_mcp_shim() -> Option<i32> {
     mcp_stdio::run_if_shim()
 }
 
+/// Запуск живой проверкой страницы плагина — его делает тест
+/// `browser_page_live`. В выпуске такого запуска нет. `None` — запуск обычный.
+pub fn run_browser_page_check() -> Option<i32> {
+    #[cfg(debug_assertions)]
+    return browser_page_check::run_if_check();
+    #[cfg(not(debug_assertions))]
+    None
+}
+
+/// Сборка приложения: настройки, иконки и интерфейс.
+///
+/// Одна на все запуски: макрос встраивает интерфейс в программу, и второй его
+/// вызов встроил бы его второй раз.
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer_by_default();
@@ -1110,7 +1129,7 @@ pub fn run() {
             updater_prepare_self_update,
             updater_install_self_update
         ])
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("error while building tauri application")
         .run(|app, event| match event {
             // Гарантированная уборка шеллов при любом пути выхода — иначе зомби.
@@ -1151,6 +1170,7 @@ mod tests {
         ("agent_session_watch.rs", include_str!("agent_session_watch.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("browser_page.rs", include_str!("browser_page.rs")),
+        ("browser_page_check.rs", include_str!("browser_page_check.rs")),
         ("browser_view.rs", include_str!("browser_view.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
