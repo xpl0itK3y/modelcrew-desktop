@@ -4,7 +4,7 @@
 //! функции внутри процесса. Агент же запускает собранный бинарь: с флагом из
 //! своего конфига, адресом сокета и пропуском панели в окружении, с запросами
 //! на stdin и ответами со stdout. Ломается обычно именно этот стык — потерянное
-//! рукопожатие или нулевой код возврата выглядят точно так же, как «агент не
+//! рукопожатие или молчание вместо ответа выглядят точно так же, как «агент не
 //! видит инструментов».
 
 #![cfg(unix)]
@@ -171,7 +171,8 @@ fn says_out_loud_that_it_was_not_let_in() {
     let listener = UnixListener::bind(&socket).unwrap();
 
     // Приложение закрывает соединение сразу: пропуск ни с одной панелью не
-    // сошёлся — ровно то, что видит агент чужой или закрытой панели.
+    // сошёлся — ровно то, что видит агент чужой или закрытой панели. Второго
+    // соединения оно уже не примет: слушатель уходит вместе с потоком.
     let served = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         drop(stream);
@@ -179,26 +180,42 @@ fn says_out_loud_that_it_was_not_let_in() {
 
     let mut child = shim(&socket, Some("pass-nobody-knows"));
     let mut stdin = child.stdin.take().unwrap();
-    // Пишем, пока пишется: разорванное соединение шим обязан заметить сам.
-    for _ in 0..50 {
-        if stdin
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
-            .and_then(|()| stdin.flush())
-            .is_err()
-        {
-            break;
-        }
-    }
+    stdin
+        .write_all(
+            concat!(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",",
+                "\"params\":{\"name\":\"browser_navigate\",",
+                "\"arguments\":{\"url\":\"http://localhost:1420\"}}}\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
     drop(stdin);
     let out = child.wait_with_output().unwrap();
     served.join().unwrap();
 
-    // Ноль здесь означал бы «сервер завершился успешно и молча»: агент решил
-    // бы, что инструментов просто нет, и причины не узнал бы никто.
-    assert_ne!(out.status.code(), Some(0));
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("ModelCrew MCP"), "{stderr}");
-    assert!(out.stdout.is_empty(), "в stdout попало лишнее");
+    // Ненулевой код клиент читает как «сервер сломался» и больше к нему не
+    // возвращается. Сломаться здесь может только связь, и о ней шим говорит
+    // словами — в ответе на вызов.
+    assert_eq!(out.status.code(), Some(0));
+    let answers: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(answers.len(), 2, "на каждый запрос — ответ: {answers:?}");
+
+    // Рукопожатие шим держит сам: сессия не должна умирать оттого, что
+    // приложение не пустило.
+    assert_eq!(answers[0]["id"], 1);
+    assert!(answers[0]["result"]["protocolVersion"].is_string(), "{}", answers[0]);
+
+    // Вызов — отказ инструмента с причиной, а не тишина и не поломка протокола.
+    assert_eq!(answers[1]["id"], 2);
+    assert_eq!(answers[1]["result"]["isError"], true, "{}", answers[1]);
+    let reason = answers[1]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(reason.contains("ModelCrew сейчас недоступен"), "{reason}");
 
     let _ = std::fs::remove_file(&socket);
 }
