@@ -12,9 +12,11 @@ import {
   isManualTitle,
 } from "../terminal/registry";
 import { getAutoTitle } from "../terminal/panelTitles";
+import { acknowledgeTerminalPanel } from "../terminal/registry";
 import { translate, type Locale } from "../i18n";
 import {
   addPanel,
+  dockFloatingGroups,
   localizeDefaultPanelTitles,
   snapshotActiveSessionLayout,
 } from "../layoutOps";
@@ -151,6 +153,9 @@ export function useWorkspaces({
             // «Изменения» переехали в оверлей: вкладку из старых раскладок
             // (когда панель жила в dockview) убираем при восстановлении.
             api.getPanel("git-changes")?.api.close();
+            // Вытащить панель из сетки больше нельзя, но в старых раскладках
+            // такие плавающие окна остались — возвращаем их на место.
+            dockFloatingGroups(api);
             restored = true;
           } catch {
             // Повреждённая сохранённая раскладка не должна блокировать вход
@@ -264,6 +269,8 @@ export function useWorkspaces({
         }
       }
       apiRef.current?.getPanel(panelId)?.api.setActive();
+      // Пользователь пришёл на зов — это и есть ответ панели.
+      acknowledgeTerminalPanel(panelId);
     },
     [apiRef, selectSession],
   );

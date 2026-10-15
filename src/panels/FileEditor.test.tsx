@@ -33,6 +33,40 @@ vi.mock("../files/fileTree", async () => {
   };
 });
 
+/// Сводка git и версия файла из истории: по ним редактор считает, какие строки
+/// ещё не закоммичены. Настоящие ходят в Tauri, которого в тестах нет.
+const gitSummary = vi.fn();
+const readHeadFile = vi.fn();
+vi.mock("../git/gitChanges", async () => {
+  const actual =
+    await vi.importActual<typeof import("../git/gitChanges")>(
+      "../git/gitChanges",
+    );
+  return {
+    ...actual,
+    subscribeGitChanges: (
+      _workspaceId: string,
+      listener: (summary: unknown) => void,
+    ) => {
+      listener(gitSummary());
+      return () => {};
+    },
+    readHeadFile: (...args: unknown[]) => readHeadFile(...args),
+  };
+});
+
+/// Картинка приезжает из бэкенда в base64. Настоящая ходит в Tauri, которого
+/// в тестах нет.
+const readWorkspaceMedia = vi.fn();
+vi.mock("../files/media", async () => {
+  const actual =
+    await vi.importActual<typeof import("../files/media")>("../files/media");
+  return {
+    ...actual,
+    readWorkspaceMedia: (...args: unknown[]) => readWorkspaceMedia(...args),
+  };
+});
+
 const { FileEditor } = await import("./FileEditor");
 
 function file(content: string) {
@@ -59,7 +93,26 @@ beforeEach(() => {
   readWorkspaceFile.mockReset();
   writeWorkspaceFile.mockReset();
   readWorkspaceFile.mockResolvedValue(file("текст"));
+  gitSummary.mockReset();
+  readHeadFile.mockReset();
+  // По умолчанию проект — не репозиторий: сравнивать не с чем, меток нет, и
+  // всё, что не про них, их не видит.
+  gitSummary.mockReturnValue({ isRepo: false, files: [] });
+  readHeadFile.mockResolvedValue({
+    content: "",
+    isBinary: false,
+    tooLarge: false,
+    exists: false,
+  });
   watchers.clear();
+  readWorkspaceMedia.mockReset();
+  readWorkspaceMedia.mockResolvedValue({
+    mime: "image/png",
+    data: "iVBOR",
+    bytes: 4096,
+    tooLarge: false,
+    exists: true,
+  });
   setLocale("ru");
 });
 
@@ -73,6 +126,7 @@ function open(path = "a.txt") {
       onSelect={() => {}}
       onClose={() => {}}
       width={520}
+      dockWidth={800}
     />,
   );
 }
@@ -87,6 +141,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -103,6 +158,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -129,6 +185,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -148,6 +205,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -166,6 +224,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={closed}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -186,6 +245,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -203,6 +263,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() => expect(visibleField()).toHaveValue("внутри b.txt"));
@@ -214,6 +275,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -232,6 +294,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={closed}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -263,6 +326,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={closed}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -286,6 +350,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -310,6 +375,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -331,6 +397,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
         leaving
       />,
     );
@@ -350,6 +417,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -376,6 +444,7 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -446,7 +515,7 @@ describe("FileView on a long file", () => {
       ),
     );
 
-    expect(gutter()?.textContent).toBe("1\n2\n3\n");
+    expect(gutter()?.textContent).toBe("1 \n2 \n3 \n");
   });
 
   it("paints a window of a long file, not the whole of it", async () => {
@@ -491,7 +560,7 @@ describe("FileView on a long file", () => {
 
     // Окно уехало за взглядом…
     await waitFor(() =>
-      expect(gutter()?.textContent).toContain("\n2401\n"),
+      expect(gutter()?.textContent).toContain("\n2401 \n"),
     );
     const paint = document.querySelector(".file-view-paint");
     expect(paint?.textContent).toContain("строка 2401");
@@ -596,6 +665,7 @@ describe("FileView and the disk under it", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -624,6 +694,7 @@ describe("FileView and the disk under it", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -640,6 +711,7 @@ describe("FileView and the disk under it", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
+        dockWidth={800}
       />,
     );
 
@@ -671,5 +743,595 @@ describe("FileView and the disk under it", () => {
     expect(
       screen.queryByText("Файл изменился на диске, пока вы его правили"),
     ).not.toBeInTheDocument();
+  });
+  it("spreads over everything and comes back where it was", async () => {
+    // Колонка ограничена ради сетки терминалов — и правильно ограничена, — но
+    // читать длинную строку в ней тесно. Разворот лежит поверх всего, а
+    // раскладка под ним остаётся нетронутой и ждёт.
+    const { container } = open();
+    const editor = container.querySelector(".file-editor")!;
+    expect(editor.className).not.toContain("is-maximized");
+
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть редактор" }));
+    expect(editor.className).toContain("is-maximized");
+    // Накрывает свою колонку и сетку — и ровно столько. Дерево и список
+    // проектов остаются на виду: по ним переключаются, и прятать их значит
+    // заставить свернуть редактор ради соседнего файла.
+    expect((editor as HTMLElement).style.getPropertyValue("--maximized-width")).toBe(
+      "calc(1320px + var(--mc-gap))",
+    );
+    // Место колонки в ряду занимает подставка: иначе сетка разъехалась бы на
+    // него, а на возврате схлопнулась обратно.
+    const placeholder = container.querySelector(".file-editor-placeholder");
+    expect(placeholder).toBeInTheDocument();
+    expect((placeholder as HTMLElement).style.width).toBe("520px");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Вернуть редактор в колонку" }),
+    );
+    // Возврат — это движение обратно, а не подмена кадра: пока оно идёт,
+    // колонка ещё поверх раскладки, и подставка держит её место. Снять их
+    // сразу значило бы, что колонка исчезнет из-под курсора и появится левее.
+    expect(editor.className).toContain("is-restoring");
+    expect(editor.className).toContain("is-overlay");
+    expect(container.querySelector(".file-editor-placeholder")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(".file-editor-placeholder"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(editor.className).not.toContain("is-overlay");
+  });
+
+  it("comes back on Escape, the first thing anyone presses", async () => {
+    const { container } = open();
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть редактор" }));
+    expect(container.querySelector(".file-editor")!.className).toContain(
+      "is-maximized",
+    );
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(container.querySelector(".file-editor")!.className).not.toContain(
+      "is-maximized",
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".file-editor")!.className).not.toContain(
+        "is-overlay",
+      ),
+    );
+  });
+});
+
+describe("FileView beside git", () => {
+  function marks(): string[] {
+    return [...document.querySelectorAll(".file-mark")].map((mark) =>
+      mark.className.replace("file-mark ", ""),
+    );
+  }
+
+  /// Сводка репозитория, в котором открытый файл уже правили.
+  function inRepo(committed: string, prefix?: string) {
+    gitSummary.mockReturnValue({
+      isRepo: true,
+      headHash: "abc",
+      files: [],
+      ...(prefix ? { prefix } : {}),
+    });
+    readHeadFile.mockResolvedValue({
+      content: committed,
+      isBinary: false,
+      tooLarge: false,
+      exists: true,
+    });
+  }
+
+  it("marks the line that is not committed yet, and only it", async () => {
+    inRepo("первая\nтретья");
+    readWorkspaceFile.mockResolvedValue(file("первая\nвторая\nтретья"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue(
+        "первая\nвторая\nтретья",
+      ),
+    );
+
+    await waitFor(() => expect(marks()).toEqual(["is-added"]));
+    // Номера от полоски не съезжают: она занимает место пробела, который стоит
+    // после номера на каждой строке — покрашен он или нет.
+    expect(
+      document.querySelector(".file-view-lines")?.textContent,
+    ).toBe("1 \n2 \n3 \n");
+  });
+
+  it("follows the text as it is typed, without waiting for a save", async () => {
+    // Ради этого метки и считаются здесь, а не спрашиваются у `git diff`:
+    // ответ git относится к файлу на диске, и первая же набранная строка
+    // сдвинула бы все метки под ней на одну.
+    inRepo("одна\nдве");
+    readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
+    open();
+    const field = await screen.findByLabelText("a.txt");
+    await waitFor(() => expect(field).toHaveValue("одна\nдве"));
+    await waitFor(() => expect(marks()).toEqual([]));
+
+    fireEvent.change(field, { target: { value: "одна\nновая\nдве" } });
+
+    await waitFor(() => expect(marks()).toEqual(["is-added"]));
+    expect(writeWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it("tells a rewritten line from a new one and from a gone one", async () => {
+    inRepo("одна\nдве\nтри\nчетыре");
+    readWorkspaceFile.mockResolvedValue(file("одна\nДВЕ\nтри"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("одна\nДВЕ\nтри"),
+    );
+
+    // Вторую переписали, последняя пропала — и метка о пропаже стоит на строке
+    // над ней, потому что самой строки в файле уже нет.
+    await waitFor(() => expect(marks()).toEqual(["is-changed", "is-removed"]));
+  });
+
+  it("asks git for the file by the name git knows it under", async () => {
+    // Проектом открыли подкаталог монорепозитория: пути git идут от корня
+    // репозитория, и без приставки он ответил бы про несуществующий файл.
+    inRepo("одна", "apps/web");
+    readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
+    open();
+    await waitFor(() =>
+      expect(readHeadFile).toHaveBeenCalledWith("w1", "apps/web/a.txt"),
+    );
+  });
+
+  it("marks the tab of a file that is not committed yet", async () => {
+    // Колонку держат открытой подолгу, и вкладка остаётся единственным следом
+    // файла, когда дерево прокручено совсем в другое место.
+    gitSummary.mockReturnValue({
+      isRepo: true,
+      headHash: "abc",
+      files: [{ path: "a.txt", status: "modified" }],
+    });
+    readWorkspaceFile.mockResolvedValue(file("одна"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("одна"),
+    );
+
+    await waitFor(() =>
+      expect(
+        document.querySelector(".file-tab")?.className,
+      ).toContain("is-git-modified"),
+    );
+  });
+
+  it("stays out of the way where there is no repository", async () => {
+    readWorkspaceFile.mockResolvedValue(file("одна\nдве"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("одна\nдве"),
+    );
+
+    expect(readHeadFile).not.toHaveBeenCalled();
+    expect(marks()).toEqual([]);
+  });
+});
+
+describe("FileView on a markdown file", () => {
+  function view(): HTMLElement | null {
+    return document.querySelector(".markdown-view");
+  }
+
+  const doc = [
+    "# Заголовок",
+    "",
+    "Абзац со **важным** и `кодом`.",
+    "",
+    "- пункт",
+    "- второй",
+    "",
+    "```ts",
+    "const a = 1;",
+    "```",
+  ].join("\n");
+
+  it("shows the document instead of its source when the eye is pressed", async () => {
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    open("README.md");
+    await waitFor(() =>
+      expect(screen.getByLabelText("README.md")).toHaveValue(doc),
+    );
+    // Пока не просили — редактор остаётся редактором.
+    expect(view()).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Показать разметку"));
+
+    const shown = view();
+    expect(shown).not.toBeNull();
+    expect(shown?.querySelector("h1")?.textContent).toBe("Заголовок");
+    expect(shown?.querySelector("strong")?.textContent).toBe("важным");
+    expect(shown?.querySelectorAll("li")).toHaveLength(2);
+    // Кодовый блок подсвечен своим языком, а не разметкой.
+    expect(shown?.querySelector(".md-block-code .tok-keyword")?.textContent).toBe(
+      "const",
+    );
+    // Поле ввода уходит вместе с исходником: показывать оба разом негде.
+    expect(screen.queryByLabelText("README.md")).not.toBeInTheDocument();
+  });
+
+  it("shows what is in the buffer, not what is on disk", async () => {
+    // Файл правят прямо сейчас, и просмотр обязан показывать правку: иначе он
+    // рассказывает про версию, которой уже нет.
+    readWorkspaceFile.mockResolvedValue(file("# Было"));
+    open("README.md");
+    const field = await screen.findByLabelText("README.md");
+    fireEvent.change(field, { target: { value: "# Стало" } });
+
+    fireEvent.click(screen.getByLabelText("Показать разметку"));
+
+    expect(view()?.querySelector("h1")?.textContent).toBe("Стало");
+  });
+
+  it("remembers the choice for every markdown file after it", async () => {
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    const first = open("README.md");
+    await waitFor(() =>
+      expect(screen.getByLabelText("README.md")).toHaveValue(doc),
+    );
+    fireEvent.click(screen.getByLabelText("Показать разметку"));
+    expect(view()).not.toBeNull();
+    first.unmount();
+
+    // Тот, кто открывает разметку чтобы прочитать, открывает так каждый раз.
+    open("OTHER.md");
+    await waitFor(() => expect(view()).not.toBeNull());
+    expect(screen.getByLabelText("Показать исходник")).toBeInTheDocument();
+  });
+
+  it("offers the eye only where there is markup to show", async () => {
+    readWorkspaceFile.mockResolvedValue(file("const a = 1;"));
+    open("app.ts");
+    await waitFor(() =>
+      expect(screen.getByLabelText("app.ts")).toHaveValue("const a = 1;"),
+    );
+
+    expect(screen.queryByLabelText("Показать разметку")).not.toBeInTheDocument();
+  });
+});
+
+describe("FileEditor pictures", () => {
+  it("opens a picture as a picture, not as a binary file", async () => {
+    open("assets/logo.png");
+    const shown = await screen.findByAltText("logo.png");
+    expect(shown.getAttribute("src")).toBe("data:image/png;base64,iVBOR");
+    // Текстового поля у картинки нет: править в ней нечего.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    // И на диск за текстом никто не ходил.
+    expect(readWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps a drawing editable and still lets it be seen", async () => {
+    const drawing = '<svg xmlns="http://www.w3.org/2000/svg"><rect /></svg>';
+    readWorkspaceFile.mockResolvedValue(file(drawing));
+    open("mark.svg");
+    await waitFor(() =>
+      expect(screen.getByLabelText("mark.svg")).toHaveValue(drawing),
+    );
+    // Разметку SVG подсвечиваем как разметку: значение атрибута — строка.
+    expect(
+      document.querySelector(".file-view-paint .tok-string")?.textContent,
+    ).toBe('"http://www.w3.org/2000/svg"');
+
+    fireEvent.click(screen.getByLabelText("Показать картинку"));
+
+    const shown = screen.getByAltText("mark.svg");
+    const source = shown.getAttribute("src") ?? "";
+    expect(source.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
+    expect(decodeURIComponent(source.split(",")[1])).toBe(drawing);
+  });
+
+  it("draws what is in the buffer, not what is on disk", async () => {
+    readWorkspaceFile.mockResolvedValue(file("<svg><rect /></svg>"));
+    open("mark.svg");
+    const field = await screen.findByLabelText("mark.svg");
+    fireEvent.change(field, { target: { value: "<svg><circle /></svg>" } });
+
+    fireEvent.click(screen.getByLabelText("Показать картинку"));
+
+    const source = screen.getByAltText("mark.svg").getAttribute("src") ?? "";
+    expect(decodeURIComponent(source.split(",")[1])).toBe("<svg><circle /></svg>");
+  });
+});
+
+describe("FileEditor keys", () => {
+  /// Поле открытого файла с курсором, поставленным в нужное место.
+  async function field(content: string, from: number, to = from) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const found = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(found).toHaveValue(content));
+    found.setSelectionRange(from, to);
+    return found;
+  }
+
+  it("puts an indent in the field instead of leaving it", async () => {
+    const found = await field("const a = 1;", 12);
+
+    fireEvent.keyDown(found, { key: "Tab", code: "Tab" });
+
+    expect(found).toHaveValue("const a = 1;  ");
+  });
+
+  it("takes the indent back on shift", async () => {
+    const found = await field("  const a = 1;", 14);
+
+    fireEvent.keyDown(found, { key: "Tab", code: "Tab", shiftKey: true });
+
+    expect(found).toHaveValue("const a = 1;");
+  });
+
+  it("starts the new line under the one before it", async () => {
+    const found = await field("  const a = {", 13);
+
+    fireEvent.keyDown(found, { key: "Enter", code: "Enter" });
+
+    expect(found).toHaveValue("  const a = {\n    ");
+  });
+
+  it("comments the line with the mark of its own language", async () => {
+    const found = await field("const a = 1;", 0, 12);
+
+    fireEvent.keyDown(found, { key: "/", code: "Slash", metaKey: true });
+
+    expect(found).toHaveValue("// const a = 1;");
+  });
+
+  it("answers the shortcut whatever the keyboard is set to", async () => {
+    // На русской раскладке ⌘/ приходит другой буквой, а клавиша та же.
+    const found = await field("const a = 1;", 0, 12);
+
+    fireEvent.keyDown(found, { key: ".", code: "Slash", metaKey: true });
+
+    expect(found).toHaveValue("// const a = 1;");
+  });
+
+  it("doubles the line under the cursor", async () => {
+    const found = await field("a();\nb();", 5);
+
+    fireEvent.keyDown(found, {
+      key: "d",
+      code: "KeyD",
+      metaKey: true,
+      shiftKey: true,
+    });
+
+    expect(found).toHaveValue("a();\nb();\nb();");
+  });
+
+  it("carries a line up and back down", async () => {
+    const found = await field("a();\nb();\nc();", 5);
+
+    fireEvent.keyDown(found, { key: "ArrowUp", code: "ArrowUp", altKey: true });
+    expect(found).toHaveValue("b();\na();\nc();");
+
+    fireEvent.keyDown(found, {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      altKey: true,
+    });
+    expect(found).toHaveValue("a();\nb();\nc();");
+  });
+
+  it("deletes the line together with its break", async () => {
+    const found = await field("a();\nb();\nc();", 5);
+
+    fireEvent.keyDown(found, {
+      key: "Backspace",
+      code: "Backspace",
+      metaKey: true,
+    });
+
+    expect(found).toHaveValue("a();\nc();");
+  });
+
+  it("leaves a file it must not edit alone", async () => {
+    readWorkspaceFile.mockResolvedValue({
+      content: "двоичное",
+      isBinary: true,
+      tooLarge: false,
+      exists: true,
+    });
+    open("icon.icns");
+    const found = (await screen.findByLabelText(
+      "icon.icns",
+    )) as HTMLTextAreaElement;
+    found.setSelectionRange(0, 0);
+
+    fireEvent.keyDown(found, { key: "Tab", code: "Tab" });
+
+    expect(found).toHaveValue("двоичное");
+  });
+});
+
+describe("FileEditor find", () => {
+  const doc = ["первая дом", "вторая", "третья дом и ДОМ"].join("\n");
+
+  async function opened(content = doc) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const found = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(found).toHaveValue(content));
+    fireEvent.keyDown(found, { key: "f", code: "KeyF", metaKey: true });
+    return found;
+  }
+
+  it("opens on the shortcut and counts what it found", async () => {
+    await opened();
+    const query = screen.getByLabelText("Найти в файле");
+
+    fireEvent.change(query, { target: { value: "дом" } });
+
+    // Три совпадения, регистр не в счёт.
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+    expect(document.querySelectorAll(".file-found")).toHaveLength(3);
+    expect(document.querySelectorAll(".file-found.is-current")).toHaveLength(1);
+  });
+
+  it("walks the matches in a circle", async () => {
+    await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+
+    fireEvent.click(screen.getByLabelText("Следующее совпадение"));
+    expect(screen.getByText("2 из 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Следующее совпадение"));
+    fireEvent.click(screen.getByLabelText("Следующее совпадение"));
+    // За последним идёт первое, а не тупик.
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Предыдущее совпадение"));
+    expect(screen.getByText("3 из 3")).toBeInTheDocument();
+  });
+
+  it("selects the match in the field, ready to be edited", async () => {
+    const field = await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "третья" },
+    });
+
+    expect(field.selectionStart).toBe(doc.indexOf("третья"));
+    expect(field.selectionEnd).toBe(doc.indexOf("третья") + "третья".length);
+  });
+
+  it("says plainly when there is nothing", async () => {
+    await opened();
+
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "такого нет" },
+    });
+
+    expect(screen.getByText("Ничего")).toBeInTheDocument();
+    expect(document.querySelectorAll(".file-found")).toHaveLength(0);
+  });
+
+  it("takes the word under the cursor as the query", async () => {
+    // Выделили слово, нажали ⌘F — искать собирались именно его.
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    open("app.ts");
+    const field = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue(doc));
+    field.setSelectionRange(7, 10);
+
+    fireEvent.keyDown(field, { key: "f", code: "KeyF", metaKey: true });
+
+    expect(screen.getByLabelText("Найти в файле")).toHaveValue("дом");
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+  });
+
+  it("keeps out of the way while the file itself is being edited", async () => {
+    // Совпадения пересчитываются на каждую букву, и курсор уезжал бы к
+    // ближайшему прямо из-под руки.
+    const field = await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+    field.focus();
+
+    fireEvent.change(field, { target: { value: doc + " ещё дом" } });
+
+    // Курсор остался там, где его оставил набор, а не уехал к совпадению.
+    expect(field.selectionStart).not.toBe(doc.indexOf("дом"));
+    // Считать при этом поиск не перестаёт.
+    expect(screen.getByText(/из 4/)).toBeInTheDocument();
+  });
+
+  it("keeps the layer of matches letter for letter over the highlighting", async () => {
+    // Слои лежат друг на друге; разойдись они на один знак — и метка встанет
+    // не на то слово, а строкой ниже уедет всё остальное.
+    await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+
+    const paint = document.querySelector(".file-view-paint")?.textContent;
+    const marks = document.querySelector(".file-view-found")?.textContent;
+    expect(marks).toBe(paint);
+  });
+
+  it("closes on escape and leaves nothing painted", async () => {
+    await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+
+    fireEvent.keyDown(screen.getByLabelText("Найти в файле"), { key: "Escape" });
+
+    expect(screen.queryByLabelText("Найти в файле")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".file-found")).toHaveLength(0);
+  });
+});
+
+describe("FileEditor wrapping", () => {
+  const doc = ["первая", "вторая длинная строка", "третья"].join("\n");
+
+  // Выбор запоминается на всё приложение, а тесты идут в одном окне: соседям
+  // он достаться не должен.
+  beforeEach(() => localStorage.removeItem("modelcrew.wrapLines"));
+  afterEach(() => localStorage.removeItem("modelcrew.wrapLines"));
+
+  async function wrapped() {
+    readWorkspaceFile.mockResolvedValue(file(doc));
+    open("app.ts");
+    await waitFor(() => expect(screen.getByLabelText("app.ts")).toHaveValue(doc));
+    fireEvent.click(screen.getByLabelText("Переносить длинные строки"));
+  }
+
+  it("keeps the layers letter for letter once the lines wrap", async () => {
+    // Пока строки не переносятся, за окном показа лежат одни переводы строки:
+    // строка там ровно одна строка высотой. С переносом это неверно, и за
+    // окном обязан лежать сам текст — иначе подсветка уедет вверх.
+    await wrapped();
+
+    expect(document.querySelector(".file-view-code")).toHaveClass("is-wrapped");
+    expect(document.querySelector(".file-view-paint")?.textContent).toBe(
+      doc + "\n",
+    );
+  });
+
+  it("carries each number along with its own line", async () => {
+    await wrapped();
+
+    const numbers = document.querySelectorAll(".file-no");
+    expect([...numbers].map((row) => row.textContent)).toEqual([
+      "1 ",
+      "2 ",
+      "3 ",
+    ]);
+    // Номер лежит в одном потоке с текстом своей строки — иначе ему не за чем
+    // ехать, когда строка занимает два ряда.
+    expect(document.querySelector(".file-view-lines")?.textContent).toBe(
+      "1 первая\n2 вторая длинная строка\n3 третья\n",
+    );
+  });
+
+  it("goes back to one line per row", async () => {
+    await wrapped();
+
+    fireEvent.click(screen.getByLabelText("Не переносить длинные строки"));
+
+    expect(document.querySelector(".file-view-code")).not.toHaveClass(
+      "is-wrapped",
+    );
+    expect(document.querySelector(".file-view-lines")?.textContent).toBe(
+      "1 \n2 \n3 \n",
+    );
+  });
+
+  it("remembers the choice for the next file", async () => {
+    await wrapped();
+
+    expect(localStorage.getItem("modelcrew.wrapLines")).toBe("1");
   });
 });

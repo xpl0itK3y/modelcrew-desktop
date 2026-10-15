@@ -3,6 +3,7 @@
 // в gitHistory, ветки в gitBranches.
 
 import { invoke } from "@tauri-apps/api/core";
+import { withCanonicalAuthors } from "./authorIdentity";
 import type { GitFileDiff } from "./gitChanges";
 import type { GitRefKind } from "./gitBranches";
 
@@ -36,6 +37,9 @@ export type GitCommitInfo = {
   fullMessage: string;
   body?: string;
   coAuthors?: string[];
+  // Имя, под которым показывать автора: одна почта — одно имя во всей истории.
+  // Заполняется при загрузке, см. authorIdentity.
+  displayAuthor?: string;
 };
 
 // Фильтр применяет git, а не панель: иначе пришлось бы вычитывать всю историю,
@@ -57,7 +61,7 @@ export function fetchLog(
     limit,
     all,
     filter,
-  });
+  }).then(withCanonicalAuthors);
 }
 
 export type GitCommitFile = {

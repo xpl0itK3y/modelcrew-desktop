@@ -37,6 +37,25 @@ vi.mock("../files/fileTree", async () => {
   };
 });
 
+/// Сводка git: настоящая ходит в Tauri, которого в тестах нет.
+const gitSummary = vi.fn();
+vi.mock("../git/gitChanges", async () => {
+  const actual =
+    await vi.importActual<typeof import("../git/gitChanges")>(
+      "../git/gitChanges",
+    );
+  return {
+    ...actual,
+    subscribeGitChanges: (
+      _workspaceId: string,
+      listener: (summary: unknown) => void,
+    ) => {
+      listener(gitSummary());
+      return () => {};
+    },
+  };
+});
+
 const { FileTree } = await import("./FileTree");
 
 function listing(
@@ -72,6 +91,8 @@ function names(): string[] {
 
 beforeEach(() => {
   readWorkspaceDir.mockReset();
+  gitSummary.mockReset();
+  gitSummary.mockReturnValue({ isRepo: false, files: [] });
   stopWatching.mockReset();
   searchTree.mockReset();
   searchTree.mockResolvedValue({ entries: [], truncated: false });
@@ -1012,5 +1033,79 @@ describe("FileTree", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert")).toBeInTheDocument(),
     );
+  });
+});
+
+describe("FileTree beside git", () => {
+  /// Сводка репозитория с перечисленными изменениями.
+  function changed(files: [path: string, status: string][], prefix?: string) {
+    gitSummary.mockReturnValue({
+      isRepo: true,
+      headHash: "abc",
+      ...(prefix ? { prefix } : {}),
+      files: files.map(([path, status]) => ({ path, status })),
+    });
+  }
+
+  function rowOf(name: string): HTMLElement {
+    return screen.getByTitle(name);
+  }
+
+  it("marks the files that are not committed yet", async () => {
+    // Дерево — то место, где на файл смотрят чаще всего, и оно ничем не
+    // отличало правленый файл от нетронутого.
+    changed([
+      ["src/main.rs", "modified"],
+      ["NEW.md", "untracked"],
+    ]);
+    serve({
+      "": listing([["src", true], ["NEW.md", false], ["README.md", false]]),
+      src: listing([["main.rs", false]], "src"),
+    });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src", "NEW.md", "README.md"]));
+
+    expect(rowOf("NEW.md").className).toContain("is-git-untracked");
+    expect(rowOf("NEW.md").textContent).toContain("U");
+    // Нетронутый файл остаётся нетронутым и на вид.
+    expect(rowOf("README.md").className).not.toContain("is-git");
+
+    fireEvent.click(rowOf("src"));
+    await waitFor(() => expect(names()).toContain("main.rs"));
+    expect(rowOf("src/main.rs").className).toContain("is-git-modified");
+    expect(rowOf("src/main.rs").textContent).toContain("M");
+  });
+
+  it("says a folded folder is hiding something", async () => {
+    // Свёрнутая папка прячет всё, что в ней тронули: без этого целая ветка
+    // проекта молчит о правках, пока её не раскроют.
+    changed([["src/deep/main.rs", "modified"]]);
+    serve({ "": listing([["src", true], ["docs", true]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["src", "docs"]));
+
+    expect(rowOf("src").className).toContain("is-git-inside");
+    expect(rowOf("docs").className).not.toContain("is-git");
+    // У папки буквы нет: изменена не она, а что-то внутри неё.
+    expect(rowOf("src").textContent).not.toContain("M");
+  });
+
+  it("reads git paths as the paths of this project", async () => {
+    // Проектом открыли подкаталог монорепозитория: пути git идут от корня
+    // репозитория, и без приставки ни один файл не сошёлся бы со своей строкой.
+    changed([["apps/web/main.ts", "modified"], ["apps/api/other.ts", "added"]], "apps/web");
+    serve({ "": listing([["main.ts", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["main.ts"]));
+
+    expect(rowOf("main.ts").className).toContain("is-git-modified");
+  });
+
+  it("leaves a folder that is not a repository completely alone", async () => {
+    serve({ "": listing([["main.ts", false]]) });
+    render(<FileTree workspaceId="w1" onOpenFile={() => {}} />);
+    await waitFor(() => expect(names()).toEqual(["main.ts"]));
+
+    expect(rowOf("main.ts").className).not.toContain("is-git");
   });
 });

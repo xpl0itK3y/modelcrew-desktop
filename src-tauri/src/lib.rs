@@ -11,6 +11,8 @@ compile_error!(
 
 mod agent_hook_cli;
 mod agent_hooks;
+mod agent_session_store;
+mod agent_session_watch;
 mod agent_sessions;
 mod browser_page;
 mod browser_view;
@@ -39,13 +41,18 @@ mod update_cache;
 mod win_proc;
 mod workspace_roots;
 
-use agent_sessions::agent_session_locate;
+use agent_session_store::{
+    agent_sessions_all, agent_sessions_forget, agent_sessions_keep, agent_sessions_remember,
+};
+use agent_session_watch::agent_sessions_watch;
+use agent_sessions::{agent_session_locate, agent_session_locate_turn};
 use browser_view::{browser_frame, browser_go};
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
 use file_tree::{
     workspace_create_entry, workspace_delete_entry, workspace_read_dir, workspace_read_file,
+    workspace_read_media,
     workspace_rename_entry, workspace_reveal_entry, workspace_search_tree, workspace_tree_unwatch,
     workspace_tree_watch, workspace_write_file, TreeWatchState,
 };
@@ -55,7 +62,8 @@ use git_branches::{
 };
 use git_changes::{
     git_abort_operation, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_continue_operation, git_file_diff, git_read_file, git_revert_file, git_write_file,
+    git_continue_operation, git_file_diff, git_head_file, git_read_file, git_revert_file,
+    git_write_file,
     GitWatchState,
 };
 use git_history::{git_commit_action, git_delete_tag, git_drop_commit, git_reword_commit};
@@ -557,6 +565,23 @@ fn workspace_unregister_root(
     state.unbind(&workspace_id)
 }
 
+// Агенты, чей хук-канал уведомлений подключён. Фронтенд по этому списку
+// молчит догадками для их панелей: агент сообщает о себе сам, а две версии
+// одного события — это два баннера подряд про одно и то же.
+//
+// async не ради ожидания, а ради потока: синхронную команду tauri выполняет
+// на главном, а здесь четыре чтения конфигов агентов подряд. Фронтенд зовёт
+// её на импорте модуля — то есть ровно тогда, когда окно рисует первый кадр,
+// и на холодном или сетевом домашнем каталоге это ожидание видно глазом.
+#[tauri::command]
+async fn agent_hook_channels(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> CommandResult<agent_hooks::AgentHookChannels> {
+    ensure_main_window(&window)?;
+    Ok(agent_hooks::notification_channels(&app))
+}
+
 // Бейдж непрочитанного на иконке приложения: счётчик в Dock (macOS) и на
 // иконках доков Linux (KDE, GNOME с доком, Cinnamon, Unity); на Windows
 // числовых бейджей нет — красная точка поверх иконки в панели задач.
@@ -992,6 +1017,7 @@ pub fn run() {
         .manage(SelfUpdaterState::default())
         .manage(GitWatchState::default())
         .manage(TreeWatchState::default())
+        .manage(agent_session_watch::AgentStoreWatchState::default())
         .manage(crew::CrewRegistry::default())
         .invoke_handler(tauri::generate_handler![
             pty_create,
@@ -1008,6 +1034,13 @@ pub fn run() {
             terminal_snapshots_prune,
             terminal_clipboard_image_save,
             agent_session_locate,
+            agent_session_locate_turn,
+            agent_hook_channels,
+            agent_sessions_all,
+            agent_sessions_remember,
+            agent_sessions_forget,
+            agent_sessions_keep,
+            agent_sessions_watch,
             crew_claims,
             browser_frame,
             browser_go,
@@ -1023,6 +1056,7 @@ pub fn run() {
             git_continue_operation,
             git_abort_operation,
             git_revert_file,
+            git_head_file,
             git_read_file,
             git_write_file,
             git_branches,
@@ -1050,6 +1084,7 @@ pub fn run() {
             workspace_delete_entry,
             workspace_read_dir,
             workspace_read_file,
+            workspace_read_media,
             workspace_rename_entry,
             workspace_search_tree,
             workspace_reveal_entry,
@@ -1112,6 +1147,8 @@ mod tests {
         ("lib.rs", LIB_RS),
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
+        ("agent_session_store.rs", include_str!("agent_session_store.rs")),
+        ("agent_session_watch.rs", include_str!("agent_session_watch.rs")),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("browser_page.rs", include_str!("browser_page.rs")),
         ("browser_view.rs", include_str!("browser_view.rs")),
@@ -1145,7 +1182,14 @@ mod tests {
     // Полный список команд, доступных веб-вью. Снимок, а не вычисление:
     // добавление команды обязано быть отдельной осознанной правкой теста.
     const EXPECTED_COMMANDS: &[&str] = &[
+        "agent_hook_channels",
         "agent_session_locate",
+        "agent_session_locate_turn",
+        "agent_sessions_all",
+        "agent_sessions_forget",
+        "agent_sessions_keep",
+        "agent_sessions_remember",
+        "agent_sessions_watch",
         "app_set_badge",
         "app_set_locale",
         "browser_frame",
@@ -1169,6 +1213,7 @@ mod tests {
         "git_drop_commit",
         "git_fetch_upstream",
         "git_file_diff",
+        "git_head_file",
         "git_log",
         "git_merge_ref",
         "git_publish_branch",
@@ -1215,6 +1260,7 @@ mod tests {
         "workspace_pick_root",
         "workspace_read_dir",
         "workspace_read_file",
+        "workspace_read_media",
         "workspace_reconcile_roots",
         "workspace_register_root",
         "workspace_rename_entry",

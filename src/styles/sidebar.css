@@ -23,10 +23,19 @@
      Переменная, а не 100%: пока панель прячут, рейка едет к нулю, и список,
      тянущийся за ней, на глазах сплющивал бы текст вместо того, чтобы уехать
      за край. */
-  width: var(--sidebar-width, 232px);
-  height: 100%;
+  /* Ширина за вычетом левого поля: вместе они дают ровно ширину рейки, и
+     карточка не вылезает за её край. Поля здесь, а не на рейке: рейку
+     ужимают до нуля, когда панель прячут, и её поля остались бы полоской. */
+  width: calc(var(--sidebar-width, 232px) - var(--mc-gap));
+  height: calc(100% - 2 * var(--mc-gap));
   flex: none;
-  padding: 4px 8px;
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+  padding: 4px 6px;
+  /* Тот же край, что у панелей: рейка, дерево проекта и терминалы — карточки
+     одного рода, и обводить их разными линиями значило бы сказать, что они
+     разного. */
+  border: 1px solid var(--mc-card-edge);
+  border-radius: var(--mc-radius);
   background: var(--mc-sidebar);
   transform: translateX(0);
   transition: transform 220ms cubic-bezier(0.2, 0, 0.13, 1);
@@ -104,7 +113,7 @@
   align-items: center;
   gap: 2px;
   padding: 0 6px 0 5px;
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   color: var(--mc-text-muted);
 }
 
@@ -113,22 +122,8 @@
 }
 
 .workspace-item.is-active {
-  background: var(--mc-surface-active);
+  background: var(--mc-hover-strong);
   color: var(--mc-text-bright);
-}
-
-.workspace-accent {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 0;
-  width: 3px;
-  border-radius: 2px;
-  background: transparent;
-}
-
-.workspace-item.is-active .workspace-accent {
-  background: var(--mc-accent);
 }
 
 .workspace-disclosure,
@@ -149,7 +144,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   color: var(--mc-text-faint);
   cursor: pointer;
 }
@@ -193,7 +188,7 @@
 
 .workspace-main:focus-visible,
 .session-main:focus-visible {
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   outline: 1px solid var(--mc-accent-border);
   outline-offset: -1px;
 }
@@ -236,10 +231,10 @@
   width: auto;
   height: 20px;
   padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--mc-accent) 35%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--mc-accent) 16%, transparent);
-  color: var(--mc-accent);
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface-raised);
+  color: var(--mc-text-faint);
   font-size: 11px;
 }
 
@@ -286,7 +281,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   color: var(--mc-text-faint);
   cursor: pointer;
 }
@@ -341,7 +336,7 @@
   align-items: center;
   gap: 2px;
   padding: 0 6px 0 9px;
-  border-radius: 7px;
+  border-radius: var(--mc-radius-sm);
   color: var(--mc-text-muted);
 }
 
@@ -351,19 +346,8 @@
 }
 
 .session-item.is-active {
-  background: var(--mc-surface-active);
+  background: var(--mc-hover-strong);
   color: var(--mc-text-bright);
-}
-
-.session-item.is-active::before {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 0;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--mc-accent);
-  content: "";
 }
 
 .session-main {
@@ -398,7 +382,7 @@
   height: 18px;
   padding: 0 5px;
   border: 1px solid var(--mc-border);
-  border-radius: 9px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   color: var(--mc-text-faint);
   font-size: 10.5px;
@@ -438,7 +422,7 @@
   gap: 2px;
   padding: 4px;
   border: 1px solid var(--mc-border);
-  border-radius: 7px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   box-shadow: 0 12px 28px var(--mc-shadow);
 }
@@ -447,7 +431,7 @@
   width: 100%;
   padding: 6px 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text);
   font: inherit;

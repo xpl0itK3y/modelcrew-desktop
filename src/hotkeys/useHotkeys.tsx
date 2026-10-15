@@ -8,6 +8,7 @@ import {
   togglePanelMaximized,
 } from "../animations";
 import { swapPanels } from "../layoutOps";
+import { isCoveredByModal } from "./modalGuard";
 
 // Все хоткеи приложения перехватываются одним capture-слушателем на
 // window: он срабатывает раньше xterm, забирает только свои комбинации
@@ -153,6 +154,16 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
         return;
       }
       const mod = isMac ? event.metaKey : event.ctrlKey;
+
+      // Поверх сетки стоит модальное окно — сетка клавиш не слышит. Иначе из
+      // настроек можно было переставлять, закрывать и заводить панели: их за
+      // диалогом не видно, а результат остаётся. Спрашиваем только при зажатом
+      // Mod: без него и делать нечего, а обработчик получает каждое нажатие,
+      // включая набор в терминале.
+      if (mod && isCoveredByModal()) {
+        hideBadges();
+        return;
+      }
 
       // Режим быстрой навигации: пока удерживаются Mod+Alt, поверх
       // терминалов висят номера.

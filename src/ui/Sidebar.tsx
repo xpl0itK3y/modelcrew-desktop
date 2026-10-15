@@ -1,6 +1,7 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { ChevronRightIcon, FolderIcon, MoreIcon, PlusIcon } from "./Icons";
 import { formatTerminalCount, useI18n } from "../i18n";
+import { MAX_WORKSPACES } from "../constants";
 import { SidebarMenu } from "./sidebar/SidebarMenu";
 import { SessionRow, type SessionNavItem } from "./sidebar/SessionRow";
 import {
@@ -62,6 +63,7 @@ export function Sidebar(props: SidebarProps) {
   const activeWorkspaceExpanded = props.activeId
     ? expandedIds.has(props.activeId)
     : false;
+  const atProjectLimit = props.workspaces.length >= MAX_WORKSPACES;
 
   const closeMenu = (restoreFocus = false) => {
     const trigger = menuTriggerRef.current;
@@ -208,11 +210,18 @@ export function Sidebar(props: SidebarProps) {
           {t("sidebar.title")}{" "}
           <span className="sidebar-count">{props.workspaces.length}</span>
         </span>
+        {/* На пределе кнопка гаснет, но нажимается: нажатие объясняет тостом,
+            почему проект не добавится. */}
         <button
           type="button"
-          className="icon-button"
-          title={t("sidebar.newWorkspace")}
+          className={`icon-button ${atProjectLimit ? "is-disabled" : ""}`}
+          title={
+            atProjectLimit
+              ? t("workspace.limit", { max: MAX_WORKSPACES })
+              : t("sidebar.newWorkspace")
+          }
           aria-label={t("sidebar.newWorkspace")}
+          aria-disabled={atProjectLimit || undefined}
           onClick={props.onCreateProject}
         >
           <PlusIcon />
@@ -232,7 +241,6 @@ export function Sidebar(props: SidebarProps) {
           return (
             <li key={workspace.id} className="workspace-node">
               <div className={`workspace-item ${isActive ? "is-active" : ""}`}>
-                <span className="workspace-accent" />
                 <button
                   type="button"
                   className="workspace-disclosure"

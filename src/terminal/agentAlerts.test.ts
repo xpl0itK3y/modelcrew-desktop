@@ -24,12 +24,14 @@ vi.mock("../notifications", () => ({
 }));
 
 import {
+  AGENT_HOOK_IDLE_GRACE_MS,
   AGENT_IDLE_MIN_BYTES,
   AGENT_IDLE_QUIET_MS,
   AGENT_REDRAW_MUTE_MS,
   SPAWN_ALERT_MUTE_MS,
   acknowledgeAgentPanel,
   createAgentAlertTracker,
+  endSpawnMuteOnSend,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   muteAlertsWhileRedrawing,
@@ -39,10 +41,12 @@ import {
 } from "./agentAlerts";
 import {
   resetAgentAlertBurst,
+  setPanelSessionResolver,
   setPanelTailResolver,
   setWorkspaceNameResolver,
 } from "./alertDelivery";
 import { resetAlertThrottle } from "./alertPolicy";
+import { noteHookChannel, resetHookChannels } from "./hookChannel";
 import {
   clearAgentAttention,
   getAgentAttentionCount,
@@ -70,6 +74,8 @@ afterEach(() => {
   }
   resetAgentAlertBurst();
   resetAlertThrottle();
+  resetHookChannels();
+  setPanelSessionResolver(() => null);
   vi.useRealTimers();
 });
 
@@ -438,6 +444,21 @@ describe("trackAgentOutput", () => {
     expect(getAgentAttentionCount()).toBe(0);
   });
 
+  it("hears the first answer of a fresh panel once the user has sent it", async () => {
+    // Открыли панель, подняли codex, написали «привет» — и ушли. Ответ
+    // приходит раньше, чем истекают 25 секунд после запуска, и под
+    // глушением его звонок пропадал: ни баннера, ни точки.
+    const fresh = engaged("fresh-panel");
+    muteAlertsAfterSpawn(fresh);
+    endSpawnMuteOnSend(fresh);
+
+    trackAgentOutput(fresh, "fresh-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("fresh-panel")).toBe(true);
+  });
+
   it("stays silent right after spawn, for plain shells and when watched", async () => {
     // Глушение после запуска: даже с engaged-панелью TUI рисует и замолкает.
     const muted = engaged("mute-panel");
@@ -487,8 +508,15 @@ describe("trackAgentOutput", () => {
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
 
-    // Спустя тайм-аут — можно снова.
+    // Тайм-аут вышел, но панель всё ещё ждёт ответа: звать второй раз о том
+    // же самом незачем — точка в шапке и счётчик горят с первого раза.
     await vi.advanceTimersByTimeAsync(16_000);
+    trackAgentOutput(tracker, "throttle-panel", "\x07", () => shown);
+    await settle();
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+
+    // Пользователь ответил — разговор окончен, следующий звонок звучит снова.
+    acknowledgeAgentPanel(tracker, "throttle-panel");
     trackAgentOutput(tracker, "throttle-panel", "\x07", () => shown);
     await settle();
     expect(mocks.playSound).toHaveBeenCalledTimes(2);
@@ -597,8 +625,15 @@ describe("alert throttling", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
 
-    // Окно истекло — снова можно даже с самым тихим сигналом.
+    // Пока панель ждёт, окно не истекает: агент, которому не ответили,
+    // переспрашивает сам, и по баннеру на каждый повтор — это тот же дубль.
     await vi.advanceTimersByTimeAsync(16_000);
+    void raiseAgentAlert("calm-panel", "permission", hidden);
+    await settle();
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+
+    // Ответили — счёт начинается заново даже с самым тихим сигналом.
+    acknowledgeAgentPanel(createAgentAlertTracker(), "calm-panel");
     void raiseAgentAlert("calm-panel", "idle", hidden);
     await settle();
     expect(mocks.systemNotification).toHaveBeenCalledTimes(2);
@@ -614,5 +649,233 @@ describe("alert throttling", () => {
 
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
     expect(mocks.playSound).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("agents that report themselves through a hook", () => {
+  const hidden = { visible: false, focused: false, workspaceId: "ws-1" };
+
+  // Запрос разрешения так, как его приносит хук Claude Code.
+  const permissionAsk = {
+    protocol: "hook" as const,
+    title: "",
+    body: "Claude needs your permission",
+    types: ["Notification"],
+  };
+
+  // Панель отработала целый ход, а потом ушла в тишину: ровно та картина, по
+  // которой догадка объявляет «закончил».
+  async function fallSilentAfterWorking(id: string) {
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, id);
+    trackAgentOutput(tracker, id, "x".repeat(AGENT_IDLE_MIN_BYTES), () => hidden);
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 100);
+    await settle();
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    localStorage.clear();
+    mocks.windowFocused.value = false;
+    mocks.record.value = { agentId: "claude", command: "claude" };
+    setPanelTailResolver(() => null);
+    setWorkspaceNameResolver(() => "ModelCrew");
+  });
+
+  it("lets the hook speak first before guessing out loud", async () => {
+    noteHookChannel("claude", "completed");
+
+    await fallSilentAfterWorking("guess-panel");
+
+    // Тишина в панели чаще всего означает долгий инструмент, а не законченную
+    // работу: даём агенту сказать самому.
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+    expect(isAgentPanelWaiting("guess-panel")).toBe(false);
+  });
+
+  it("keeps the deferred guess alive while the agent redraws its status line", async () => {
+    // Отсрочка жила в общем слоте таймера тишины, а его сбрасывает любой байт
+    // вывода. Агент с хуком, подрисовывающий проценты контекста раз в двадцать
+    // секунд, не звал вовсе: каждая подрисовка убивала отложенную догадку и
+    // заводила новый отсчёт, до порога «поработал» уже не доходивший.
+    noteHookChannel("claude", "completed");
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "redraw-panel");
+    trackAgentOutput(
+      tracker,
+      "redraw-panel",
+      "x".repeat(AGENT_IDLE_MIN_BYTES),
+      () => hidden,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 100);
+    await settle();
+
+    // Отсрочка идёт; агент подрисовывает строку состояния.
+    await vi.advanceTimersByTimeAsync(10_000);
+    trackAgentOutput(tracker, "redraw-panel", "ctx 42%", () => hidden);
+    await settle();
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(AGENT_HOOK_IDLE_GRACE_MS);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("redraw-panel")).toBe(true);
+  });
+
+  it("drops the deferred guess when the agent goes back to work", async () => {
+    // Непрерывный вывод все полминуты: таймер тишины до срабатывания так и не
+    // доживает, и отсрочка приходит к своему сроку у работающей панели. Звать
+    // не о чем — следующая пауза позовёт сама.
+    noteHookChannel("claude", "completed");
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "busy-panel");
+    trackAgentOutput(
+      tracker,
+      "busy-panel",
+      "x".repeat(AGENT_IDLE_MIN_BYTES),
+      () => hidden,
+    );
+    await vi.advanceTimersByTimeAsync(AGENT_IDLE_QUIET_MS + 100);
+    await settle();
+
+    for (let tick = 0; tick < 8; tick += 1) {
+      await vi.advanceTimersByTimeAsync(4_000);
+      trackAgentOutput(
+        tracker,
+        "busy-panel",
+        "y".repeat(AGENT_IDLE_MIN_BYTES),
+        () => hidden,
+      );
+    }
+    await settle();
+
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+  });
+
+  it("still calls out a panel whose hook never spoke", async () => {
+    // Хук установлен — не значит сработал: его могли отключить в отдельном
+    // проекте. Догадка отступает, но не исчезает, иначе панель замолчала бы
+    // навсегда.
+    noteHookChannel("claude", "completed");
+
+    await fallSilentAfterWorking("mute-hook-panel");
+    await vi.advanceTimersByTimeAsync(AGENT_HOOK_IDLE_GRACE_MS + 100);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("mute-hook-panel")).toBe(true);
+  });
+
+  it("drops its own bell in favour of the hook", async () => {
+    // Звонок звучал первым, и следом хук пробивал окно тишины как более
+    // важный — два баннера на одно событие.
+    noteHookChannel("claude", "permission");
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "bell-hook-panel");
+
+    trackAgentOutput(tracker, "bell-hook-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
+  });
+
+  it("still rings for an agent whose hook only reports the end of a turn", async () => {
+    // Хук, который сообщает только конец хода, запрос разрешения не заметит,
+    // и звонок BEL — единственный сигнал о нём. Заглушив звонок по одному
+    // факту «хук есть», мы не позвали бы вовсе: ни баннера, ни точки в шапке,
+    // ни счётчика. Так было у copilot, пока мы не ставили ему `notification`.
+    noteHookChannel("newcli", "completed");
+    mocks.record.value = { agentId: "newcli", command: "newcli" };
+    const tracker = createAgentAlertTracker();
+    markAgentPanelEngaged(tracker, "newcli-bell-panel");
+
+    trackAgentOutput(tracker, "newcli-bell-panel", "\x07", () => hidden);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("newcli-bell-panel")).toBe(true);
+  });
+
+  it("still guesses for an agent that has no hook of its own", async () => {
+    // Канал есть у claude, а в панели другой CLI: для него догадка по тишине
+    // остаётся единственным источником сигналов, и молчать ей нельзя.
+    noteHookChannel("claude", "completed");
+    mocks.record.value = { agentId: "aider", command: "aider" };
+
+    await fallSilentAfterWorking("aider-panel");
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(isAgentPanelWaiting("aider-panel")).toBe(true);
+  });
+
+  it("announces a permission prompt once instead of after its own guess", async () => {
+    // Случай из жизни: долгий инструмент молчал, догадка объявляла «закончил
+    // или ждёт», следом хук приносил «ждёт разрешения» — и второй баннер
+    // законно пробивал окно тишины, потому что был важнее. Два баннера на одно
+    // событие, причём первый ещё и неверный.
+    noteHookChannel("claude", "permission");
+
+    await fallSilentAfterWorking("dup-panel");
+    void raiseAgentHookAlert(
+      "dup-panel",
+      "claude",
+      "permission",
+      hidden,
+      permissionAsk,
+    );
+    await settle();
+    // Отступившая догадка доходит до своего срока и застаёт панель уже
+    // позванной — второго баннера про то же самое не будет.
+    await vi.advanceTimersByTimeAsync(AGENT_HOOK_IDLE_GRACE_MS + 2_000);
+    await settle();
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.systemNotification).toHaveBeenCalledWith(
+      expect.stringMatching(/(permission|разреш)/i),
+      expect.any(String),
+    );
+  });
+
+  it("does not re-announce a prompt the user has not answered yet", async () => {
+    // Claude Code переспрашивает про неотвеченное разрешение каждые полминуты.
+    // Окно тишины короче этого интервала, поэтому раньше каждый повтор давал
+    // свой баннер со звуком.
+    noteHookChannel("claude", "permission");
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      void raiseAgentHookAlert(
+        "nag-panel",
+        "claude",
+        "permission",
+        hidden,
+        permissionAsk,
+      );
+      await settle();
+      await vi.advanceTimersByTimeAsync(45_000);
+    }
+
+    expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.playSound).toHaveBeenCalledTimes(1);
+    // Позвать всё-таки позвали: отметка держится до ответа пользователя.
+    expect(isAgentPanelWaiting("nag-panel")).toBe(true);
+  });
+
+  it("names the session so two panels of one agent differ", async () => {
+    // Заголовок и проект у них совпадают до буквы: без сессии два разных
+    // события читаются как одно, показанное дважды.
+    setPanelSessionResolver((panelId) =>
+      panelId === "left-panel" ? "Вёрстка" : "Релиз",
+    );
+
+    void raiseAgentAlert("left-panel", "permission", hidden);
+    await settle();
+    void raiseAgentAlert("right-panel", "permission", hidden);
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const bodies = mocks.systemNotification.mock.calls.map((call) => call[1]);
+    expect(bodies.join("\n")).toContain("Вёрстка");
+    expect(bodies.join("\n")).toContain("Релиз");
   });
 });

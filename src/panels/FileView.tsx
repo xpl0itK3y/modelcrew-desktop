@@ -11,10 +11,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
@@ -24,7 +27,36 @@ import {
   writeWorkspaceFile,
   type FileContent,
 } from "../files/fileTree";
-import { grammarOf, lineOffsets, paintLines } from "../files/highlight";
+import {
+  commentMarks,
+  grammarOf,
+  lineOffsets,
+  paintLines,
+} from "../files/highlight";
+import { findAll, lineAt, nearest, NO_MATCHES } from "../files/search";
+import {
+  breakLine,
+  deleteLines,
+  duplicateLines,
+  indent,
+  indentUnitOf,
+  moveLines,
+  outdent,
+  toggleComment,
+  type Edit,
+} from "../files/editing";
+import { imageMimeOf, svgSource } from "../files/media";
+import { useLineMarks } from "../git/useLineMarks";
+import { MarkdownView } from "./MarkdownView";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CloseIcon,
+  CodeIcon,
+  EyeIcon,
+  WrapIcon,
+} from "../ui/Icons";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import { fileName } from "../crew/claimLabel";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
@@ -81,9 +113,98 @@ export function FileView(props: {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const name = path.split("/").pop() ?? path;
   // Язык от имени файла, а не от содержимого: имя мы знаем сразу, а угадывать
   // язык по тексту — отдельная задача с собственными ошибками.
-  const language = grammarOf(path.split("/").pop() ?? path);
+  const language = grammarOf(name);
+
+  // Разметку можно не только править, но и читать: заголовки заголовками,
+  // списки списками. То же и с SVG: это текст, но текст, который нарисован.
+  // Выбор запоминается на всё приложение — тот, кто открывает .md чтобы
+  // прочитать, открывает так каждый раз, и щёлкать глазом на каждом файле ему
+  // незачем.
+  const markdown = language === "md";
+  const vector = imageMimeOf(name) === "image/svg+xml";
+  const [preview, setPreview] = useState(
+    () => readSetting(KEYS.filePreview) === "1",
+  );
+  const showPreview = (markdown || vector) && preview;
+  const togglePreview = () => {
+    setPreview((current) => {
+      writeSetting(KEYS.filePreview, current ? "0" : "1");
+      return !current;
+    });
+  };
+
+  const previewLabel = showPreview
+    ? "files.source"
+    : markdown
+      ? "files.preview"
+      : "files.previewImage";
+
+  // Отступ берём у самого файла: чужой файл правят его отступом, каким бы он
+  // ни был. Считаем по версии с диска, а не по каждому нажатию: она меняется
+  // раз в сохранение, а нажатий между ними тысяча.
+  const unit = useMemo(() => indentUnitOf(loaded?.text ?? ""), [loaded?.text]);
+  const comment = useMemo(() => commentMarks(language), [language]);
+
+  // Куда поставить выделение после того, как React перерисует поле. Раньше
+  // ставить нельзя: значение поля задаёт React, и до его отрисовки в поле ещё
+  // старый текст, а выделение считается по новому.
+  const pending = useRef<{ from: number; to: number } | null>(null);
+  useLayoutEffect(() => {
+    const place = pending.current;
+    const field = textRef.current;
+    if (!place || !field) {
+      return;
+    }
+    pending.current = null;
+    field.setSelectionRange(place.from, place.to);
+  }, [text]);
+
+  /// Записать правку в поле руками браузера, а не в обход него: тогда у поля
+  /// остаётся собственная отмена, и ⌘Z возвращает то, что было до Tab, а не
+  /// откатывает всё до последней перерисовки.
+  const apply = (edit: Edit | null) => {
+    const field = textRef.current;
+    if (!edit || !field || edit.text === text) {
+      return;
+    }
+    // Заменяем не весь текст, а тот кусок, которым две версии отличаются:
+    // браузер запомнит в отмене именно его.
+    let head = 0;
+    const before = field.value;
+    const shortest = Math.min(before.length, edit.text.length);
+    while (head < shortest && before[head] === edit.text[head]) {
+      head += 1;
+    }
+    let tail = 0;
+    while (
+      tail < shortest - head &&
+      before[before.length - 1 - tail] === edit.text[edit.text.length - 1 - tail]
+    ) {
+      tail += 1;
+    }
+    const inserted = edit.text.slice(head, edit.text.length - tail);
+    field.setSelectionRange(head, before.length - tail);
+    const written =
+      inserted === ""
+        ? document.execCommand?.("delete")
+        : document.execCommand?.("insertText", false, inserted);
+    if (!written) {
+      // Движок без execCommand — пишем напрямую. Отмена в поле при этом теряет
+      // эту правку, но потерять саму правку было бы хуже.
+      field.value = edit.text;
+    }
+    pending.current = { from: edit.from, to: edit.to };
+    setText(edit.text);
+  };
+
+  /// Сочетание клавиш по месту клавиши, а не по букве на ней: на русской
+  /// раскладке ⌘S — это «ы», и проверка по букве молча перестаёт работать
+  /// ровно тогда, когда человек переключил язык.
+  const pressed = (event: KeyboardEvent | ReactKeyboardEvent, code: string, key: string) =>
+    event.code === code || event.key.toLowerCase() === key;
 
   const dirty = loaded !== null && text !== loaded.text;
   const dirtyRef = useRef(dirty);
@@ -247,18 +368,45 @@ export function FileView(props: {
     () => paintLines(text, language, offsets, shown.from, shown.to),
     [text, language, offsets, shown.from, shown.to],
   );
+
+  // Какие строки git ещё не видел. Двоичный и слишком большой файл сравнивать
+  // не с чем: у первого нет строк, у второго нет содержимого.
+  const marks = useLineMarks(
+    workspaceId,
+    path,
+    text,
+    loaded !== null && loaded.blocked === null,
+  );
+
+  // Номера и полоска правок — один слой, а не два. Полоска обязана стоять
+  // строка в строку с номером, и двум отдельным слоям разъехаться было бы куда
+  // проще, чем сойтись. Текст в каждой строке один и тот же — номер и пробел, —
+  // меняется только то, покрашен пробел или нет; поэтому слой остаётся ровно
+  // такой же высоты, какой был.
   const numbers = useMemo(() => {
-    const rows: string[] = [];
+    const rows: ReactNode[] = [];
     for (let line = shown.from; line < shown.to; line += 1) {
+      const mark = marks.get(line);
       rows.push(String(line + 1));
+      rows.push(
+        mark ? (
+          <span key={line} className={`file-mark is-${mark}`}>
+            {" "}
+          </span>
+        ) : (
+          " "
+        ),
+      );
+      rows.push("\n");
     }
-    return rows.join("\n");
-  }, [shown.from, shown.to]);
+    return rows;
+  }, [shown.from, shown.to, marks]);
 
   // Открыли другой файл — окно начинается сверху.
   useEffect(() => setWindow({ from: 0, to: WHOLE }), [workspaceId, path]);
 
   const paintRef = useRef<HTMLPreElement | null>(null);
+  const foundRef = useRef<HTMLPreElement | null>(null);
   const gutterRef = useRef<HTMLPreElement | null>(null);
 
   // Прокрутка ведёт за собой оба нижних слоя и, если ушла за край окна,
@@ -271,6 +419,10 @@ export function FileView(props: {
     if (paintRef.current) {
       paintRef.current.scrollTop = element.scrollTop;
       paintRef.current.scrollLeft = element.scrollLeft;
+    }
+    if (foundRef.current) {
+      foundRef.current.scrollTop = element.scrollTop;
+      foundRef.current.scrollLeft = element.scrollLeft;
     }
     if (gutterRef.current) {
       gutterRef.current.scrollTop = element.scrollTop;
@@ -293,6 +445,182 @@ export function FileView(props: {
     );
   }, [lineCount]);
 
+  // Поиск по файлу. Пока строка не открыта, ничего не считается и ничего не
+  // рисуется: у закрытого поиска нет ни запроса, ни совпадений.
+  const [query, setQuery] = useState<string | null>(null);
+  const [current, setCurrent] = useState(0);
+  const queryRef = useRef<HTMLInputElement | null>(null);
+  const found = useMemo(
+    () => (query ? findAll(text, query) : NO_MATCHES),
+    [text, query],
+  );
+
+  const openFind = () => {
+    const field = textRef.current;
+    // Выделенное слово и есть то, что ищут: это первое, что делают руками.
+    const picked =
+      field && field.selectionEnd > field.selectionStart
+        ? text.slice(field.selectionStart, field.selectionEnd)
+        : null;
+    setQuery((was) => (picked && !picked.includes("\n") ? picked : (was ?? "")));
+    setCurrent(0);
+    // Строка уже открыта — щелчок по ⌘F ставит курсор обратно в неё.
+    globalThis.requestAnimationFrame(() => queryRef.current?.select());
+  };
+
+  const closeFind = () => {
+    setQuery(null);
+    textRef.current?.focus();
+  };
+
+  /// Перейти к совпадению по кругу: за последним идёт первое.
+  const step = (delta: number) => {
+    if (found.at.length === 0) {
+      return;
+    }
+    setCurrent((was) => (was + delta + found.at.length) % found.at.length);
+  };
+
+  // Показать текущее совпадение: выделить его в поле и подвинуть прокрутку.
+  // Прокрутка полем, а не элементом внутри слоя подсветки: слой рисует только
+  // окно показа, и того, что за его краем, в нём просто нет.
+  useEffect(() => {
+    const field = textRef.current;
+    const at = found.at[current];
+    if (!field || at === undefined || !visible) {
+      return;
+    }
+    // Пока правят сам файл, поиск в него не лезет: набор совпадений меняется
+    // от каждой буквы, и курсор уезжал бы к ближайшему совпадению прямо
+    // из-под руки. Строка поиска при этом остаётся открытой и считает.
+    if (document.activeElement === field) {
+      return;
+    }
+    field.setSelectionRange(at, at + found.length);
+    const perLine = field.scrollHeight / Math.max(1, lineCount);
+    if (perLine > 0) {
+      const line = lineAt(offsets, at);
+      const top = line * perLine;
+      // Двигаемся, только если совпадение вне видимого: иначе каждая буква в
+      // строке поиска дёргала бы файл под руками.
+      if (top < field.scrollTop || top > field.scrollTop + field.clientHeight - perLine) {
+        field.scrollTop = Math.max(0, top - field.clientHeight / 2);
+        follow();
+      }
+    }
+  }, [found, current, visible, lineCount, offsets, follow]);
+
+  const countLabel =
+    query === null || query === ""
+      ? ""
+      : found.at.length === 0
+        ? t("files.findNone")
+        : t(found.capped ? "files.findCapped" : "files.findCount", {
+            index: String(current + 1),
+            total: String(found.at.length),
+          });
+
+  // Запрос сменился — идём к тому совпадению, что ближе к прежнему месту.
+  useEffect(() => {
+    const field = textRef.current;
+    setCurrent(nearest(found.at, field ? field.selectionStart : 0));
+    // Только на смену набора совпадений: в остальном шагами двигает человек.
+  }, [found]);
+
+  // Перенос длинных строк. Длинный JSON и абзац в README уезжают вбок на
+  // километр, и читать их можно только тягая полосу прокрутки.
+  const [wrap, setWrap] = useState(() => readSetting(KEYS.wrapLines) === "1");
+  const toggleWrap = () => {
+    setWrap((current) => {
+      writeSetting(KEYS.wrapLines, current ? "0" : "1");
+      return !current;
+    });
+  };
+
+  // Текст выше и ниже окна показа. Пока строки не переносятся, это ровно
+  // столько переводов строки, сколько там строк: пустая строка в `pre` той же
+  // высоты, что любая другая, и слои сходятся без единого вычисления.
+  //
+  // С переносом это неверно: перенесённая строка занимает два ряда, а перевод
+  // строки — один, и слой подсветки уехал бы вверх на разницу. Поэтому при
+  // переносе за окном лежит сам текст — он и переносится так же, как в поле.
+  // Это один узел на всё, а не по элементу на строку, и стоит он не дороже
+  // того, что поле рисует и так.
+  const head = offsets[shown.from] ?? 0;
+  const foot = shown.to >= lineCount ? text.length : offsets[shown.to] - 1;
+  const above = wrap ? text.slice(0, head) : "\n".repeat(shown.from);
+  const below =
+    (wrap ? text.slice(foot) : "\n".repeat(Math.max(0, lineCount - shown.to))) +
+    "\n";
+
+  // Номера при переносе: каждый едет со своей строкой, а для этого лежит с ней
+  // в одном потоке — вместе с самим текстом строки, невидимым, но переносящимся
+  // точно так же. Сам номер ширины не занимает: его коробка отрицательным полем
+  // сдвинута ровно на свою ширину влево, и перенос от неё не меняется ни на
+  // знак.
+  const wrappedNumbers = useMemo(() => {
+    if (!wrap) {
+      return null;
+    }
+    const rows: ReactNode[] = [];
+    for (let line = shown.from; line < shown.to; line += 1) {
+      const mark = marks.get(line);
+      const start = offsets[line];
+      const end = line + 1 < lineCount ? offsets[line + 1] - 1 : text.length;
+      rows.push(
+        <span key={line} className="file-no">
+          {String(line + 1)}
+          {mark ? (
+            <span className={`file-mark is-${mark}`}> </span>
+          ) : (
+            " "
+          )}
+        </span>,
+      );
+      rows.push(text.slice(start, end));
+      rows.push("\n");
+    }
+    return rows;
+  }, [wrap, shown.from, shown.to, marks, offsets, text, lineCount]);
+
+  /// Совпадения в окне показа, кусками текста и метками. Слой лежит между
+  /// подсветкой и полем ввода, поэтому у меток только фон — цвет букв виден
+  /// сквозь них, с нижнего слоя.
+  const highlighted = useMemo(() => {
+    if (!query || found.at.length === 0) {
+      return null;
+    }
+    const start = offsets[shown.from] ?? 0;
+    const end = shown.to >= lineCount ? text.length : offsets[shown.to] - 1;
+    const parts: ReactNode[] = [];
+    let at = start;
+    for (let index = 0; index < found.at.length; index += 1) {
+      const from = found.at[index];
+      if (from + found.length <= start) {
+        continue;
+      }
+      if (from >= end) {
+        break;
+      }
+      // Совпадение, начавшееся выше окна, показываем с его края: слоя выше нет,
+      // и лишние буквы сдвинули бы всё, что ниже.
+      const left = Math.max(from, start);
+      const right = Math.min(from + found.length, end);
+      parts.push(text.slice(at, left));
+      parts.push(
+        <mark
+          key={index}
+          className={index === current ? "file-found is-current" : "file-found"}
+        >
+          {text.slice(left, right)}
+        </mark>,
+      );
+      at = right;
+    }
+    parts.push(text.slice(at, end));
+    return parts;
+  }, [query, found, current, shown.from, shown.to, offsets, text, lineCount]);
+
   // Не только на прокрутку: колонку тянут за разделитель, окно приложения
   // меняет высоту — видно становится больше строк, чем нарисовано.
   useEffect(() => {
@@ -309,6 +637,30 @@ export function FileView(props: {
         </span>
         {loaded?.blocked && (
           <span className="file-view-note">{t(BLOCKED_TEXT[loaded.blocked])}</span>
+        )}
+        {(markdown || vector) && loaded !== null && loaded.blocked === null && (
+          <button
+            type="button"
+            className="file-view-preview icon-button"
+            title={t(previewLabel)}
+            aria-label={t(previewLabel)}
+            aria-pressed={showPreview}
+            onClick={togglePreview}
+          >
+            {showPreview ? <CodeIcon /> : <EyeIcon />}
+          </button>
+        )}
+        {loaded !== null && !showPreview && (
+          <button
+            type="button"
+            className="file-view-preview icon-button"
+            title={t(wrap ? "files.wrapOff" : "files.wrap")}
+            aria-label={t(wrap ? "files.wrapOff" : "files.wrap")}
+            aria-pressed={wrap}
+            onClick={toggleWrap}
+          >
+            <WrapIcon />
+          </button>
         )}
         {loaded !== null && loaded.blocked === null && (
           <button
@@ -337,9 +689,21 @@ export function FileView(props: {
       )}
       {loaded === null && !error ? (
         <div className="file-view-empty">{t("files.loading")}</div>
+      ) : showPreview && markdown && loaded?.blocked === null ? (
+        /* Показываем то, что в поле, а не то, что на диске: несохранённая
+           правка обязана быть видна и здесь, иначе просмотр врёт про файл,
+           который прямо сейчас правят. */
+        <MarkdownView text={text} />
+      ) : showPreview && loaded?.blocked === null ? (
+        /* SVG уезжает в адрес картинки, а не в разметку страницы. Внутри
+           `<img>` не выполняется ни скрипт, ни обработчик события — а SVG
+           умеет и то и другое, и пишет его агент. */
+        <div className="picture-sheet">
+          <img className="picture-shown" src={svgSource(text)} alt={name} />
+        </div>
       ) : (
         <div
-          className="file-view-code"
+          className={`file-view-code ${wrap ? "is-wrapped" : ""}`}
           style={
             { "--file-digits": `${String(lineCount).length}ch` } as CSSProperties
           }
@@ -354,7 +718,7 @@ export function FileView(props: {
               высоту, что и любая другая, поэтому окно встаёт на своё место без
               единого вычисления в пикселях: разъехаться тут нечему. */}
           <pre ref={paintRef} className="file-view-paint" aria-hidden="true">
-            {"\n".repeat(shown.from)}
+            {above}
             {painted.map((token, index) => (
               <span key={index} className={`tok-${token.kind}`}>
                 {token.text}
@@ -362,8 +726,15 @@ export function FileView(props: {
             ))}
             {/* Хвост и последняя строка без перевода: без них слой ниже поля
                 кончается раньше, и подсветка отстаёт на строку. */}
-            {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+            {below}
           </pre>
+          {highlighted && (
+            <pre ref={foundRef} className="file-view-found" aria-hidden="true">
+              {above}
+              {highlighted}
+              {below}
+            </pre>
+          )}
           <textarea
             ref={textRef}
             className="file-view-text"
@@ -374,9 +745,64 @@ export function FileView(props: {
             onChange={(event) => setText(event.target.value)}
             onScroll={follow}
             onKeyDown={(event) => {
-              if (event.key === "s" && (event.metaKey || event.ctrlKey)) {
+              const meta = event.metaKey || event.ctrlKey;
+              if (meta && pressed(event, "KeyS", "s")) {
                 event.preventDefault();
                 requestSave();
+                return;
+              }
+              if (meta && pressed(event, "KeyF", "f")) {
+                event.preventDefault();
+                openFind();
+                return;
+              }
+              if (event.key === "Escape" && query !== null) {
+                event.preventDefault();
+                closeFind();
+                return;
+              }
+              // Правки — только там, где правят: у двоичного и слишком
+              // большого файла поле только для чтения.
+              if (loaded === null || loaded.blocked !== null) {
+                return;
+              }
+              const field = event.currentTarget;
+              const from = field.selectionStart;
+              const to = field.selectionEnd;
+              if (event.key === "Tab") {
+                // Tab уводил фокус из поля — на этом спотыкаются первым делом:
+                // в текстовом поле он должен ставить отступ.
+                event.preventDefault();
+                apply(
+                  event.shiftKey
+                    ? outdent(text, from, to, unit)
+                    : indent(text, from, to, unit),
+                );
+                return;
+              }
+              if (event.key === "Enter" && !meta && !event.altKey) {
+                event.preventDefault();
+                apply(breakLine(text, from, to, unit));
+                return;
+              }
+              if (meta && pressed(event, "Slash", "/")) {
+                event.preventDefault();
+                apply(toggleComment(text, from, to, comment));
+                return;
+              }
+              if (meta && event.shiftKey && pressed(event, "KeyD", "d")) {
+                event.preventDefault();
+                apply(duplicateLines(text, from, to));
+                return;
+              }
+              if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+                event.preventDefault();
+                apply(moveLines(text, from, to, event.key === "ArrowUp" ? -1 : 1));
+                return;
+              }
+              if (meta && event.key === "Backspace") {
+                event.preventDefault();
+                apply(deleteLines(text, from, to));
               }
             }}
           />
@@ -384,10 +810,70 @@ export function FileView(props: {
               строка уезжает под них, а не поверх. Мышь их не видит — щелчок
               по номеру должен попадать в текст. */}
           <pre ref={gutterRef} className="file-view-lines" aria-hidden="true">
-            {"\n".repeat(shown.from)}
-            {numbers}
-            {"\n".repeat(Math.max(0, lineCount - shown.to) + 1)}
+            {wrap ? text.slice(0, head) : "\n".repeat(shown.from)}
+            {wrap ? wrappedNumbers : numbers}
+            {/* Перевод строки у каждой строки уже свой, поэтому хвост здесь на
+                один короче, чем у слоя подсветки: вместе они дают ту же высоту. */}
+            {wrap
+              ? text.slice(foot + 1)
+              : "\n".repeat(Math.max(0, lineCount - shown.to))}
           </pre>
+          {query !== null && (
+            /* Строка поиска лежит поверх текста, а не над ним: появившись в
+               потоке, она сдвинула бы файл под курсором на свою высоту. */
+            <div className="file-find">
+              <input
+                ref={queryRef}
+                className="file-find-query"
+                value={query}
+                placeholder={t("files.findQuery")}
+                aria-label={t("files.find")}
+                spellCheck={false}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    step(event.shiftKey ? -1 : 1);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeFind();
+                  }
+                }}
+              />
+              <span className="file-find-count">{countLabel}</span>
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.findPrevious")}
+                aria-label={t("files.findPrevious")}
+                disabled={found.at.length === 0}
+                onClick={() => step(-1)}
+              >
+                <ChevronUpIcon />
+              </button>
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.findNext")}
+                aria-label={t("files.findNext")}
+                disabled={found.at.length === 0}
+                onClick={() => step(1)}
+              >
+                <ChevronDownIcon />
+              </button>
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.findClose")}
+                aria-label={t("files.findClose")}
+                onClick={closeFind}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          )}
         </div>
       )}
       {asking && (

@@ -7,6 +7,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
+import { hydrateAgentSessions } from "../agents";
 import { isTauri } from "../platform";
 import { invoke } from "@tauri-apps/api/core";
 import { backendErrorReason, localizeBackendError, translate } from "../i18n";
@@ -144,6 +145,19 @@ export function useWorkspaceRoots({
       });
       rootErrorsRef.current = errors;
       setRootErrors(errors);
+      // Привязки к разговорам приходят из файла приложения, а не из хранилища
+      // вебвью. Обязательно до готовности реестра: следом монтируется Dockview,
+      // и восстановленные панели сразу решают, какой чат продолжать.
+      const panelIds: string[] = [];
+      for (const workspace of workspacesRef.current.list) {
+        for (const session of workspace.sessions) {
+          panelIds.push(...Object.keys(session.layout?.panels ?? {}));
+        }
+      }
+      await hydrateAgentSessions(panelIds);
+      if (cancelled) {
+        return;
+      }
       setRootRegistryReady(true);
     })();
     return () => {

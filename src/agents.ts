@@ -19,18 +19,21 @@ export type AgentDefinition = {
   // заголовков уже отдаёт их, например "codex" или "claude"). Первое из них —
   // команда запуска: из неё собирается resume.
   processNames: string[];
-  // Имена, под которыми агент значится в списке процессов, но которыми его не
-  // запускают: бинарь kimi переименовывает себя в kimi-code, а `kimi-code` в
-  // PATH нет. Годятся только для опознания — команда берётся из processNames.
-  aliasNames?: string[];
   // Аргументы «продолжить последний диалог этой папки».
   resumeLast: string[];
-  // Аргументы «показать список диалогов» — для второй и последующих панелей
-  // того же агента в той же папке, чтобы не открыть везде один и тот же чат.
+  // Что запустить второй и последующим панелям того же агента в той же папке,
+  // чтобы не открыть везде один и тот же чат. Обычно это «показать список
+  // диалогов». Пустой список — запустить агента без аргументов, то есть с
+  // чистого разговора: так у агентов, которым выбирать диалог при запуске
+  // нечем.
   resumePicker: string[];
   // Аргументы точного возобновления: id сессии добавляется последним.
   // Отсутствует у агентов без адресного resume.
   resumeSession?: string[];
+  // Журнал агента помечает временем начало каждого хода, и диалог панели
+  // находится по её собственному Enter. Нужно тем, чей хук своего id не
+  // называет.
+  bindsByTurn?: boolean;
 };
 
 // Флаги сверены с документацией CLI (июль 2026).
@@ -50,6 +53,7 @@ export const AGENTS: AgentDefinition[] = [
     resumeLast: ["resume", "--last"],
     resumePicker: ["resume"],
     resumeSession: ["resume"],
+    bindsByTurn: true,
   },
   {
     id: "copilot",
@@ -64,57 +68,14 @@ export const AGENTS: AgentDefinition[] = [
     label: "OpenCode",
     processNames: ["opencode"],
     resumeLast: ["--continue"],
-    resumePicker: ["--continue"],
+    // У opencode выбора диалога при запуске нет: `--continue` берёт последний,
+    // `--session <id>` — названный, а `opencode session list` только печатает
+    // список и TUI не открывает. Поставить сюда `--continue` значило бы
+    // отправить вторую панель в тот самый чат, от которого мы её уводим.
+    // Поэтому чистый разговор: не то, что панель помнила, зато свой — и
+    // локатор привяжет его к ней, так что следующий запуск будет точным.
+    resumePicker: [],
     resumeSession: ["--session"],
-  },
-  {
-    id: "kilocode",
-    label: "Kilo Code",
-    processNames: ["kilocode", "kilo"],
-    resumeLast: ["--continue"],
-    resumePicker: ["--continue"],
-    resumeSession: ["--session"],
-  },
-  {
-    id: "kimi",
-    label: "Kimi Code",
-    processNames: ["kimi"],
-    aliasNames: ["kimi-code"],
-    resumeLast: ["--continue"],
-    resumePicker: ["--session"],
-    resumeSession: ["--session"],
-  },
-  {
-    id: "grok",
-    label: "Grok Build",
-    processNames: ["grok"],
-    resumeLast: ["-c"],
-    resumePicker: ["--resume"],
-    resumeSession: ["--resume"],
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    processNames: ["cursor-agent"],
-    resumeLast: ["--continue"],
-    resumePicker: ["resume"],
-    resumeSession: ["--resume"],
-  },
-  {
-    id: "aider",
-    label: "Aider",
-    processNames: ["aider"],
-    // У aider одна история на репозиторий, адресных сессий нет.
-    resumeLast: ["--restore-chat-history"],
-    resumePicker: ["--restore-chat-history"],
-  },
-  {
-    id: "antigravity",
-    label: "Antigravity",
-    processNames: ["agy"],
-    resumeLast: ["--continue"],
-    resumePicker: ["--continue"],
-    resumeSession: ["--conversation"],
   },
 ];
 
@@ -150,20 +111,8 @@ export function matchAgent(
     if (agent.processNames.includes(name)) {
       return { agent, command: name };
     }
-    // Опознали по самоназванию процесса: командой оно быть не может, поэтому
-    // возвращаем ту, которой агента запускают.
-    if (agent.aliasNames?.includes(name)) {
-      return { agent, command: agent.processNames[0] };
-    }
   }
   return null;
-}
-
-// Подпись панели по имени процесса. Самоназвание бинаря заменяем на команду
-// запуска: иначе панель, созданная как «kimi», после перезапуска сама собой
-// переименовывалась в «kimi-code».
-export function panelProcessLabel(processName: string): string {
-  return matchAgent(processName)?.command ?? processName;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +130,7 @@ type AgentRecord = {
   sessionId?: string;
 };
 
-// Буквы/цифры/дефис/подчёркивание: uuid (claude, codex, agy) и ses_… (opencode).
+// Буквы/цифры/дефис/подчёркивание: uuid (claude, codex) и ses_… (opencode).
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 // ---------------------------------------------------------------------------
@@ -191,7 +140,16 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 // закрытия самой панели и служит запасным ответом на вопрос «какой диалог
 // продолжать», когда свежей привязки нет.
 
-type RememberedSession = { agentId: string; sessionId: string };
+type RememberedSession = {
+  agentId: string;
+  sessionId: string;
+  // Проект, в котором живёт диалог. Нужен, чтобы «продолжить последний чат»
+  // отменялось только из-за соседа по той же папке: чужая папка чужому чату
+  // не конкурент. Записи прежних версий папку не помнят — такую сессию
+  // считаем соседской, потому что лишний список диалогов безобиднее, чем две
+  // панели в одном чате.
+  workspaceId?: string;
+};
 
 function loadSessions(): Record<string, RememberedSession> {
   try {
@@ -218,6 +176,9 @@ function loadSessions(): Record<string, RememberedSession> {
         sessions[id] = {
           agentId: candidate.agentId,
           sessionId: candidate.sessionId,
+          ...(typeof candidate.workspaceId === "string"
+            ? { workspaceId: candidate.workspaceId }
+            : {}),
         };
       }
     }
@@ -228,10 +189,134 @@ function loadSessions(): Record<string, RememberedSession> {
 }
 
 function saveSessions(sessions: Record<string, RememberedSession>): void {
+  // Что изменилось, знает только сравнение с прежним состоянием: вызывающие
+  // отдают карту целиком, а в файл незачем переписывать всё подряд.
+  const previous = loadSessions();
   try {
     writeSetting(KEYS.agentSessions, JSON.stringify(sessions));
   } catch {
     // Non-fatal: останется прежний поиск сессии локатором.
+  }
+  for (const [terminalId, session] of Object.entries(sessions)) {
+    const before = previous[terminalId];
+    if (
+      !before ||
+      before.agentId !== session.agentId ||
+      before.sessionId !== session.sessionId ||
+      before.workspaceId !== session.workspaceId
+    ) {
+      rememberDurably(terminalId, session);
+    }
+  }
+  for (const terminalId of Object.keys(previous)) {
+    if (!sessions[terminalId]) {
+      forgetDurably(terminalId);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Долговечная копия привязок: файл в данных приложения, а не хранилище вебвью.
+//
+// Разговор — единственное, что приложение не умеет восстановить само. Раскладку,
+// текст панели и историю команд оно соберёт заново; чат агент отдаёт только по
+// точному id, и потерянный id значит, что пользователь открыл приложение и не
+// нашёл ни одной своей беседы. Хранилище вебвью для этого негодный дом: оно
+// чистится вместе с данными сайта, у dev- и установленной сборки оно разное и
+// переустановку не переживает.
+//
+// localStorage остаётся рабочей копией — он синхронный, и его читают на каждый
+// чих, — а файл ведётся рядом и на старте наполняет его обратно.
+
+type StoredSession = {
+  panelId: string;
+  agentId: string;
+  sessionId: string;
+  workspaceId?: string;
+  updatedAt: number;
+};
+
+function rememberDurably(
+  terminalId: string,
+  session: RememberedSession,
+): void {
+  if (!isTauri) {
+    return;
+  }
+  void invoke("agent_sessions_remember", {
+    panelId: terminalId,
+    agentId: session.agentId,
+    sessionId: session.sessionId,
+    workspaceId: session.workspaceId ?? null,
+  }).catch(() => {
+    // Файл недоступен — привязка живёт хотя бы до закрытия приложения.
+  });
+}
+
+function forgetDurably(terminalId: string): void {
+  if (!isTauri) {
+    return;
+  }
+  void invoke("agent_sessions_forget", { panelId: terminalId }).catch(() => {});
+}
+
+// Наполняет рабочую копию из файла до того, как появится первая панель.
+// Список живых панелей обязателен: файл переживает и те панели, которых уже
+// нет, и воскрешать их в хранилище вебвью незачем.
+export async function hydrateAgentSessions(
+  livePanelIds: string[],
+): Promise<void> {
+  if (!isTauri) {
+    return;
+  }
+  let stored: StoredSession[];
+  try {
+    stored = await invoke<StoredSession[]>("agent_sessions_all");
+  } catch {
+    return; // файла нет или он недоступен: остаётся прежняя рабочая копия
+  }
+  const alive = new Set(livePanelIds);
+  const sessions = loadSessions();
+  let changed = false;
+  for (const item of stored) {
+    if (!alive.has(item.panelId) || !SESSION_ID_PATTERN.test(item.sessionId)) {
+      continue;
+    }
+    const current = sessions[item.panelId];
+    if (
+      current?.agentId === item.agentId &&
+      current.sessionId === item.sessionId &&
+      current.workspaceId === item.workspaceId
+    ) {
+      continue;
+    }
+    sessions[item.panelId] = {
+      agentId: item.agentId,
+      sessionId: item.sessionId,
+      ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}),
+    };
+    changed = true;
+  }
+  if (changed) {
+    // Мимо saveSessions: писать в файл то, что из него же и пришло, незачем.
+    try {
+      writeSetting(KEYS.agentSessions, JSON.stringify(sessions));
+    } catch {
+      // Non-fatal: привязки останутся только в файле, до следующего старта.
+    }
+  }
+  // Первый запуск после обновления: привязки есть только в вебвью — переносим
+  // их в файл, иначе «фишка» начнётся с чистого листа у всех разом.
+  const known = new Set(stored.map((item) => item.panelId));
+  for (const [terminalId, session] of Object.entries(sessions)) {
+    if (alive.has(terminalId) && !known.has(terminalId)) {
+      rememberDurably(terminalId, session);
+    }
+  }
+  try {
+    await invoke("agent_sessions_keep", { keep: [...alive] });
+  } catch {
+    // Подчистится при следующем запуске.
   }
 }
 
@@ -251,6 +336,98 @@ export function rememberedSessionId(
     : stored.sessionId;
 }
 
+// Дописывает папку уже привязанной сессии. Нужно двум приходящим: панелям от
+// прежних версий, где поля ещё не было, и панелям, чей чат привязан давно —
+// локатор к ним больше не заходит (у записи есть id, и он уходит первым же
+// return'ом), так что сама привязка папку дописать не может. Без папки такая
+// сессия считается соседской в любом проекте, и «продолжить последний чат»
+// пропал бы у всех навсегда.
+export function noteSessionWorkspace(
+  terminalId: string,
+  workspaceId: string,
+): void {
+  if (!workspaceId) {
+    return;
+  }
+  const sessions = loadSessions();
+  const session = sessions[terminalId];
+  if (!session || session.workspaceId !== undefined) {
+    return;
+  }
+  sessions[terminalId] = { ...session, workspaceId };
+  saveSessions(sessions);
+}
+
+// «Продолжить последний диалог» — единственная команда возобновления, которой
+// нельзя сказать «кроме этих». Она открывает самый свежий чат папки, а он
+// запросто принадлежит соседней панели, которая возобновится по точному id:
+// так две панели и оказываются в одном разговоре. Поэтому предлагаем её,
+// только когда в этой папке нет другой панели с известным чатом того же
+// агента, — иначе безопаснее показать список.
+export function agentChatClaimedNearby(
+  agentId: string,
+  exceptTerminalId: string,
+  workspaceId: string,
+): boolean {
+  for (const [terminalId, session] of Object.entries(loadSessions())) {
+    if (terminalId === exceptTerminalId || session.agentId !== agentId) {
+      continue;
+    }
+    if (
+      session.workspaceId === undefined ||
+      session.workspaceId === workspaceId
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
+// Диалог, в который панель возобновилась при запуске приложения. Запись об
+// агенте эфемерна: watcher стирает её, едва увидит оболочку, — а после полного
+// перезапуска оболочка и есть первое, что он видит, потому что команду
+// возобновления мы вводим уже в приглашение. К моменту, когда агент поднялся,
+// запись пересоздаётся с нуля и об id не помнит, хотя панель всё это время
+// сидит в известном чате. Локатор такую панель считает ничьей и по свежести
+// файлов может отдать ей разговор соседки — так две панели и оказываются в
+// одном чате. Заметка закрывает ровно этот промежуток.
+//
+// Одноразовая и недолгая: она про один переход «оболочка → агент» сразу после
+// возобновления. Если тот же агент позже запустится в панели снова, это уже
+// новый разговор, и приписывать ему старый id нельзя.
+const RESUMED_SESSION_TRUST_MS = 2 * 60_000;
+
+const resumedSessions = new Map<string, { sessionId: string; at: number }>();
+
+export function noteResumedAgentSession(
+  terminalId: string,
+  sessionId: string,
+): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return;
+  }
+  resumedSessions.set(terminalId, { sessionId, at: Date.now() });
+}
+
+function takeResumedSession(
+  terminalId: string,
+  agentId: string,
+): string | undefined {
+  const noted = resumedSessions.get(terminalId);
+  if (!noted) {
+    return undefined;
+  }
+  resumedSessions.delete(terminalId);
+  if (Date.now() - noted.at > RESUMED_SESSION_TRUST_MS) {
+    return undefined;
+  }
+  // Пока панель поднималась, чат мог достаться соседке (например, по хуку).
+  // Повторять старую привязку поверх чужой — снова сажать двоих в один чат.
+  return boundAgentSessionIds(agentId, terminalId).includes(noted.sessionId)
+    ? undefined
+    : noted.sessionId;
+}
 
 function loadRecords(): Record<string, AgentRecord> {
   try {
@@ -361,10 +538,13 @@ export function rememberAgentProcess(
     ) {
       return true;
     }
+    // Агент поднялся после возобновления: свой чат панель знает и без локатора.
+    const resumed = takeResumedSession(terminalId, matched.agent.id);
     records[terminalId] = {
       agentId: matched.agent.id,
       command: matched.command,
       detectedAt: Date.now(),
+      ...(resumed ? { sessionId: resumed } : {}),
     };
     saveRecords(records);
     return true;
@@ -394,6 +574,8 @@ export function rememberAgentProcess(
 export function discardAgentRecord(terminalId: string): void {
   agentMisses.delete(terminalId);
   bindingRoots.delete(terminalId);
+  resumedSessions.delete(terminalId);
+  forgetTurns(terminalId);
   const sessions = loadSessions();
   if (sessions[terminalId]) {
     delete sessions[terminalId];
@@ -450,6 +632,36 @@ export function pruneAgentRecords(keepIds: string[]): void {
   if (changed) {
     saveRecords(records);
   }
+  // То же и для запомненных диалогов. Раньше чистили одни записи, а дубль
+  // оставался здесь — и переживал перезапуск, потому что именно отсюда
+  // панель берёт чат, когда свежей привязки нет.
+  //
+  // Владелец дубля — панель, за которой чат числится в записи: она возобновится
+  // по нему точно, и отнять его у неё нельзя. Порядок ключей решает, только
+  // когда записи нет ни у одной из панелей: id панелей — случайные uuid, так
+  // что это жребий, а не право.
+  const holders = new Map<string, string>();
+  for (const [id, record] of Object.entries(records)) {
+    if (record.sessionId) {
+      holders.set(`${record.agentId}:${record.sessionId}`, id);
+    }
+  }
+  const claimed = new Set<string>();
+  let duplicates = false;
+  for (const id of Object.keys(sessions).sort()) {
+    const session = sessions[id];
+    const key = `${session.agentId}:${session.sessionId}`;
+    const holder = holders.get(key);
+    if (holder !== undefined ? holder !== id : claimed.has(key)) {
+      delete sessions[id];
+      duplicates = true;
+    } else {
+      claimed.add(key);
+    }
+  }
+  if (duplicates) {
+    saveSessions(sessions);
+  }
 }
 
 export function getAgentRecord(terminalId: string): AgentRecord | null {
@@ -460,6 +672,7 @@ export function getAgentRecord(terminalId: string): AgentRecord | null {
 export function bindAgentSession(
   terminalId: string,
   sessionId: string,
+  workspaceId?: string,
 ): boolean {
   if (!SESSION_ID_PATTERN.test(sessionId)) {
     return false;
@@ -475,40 +688,95 @@ export function bindAgentSession(
   // Локаторы панелей бегут параллельно: пока эта панель ждала ответа, другая
   // могла занять тот же id (exclude его ещё не знал). Тогда привязку
   // отклоняем — вызывающий повторит поиск уже с обновлённым exclude.
-  for (const [otherId, other] of Object.entries(records)) {
-    if (
-      otherId !== terminalId &&
-      other.agentId === record.agentId &&
-      other.sessionId === sessionId
-    ) {
-      return false;
-    }
+  // Спрашиваем по обеим картам: у соседки, чей агент вышел в оболочку, id
+  // остался только в запомненных диалогах, но чат всё равно её.
+  if (boundAgentSessionIds(record.agentId, terminalId).includes(sessionId)) {
+    return false;
   }
   records[terminalId] = { ...record, sessionId };
   saveRecords(records);
   const sessions = loadSessions();
-  sessions[terminalId] = { agentId: record.agentId, sessionId };
+  sessions[terminalId] = {
+    agentId: record.agentId,
+    sessionId,
+    // Папку знает только тот, кто заводил привязку. Без неё сессия сойдёт за
+    // соседскую — осторожная сторона этой развилки.
+    ...(workspaceId ? { workspaceId } : {}),
+  };
   saveSessions(sessions);
   return true;
 }
 
+// Хук назвал и панель, и диалог: это не догадка по каталогу, а слово самого
+// агента, и в один диалог два процесса всё равно не пишут. Поэтому такая
+// привязка сильнее локаторной — если id числится за другой панелью, он попал
+// туда прежней догадкой, и снять его оттуда правильнее, чем отказать здесь.
+export function bindAgentSessionFromHook(
+  terminalId: string,
+  sessionId: string,
+  workspaceId?: string,
+): boolean {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return false;
+  }
+  const records = loadRecords();
+  const record = records[terminalId];
+  if (!record) {
+    return false; // агента в панели ещё не опознали — привязывать не к чему
+  }
+  let stripped = false;
+  for (const [otherId, other] of Object.entries(records)) {
+    if (otherId !== terminalId && other.agentId === record.agentId && other.sessionId === sessionId) {
+      const { sessionId: _wrong, ...rest } = other;
+      records[otherId] = rest;
+      stripped = true;
+    }
+  }
+  const sessions = loadSessions();
+  let forgotten = false;
+  for (const [otherId, other] of Object.entries(sessions)) {
+    if (otherId !== terminalId && other.agentId === record.agentId && other.sessionId === sessionId) {
+      delete sessions[otherId];
+      forgotten = true;
+    }
+  }
+  if (stripped) {
+    saveRecords(records);
+  }
+  if (forgotten) {
+    saveSessions(sessions);
+  }
+  return bindAgentSession(terminalId, sessionId, workspaceId);
+}
+
 // Сессии этого агента, уже занятые другими панелями: локатор их пропускает,
 // чтобы шесть клаудов в одном проекте получили шесть разных чатов.
+//
+// Считаем по обеим картам. Запись живёт, только пока агент — foreground-
+// процесс: вышел в оболочку — и id из неё пропал, хотя диалог остался за
+// панелью и она возобновит именно его. Пока здесь смотрели в одни записи,
+// такой чат становился ничьим: локатор соседа его не исключал, привязка не
+// отклонялась, и две панели уходили в один разговор.
 export function boundAgentSessionIds(
   agentId: string,
   exceptTerminalId: string,
 ): string[] {
-  const ids: string[] = [];
+  const ids = new Set<string>();
   for (const [terminalId, record] of Object.entries(loadRecords())) {
     if (
       terminalId !== exceptTerminalId &&
       record.agentId === agentId &&
       record.sessionId
     ) {
-      ids.push(record.sessionId);
+      ids.add(record.sessionId);
     }
   }
-  return ids;
+  for (const [terminalId, session] of Object.entries(loadSessions())) {
+    if (terminalId !== exceptTerminalId && session.agentId === agentId) {
+      ids.add(session.sessionId);
+    }
+  }
+  return [...ids];
 }
 
 // Собирает shell-строку возобновления. picker: в этой папке уже возобновлялась
@@ -547,11 +815,18 @@ const LOCATE_ATTEMPT_DELAYS_MS = [1_500, 6_000, 20_000];
 
 const pendingBindings = new Set<string>();
 
-// Папка проекта панели: нужна, чтобы повторить поиск сессии позже, когда
-// пользователь наконец напишет агенту.
-const bindingRoots = new Map<string, string>();
+// Проект панели: папка нужна, чтобы повторить поиск сессии позже, когда
+// пользователь наконец напишет агенту, а id рабочего пространства — чтобы
+// найденный чат запомнился вместе с местом, где он живёт.
+type BindingRoot = { cwd: string; workspaceId: string };
 
-async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
+const bindingRoots = new Map<string, BindingRoot>();
+
+async function locateOnce(
+  terminalId: string,
+  root: BindingRoot,
+  since: number,
+): Promise<boolean> {
   const record = getAgentRecord(terminalId);
   if (!record || record.sessionId) {
     return true; // привязка не нужна или уже есть
@@ -563,11 +838,11 @@ async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
   try {
     const found = await invoke<string | null>("agent_session_locate", {
       agent: record.agentId,
-      cwd,
-      sinceEpochMs: Math.max(0, Math.round(record.detectedAt)),
+      cwd: root.cwd,
+      sinceEpochMs: Math.max(0, Math.round(since)),
       exclude: boundAgentSessionIds(record.agentId, terminalId),
     });
-    if (found && bindAgentSession(terminalId, found)) {
+    if (found && bindAgentSession(terminalId, found, root.workspaceId)) {
       return true;
     }
   } catch {
@@ -576,15 +851,27 @@ async function locateOnce(terminalId: string, cwd: string): Promise<boolean> {
   return false;
 }
 
-function startBinding(terminalId: string, cwd: string): void {
+// Момент, вокруг которого локатор ищет файл сессии. При обнаружении агента
+// это его запуск: файл появится через секунды. На повторе — сам повтор, а не
+// запуск: повтор вызывает первый ввод пользователя, и файл создаётся именно
+// сейчас. Пока сюда всегда шёл момент запуска, окно поиска у бэкенда (десять
+// минут после него) успевало закрыться, и панель, в которой заговорили
+// позже, не привязывалась уже никогда — а непривязанная панель и есть та,
+// что потом тянется к чужому диалогу.
+function startBinding(
+  terminalId: string,
+  root: BindingRoot,
+  since?: number,
+): void {
   if (!isTauri || pendingBindings.has(terminalId)) {
     return;
   }
   pendingBindings.add(terminalId);
-  bindingRoots.set(terminalId, cwd);
+  bindingRoots.set(terminalId, root);
+  const anchor = since ?? getAgentRecord(terminalId)?.detectedAt ?? Date.now();
   let attempt = 0;
   const tryLocate = () => {
-    void locateOnce(terminalId, cwd).then((done) => {
+    void locateOnce(terminalId, root, anchor).then((done) => {
       attempt += 1;
       if (done || attempt >= LOCATE_ATTEMPT_DELAYS_MS.length) {
         pendingBindings.delete(terminalId);
@@ -596,12 +883,35 @@ function startBinding(terminalId: string, cwd: string): void {
   window.setTimeout(tryLocate, LOCATE_ATTEMPT_DELAYS_MS[0]);
 }
 
+// Хранилища разговоров под наблюдением: у агента, который ни разу не
+// запускался, каталога ещё нет и следить не за чем. К моменту, когда агент
+// опознан в панели, каталог создан им самим — поэтому проба повторяется на
+// каждого нового агента, а не один раз за запуск.
+const watchedAgentStores = new Set<string>();
+
+function watchAgentStores(agentId: string): void {
+  if (!isTauri || watchedAgentStores.has(agentId)) {
+    return;
+  }
+  watchedAgentStores.add(agentId);
+  void invoke("agent_sessions_watch").catch(() => {
+    // Не поднялось — остаётся прежний путь: попытки по таймеру и по вводу.
+    watchedAgentStores.delete(agentId);
+  });
+}
+
 // Зовётся watcher'ом при обнаружении агента в панели.
 export function scheduleAgentSessionBinding(
   terminalId: string,
   cwd: string,
+  workspaceId: string,
 ): void {
-  startBinding(terminalId, cwd);
+  noteSessionWorkspace(terminalId, workspaceId);
+  const agentId = getAgentRecord(terminalId)?.agentId;
+  if (agentId) {
+    watchAgentStores(agentId);
+  }
+  startBinding(terminalId, { cwd, workspaceId });
 }
 
 // Пользователь написал в панель с агентом. Файл сессии агент создаёт с первым
@@ -620,8 +930,148 @@ export function retryAgentSessionBinding(terminalId: string): void {
   if (!record || record.sessionId) {
     return;
   }
-  const cwd = bindingRoots.get(terminalId);
-  if (cwd) {
-    startBinding(terminalId, cwd);
+  const root = bindingRoots.get(terminalId);
+  if (root) {
+    startBinding(terminalId, root, Date.now());
   }
+}
+
+// ---------------------------------------------------------------------------
+// Привязка по началу хода. Локатор выше догадывается по свежести файлов, а
+// при двух одинаковых агентах в одном проекте свежими выглядят оба разговора:
+// какой из них чей, по времени записи не понять. Зато ход начинается от Enter
+// в своей панели, и codex пишет начало хода в журнал с меткой времени.
+// Бэкенд ищет разговор, где ход начался сразу после нажатия, и отвечает,
+// только когда такой разговор один.
+
+// Отсчёт от нажатия. Бэкенд ждёт начала хода до восьми секунд: первый ход
+// свежего разговора стартует, только когда поднимутся MCP-серверы.
+const TURN_CHECK_DELAYS_MS = [2_000, 5_000, 10_000];
+
+// Два совпадения считаются независимыми, только если их окна не
+// пересекаются: иначе один и тот же ход проголосовал бы дважды.
+const INDEPENDENT_TURN_GAP_MS = 10_000;
+
+const turnChecks = new Map<string, { timer?: number }>();
+
+// Совпадение, которому пока не поверили: см. bindAgentSessionFromTurn.
+const turnVotes = new Map<string, { sessionId: string; turnAt: number }>();
+
+function forgetTurns(terminalId: string): void {
+  const check = turnChecks.get(terminalId);
+  if (check?.timer !== undefined) {
+    window.clearTimeout(check.timer);
+  }
+  turnChecks.delete(terminalId);
+  turnVotes.delete(terminalId);
+}
+
+// Ответ про ход панели. Свободный чат панели без привязки достаётся ей сразу.
+// Сменить чат, который панель уже считает своим, или забрать чат у соседки
+// можно только по второму независимому ходу: Enter начинает ход не всегда
+// (подтверждение команды, выбор в меню), и тогда в окно мог попасть ход,
+// который соседка начала сама. Дважды подряд так случайно не совпадёт.
+//
+// Смена своего чата — не ошибка локатора, а обычное дело: внутри агента
+// открыли другой диалог (`/resume`, `/new`). Привязка идёт за панелью, и
+// после перезапуска откроется тот разговор, что был в ней последним.
+export function bindAgentSessionFromTurn(
+  terminalId: string,
+  sessionId: string,
+  turnAt: number,
+  workspaceId?: string,
+): boolean {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return false;
+  }
+  const record = getAgentRecord(terminalId);
+  if (!record) {
+    return false;
+  }
+  if (record.sessionId === sessionId) {
+    turnVotes.delete(terminalId);
+    return true;
+  }
+  const contested =
+    record.sessionId !== undefined ||
+    boundAgentSessionIds(record.agentId, terminalId).includes(sessionId);
+  if (!contested) {
+    turnVotes.delete(terminalId);
+    return bindAgentSession(terminalId, sessionId, workspaceId);
+  }
+  const vote = turnVotes.get(terminalId);
+  if (vote?.sessionId !== sessionId) {
+    turnVotes.set(terminalId, { sessionId, turnAt });
+    return false;
+  }
+  if (turnAt - vote.turnAt < INDEPENDENT_TURN_GAP_MS) {
+    return false;
+  }
+  turnVotes.delete(terminalId);
+  // Два хода подряд — слово того же веса, что и у хука: чат снимается с
+  // соседки, к которой он попал прежней догадкой.
+  return bindAgentSessionFromHook(terminalId, sessionId, workspaceId);
+}
+
+async function locateTurn(
+  agentId: string,
+  root: BindingRoot,
+  turnAt: number,
+): Promise<string | null> {
+  try {
+    return await invoke<string | null>("agent_session_locate_turn", {
+      agent: agentId,
+      cwd: root.cwd,
+      turnEpochMs: Math.max(0, Math.round(turnAt)),
+    });
+  } catch {
+    return null; // поиск best-effort: следующий Enter спросит снова
+  }
+}
+
+// Зовётся на Enter в панели. Каждое нажатие — новый вопрос, поэтому привязка
+// держится за панелью и тогда, когда она уже есть: точнее хода её всё равно
+// ничто не подтвердит.
+export function noteAgentTurn(terminalId: string): void {
+  if (!isTauri) {
+    return;
+  }
+  const record = getAgentRecord(terminalId);
+  const root = bindingRoots.get(terminalId);
+  const agent = AGENTS.find((entry) => entry.id === record?.agentId);
+  if (!record || !root || !agent?.bindsByTurn) {
+    return;
+  }
+  // Прежнее нажатие уступает новому. Его ответ уже не нужен, а услышанный
+  // дважды один и тот же ход сошёл бы за два.
+  const previous = turnChecks.get(terminalId);
+  if (previous?.timer !== undefined) {
+    window.clearTimeout(previous.timer);
+  }
+  const check: { timer?: number } = {};
+  turnChecks.set(terminalId, check);
+  const turnAt = Date.now();
+  let attempt = 0;
+  const tryLocate = () => {
+    check.timer = undefined;
+    void locateTurn(record.agentId, root, turnAt).then((found) => {
+      if (turnChecks.get(terminalId) !== check) {
+        return;
+      }
+      attempt += 1;
+      // Пока шёл поиск, агент в панели мог смениться.
+      if (found && getAgentRecord(terminalId)?.agentId === record.agentId) {
+        bindAgentSessionFromTurn(terminalId, found, turnAt, root.workspaceId);
+      }
+      if (found || attempt >= TURN_CHECK_DELAYS_MS.length) {
+        turnChecks.delete(terminalId);
+        return;
+      }
+      check.timer = window.setTimeout(
+        tryLocate,
+        TURN_CHECK_DELAYS_MS[attempt] - TURN_CHECK_DELAYS_MS[attempt - 1],
+      );
+    });
+  };
+  check.timer = window.setTimeout(tryLocate, TURN_CHECK_DELAYS_MS[0]);
 }

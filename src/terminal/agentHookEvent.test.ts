@@ -49,9 +49,25 @@ describe("agentHookAlert", () => {
     expect(agentHookAlert(hook("permission.asked", "", "opencode"))?.kind).toBe(
       "permission",
     );
+    expect(agentHookAlert(hook("question.asked", "", "opencode"))?.kind).toBe(
+      "question",
+    );
     expect(
       agentHookAlert(hook("permission_prompt", "", "copilot"))?.kind,
     ).toBe("permission");
+  });
+
+  it("trusts the notification type over a message that does not say it", () => {
+    // Текст с живого copilot на запросе разрешения: о разрешении в нём ни
+    // слова, и по одному тексту это был бы просто «ждёт».
+    expect(
+      agentHookAlert(
+        hook("permission_prompt", "Run command: mkdir probe-dir", "copilot"),
+      )?.kind,
+    ).toBe("permission");
+    expect(
+      agentHookAlert(hook("elicitation_dialog", "", "claude"))?.kind,
+    ).toBe("question");
   });
 
   it("falls back to waiting for an unknown event", () => {

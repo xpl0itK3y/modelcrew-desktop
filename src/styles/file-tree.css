@@ -5,15 +5,22 @@
   flex-direction: column;
   flex: 0 0 auto;
   min-height: 0;
-  border-right: 1px solid var(--mc-border);
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+  overflow: hidden;
+  /* Край карточки — общей для всех колонок линией; волосок остаётся тому, что
+     делит содержимое внутри (шапке дерева от самого дерева). */
+  border: 1px solid var(--mc-card-edge);
+  border-radius: var(--mc-radius);
   background: var(--mc-sidebar);
 }
 
+/* Ровно та же высота, что у шапки панели: дерево стоит с терминалами в один
+   ряд, и разъехавшиеся на четыре пикселя шапки соседних карточек видно. */
 .file-tree-header {
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 34px;
+  height: 30px;
   padding: 0 6px 0 12px;
   color: var(--mc-text-muted);
   font-size: 11px;
@@ -25,8 +32,8 @@
 /* Кнопки проявляются при наведении на колонку: четыре значка над каждым
    деревом — это рябь, а нужны они изредка. Клавиатуре они видны всегда. */
 .file-tree-header .icon-button {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -99,7 +106,7 @@
 }
 
 .file-row.is-active {
-  background: var(--mc-surface-active);
+  background: var(--mc-hover-strong);
   color: var(--mc-text-bright);
 }
 
@@ -203,8 +210,80 @@
      держит columnWidths — в одном месте, а не по половине здесь и там. */
   flex: 0 0 auto;
   min-height: 0;
-  border-right: 1px solid var(--mc-border);
+  /* Карточка, как рейка и дерево слева и поднос справа. Одна колонка из
+     четырёх стояла впритык к соседям и держалась на одной линии справа —
+     в ряду карточек это читалось как недоделка, а не как замысел. */
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+  border: 1px solid var(--mc-card-edge);
+  border-radius: var(--mc-radius);
   background: var(--mc-panel);
+}
+
+/* Развёрнутый редактор: та же мысль, что у развёрнутой панели терминала —
+   на время чтения он занимает всё, что мешало читать, а раскладка под ним
+   остаётся нетронутой и ждёт. Накрывает свою колонку и сетку терминалов, но
+   не дерево и не список проектов: по ним переключаются, и прятать их значит
+   заставить свернуть редактор только ради того, чтобы открыть соседний файл.
+   Выше подноса изменений (120), чтобы поверх было именно поверх. */
+.file-editor.is-overlay {
+  position: absolute;
+  top: var(--mc-gap);
+  bottom: var(--mc-gap);
+  z-index: 130;
+  margin: 0;
+}
+
+/* Разворот и возврат — движение, а не подмена кадра. Без него колонка просто
+   оказывалась то узкой, то во весь экран, и понять, что именно произошло,
+   было нечем: ни направления, ни того, откуда она приехала.
+   200 мс — то же число, что у ухода колонки (COLUMN_EXIT_MS) и у MAXIMIZE_MS
+   в FileEditor: по нему снимается подставка, и разъехаться им нельзя. */
+.file-editor.is-overlay.is-maximized {
+  /* Правый край — там же, где правый край сетки; ширину задаёт раскладка,
+     потому что только она знает, сколько сетка сейчас занимает. */
+  right: var(--mc-gap);
+  width: var(--maximized-width);
+  animation: editor-spread 200ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.file-editor.is-overlay.is-restoring {
+  right: var(--collapsed-right);
+  width: var(--column-width);
+  animation: editor-gather 200ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Растём и возвращаемся только правым краем: левый стоит на месте колонки,
+   поэтому текст под курсором не уезжает. */
+@keyframes editor-spread {
+  from {
+    right: var(--collapsed-right);
+    width: var(--column-width);
+  }
+}
+
+@keyframes editor-gather {
+  from {
+    right: var(--mc-gap);
+    width: var(--maximized-width);
+  }
+}
+
+/* Место, которое развёрнутый редактор занимал в ряду: пока он поверх всего,
+   колонки стоят там же, где стояли. */
+.file-editor-placeholder {
+  flex: 0 0 auto;
+  margin: var(--mc-gap) 0 var(--mc-gap) var(--mc-gap);
+}
+
+/* Кнопка прижата к правому краю полосы вкладок и не уезжает вместе с ними
+   при прокрутке: вкладок бывает больше, чем помещается. */
+.file-editor-maximize {
+  flex: 0 0 auto;
+  margin-left: auto;
+  position: sticky;
+  right: 0;
+  align-self: center;
+  background: var(--mc-panel-header);
 }
 
 .file-editor-tabs {
@@ -251,6 +330,29 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Тот же словарь статусов, что в дереве и в колонке номеров. Красится имя, а
+   не вся вкладка: активная вкладка узнаётся по фону, и спорить с ним цветом
+   значит потерять и то, и другое. */
+.file-tab.is-git {
+  --tab-git: var(--mc-git-modified);
+}
+.file-tab.is-git-added,
+.file-tab.is-git-untracked {
+  --tab-git: var(--mc-git-added);
+}
+.file-tab.is-git-deleted {
+  --tab-git: var(--mc-git-deleted);
+}
+.file-tab.is-git-renamed {
+  --tab-git: var(--mc-git-renamed);
+}
+.file-tab.is-git-conflicted {
+  --tab-git: var(--mc-git-conflicted);
+}
+.file-tab.is-git .file-tab-name {
+  color: var(--tab-git);
 }
 
 /* Точка вместо звёздочки: она не спорит с именем файла за внимание и не
@@ -310,10 +412,21 @@
   color: var(--mc-text-muted);
 }
 
+/* Переключатель просмотра стоит перед «Сохранить»: и то, и другое относится к
+   файлу, а не к колонке, и живут они в одном углу. Место им освобождает сам
+   путь — он растянут на всё остальное. */
+.file-view-preview {
+  flex: 0 0 auto;
+}
+.file-view-preview[aria-pressed="true"] {
+  color: var(--mc-text-bright);
+  background: var(--mc-hover-strong);
+}
+
 .file-view-save {
   padding: 2px 9px;
   border: 1px solid var(--mc-border);
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   background: var(--mc-button);
   color: var(--mc-text-bright);
   font: inherit;
@@ -328,6 +441,68 @@
 .file-view-save:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Настоящий размер против вписанного в окно. Кнопкой со словом, а не значком:
+   значка, который читался бы как «один к одному», не существует. */
+.file-view-zoom {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.file-view-zoom:hover {
+  background: var(--mc-button-hover);
+  color: var(--mc-text-bright);
+}
+
+.file-view-zoom[aria-pressed="true"] {
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+}
+
+/* Лист под картинкой. Клетка — чтобы прозрачное читалось прозрачным: на
+   светлой теме белый фон съел бы белую иконку, на тёмной — тёмную. Клетка не
+   зависит от темы нарочно, по той же причине, по какой она вообще есть. */
+.picture-sheet {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background-color: #6a6a6a1a;
+  background-image:
+    linear-gradient(45deg, #8080801f 25%, transparent 25%),
+    linear-gradient(-45deg, #8080801f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #8080801f 75%),
+    linear-gradient(-45deg, transparent 75%, #8080801f 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Вписанная картинка не выходит за лист ни по одной стороне; настоящий размер
+   выходит, и тогда лист прокручивается. */
+.picture-shown {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Настоящий размер: картинка больше листа — лист прокручивается, и прижимать
+   её к центру при этом нельзя, иначе левый верхний угол уедет за край. */
+.picture-sheet.is-actual {
+  place-items: start;
+}
+
+.picture-sheet.is-actual .picture-shown {
+  max-width: none;
+  max-height: none;
 }
 
 .file-view-error {
@@ -388,10 +563,15 @@
   /* Ширина колонки номеров — одно число на всех: по нему она рисуется и по
      нему же оба слоя отступают вправо. Разойдись они — и первые буквы строк
      уедут под номера. */
-  --file-gutter: calc(var(--file-digits, 3ch) + 22px);
+  --file-gutter: calc(var(--file-digits, 3ch) + 1ch + 22px);
+  /* Межстрочный интервал слоёв. Один на всех и отсюда же: полоска правки
+     тянется ровно на строку, и разойдись эти два числа — она поехала бы
+     относительно текста тем сильнее, чем ниже строка. */
+  --file-line: 1.5;
 }
 
 .file-view-paint,
+.file-view-found,
 .file-view-text,
 .file-view-lines {
   position: absolute;
@@ -401,7 +581,7 @@
   border: 0;
   font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: var(--file-line);
   tab-size: 2;
   white-space: pre;
   overflow: auto;
@@ -410,6 +590,7 @@
 /* Место под номера отдают оба слоя сразу: текст начинается за колонкой, а не
    под ней. */
 .file-view-paint,
+.file-view-found,
 .file-view-text {
   padding-left: calc(var(--file-gutter) + 10px);
 }
@@ -434,11 +615,155 @@
   user-select: none;
 }
 
+/* Перенос длинных строк. Правила одни на всю стопку слоёв: разъедься они хоть
+   одним свойством — и буквы в поле встанут не над своими же буквами в
+   подсветке. Строка без единого пробела — минифицированный json, base64 —
+   иначе не переносится вовсе, и переключатель на ней ничего бы не сделал. */
+.file-view-code.is-wrapped .file-view-paint,
+.file-view-code.is-wrapped .file-view-found,
+.file-view-code.is-wrapped .file-view-text,
+.file-view-code.is-wrapped .file-view-lines {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* При переносе колонка номеров занимает всю ширину: в ней лежит тот же текст,
+   что и в поле, — невидимый, но переносящийся точно так же. Иначе номеру не за
+   чем ехать: строк на экране больше, чем строк в файле, и посчитать, где какая,
+   без самого текста нечем. */
+.file-view-code.is-wrapped .file-view-lines {
+  right: 0;
+  width: auto;
+  padding: 10px 12px 10px calc(var(--file-gutter) + 10px);
+  background: transparent;
+  border-right: 0;
+  color: transparent;
+  text-align: left;
+}
+
+/* Сам номер. Ширины не занимает: коробка сдвинута отрицательным полем ровно на
+   свою ширину влево, так что перенос строки от неё не меняется ни на знак, а
+   рисуется она в отступе — там же, где колонка номеров без переноса. */
+.file-no {
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--file-gutter);
+  margin-left: calc(-1 * var(--file-gutter));
+  padding-right: 6px;
+  color: var(--mc-text-faint);
+  text-align: right;
+}
+
+/* Полоска правки у самого края колонки номеров — там же, где её рисует любой
+   редактор: между номером и кодом. Занимает место обычного пробела, который
+   стоит после номера на каждой строке, покрашена она или нет, поэтому текст
+   слоя от неё не меняется ни на символ.
+
+   Высота ровно в строку, и от неё же: `inline-block` выше строки растянул бы
+   строку под себя, и колонка номеров поехала бы вниз относительно текста. */
+.file-mark {
+  display: inline-block;
+  width: 1ch;
+  height: calc(var(--file-line) * 1em);
+  vertical-align: top;
+  border-radius: 1px;
+  background: var(--mc-git-modified);
+}
+
+.file-mark.is-added {
+  background: var(--mc-git-added);
+}
+
+.file-mark.is-changed {
+  background: var(--mc-git-modified);
+}
+
+/* Удалённых строк в файле уже нет: метка стоит на последней уцелевшей над
+   пропажей и жмётся к её нижнему краю — туда, где строки не стало. */
+.file-mark.is-removed {
+  background: linear-gradient(
+    to bottom,
+    transparent 58%,
+    var(--mc-git-deleted) 58%
+  );
+  border-radius: 0 0 1px 1px;
+}
+
 .file-view-paint {
   /* Слой рисуют, но не трогают: щелчки и выделение — дело поля сверху. */
   pointer-events: none;
   color: var(--mc-text);
   overflow: hidden;
+}
+
+/* Найденное. Слой лежит между подсветкой и полем: буквы в нём прозрачные, у
+   меток только фон — и цвет букв виден сквозь него, с нижнего слоя. */
+.file-view-found {
+  pointer-events: none;
+  color: transparent;
+  overflow: hidden;
+}
+
+.file-found {
+  background: #d8a65740;
+  color: transparent;
+  border-radius: 2px;
+}
+
+/* Текущее совпадение — то, к которому только что перешли: его видно среди
+   остальных, иначе счётчик «3 из 40» не про что. */
+.file-found.is-current {
+  background: #d8a657a0;
+}
+
+/* Строка поиска. Поверх текста, а не над ним: появившись в потоке, она
+   сдвинула бы файл под курсором на свою высоту. */
+.file-find {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px 4px 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-panel);
+  box-shadow: 0 6px 18px #0006;
+}
+
+.file-find-query {
+  width: 180px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12px;
+}
+
+.file-find-query:focus-visible {
+  outline: 0;
+}
+
+.file-find-count {
+  min-width: 58px;
+  color: var(--mc-text-faint);
+  font-size: 11px;
+  text-align: right;
+  /* Счётчик меняется на каждую букву: без своего места строка дёргалась бы
+     вслед за ним. */
+  font-variant-numeric: tabular-nums;
+}
+
+.file-find-step {
+  flex: 0 0 auto;
+}
+
+.file-find-step:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .file-view-text {
@@ -480,6 +805,193 @@
   color: var(--mc-text-muted);
 }
 
+/* Разметка. Заголовок ярче текста и плотнее — он и на бумаге такой; вставка
+   кода тем же цветом, что строка в коде; ссылка подчёркнута пунктиром, чтобы
+   отличаться от выделения не только цветом. */
+.tok-heading {
+  color: var(--mc-text-bright);
+  font-weight: 600;
+}
+
+.tok-code {
+  color: #9ccfa0;
+}
+
+.tok-emphasis {
+  color: #d8a657;
+}
+
+.tok-link {
+  color: #7fb3d5;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+/* Имя атрибута в разметке и имя свойства в стилях. Тот же цвет, что у
+   выделения в тексте: роль у них одна — назвать то, чему сейчас задают
+   значение, — и встречаются они в разных языках, так что спутать негде. */
+.tok-attr {
+  color: #d8a657;
+}
+
+/* Заплата. Те же цвета, что у меток изменённых строк на полях: добавленное
+   зелёное, убранное красное — одно знание, показанное в двух местах, и
+   расходиться им нельзя. */
+.tok-inserted {
+  color: var(--mc-git-added);
+}
+
+.tok-deleted {
+  color: var(--mc-git-deleted);
+}
+
+
+/* Просмотр разметки. Читают его подолгу и подряд, поэтому строки шире и
+   воздуха больше, чем в коде: это текст, а не листинг. */
+.markdown-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px 24px;
+  color: var(--mc-text);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: break-word;
+}
+
+.md-heading {
+  margin: 20px 0 8px;
+  color: var(--mc-text-bright);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-view > .md-heading:first-child {
+  margin-top: 0;
+}
+h1.md-heading {
+  font-size: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--mc-panel-border);
+}
+h2.md-heading {
+  font-size: 17px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--mc-panel-border);
+}
+h3.md-heading {
+  font-size: 15px;
+}
+h4.md-heading,
+h5.md-heading,
+h6.md-heading {
+  font-size: 13px;
+  color: var(--mc-text);
+}
+
+.md-paragraph {
+  margin: 0 0 10px;
+  /* Перевод строки внутри абзаца автор поставил сам — сохраняем его, а
+     длинные строки всё равно переносим по ширине колонки. */
+  white-space: pre-wrap;
+}
+
+.md-list {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.md-list .md-list {
+  margin: 4px 0 0;
+}
+.md-list li {
+  margin: 2px 0;
+}
+/* Внутри пункта абзац не отбивается: это одна строка списка, а не раздел. */
+.md-list li > .md-paragraph {
+  margin: 0;
+}
+
+.md-quote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--mc-panel-border);
+  color: var(--mc-text-muted);
+}
+.md-quote > :last-child {
+  margin-bottom: 0;
+}
+
+.md-rule {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--mc-panel-border);
+}
+
+.md-code {
+  padding: 1px 5px;
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-hover-subtle);
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+
+.md-block-code {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--mc-panel-border);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface-raised);
+  /* Длинная строка кода уезжает внутри блока, а не растягивает всю колонку. */
+  overflow-x: auto;
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+.md-block-code code {
+  font: inherit;
+}
+
+.md-link {
+  color: #7fb3d5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+/* Ссылка на соседний файл или на якорь: увести по ней некуда, и вести себя
+   как ссылка она не должна — только выглядеть иначе, чем текст. */
+.md-link.is-local {
+  color: var(--mc-text-muted);
+  text-decoration: underline dotted;
+  cursor: default;
+}
+
+.md-image {
+  padding: 1px 6px;
+  border: 1px dashed var(--mc-panel-border);
+  border-radius: var(--mc-radius-xs);
+  color: var(--mc-text-muted);
+  font-size: 12px;
+}
+
+.md-table-scroll {
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+.md-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.md-table th,
+.md-table td {
+  padding: 4px 10px;
+  border: 1px solid var(--mc-panel-border);
+  text-align: left;
+}
+.md-table th {
+  background: var(--mc-hover-subtle);
+  color: var(--mc-text-bright);
+  font-weight: 600;
+}
 
 /* Разделители колонок. */
 
@@ -493,16 +1005,19 @@
   z-index: 2;
   cursor: col-resize;
   background: transparent;
-  transition: background 120ms ease;
 }
 
-.resize-handle:hover,
+/* Под курсором и во время перетаскивания разделитель ничего не рисует. Пока
+   колонки стояли впритык, заливка ложилась на сам шов и читалась как «здесь
+   можно взяться». Между карточками теперь поле, и та же заливка встаёт в нём
+   отдельной полосой во всю высоту окна — как раз там, где пусто по замыслу.
+   Что разделитель под курсором, говорит сам курсор; что его тянут — соседние
+   карточки, которые едут следом.
+
+   Клавиатуре указание всё же нужно: у неё нет ни курсора, ни движения под
+   рукой, и без рамки фокус на разделителе просто негде увидеть. */
 .resize-handle:focus-visible {
-  background: var(--mc-accent-soft);
   outline: 0;
-}
-
-.resize-handle:focus-visible {
   box-shadow: inset 0 0 0 1px var(--mc-accent-border);
 }
 
@@ -511,15 +1026,8 @@ body.is-resizing {
   user-select: none;
 }
 
-body.is-resizing .sidebar-rail,
-body.is-resizing .resize-handle {
+body.is-resizing .sidebar-rail {
   transition: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .resize-handle {
-    transition: none;
-  }
 }
 
 /* Меню строки дерева. */
@@ -530,7 +1038,7 @@ body.is-resizing .resize-handle {
   min-width: 180px;
   padding: 4px;
   border: 1px solid var(--mc-border);
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   box-shadow: 0 12px 32px var(--mc-shadow);
 }
@@ -540,7 +1048,7 @@ body.is-resizing .resize-handle {
   width: 100%;
   padding: 6px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text);
   font: inherit;
@@ -606,7 +1114,7 @@ body.is-resizing .resize-handle {
   width: 100%;
   padding: 4px 8px;
   border: 1px solid var(--mc-border);
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: var(--mc-panel);
   color: var(--mc-text);
   font: inherit;
@@ -624,6 +1132,47 @@ body.is-resizing .resize-handle {
 
 /* В находках имя одно и то же встречается часто, и без каталога их не
    различить. Путь приписан сбоку и приглушён: он подсказка, а не заголовок. */
+/* Файл, который git ещё не видел. Цвет берётся из общего словаря статусов:
+   панель «Изменения», дерево и полоска в редакторе говорят об одном и том же,
+   и говорить об этом разными цветами им нельзя.
+
+   Правило стоит после наклона папок нарочно: у них та же вес, и решает
+   порядок — изменённая папка обязана перекрашиваться, оставаясь наклонной. */
+.file-row.is-git {
+  --row-git: var(--mc-git-modified);
+}
+.file-row.is-git-added,
+.file-row.is-git-untracked {
+  --row-git: var(--mc-git-added);
+}
+.file-row.is-git-deleted {
+  --row-git: var(--mc-git-deleted);
+}
+.file-row.is-git-renamed {
+  --row-git: var(--mc-git-renamed);
+}
+.file-row.is-git-conflicted {
+  --row-git: var(--mc-git-conflicted);
+}
+.file-row.is-git .file-name {
+  color: var(--row-git);
+}
+/* Свёрнутая папка прячет всё, что в ней тронули. Приглушённый оттенок того же
+   цвета говорит «загляни внутрь», не крича на всю колонку именем папки. */
+.file-row.is-git-inside .file-name {
+  color: color-mix(in srgb, var(--mc-git-modified) 55%, var(--mc-text));
+}
+
+.file-row-status {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--row-git);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .file-row-where {
   margin-left: auto;
   padding-left: 8px;
@@ -780,6 +1329,8 @@ body.is-resizing .resize-handle {
 @media (prefers-reduced-motion: reduce) {
   .file-editor,
   .file-editor.is-leaving,
+  .file-editor.is-overlay.is-maximized,
+  .file-editor.is-overlay.is-restoring,
   .file-tree-column,
   .file-tree-column.is-leaving,
   .file-tab {

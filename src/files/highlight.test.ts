@@ -2,7 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  grammarForTag,
   grammarOf,
+  languages,
   lineOffsets,
   paintLines,
   tokenize,
@@ -154,9 +156,378 @@ describe("grammarOf", () => {
     expect(grammarOf("deploy.YAML")).toBe("yaml");
   });
 
-  it("admits when it does not know the language", () => {
+  it("knows the files whose name is the whole language", () => {
+    expect(grammarOf(".gitignore")).toBe("ignore");
+    expect(grammarOf(".dockerignore")).toBe("ignore");
+    expect(grammarOf("CODEOWNERS")).toBe("ignore");
+    expect(grammarOf("go.mod")).toBe("ignore");
+    expect(grammarOf(".editorconfig")).toBe("ini");
+    expect(grammarOf("nginx.conf")).toBe("nginx");
+    expect(grammarOf(".vimrc")).toBe("vim");
+    expect(grammarOf("Cargo.lock")).toBe("toml");
+  });
+
+  it("gives an unknown extension the common reading rather than nothing", () => {
+    // Комментарии, строки и числа устроены почти везде одинаково, и показать
+    // хотя бы их лучше, чем оставить файл целиком серым.
+    expect(grammarOf("app.wizzle")).toBe("plain");
+    expect(grammarOf("build.qqq")).toBe("plain");
+  });
+
+  it("leaves prose, pictures and binaries alone", () => {
+    // Файл без расширения — это `LICENSE` и `AUTHORS`: текст, а не язык,
+    // которого мы не знаем.
     expect(grammarOf("LICENSE")).toBeNull();
     expect(grammarOf("icon.png")).toBeNull();
-    expect(grammarOf(".gitignore")).toBeNull();
+    expect(grammarOf("notes.txt")).toBeNull();
+    expect(grammarOf("run.log")).toBeNull();
+    expect(grammarOf("table.csv")).toBeNull();
+    expect(grammarOf("bundle.woff2")).toBeNull();
+  });
+});
+
+describe("the languages beyond the ones this app is written in", () => {
+  /// То же свойство, что и выше, но на всех грамматиках разом. Свежий язык
+  /// добавляют одной строкой в таблицу, и проверять его отдельно никто не
+  /// вспомнит — а разъедется от него весь редактор целиком.
+  it("never loses or invents a character, in any language it knows", () => {
+    const samples = [
+      'x = "строка" # хвост',
+      "/* незакрытый /* вложенный",
+      "'''\nтройная\n'''",
+      '"""\nтройная\n"""',
+      "-- [[ полуоткрытый",
+      "{- } -} <# #> (* *) =begin =end",
+      "1_000.5e3 0xff 42",
+      "",
+      "просто текст без всякого языка",
+    ];
+    for (const language of languages) {
+      for (const sample of samples) {
+        expect(
+          joined(tokenize(sample, language)),
+          `${language}: ${JSON.stringify(sample)}`,
+        ).toBe(sample);
+      }
+    }
+  });
+
+  it("lets a docstring span the lines it is written across", () => {
+    const tokens = tokenize('def f():\n    """что делает\n    функция"""\n', "py");
+
+    expect(kinds(tokens)).toContainEqual([
+      "string",
+      '"""что делает\n    функция"""',
+    ]);
+    expect(kinds(tokens)).toContainEqual(["keyword", "def"]);
+  });
+
+  it("knows a SQL keyword however it was shouted", () => {
+    // Один и тот же запрос пишут и строчными, и прописными — и в одном файле
+    // вперемешку. Регистр здесь ничего не значит.
+    for (const word of ["select", "SELECT", "Select"]) {
+      expect(kinds(tokenize(`${word} 1`, "sql"))).toContainEqual([
+        "keyword",
+        word,
+      ]);
+    }
+    // А там, где регистр значение имеет, слово остаётся словом.
+    expect(kinds(tokenize("CONST x = 1", "ts"))).not.toContainEqual([
+      "keyword",
+      "CONST",
+    ]);
+  });
+
+  it("opens a block comment that starts like a line comment", () => {
+    // `--[[` в Lua и `#=` в Julia начинаются тем же, чем однострочный
+    // комментарий: примерь его первым — и закрывающая скобка осталась бы
+    // кодом, а с ней и весь остаток блока.
+    const lua = tokenize("--[[ пояснение\nна две строки ]]\nlocal x = 1", "lua");
+    expect(kinds(lua)).toContainEqual([
+      "comment",
+      "--[[ пояснение\nна две строки ]]",
+    ]);
+    expect(kinds(lua)).toContainEqual(["keyword", "local"]);
+
+    const julia = tokenize("#= пояснение\nна две строки =#\nconst x = 1", "julia");
+    expect(kinds(julia)).toContainEqual(["keyword", "const"]);
+  });
+
+  it("does not take a lisp quote for the start of a string", () => {
+    const tokens = tokenize("(def xs '(1 2 3))\n(def ys 4)", "lisp");
+
+    // Приняв апостроф за кавычку, разбор покрасил бы строкой весь остаток
+    // файла — а апостроф в этом семействе стоит чуть ли не в каждой строке.
+    expect(kinds(tokens).filter(([kind]) => kind === "string")).toHaveLength(0);
+    expect(kinds(tokens).filter(([kind]) => kind === "keyword")).toHaveLength(2);
+  });
+
+  it("reads the language of a file that has no extension at all", () => {
+    expect(grammarOf("Dockerfile")).toBe("docker");
+    expect(grammarOf("build/Makefile")).toBeNull();
+    expect(grammarOf("Makefile")).toBe("make");
+    expect(grammarOf("Gemfile")).toBe("ruby");
+    expect(grammarOf(".zshrc")).toBe("sh");
+  });
+
+  it("covers the languages people actually write in", () => {
+    const expected: Record<string, string> = {
+      "main.py": "py", "server.go": "go", "App.java": "java",
+      "Main.kt": "kotlin", "build.sbt": "scala", "core.c": "c",
+      "engine.cpp": "cpp", "View.mm": "objc", "Program.cs": "cs",
+      "index.php": "php", "app.rb": "ruby", "App.swift": "swift",
+      "main.dart": "dart", "schema.sql": "sql", "init.lua": "lua",
+      "tool.pl": "perl", "plot.R": "r", "model.jl": "julia",
+      "Main.hs": "haskell", "app.ex": "elixir", "node.erl": "erlang",
+      "core.clj": "lisp", "main.zig": "zig", "parser.ml": "ocaml",
+      "deploy.ps1": "powershell", "main.tf": "hcl", "schema.graphql": "graphql",
+      "api.proto": "proto", "Token.sol": "solidity", "flake.nix": "nix",
+      "setup.cfg": "ini", "Component.vue": "html",
+    };
+    for (const [name, language] of Object.entries(expected)) {
+      expect(grammarOf(name), name).toBe(language);
+    }
+  });
+});
+
+describe("markdown", () => {
+  it("reads the file by the start of its lines", () => {
+    const doc = [
+      "# Заголовок",
+      "",
+      "Обычный абзац.",
+      "",
+      "- пункт списка",
+      "1. и нумерованный",
+      "",
+      "> цитата",
+      "",
+      "---",
+    ].join("\n");
+    const marked = kinds(tokenize(doc, "md"));
+
+    expect(marked).toContainEqual(["heading", "# Заголовок"]);
+    expect(marked).toContainEqual(["comment", "> цитата"]);
+    expect(marked).toContainEqual(["punct", "-"]);
+    expect(marked).toContainEqual(["punct", "1."]);
+    expect(marked).toContainEqual(["punct", "---"]);
+    // Абзац остаётся текстом: красить в разметке нечего.
+    expect(marked.some(([, text]) => text.includes("Обычный абзац"))).toBe(false);
+  });
+
+  it("keeps everything inside a fence out of the parser's hands", () => {
+    // В примере кода решётка — комментарий, а звёздочка — умножение. Разбирать
+    // их как разметку значит красить чужой язык своими правилами.
+    const doc = [
+      "```py",
+      "# это комментарий, а не заголовок",
+      "x = a * b",
+      "```",
+      "# а вот это заголовок",
+    ].join("\n");
+    const marked = kinds(tokenize(doc, "md"));
+
+    expect(marked).toContainEqual(["code", "```py"]);
+    expect(marked).toContainEqual([
+      "code",
+      "# это комментарий, а не заголовок",
+    ]);
+    expect(marked).toContainEqual(["heading", "# а вот это заголовок"]);
+  });
+
+  it("leaves an unclosed fence closed to the end of the file", () => {
+    // Ровно так его и прочитает любой просмотрщик разметки: ограда без пары
+    // тянется до конца, и видеть это полезнее, чем догадываться.
+    const marked = kinds(tokenize("```\nкод\n# не заголовок", "md"));
+
+    expect(marked.every(([kind]) => kind === "code")).toBe(true);
+  });
+
+  it("marks what is written inside a line", () => {
+    const marked = kinds(
+      tokenize(
+        "текст с `кодом`, **жирным**, _наклонным_ и [ссылкой](https://ya.ru)",
+        "md",
+      ),
+    );
+
+    expect(marked).toContainEqual(["code", "`кодом`"]);
+    expect(marked).toContainEqual(["emphasis", "**жирным**"]);
+    expect(marked).toContainEqual(["emphasis", "_наклонным_"]);
+    expect(marked).toContainEqual(["link", "[ссылкой](https://ya.ru)"]);
+  });
+
+  it("does not take a lone asterisk for the start of a word in bold", () => {
+    // Звёздочка без пары — обычный знак, и покрасить с неё половину строки
+    // значит соврать про весь остаток абзаца.
+    const marked = kinds(tokenize("5 * 3 = 15, и это не разметка", "md"));
+
+    expect(marked.filter(([kind]) => kind === "emphasis")).toHaveLength(0);
+  });
+
+  it("knows a markdown file by its name", () => {
+    expect(grammarOf("README.md")).toBe("md");
+    expect(grammarOf("SPEC.markdown")).toBe("md");
+    expect(grammarOf("page.mdx")).toBe("md");
+  });
+
+  it("reads the tag written at the fence, however it was spelled", () => {
+    // У ограды пишут словом, а таблица расширений знает сокращения.
+    expect(grammarForTag("typescript")).toBe("ts");
+    expect(grammarForTag("Python")).toBe("py");
+    expect(grammarForTag("bash")).toBe("sh");
+    expect(grammarForTag("rs")).toBe("rs");
+    expect(grammarForTag("")).toBeNull();
+    expect(grammarForTag("нетакого")).toBeNull();
+  });
+});
+
+describe("the formats that are not languages", () => {
+  it("reads a list of exclusions as a list, not as code", () => {
+    const marked = kinds(
+      tokenize("# сборка\nnode_modules/\n*.log\n!keep.log", "ignore"),
+    );
+
+    expect(marked).toContainEqual(["comment", "# сборка"]);
+    // Двойка в `logs/2` — часть пути, а не число, и красить её числом значит
+    // показывать структуру, которой здесь нет.
+    expect(marked.filter(([kind]) => kind === "number")).toHaveLength(0);
+    expect(marked.filter(([kind]) => kind === "string")).toHaveLength(0);
+  });
+
+  it("tells an added line from a subtraction", () => {
+    const patch = [
+      "diff --git a/main.rs b/main.rs",
+      "@@ -1,4 +1,4 @@",
+      " let a = 1;",
+      "-let b = a - 1;",
+      "+let b = a + 1;",
+    ].join("\n");
+    const marked = kinds(tokenize(patch, "diff"));
+
+    expect(marked).toContainEqual(["comment", "diff --git a/main.rs b/main.rs"]);
+    expect(marked).toContainEqual(["heading", "@@ -1,4 +1,4 @@"]);
+    expect(marked).toContainEqual(["deleted", "-let b = a - 1;"]);
+    expect(marked).toContainEqual(["inserted", "+let b = a + 1;"]);
+    // Знак решает только в начале строки: внутри это сложение.
+    expect(marked.filter(([kind]) => kind === "inserted")).toHaveLength(1);
+  });
+
+  it("keeps a quoted apostrophe out of the languages that comment with one", () => {
+    // В этом семействе апостроф начинает комментарий, а не строку: приняв его
+    // за кавычку, мы покрасили бы строкой весь остаток файла.
+    const marked = kinds(tokenize("Dim x ' что это такое\nSet y = 2", "basic"));
+
+    expect(marked).toContainEqual(["comment", "' что это такое"]);
+    expect(marked).toContainEqual(["keyword", "Set"]);
+  });
+
+  it("takes the keywords of a case-blind language in any spelling", () => {
+    expect(kinds(tokenize("PROCEDURE Main;", "pascal"))).toContainEqual([
+      "keyword",
+      "PROCEDURE",
+    ]);
+    expect(kinds(tokenize("procedure Main;", "pascal"))).toContainEqual([
+      "keyword",
+      "procedure",
+    ]);
+  });
+
+  it("gives an unknown format the three commonest comment marks", () => {
+    const marked = kinds(
+      tokenize('# один\n// два\n/* три */\nкод "строка" 42', "plain"),
+    );
+
+    expect(marked).toContainEqual(["comment", "# один"]);
+    expect(marked).toContainEqual(["comment", "// два"]);
+    expect(marked).toContainEqual(["comment", "/* три */"]);
+    expect(marked).toContainEqual(["string", '"строка"']);
+    expect(marked).toContainEqual(["number", "42"]);
+    // Ключевых слов у неизвестного языка нет: придумывать ему костяк не из чего.
+    expect(marked.filter(([kind]) => kind === "keyword")).toHaveLength(0);
+  });
+});
+
+describe("markup and styles", () => {
+  it("reads a page as a page", () => {
+    const page = [
+      "<!DOCTYPE html>",
+      '<div class="row" data-id=1>',
+      "  текст &amp; ещё <!-- заметка -->",
+      "</div>",
+    ].join("\n");
+    const marked = kinds(tokenize(page, "html"));
+
+    expect(marked).toContainEqual(["keyword", "<!DOCTYPE html>"]);
+    expect(marked).toContainEqual(["keyword", "div"]);
+    expect(marked).toContainEqual(["attr", "class"]);
+    expect(marked).toContainEqual(["string", '"row"']);
+    expect(marked).toContainEqual(["attr", "data-id"]);
+    expect(marked).toContainEqual(["number", "&amp;"]);
+    expect(marked).toContainEqual(["comment", "<!-- заметка -->"]);
+  });
+
+  it("does not take a less-than sign for a tag", () => {
+    const marked = kinds(tokenize("if a < b and b > c", "html"));
+
+    expect(marked.filter(([kind]) => kind === "keyword")).toHaveLength(0);
+  });
+
+  it("reads a stylesheet as a stylesheet", () => {
+    const sheet = [
+      "/* заметка */",
+      "@media (max-width: 600px) {",
+      ".row > a:hover {",
+      "  color: #ffcc00;",
+      "  margin: 0 12px 1.5rem;",
+      '  content: "«»" !important;',
+      "}",
+      "}",
+    ].join("\n");
+    const marked = kinds(tokenize(sheet, "css"));
+
+    expect(marked).toContainEqual(["comment", "/* заметка */"]);
+    expect(marked).toContainEqual(["keyword", "@media"]);
+    expect(marked).toContainEqual(["heading", ".row > a:hover"]);
+    expect(marked).toContainEqual(["attr", "color"]);
+    expect(marked).toContainEqual(["number", "#ffcc00"]);
+    expect(marked).toContainEqual(["number", "12px"]);
+    expect(marked).toContainEqual(["number", "1.5rem"]);
+    expect(marked).toContainEqual(["string", '"«»"']);
+    expect(marked).toContainEqual(["keyword", "!important"]);
+  });
+
+  it("tells a nested rule from a property", () => {
+    // В scss на месте свойства оказывается селектор, и отличить их можно
+    // только по тому, чем предложение кончится.
+    const marked = kinds(tokenize(".card {\n  color: red;\n  &:hover { color: blue; }\n}", "css"));
+
+    expect(marked).toContainEqual(["attr", "color"]);
+    expect(marked).toContainEqual(["heading", "&:hover"]);
+  });
+
+  it("never loses a character of a page or a stylesheet", () => {
+    const samples = [
+      "<a href='x'>текст</a>",
+      "<img src=logo.png />",
+      "<незакрытый",
+      "<!-- незакрытый комментарий",
+      "a<b>c",
+      "&amp;&#169;&nope",
+      ".a{color:red}",
+      "@import url(x.css);",
+      "a { b: c",
+      "/* незакрытый",
+      "мусор без всякого смысла",
+      "",
+    ];
+    for (const language of ["html", "css"]) {
+      for (const sample of samples) {
+        expect(
+          joined(tokenize(sample, language)),
+          `${language}: ${JSON.stringify(sample)}`,
+        ).toBe(sample);
+      }
+    }
   });
 });

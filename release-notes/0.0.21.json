@@ -1,0 +1,25 @@
+{
+  "version": "0.0.21",
+  "ru": {
+    "title": "Свой диалог у каждой панели и честные уведомления",
+    "summary": "Панели агентов возвращаются каждая в свой диалог, а уведомления перестали дублироваться, теряться и глохнуть. Новый терминал открывается рядом с предыдущим.",
+    "highlights": [
+      "Две панели одного агента больше не открывают после перезапуска один и тот же чат",
+      "Одно событие агента — один баннер, и в нём названы проект и сессия",
+      "Запрос разрешения от copilot и opencode больше не теряется",
+      "Панель, к которой перешли из колокольчика, снова подаёт голос",
+      "Терминал открывается рядом с предыдущим, шапка тоньше, на пустом экране знак приложения"
+    ]
+  },
+  "en": {
+    "title": "A conversation of its own for every panel, and alerts you can trust",
+    "summary": "Agent panels each resume their own conversation, and alerts no longer double up, go missing, or fall silent. A new terminal opens next to the one before it.",
+    "highlights": [
+      "Two panels of the same agent no longer reopen the same chat after a restart",
+      "One event from an agent is one banner, and it names the project and the session",
+      "A permission prompt from copilot or opencode is no longer lost",
+      "A panel reached from the bell can speak up again",
+      "A terminal opens beside the previous one, the title bar is slimmer, the empty screen carries the mark"
+    ]
+  }
+}

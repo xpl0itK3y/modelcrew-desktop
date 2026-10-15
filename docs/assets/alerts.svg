@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 960 436" width="960" height="436" role="img" aria-label="Событие агента: если панель на виду — тишина, иначе звук, системный баннер и счётчик в доке, и один клик открывает ту самую панель">
+  <title>An agent out of sight still reaches you</title>
+  <defs>
+    <marker id="tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L7 4 L0 6.8 z" fill="#232833"/>
+    </marker>
+    <marker id="tip_amber" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L7 4 L0 6.8 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="tip_dim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L7 4 L0 6.8 z" fill="#1f242d"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @media (prefers-reduced-motion: reduce) { .flow { display: none; } }
+  </style>
+  <rect x="0.5" y="0.5" width="959" height="435" rx="16" fill="#101216" stroke="#232833"/>
+  <rect x="34.5" y="146.5" width="175" height="67" rx="12" fill="#16181d" stroke="#fbbf24"/>
+  <text x="122" y="178" font-size="12.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">Agent event</text>
+  <text x="122" y="194" font-size="10" text-anchor="middle" fill="#8b93a3">finished · waiting · permission</text>
+  <rect x="258.5" y="146.5" width="177" height="67" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="347" y="178" font-size="12.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">Is the panel in use?</text>
+  <text x="347" y="194" font-size="10" text-anchor="middle" fill="#8b93a3">seen · focused · window active</text>
+  <rect x="258.5" y="272.5" width="177" height="55" rx="12" fill="#1b1e25" stroke="#1f242d"/>
+  <text x="347" y="298" font-size="11.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">Silence</text>
+  <text x="347" y="314" font-size="10" text-anchor="middle" fill="#8b93a3">you are already there</text>
+  <rect x="496.5" y="40.5" width="185" height="65" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="589" y="71" font-size="12.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">Sound</text>
+  <text x="589" y="87" font-size="10" text-anchor="middle" fill="#8b93a3">the one you chose</text>
+  <rect x="496.5" y="146.5" width="185" height="65" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="589" y="177" font-size="12.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">System banner</text>
+  <text x="589" y="193" font-size="10" text-anchor="middle" fill="#8b93a3">the agent and the project</text>
+  <rect x="496.5" y="252.5" width="185" height="65" rx="12" fill="#16181d" stroke="#1f242d"/>
+  <text x="589" y="283" font-size="12.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">Dock badge</text>
+  <text x="589" y="299" font-size="10" text-anchor="middle" fill="#8b93a3">how many are waiting</text>
+  <rect x="752.5" y="146.5" width="173" height="65" rx="12" fill="#16181d" stroke="#4ade80"/>
+  <text x="839" y="177" font-size="12.5" font-weight="600" text-anchor="middle" fill="#e8ebf2">One click</text>
+  <text x="839" y="193" font-size="10" text-anchor="middle" fill="#8b93a3">opens that very panel</text>
+  <path id="a1" d="M210 180 H250" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="a5" d="M347 214 V264" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
+  <text class="m" x="356" y="244" font-size="9.5" text-anchor="start" fill="#5c6472">yes</text>
+  <path id="a2" d="M436 170 C464 170 464 74 488 73" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
+  <path id="a3" d="M436 180 H488" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
+  <path id="a4" d="M436 190 C464 190 464 284 488 285" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip_amber)"/>
+  <text class="m" x="444" y="134" font-size="9.5" text-anchor="middle" fill="#5c6472">no</text>
+  <path id="a6" d="M682 73 C714 73 722 172 744 178" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="a7" d="M682 180 H744" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="a8" d="M682 285 C714 285 722 190 744 184" fill="none" stroke="#232833" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#tip)"/>
+  <path id="a9" d="M839 212 V396 H120 V222" fill="none" stroke="#1f242d" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#tip_dim)"/>
+  <text class="m" x="480" y="388" font-size="10" text-anchor="middle" fill="#5c6472">back to the agent that called — the right project, session and terminal</text>
+  <g class="flow">
+    <circle r="3.4" fill="#fbbf24"><animateMotion dur="2.0s" begin="0s" repeatCount="indefinite"><mpath xlink:href="#a1"/></animateMotion></circle>
+    <circle r="3.4" fill="#fbbf24"><animateMotion dur="3.0s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#a2"/></animateMotion></circle>
+    <circle r="3.4" fill="#fbbf24"><animateMotion dur="3.0s" begin="0.9s" repeatCount="indefinite"><mpath xlink:href="#a3"/></animateMotion></circle>
+    <circle r="3.4" fill="#fbbf24"><animateMotion dur="3.0s" begin="1.0s" repeatCount="indefinite"><mpath xlink:href="#a4"/></animateMotion></circle>
+    <circle r="2.6" fill="#5c6472"><animateMotion dur="2.0s" begin="2.4s" repeatCount="indefinite"><mpath xlink:href="#a5"/></animateMotion></circle>
+    <circle r="3.4" fill="#4ade80"><animateMotion dur="3.0s" begin="2.2s" repeatCount="indefinite"><mpath xlink:href="#a6"/></animateMotion></circle>
+    <circle r="3.4" fill="#4ade80"><animateMotion dur="3.0s" begin="2.3000000000000003s" repeatCount="indefinite"><mpath xlink:href="#a7"/></animateMotion></circle>
+    <circle r="3.4" fill="#4ade80"><animateMotion dur="3.0s" begin="2.4000000000000004s" repeatCount="indefinite"><mpath xlink:href="#a8"/></animateMotion></circle>
+  </g>
+</svg>

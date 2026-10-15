@@ -10,7 +10,7 @@
 .github-login-button {
   padding: 4px 8px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--mc-radius-sm);
   background: transparent;
   color: var(--mc-text-muted);
   font: inherit;
@@ -57,7 +57,7 @@
   min-width: 160px;
   padding: 4px;
   border: 1px solid var(--mc-border);
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   box-shadow: 0 12px 34px var(--mc-shadow);
 }
@@ -74,7 +74,7 @@
   width: 100%;
   padding: 6px 8px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text);
   font: inherit;
@@ -121,7 +121,7 @@
   box-sizing: border-box;
   padding: 20px;
   border: 1px solid var(--mc-border);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: var(--mc-surface-raised);
   color: var(--mc-text);
   box-shadow: 0 24px 64px var(--mc-shadow);
@@ -154,7 +154,7 @@
   padding: 12px;
   margin-bottom: 16px;
   border: 1px dashed var(--mc-border);
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface);
   color: var(--mc-text-bright);
   font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -177,7 +177,7 @@
 .github-modal-primary,
 .github-modal-secondary {
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   font: inherit;
   font-weight: 650;
   cursor: pointer;

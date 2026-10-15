@@ -370,11 +370,14 @@ export function CommitGraph(props: {
                 </span>
                 <span className="git-graph-who">
                   <AuthorAvatar
-                    name={commit.author}
+                    name={commit.displayAuthor ?? commit.author}
                     email={commit.authorEmail}
                   />
-                  <span className="git-graph-author" title={commit.author}>
-                    {commit.author}
+                  <span
+                    className="git-graph-author"
+                    title={commit.displayAuthor ?? commit.author}
+                  >
+                    {commit.displayAuthor ?? commit.author}
                   </span>
                 </span>
                 <button

@@ -2,9 +2,11 @@
 
 .dockview-theme-modelcrew {
   --dv-group-view-background-color: var(--mc-panel);
-  --dv-tabs-and-actions-container-background-color: var(--mc-panel-header);
+  /* Шапка того же цвета, что и терминал под ней: карточка — одна плоскость, а
+     не полка со стоящим на ней окном. Отделяет их волосок, а не смена фона. */
+  --dv-tabs-and-actions-container-background-color: var(--mc-panel);
   --dv-tabs-and-actions-container-height: 30px;
-  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-font-size: 12.5px;
   --dv-activegroup-visiblepanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
@@ -25,13 +27,28 @@
   --dv-background-color: transparent;
 }
 
-/* Плотная сетка: тонкие рамки, острые углы; активная — рамка акцентом */
+/* Заливку области сетки dockview берёт на себя сам: `.dv-dockview` красит её
+   целиком цветом панели. Из-за этого поле между карточками получалось того же
+   цвета, что и сами карточки, а подложка проступала только по краю сетки —
+   двумя разными фонами вместо одного. Убираем заливку у корня: под панелями
+   должно быть ровно то, на чём они лежат, и ничего больше. */
+.dockview-theme-modelcrew .dv-dockview {
+  background-color: transparent;
+}
+
+/* Сетка карточек: тонкие рамки, скруглённые углы; активная — рамка акцентом */
 .dockview-theme-modelcrew .dv-groupview {
-  /* Углы прямые: панели стыкуются вплотную, и скругление оставляло бы между
-     ними просветы фона на каждом стыке. */
-  border-radius: 0;
+  /* Карточка красит себя сама — раньше за неё это делал корень сетки. */
+  background-color: var(--mc-panel);
+  /* Скругление держится на поле между панелями: пока они стыковались
+     вплотную, оно оставляло бы просвет фона на каждом стыке. */
+  border-radius: var(--mc-radius);
   overflow: hidden;
-  border: 1px solid var(--mc-panel-border);
+  /* Край карточки рисуется заметной линией, а не той же, что делит шапку и
+     терминал внутри неё. Пока обе были одним цветом, панель держалась на
+     разнице заливок; теперь заливка у карточки и у поля вокруг общая, и всю
+     работу «где кончается панель» делает эта рамка. */
+  border: 1px solid var(--mc-card-edge);
   box-sizing: border-box;
   transition:
     border-color 120ms ease,
@@ -43,31 +60,18 @@
 /* Активная панель обведена акцентом в полную силу, а не приглушённым: при
    двенадцати панелях на экране рамка — единственный признак того, куда уйдёт
    ввод с клавиатуры, и разбавленный цвет теряется среди неактивных соседей.
-   Внешнее кольцо тем же цветом даёт видимые два пикселя, не сдвигая раскладку:
-   box-shadow рисуется поверх, за пределами border-box. */
+
+   Но именно одна линия, и ничего внутрь: поле вокруг карточки отделяет её от
+   соседей само, поэтому второму кольцу поверх рамки и заливке, красившей
+   акцентом весь терминал, работы не осталось. */
 .dockview-theme-modelcrew .dv-groupview.dv-active-group {
   border-color: var(--mc-accent);
-  box-shadow: 0 0 0 1px var(--mc-accent);
-}
-
-/* Свечение уходит внутрь панели, а не наружу: снаружи оно ложится на соседей
-   и на щели сетки, где его почти не видно, а изнутри подсвечивает саму панель
-   — тот самый ореол вдоль рамки. Отдельным слоем поверх содержимого, потому
-   что inset-тень на самой группе закрасил бы терминал своим фоном. */
-.dockview-theme-modelcrew .dv-groupview.dv-active-group::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  /* Слой декоративный: клики и выделение текста проходят сквозь него. */
-  pointer-events: none;
-  z-index: 2;
-  box-shadow: inset 0 0 26px
-    color-mix(in srgb, var(--mc-accent) 20%, transparent);
 }
 
 .dockview-theme-modelcrew .dv-tabs-and-actions-container {
-  border-bottom: 1px solid var(--mc-border);
+  /* Шапка отделена от терминала волоском, а не чертой: рамку карточке уже
+     держит её собственный край, и вторая линия в полную силу спорила с ним. */
+  border-bottom: 1px solid var(--mc-panel-border);
   /* Точка отсчёта для подписи «что правит»: она смотрит на ширину шапки, а
      не окна — в сетке из двенадцати панелей это разные величины. Ширина
      шапки задаётся группой, поэтому containment здесь безопасен. */
@@ -79,7 +83,7 @@
   animation: drop-pulse 900ms ease-in-out infinite;
   border: 1px solid var(--mc-accent);
   /* Повторяет форму панели, на место которой встанет перетаскиваемая. */
-  border-radius: 0;
+  border-radius: var(--mc-radius);
 }
 
 @keyframes drop-pulse {
@@ -107,8 +111,38 @@
   align-items: center;
   gap: 7px;
   height: 100%;
-  padding: 0 10px;
-  max-width: 220px;
+  padding: 0 8px 0 10px;
+  max-width: 240px;
+}
+
+/* Значок между точкой и именем: чем занята панель — агентом или оболочкой.
+   Точка рядом говорит про жизнь процесса, значок — про его род, и цвет он
+   берёт у имени: у выбранной панели разгорается вместе с ним. */
+.tab-glyph {
+  display: inline-flex;
+  flex: none;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.tab-glyph svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+/* Марки компаний залиты, а не обведены: на тринадцати пикселях они плотнее
+   наших линейных значков и с той же приглушённостью выглядели бы темнее
+   имени рядом. */
+.tab-glyph.is-agent {
+  opacity: 0.88;
+}
+
+/* Единственная из четырёх марок, у которой цвет — часть знака: остальные три
+   компании рисуют свои одноцветными и берут тон у текста вокруг. */
+.tab-glyph.is-claude {
+  opacity: 1;
+  color: #d97757;
 }
 
 .tab-dot {
@@ -176,8 +210,12 @@
   }
 }
 
+/* Имя панели набрано полужирным: в шапке без своего фона оно — единственное,
+   что держит верх карточки, и в обычном начертании расплывалось в ряду с
+   подписью справа и кнопками. */
 .tab-title {
   overflow: hidden;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -199,11 +237,24 @@
 .group-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   height: 100%;
   padding: 0 6px;
   opacity: 0.5;
   transition: opacity 120ms ease;
+}
+
+/* Кнопки ужаты под низкую шапку: в тридцати пикселях прежние двадцать восемь
+   упирались в оба края и подсветка при наведении читалась как полоса во всю
+   высоту карточки. */
+.group-actions .icon-button {
+  width: 22px;
+  height: 22px;
+}
+
+.group-actions .icon-button svg {
+  width: 13px;
+  height: 13px;
 }
 
 .dv-groupview:hover .group-actions,
@@ -397,10 +448,17 @@
   height: 100%;
 }
 
-.welcome-badge {
-  font-size: 11px;
-  letter-spacing: 0.32em;
-  color: var(--mc-text-faint);
+/* Знак стоит на своём фоне и своей форме — он и есть иконка приложения, той
+   же скруглённой плиткой, какой её видно в доке. Своего скругления и тени
+   поэтому не добавляем: получилась бы плитка в плитке. */
+.welcome-logo {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 4px;
+  /* Пустой экран — фон, а не витрина: знак ждёт взгляда, а не ловит его. */
+  opacity: 0.92;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .welcome-title {
@@ -421,7 +479,7 @@
   gap: 8px;
   padding: 10px 18px;
   border: 1px solid var(--mc-accent-border);
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-accent-soft);
   color: var(--mc-text-bright);
   font-size: 13.5px;
@@ -555,7 +613,7 @@
   gap: 8px;
   padding: 8px 14px;
   border: 1px solid var(--mc-accent-border);
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: color-mix(in srgb, var(--mc-surface-raised) 94%, transparent);
   color: var(--mc-text-bright);
   font-size: 12.5px;
@@ -652,7 +710,7 @@ body.cmd-dragging * {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: color-mix(in srgb, var(--mc-surface-raised) 88%, transparent);
   border: 1px solid var(--mc-border);
   color: var(--mc-text-bright);

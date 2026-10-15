@@ -235,6 +235,98 @@ pub fn read_file(root: &Path, path: &str) -> CommandResult<FileContent> {
     })
 }
 
+/// Картинка в том виде, в каком её примет вебвью.
+///
+/// Байты уезжают в base64 и вставляются в страницу адресом `data:`. Обходной
+/// путь через файловый протокол Tauri тут был бы не проще: ему нужна отдельная
+/// область разрешений на весь диск, и открытая она ровно настолько же, а
+/// закрытая — не открывает проект, выбранный пользователем в этот запуск.
+#[derive(Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMedia {
+    /// Тип по расширению: по нему вебвью решает, чем это рисовать.
+    pub mime: &'static str,
+    pub data: String,
+    pub bytes: u64,
+    pub too_large: bool,
+    pub exists: bool,
+}
+
+/// Картинку крупнее не показываем: в base64 она вырастает на треть, и всё это
+/// проходит через IPC одной строкой. Фотография из репозитория в этот предел
+/// укладывается с запасом.
+const MAX_MEDIA_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Форматы, которые вебвью нарисует сам. Список закрытый нарочно: отдавать
+/// произвольный файл строкой в страницу — не то, что должно случаться от
+/// щелчка по имени.
+pub fn media_mime(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    let (stem, extension) = lower.rsplit_once('.')?;
+    // `.png` — это имя файла, а не расширение: точка в начале ничего не
+    // открывает, и картинкой такой файл делает разве что совпадение.
+    if stem.is_empty() {
+        return None;
+    }
+    Some(match extension {
+        "png" | "apng" => "image/png",
+        "jpg" | "jpeg" | "jfif" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "ico" | "cur" => "image/x-icon",
+        "svg" => "image/svg+xml",
+        _ => return None,
+    })
+}
+
+pub fn read_media(root: &Path, path: &str) -> CommandResult<FileMedia> {
+    let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+    let Some(mime) = media_mime(name) else {
+        return Err(
+            CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", path)
+        );
+    };
+    let full = resolve_inside(root, path)?;
+    let Ok(metadata) = std::fs::metadata(&full) else {
+        return Ok(FileMedia {
+            mime,
+            data: String::new(),
+            bytes: 0,
+            too_large: false,
+            exists: false,
+        });
+    };
+    if !metadata.is_file() {
+        return Err(
+            CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", path)
+        );
+    }
+    if metadata.len() > MAX_MEDIA_BYTES {
+        return Ok(FileMedia {
+            mime,
+            data: String::new(),
+            bytes: metadata.len(),
+            too_large: true,
+            exists: true,
+        });
+    }
+    let bytes = std::fs::read(&full).map_err(|error| {
+        CommandError::new(ErrorCode::WorkspaceRootUnavailable)
+            .with_context("path", path)
+            .with_debug(error)
+    })?;
+    use base64::Engine as _;
+    Ok(FileMedia {
+        mime,
+        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        bytes: bytes.len() as u64,
+        too_large: false,
+        exists: true,
+    })
+}
+
 pub fn write_file(root: &Path, path: &str, content: &str) -> CommandResult<()> {
     if path.is_empty() {
         return Err(CommandError::new(ErrorCode::WorkspacePathUnsupported).with_context("path", ""));
@@ -753,6 +845,20 @@ pub async fn workspace_read_file(
     crate::ensure_main_window(&window)?;
     let root: PathBuf = roots.resolve(&workspace_id)?;
     tauri::async_runtime::spawn_blocking(move || read_file(&root, &path))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn workspace_read_media(
+    window: tauri::WebviewWindow,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    path: String,
+) -> CommandResult<FileMedia> {
+    crate::ensure_main_window(&window)?;
+    let root: PathBuf = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || read_media(&root, &path))
         .await
         .map_err(|error| CommandError::new(ErrorCode::WorkspaceRootUnavailable).with_debug(error))?
 }
@@ -1424,6 +1530,56 @@ mod tests {
             "чужое"
         );
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn hands_a_picture_over_ready_to_be_shown() {
+        // Картинку до сих пор нельзя было открыть вовсе: она двоичная, и
+        // редактор говорил про неё «показывать нечего».
+        let root = sandbox("media");
+        // Однопиксельный PNG, какой он есть на диске.
+        let png: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        std::fs::write(root.join("значок.png"), png).unwrap();
+
+        let media = read_media(&root, "значок.png").unwrap();
+        assert!(media.exists && !media.too_large);
+        assert_eq!(media.mime, "image/png");
+        assert_eq!(media.bytes, 8);
+        use base64::Engine as _;
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&media.data)
+                .unwrap(),
+            png
+        );
+
+        // Отсутствие файла — не отказ: вкладка про него скажет сама.
+        assert!(!read_media(&root, "нет.png").unwrap().exists);
+
+        // А вот всё остальное отдавать строкой в страницу нельзя: список
+        // форматов закрытый, и щелчок по имени не повод его расширять.
+        std::fs::write(root.join("архив.zip"), [0_u8; 4]).unwrap();
+        assert!(read_media(&root, "архив.zip").is_err());
+        assert!(read_media(&root, "../наружу.png").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn knows_the_pictures_a_webview_can_draw_by_itself() {
+        for (name, mime) in [
+            ("a.PNG", "image/png"),
+            ("b.jpeg", "image/jpeg"),
+            ("c.jpg", "image/jpeg"),
+            ("d.gif", "image/gif"),
+            ("e.webp", "image/webp"),
+            ("f.svg", "image/svg+xml"),
+            ("g.ico", "image/x-icon"),
+        ] {
+            assert_eq!(media_mime(name), Some(mime), "{name}");
+        }
+        for name in ["readme.md", "noextension", "photo.tiff", ".png"] {
+            assert_eq!(media_mime(name), None, "{name}");
+        }
     }
 
     #[test]

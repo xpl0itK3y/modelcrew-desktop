@@ -15,7 +15,7 @@ use tauri::Manager;
 const LOCATE_SLACK_BEFORE: Duration = Duration::from_secs(15);
 const LOCATE_WINDOW_AFTER: Duration = Duration::from_secs(10 * 60);
 
-fn is_session_id(value: &str) -> bool {
+pub(crate) fn is_session_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
@@ -31,28 +31,41 @@ fn encode_claude_project_dir(cwd: &str) -> String {
         .collect()
 }
 
-fn file_instant(path: &Path) -> Option<SystemTime> {
+/// Когда сессия появилась и когда в неё писали в последний раз.
+///
+/// Появление — created; на ФС без birth-time откатываемся к modified. Берём
+/// раннее из доступных: у живого файла created ≤ modified.
+fn file_times(path: &Path) -> Option<(SystemTime, SystemTime)> {
     let meta = fs::metadata(path).ok()?;
-    // Момент появления сессии — created; на ФС без birth-time откатываемся к
-    // modified. Берём раннее из доступных: у живого файла created ≤ modified.
     match (meta.created().ok(), meta.modified().ok()) {
-        (Some(created), Some(modified)) => Some(created.min(modified)),
-        (Some(instant), None) | (None, Some(instant)) => Some(instant),
+        (Some(created), Some(modified)) => Some((created.min(modified), modified)),
+        (Some(instant), None) | (None, Some(instant)) => Some((instant, instant)),
         (None, None) => None,
     }
 }
 
-fn within_window(instant: SystemTime, since: SystemTime) -> bool {
-    let low = since.checked_sub(LOCATE_SLACK_BEFORE).unwrap_or(UNIX_EPOCH);
-    let high = since + LOCATE_WINDOW_AFTER;
-    instant >= low && instant <= high
+fn window_floor(since: SystemTime) -> SystemTime {
+    since.checked_sub(LOCATE_SLACK_BEFORE).unwrap_or(UNIX_EPOCH)
 }
 
-fn distance(instant: SystemTime, since: SystemTime) -> Duration {
-    instant
-        .duration_since(since)
-        .or_else(|_| since.duration_since(instant))
-        .unwrap_or(Duration::ZERO)
+fn within_window(instant: SystemTime, since: SystemTime) -> bool {
+    let high = since + LOCATE_WINDOW_AFTER;
+    instant >= window_floor(since) && instant <= high
+}
+
+/// Похожа ли сессия на принадлежащую этой панели.
+///
+/// Двумя способами, потому что панель приходит к диалогу двумя путями. Новый
+/// разговор — файл появляется рядом с запуском агента, это прежнее правило.
+/// Продолженный — файл создан хоть месяц назад, а пишут в него прямо сейчас,
+/// и по времени появления его не найти уже никогда.
+///
+/// Второй случай был дырой, и она сама себя воспроизводила: панель без
+/// привязки открывала список диалогов, пользователь выбирал старый разговор,
+/// локатор его не видел, привязка не появлялась — и в следующий раз панель
+/// снова открывала список. Ровно это и наблюдалось у codex.
+fn belongs_to_panel(created: SystemTime, modified: SystemTime, since: SystemTime) -> bool {
+    within_window(created, since) || modified >= window_floor(since)
 }
 
 /// Claude Code: `<config>/projects/<encoded-cwd>/<uuid>.jsonl`.
@@ -66,7 +79,7 @@ pub fn locate_claude_session(
         .join("projects")
         .join(encode_claude_project_dir(cwd));
     let entries = fs::read_dir(dir).ok()?;
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
@@ -78,15 +91,14 @@ pub fn locate_claude_session(
         {
             continue;
         }
-        let Some(instant) = file_instant(&path) else {
+        let Some((created, modified)) = file_times(&path) else {
             continue;
         };
-        if !within_window(instant, since) {
+        if !belongs_to_panel(created, modified, since) {
             continue;
         }
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-            best = Some((dist, stem.to_string()));
+        if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+            best = Some((modified, stem.to_string()));
         }
     }
     best.map(|(_, id)| id)
@@ -108,12 +120,40 @@ fn json_find_cwd(value: &serde_json::Value, depth: u8) -> Option<String> {
     }
 }
 
-fn codex_session_cwd(path: &Path) -> Option<String> {
-    // Достаточно первой строки — метаданные сессии codex пишет первой записью.
-    let content = fs::read_to_string(path).ok()?;
-    let first = content.lines().find(|line| !line.trim().is_empty())?;
-    let value: serde_json::Value = serde_json::from_str(first).ok()?;
-    json_find_cwd(&value, 3)
+// Первая строка rollout'а несёт и системные инструкции целиком, так что она
+// бывает в десятки килобайт. Предел — против файла, где перевода строки нет
+// вовсе: читать его до конца ради заголовка незачем.
+const CODEX_META_LIMIT: u64 = 1024 * 1024;
+
+/// Чей это разговор и где он идёт: метаданные из первой строки rollout'а.
+struct CodexMeta {
+    cwd: String,
+    // Id диалога, как его понимает `codex resume`. Берётся отсюда, а не из
+    // имени файла: у продолженного диалога файлов бывает несколько, и в
+    // хвосте имени тогда стоит id куска, а не разговора.
+    id: Option<String>,
+}
+
+fn codex_session_meta(path: &Path) -> Option<CodexMeta> {
+    use std::io::{BufRead, BufReader, Read};
+    let file = fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file.take(CODEX_META_LIMIT));
+    let mut first = String::new();
+    while first.trim().is_empty() {
+        first.clear();
+        if reader.read_line(&mut first).ok()? == 0 {
+            return None;
+        }
+    }
+    let value: serde_json::Value = serde_json::from_str(first.trim()).ok()?;
+    let cwd = json_find_cwd(&value, 3)?;
+    let payload = value.get("payload").unwrap_or(&value);
+    let id = ["id", "session_id"]
+        .iter()
+        .find_map(|key| payload.get(*key).and_then(serde_json::Value::as_str))
+        .filter(|id| is_session_id(id))
+        .map(str::to_string);
+    Some(CodexMeta { cwd, id })
 }
 
 fn codex_uuid_from_name(name: &str) -> Option<&str> {
@@ -125,15 +165,9 @@ fn codex_uuid_from_name(name: &str) -> Option<&str> {
     is_session_id(uuid).then_some(uuid)
 }
 
-/// Codex: `<home>/sessions/YYYY/MM/DD/rollout-…-<uuid>.jsonl`, cwd — в
-/// метаданных первой строки.
-pub fn locate_codex_session(
-    codex_home: &Path,
-    cwd: &str,
-    since: SystemTime,
-    exclude: &[String],
-) -> Option<String> {
-    let mut best: Option<(Duration, String)> = None;
+/// Все rollout'ы codex: `<home>/sessions/YYYY/MM/DD/rollout-…-<uuid>.jsonl`.
+fn codex_rollouts(codex_home: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
     let mut stack = vec![(codex_home.join("sessions"), 0u8)];
     while let Some((dir, depth)) = stack.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -148,31 +182,230 @@ pub fn locate_codex_session(
                 }
                 continue;
             }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let Some(uuid) = codex_uuid_from_name(name) else {
-                continue;
-            };
-            if exclude.iter().any(|id| id == uuid) {
-                continue;
-            }
-            let Some(instant) = file_instant(&path) else {
-                continue;
-            };
-            if !within_window(instant, since) {
-                continue;
-            }
-            if codex_session_cwd(&path).as_deref() != Some(cwd) {
-                continue;
-            }
-            let dist = distance(instant, since);
-            if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-                best = Some((dist, uuid.to_string()));
+            let is_rollout = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(codex_uuid_from_name)
+                .is_some();
+            if is_rollout {
+                found.push(path);
             }
         }
     }
-    best.map(|(_, id)| id)
+    found
+}
+
+/// Id диалога из rollout'а этого проекта, если файл к проекту относится.
+fn codex_session_of(path: &Path, cwd: &str) -> Option<String> {
+    let meta = codex_session_meta(path)?;
+    if meta.cwd != cwd {
+        return None;
+    }
+    meta.id.or_else(|| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .and_then(codex_uuid_from_name)
+            .map(str::to_string)
+    })
+}
+
+/// Codex: по папке и моменту запуска, cwd — в метаданных первой строки.
+///
+/// Догадка по времени: подходит любой разговор проекта, который появился или
+/// пишется рядом с запуском. Пока codex в проекте один, такой разговор один и
+/// есть. Когда их два, свежими выглядят оба, и «самый свежий из них» — это
+/// просто тот, кто последним дописал строку: так две панели и менялись чатами.
+/// Поэтому при двух кандидатах ответа нет — точный ответ даст начало хода
+/// (`locate_codex_turn`), а неверная привязка хуже никакой.
+pub fn locate_codex_session(
+    codex_home: &Path,
+    cwd: &str,
+    since: SystemTime,
+    exclude: &[String],
+) -> Option<String> {
+    let mut found: Option<String> = None;
+    for path in codex_rollouts(codex_home) {
+        let Some((created, modified)) = file_times(&path) else {
+            continue;
+        };
+        if !belongs_to_panel(created, modified, since) {
+            continue;
+        }
+        let Some(id) = codex_session_of(&path, cwd) else {
+            continue;
+        };
+        if exclude.contains(&id) {
+            continue;
+        }
+        match &found {
+            None => found = Some(id),
+            Some(known) if *known == id => {}
+            Some(_) => return None,
+        }
+    }
+    found
+}
+
+// Начало хода ищется вокруг нажатия Enter в панели. Раньше нажатия codex ход
+// не начнёт, а секунда в запас — на разницу между тем, когда фронтенд
+// посмотрел на часы, и тем, когда байты дошли до PTY.
+const TURN_SLACK_BEFORE: Duration = Duration::from_secs(1);
+// Первый ход свежего разговора ждёт, пока поднимутся MCP-серверы, и
+// начинается позже нажатия на секунды.
+const TURN_WINDOW_AFTER: Duration = Duration::from_secs(8);
+// За десять секунд хода в rollout не успевает попасть больше пары мегабайт
+// даже с длинными выводами инструментов; читать весь файл незачем.
+const TURN_TAIL_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// Начинался ли в этом rollout'е ход внутри окна вокруг нажатия.
+fn codex_turn_started_near(path: &Path, turn_at: SystemTime) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let length = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let start = length.saturating_sub(TURN_TAIL_LIMIT);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return false;
+    }
+    let mut tail = Vec::new();
+    if file.read_to_end(&mut tail).is_err() {
+        return false;
+    }
+    let tail = String::from_utf8_lossy(&tail);
+    let low = turn_at.checked_sub(TURN_SLACK_BEFORE).unwrap_or(UNIX_EPOCH);
+    let high = turn_at + TURN_WINDOW_AFTER;
+    // Первая строка хвоста почти всегда обрезана — её JSON просто не
+    // разберётся и выпадет сам.
+    tail.lines()
+        // Дешёвый отсев до разбора: ходов в файле единицы, строк — тысячи.
+        .filter(|line| line.contains("task_started") || line.contains("user_message"))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|value| value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg"))
+        .filter(|value| {
+            matches!(
+                value
+                    .get("payload")
+                    .and_then(|payload| payload.get("type"))
+                    .and_then(serde_json::Value::as_str),
+                Some("task_started" | "user_message")
+            )
+        })
+        .filter_map(|value| {
+            value
+                .get("timestamp")
+                .and_then(serde_json::Value::as_str)
+                .and_then(parse_utc_timestamp)
+        })
+        .any(|at| at >= low && at <= high)
+}
+
+/// Codex: диалог, в котором ход начался сразу после нажатия Enter в панели.
+///
+/// Это уже не догадка по свежести файла. Ход начинается ровно от отправки
+/// сообщения, и codex пишет его начало в rollout с меткой времени, так что
+/// соседняя панель в том же проекте сюда не попадает: её ходы начинаются от
+/// её нажатий. Если ходы в окне начались в двух разных разговорах, ответа нет —
+/// угадывать между ними нечем, а следующий Enter спросит снова.
+///
+/// Чужие привязки здесь не исключаются, а считаются: ход в разговоре
+/// соседки — такой же свидетель, и без него единственным кандидатом мог бы
+/// остаться неверный.
+pub fn locate_codex_turn(codex_home: &Path, cwd: &str, turn_at: SystemTime) -> Option<String> {
+    let floor = turn_at.checked_sub(TURN_SLACK_BEFORE).unwrap_or(UNIX_EPOCH);
+    let mut found: Option<String> = None;
+    for path in codex_rollouts(codex_home) {
+        // Ход в окне сдвинул бы время записи; файл, который с тех пор не
+        // трогали, читать незачем.
+        let Some((_, modified)) = file_times(&path) else {
+            continue;
+        };
+        if modified < floor {
+            continue;
+        }
+        let Some(id) = codex_session_of(&path, cwd) else {
+            continue;
+        };
+        if !codex_turn_started_near(&path, turn_at) {
+            continue;
+        }
+        match &found {
+            None => found = Some(id),
+            Some(known) if *known == id => {}
+            Some(_) => return None,
+        }
+    }
+    found
+}
+
+/// `2026-09-21T12:10:08.161Z` → момент времени. Codex пишет метки в UTC; знак
+/// смещения тоже понимаем, на случай если где-то он окажется не нулевым.
+fn parse_utc_timestamp(text: &str) -> Option<SystemTime> {
+    let bytes = text.as_bytes();
+    let number = |range: std::ops::Range<usize>| -> Option<i64> {
+        let part = text.get(range)?;
+        part.bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| part.parse().ok())?
+    };
+    if bytes.len() < 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !matches!(bytes[10], b'T' | b't' | b' ')
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return None;
+    }
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let mut rest = &text[19..];
+    let mut nanos: u64 = 0;
+    if let Some(fraction) = rest.strip_prefix('.') {
+        let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        for (index, byte) in fraction.bytes().take(9).take(digits).enumerate() {
+            nanos += u64::from(byte - b'0') * 10_u64.pow(8 - index as u32);
+        }
+        rest = &fraction[digits..];
+    }
+    let offset_seconds = match rest {
+        "Z" | "z" => 0,
+        _ => {
+            let sign = match rest.as_bytes().first()? {
+                b'+' => 1,
+                b'-' => -1,
+                _ => return None,
+            };
+            let offset = rest.get(1..)?;
+            if offset.len() != 5 || offset.as_bytes()[2] != b':' {
+                return None;
+            }
+            let hours: i64 = offset.get(0..2)?.parse().ok()?;
+            let minutes: i64 = offset.get(3..5)?.parse().ok()?;
+            sign * (hours * 3600 + minutes * 60)
+        }
+    };
+    // Число дней от 1970-01-01 по григорианскому календарю (алгоритм Хиннанта).
+    let shifted_year = if month <= 2 { year - 1 } else { year };
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset_seconds;
+    let seconds = u64::try_from(seconds).ok()?;
+    Some(UNIX_EPOCH + Duration::from_secs(seconds) + Duration::from_nanos(nanos))
 }
 
 /// GitHub Copilot CLI: `<home>/session-state/<uuid>/` с историей в
@@ -184,7 +417,7 @@ pub fn locate_copilot_session(
     exclude: &[String],
 ) -> Option<String> {
     let entries = fs::read_dir(copilot_home.join("session-state")).ok()?;
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
 
     for entry in entries.flatten() {
         let session_dir = entry.path();
@@ -203,10 +436,11 @@ pub fn locate_copilot_session(
         if !events.is_file() {
             continue;
         }
-        let Some(instant) = file_instant(&events).or_else(|| file_instant(&session_dir)) else {
+        let Some((created, modified)) = file_times(&events).or_else(|| file_times(&session_dir))
+        else {
             continue;
         };
-        if !within_window(instant, since) {
+        if !belongs_to_panel(created, modified, since) {
             continue;
         }
         // Формат метаданных менялся между версиями CLI. Ищем cwd сначала в
@@ -215,9 +449,8 @@ pub fn locate_copilot_session(
             continue;
         }
 
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(best_dist, _)| dist < *best_dist) {
-            best = Some((dist, id.to_string()));
+        if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+            best = Some((modified, id.to_string()));
         }
     }
 
@@ -240,190 +473,35 @@ pub fn locate_opencode_session(
             .ok()?;
     let mut statement = connection
         .prepare(
-            "SELECT id, time_created FROM session \
+            "SELECT id, time_created, time_updated FROM session \
              WHERE directory = ?1 AND parent_id IS NULL \
-             ORDER BY time_created DESC LIMIT 50",
+             ORDER BY time_updated DESC LIMIT 50",
         )
         .ok()?;
     let rows = statement
         .query_map([cwd], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .ok()?;
-    let mut best: Option<(Duration, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
     for row in rows.flatten() {
-        let (id, created_ms) = row;
+        let (id, created_ms, updated_ms) = row;
         if !is_session_id(&id) || exclude.iter().any(|entry| entry == &id) {
             continue;
         }
-        let instant = UNIX_EPOCH + Duration::from_millis(created_ms.max(0) as u64);
-        if !within_window(instant, since) {
+        let created = UNIX_EPOCH + Duration::from_millis(created_ms.max(0) as u64);
+        let modified = UNIX_EPOCH + Duration::from_millis(updated_ms.max(0) as u64);
+        if !belongs_to_panel(created, modified, since) {
             continue;
         }
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-            best = Some((dist, id));
-        }
-    }
-    best.map(|(_, id)| id)
-}
-
-/// Antigravity (agy): папки-разговоры `<cli>/brain/<uuid>/` плюс карта
-/// `cache/last_conversations.json` «папка проекта → id последнего разговора».
-pub fn locate_antigravity_session(
-    cli_dir: &Path,
-    cwd: &str,
-    since: SystemTime,
-    exclude: &[String],
-) -> Option<String> {
-    let mut candidates: Vec<(Duration, String)> = Vec::new();
-    if let Ok(entries) = fs::read_dir(cli_dir.join("brain")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if !is_session_id(name) || exclude.iter().any(|id| id == name) {
-                continue;
-            }
-            let Some(instant) = file_instant(&path) else {
-                continue;
-            };
-            // У активного разговора mtime папки обновляется — окно шире.
-            if !within_window(instant, since) {
-                continue;
-            }
-            candidates.push((distance(instant, since), name.to_string()));
+        if best.as_ref().is_none_or(|(best_at, _)| modified > *best_at) {
+            best = Some((modified, id));
         }
     }
-    // Карта «cwd → последний разговор» разрешает неоднозначность между
-    // параллельными проектами: у brain-папок нет собственного cwd.
-    let mapped: Option<String> = fs::read_to_string(cli_dir.join("cache/last_conversations.json"))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|value| {
-            value
-                .get(cwd)
-                .and_then(|id| id.as_str())
-                .map(str::to_string)
-        })
-        .filter(|id| is_session_id(id) && !exclude.iter().any(|entry| entry == id));
-
-    if let Some(mapped_id) = &mapped {
-        if candidates.iter().any(|(_, id)| id == mapped_id) {
-            return Some(mapped_id.clone());
-        }
-    }
-    if candidates.len() == 1 {
-        return Some(candidates.remove(0).1);
-    }
-    // Несколько кандидатов без карты — не гадаем; ноль кандидатов — карта
-    // как последний шанс (папка могла не попасть в окно по времени).
-    if candidates.is_empty() {
-        return mapped;
-    }
-    None
-}
-
-/// Grok Build: `~/.grok/sessions/**` — идентификатор в имени файла/папки,
-/// принадлежность проекту проверяется по упоминанию cwd в начале файла.
-pub fn locate_grok_session(
-    grok_dir: &Path,
-    cwd: &str,
-    since: SystemTime,
-    exclude: &[String],
-) -> Option<String> {
-    let mut best: Option<(Duration, String)> = None;
-    let mut stack = vec![(grok_dir.join("sessions"), 0u8)];
-    while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if depth < 4 {
-                    stack.push((path, depth + 1));
-                }
-                continue;
-            }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if !is_session_id(stem) || exclude.iter().any(|id| id == stem) {
-                continue;
-            }
-            let Some(instant) = file_instant(&path) else {
-                continue;
-            };
-            if !within_window(instant, since) {
-                continue;
-            }
-            if !file_mentions_cwd(&path, cwd) {
-                continue;
-            }
-            let dist = distance(instant, since);
-            if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-                best = Some((dist, stem.to_string()));
-            }
-        }
-    }
-    best.map(|(_, id)| id)
-}
-
-/// Kimi Code: `<home>/session_index.jsonl` maps a work directory and session
-/// id to `<home>/sessions/<work-dir-key>/session_<uuid>/`.
-pub fn locate_kimi_session(
-    kimi_home: &Path,
-    cwd: &str,
-    since: SystemTime,
-    exclude: &[String],
-) -> Option<String> {
-    let sessions_root = fs::canonicalize(kimi_home.join("sessions")).ok()?;
-    let index = fs::read_to_string(kimi_home.join("session_index.jsonl")).ok()?;
-    let mut best: Option<(Duration, String)> = None;
-
-    for line in index.lines().filter(|line| !line.trim().is_empty()) {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        let Some(id) = entry.get("sessionId").and_then(|value| value.as_str()) else {
-            continue;
-        };
-        let Some(work_dir) = entry.get("workDir").and_then(|value| value.as_str()) else {
-            continue;
-        };
-        let Some(session_dir) = entry.get("sessionDir").and_then(|value| value.as_str()) else {
-            continue;
-        };
-        if work_dir != cwd || !is_session_id(id) || exclude.iter().any(|excluded| excluded == id) {
-            continue;
-        }
-
-        // sessionDir is user-owned metadata. Keep lookup confined to Kimi's
-        // session store before reading state.json.
-        let Ok(session_dir) = fs::canonicalize(session_dir) else {
-            continue;
-        };
-        if !session_dir.starts_with(&sessions_root) {
-            continue;
-        }
-        let state_path = session_dir.join("state.json");
-        let Some(instant) = file_instant(&state_path) else {
-            continue;
-        };
-        if !within_window(instant, since) {
-            continue;
-        }
-        let dist = distance(instant, since);
-        if best.as_ref().is_none_or(|(best_dist, _)| dist < *best_dist) {
-            best = Some((dist, id.to_string()));
-        }
-    }
-
     best.map(|(_, id)| id)
 }
 
@@ -457,19 +535,19 @@ fn file_mentions_cwd(path: &Path, cwd: &str) -> bool {
         .is_some_and(|encoded| head.contains(&encoded))
 }
 
-fn claude_config_dir(home: &Path) -> PathBuf {
+pub(crate) fn claude_config_dir(home: &Path) -> PathBuf {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".claude"))
 }
 
-fn codex_home_dir(home: &Path) -> PathBuf {
+pub(crate) fn codex_home_dir(home: &Path) -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".codex"))
 }
 
-fn copilot_home_dir(home: &Path) -> PathBuf {
+pub(crate) fn copilot_home_dir(home: &Path) -> PathBuf {
     std::env::var_os("COPILOT_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".copilot"))
@@ -482,7 +560,7 @@ fn xdg_data_home(home: &Path) -> PathBuf {
 }
 
 /// OPENCODE_DATA_DIR может быть списком через запятую.
-fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
+pub(crate) fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
     if let Some(raw) = std::env::var_os("OPENCODE_DATA_DIR") {
         return raw
             .to_string_lossy()
@@ -492,30 +570,6 @@ fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
             .collect();
     }
     vec![xdg_data_home(home).join("opencode/opencode.db")]
-}
-
-fn kilo_db_candidates(home: &Path) -> Vec<PathBuf> {
-    let data = xdg_data_home(home);
-    // Форк opencode: имя каталога данных зависит от дистрибуции.
-    vec![
-        data.join("kilo/opencode.db"),
-        data.join("kilocode/opencode.db"),
-        data.join("kilo/kilo.db"),
-    ]
-}
-
-fn antigravity_cli_dir(home: &Path) -> PathBuf {
-    home.join(".gemini/antigravity-cli")
-}
-
-fn grok_dir(home: &Path) -> PathBuf {
-    home.join(".grok")
-}
-
-fn kimi_code_home_dir(home: &Path) -> PathBuf {
-    std::env::var_os("KIMI_CODE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".kimi-code"))
 }
 
 #[tauri::command]
@@ -544,15 +598,30 @@ pub fn agent_session_locate(
         "opencode" => opencode_db_candidates(&home)
             .iter()
             .find_map(|db| locate_opencode_session(db, &cwd, since, &exclude)),
-        "kilocode" => kilo_db_candidates(&home)
-            .iter()
-            .find_map(|db| locate_opencode_session(db, &cwd, since, &exclude)),
-        "kimi" => locate_kimi_session(&kimi_code_home_dir(&home), &cwd, since, &exclude),
-        "antigravity" => {
-            locate_antigravity_session(&antigravity_cli_dir(&home), &cwd, since, &exclude)
-        }
-        "grok" => locate_grok_session(&grok_dir(&home), &cwd, since, &exclude),
         // Для прочих агентов адаптеров нет — мягкий фолбэк на фронте.
+        _ => None,
+    })
+}
+
+/// Диалог, в котором ход начался сразу после нажатия Enter в панели.
+///
+/// Только для агентов, чей журнал помечает начало хода временем. Остальным
+/// панелям id называет их собственный хук, а не этот поиск.
+#[tauri::command]
+pub fn agent_session_locate_turn(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    agent: String,
+    cwd: String,
+    turn_epoch_ms: u64,
+) -> CommandResult<Option<String>> {
+    super::ensure_main_window(&window)?;
+    let turn_at = UNIX_EPOCH + Duration::from_millis(turn_epoch_ms);
+    let home = app.path().home_dir().map_err(|error| {
+        CommandError::new(ErrorCode::AgentSessionLookupFailed).with_debug(error)
+    })?;
+    Ok(match agent.as_str() {
+        "codex" => locate_codex_turn(&codex_home_dir(&home), &cwd, turn_at),
         _ => None,
     })
 }
@@ -590,6 +659,24 @@ mod tests {
             encode_claude_project_dir("/home/u/my_app.v2"),
             "-home-u-my-app-v2"
         );
+    }
+
+    #[test]
+    fn a_conversation_written_right_now_belongs_to_the_panel() {
+        let since = SystemTime::now();
+        let long_ago = since - Duration::from_secs(30 * 24 * 3600);
+        let just_after = since + Duration::from_secs(2);
+
+        // Новый разговор: файл появился рядом с запуском агента.
+        assert!(belongs_to_panel(just_after, just_after, since));
+
+        // Продолженный: заведён месяц назад, пишут в него прямо сейчас. Это и
+        // была дыра — панель без привязки открывала список, пользователь
+        // выбирал старый разговор, и найти его локатор уже не мог никогда.
+        assert!(belongs_to_panel(long_ago, just_after, since));
+
+        // Заброшенный чужой: и появился давно, и не трогали.
+        assert!(!belongs_to_panel(long_ago, long_ago, since));
     }
 
     #[test]
@@ -667,6 +754,192 @@ mod tests {
         );
     }
 
+    /// Rollout codex: заголовок с проектом и id, затем строки журнала.
+    fn write_rollout(path: &Path, id: &str, cwd: &str, lines: &[String]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut body = format!(
+            "{{\"timestamp\":\"2026-09-21T12:00:00.000Z\",\"type\":\"session_meta\",\
+             \"payload\":{{\"id\":\"{id}\",\"session_id\":\"{id}\",\"cwd\":\"{cwd}\"}}}}\n"
+        );
+        for line in lines {
+            body.push_str(line);
+            body.push('\n');
+        }
+        fs::write(path, body).unwrap();
+    }
+
+    fn turn_started(at: &str) -> String {
+        format!(
+            "{{\"timestamp\":\"{at}\",\"type\":\"event_msg\",\
+             \"payload\":{{\"type\":\"task_started\",\"turn_id\":\"t\"}}}}"
+        )
+    }
+
+    fn streamed_output(at: &str) -> String {
+        format!(
+            "{{\"timestamp\":\"{at}\",\"type\":\"response_item\",\
+             \"payload\":{{\"type\":\"message\",\"role\":\"assistant\"}}}}"
+        )
+    }
+
+    #[test]
+    fn codex_conversation_id_comes_from_the_header_not_the_file_name() {
+        // У продолженного диалога файлов несколько, и в хвосте имени стоит id
+        // куска. `codex resume` с ним не найдёт ничего.
+        let home = temp_dir("codex-segment");
+        let thread = "01a0d305-9ca5-7000-80e7-d9fc6a32bf9c";
+        let segment = "01a0d30d-ac32-7cb0-8b10-3dfc22fb894f";
+        write_rollout(
+            &home.join(format!(
+                "sessions/2026/09/24/rollout-2026-09-24T15-54-43-{thread}_{segment}.jsonl"
+            )),
+            thread,
+            "/tmp/proj",
+            &[],
+        );
+
+        assert_eq!(
+            locate_codex_session(&home, "/tmp/proj", SystemTime::now(), &[]).as_deref(),
+            Some(thread)
+        );
+        // Исключение тоже сверяется с id диалога.
+        assert_eq!(
+            locate_codex_session(&home, "/tmp/proj", SystemTime::now(), &[thread.into()]),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_locator_does_not_pick_between_two_live_conversations() {
+        // Два codex в одном проекте: свежие оба, и «самый свежий» — просто
+        // тот, кто последним дописал строку. Так панели и менялись чатами.
+        let home = temp_dir("codex-two");
+        let day = home.join("sessions/2026/10/14");
+        let first = "0195c9a1-1111-4222-8333-000000000001";
+        let second = "0195c9a1-1111-4222-8333-000000000002";
+        write_rollout(
+            &day.join(format!("rollout-2026-10-14T10-00-00-{first}.jsonl")),
+            first,
+            "/tmp/proj",
+            &[],
+        );
+        write_rollout(
+            &day.join(format!("rollout-2026-10-14T10-00-05-{second}.jsonl")),
+            second,
+            "/tmp/proj",
+            &[],
+        );
+        let since = SystemTime::now();
+
+        assert_eq!(locate_codex_session(&home, "/tmp/proj", since, &[]), None);
+        // Соседка свой уже назвала — оставшийся кандидат один.
+        assert_eq!(
+            locate_codex_session(&home, "/tmp/proj", since, &[first.into()]).as_deref(),
+            Some(second)
+        );
+    }
+
+    #[test]
+    fn codex_turn_locator_names_the_conversation_the_key_started() {
+        let home = temp_dir("codex-turn");
+        let day = home.join("sessions/2026/09/21");
+        let mine = "0195c9a1-1111-4222-8333-00000000000a";
+        let neighbour = "0195c9a1-1111-4222-8333-00000000000b";
+        // Соседка пишет прямо сейчас — но её ход начался полминуты назад,
+        // от её собственного нажатия.
+        write_rollout(
+            &day.join(format!("rollout-2026-09-21T11-59-00-{neighbour}.jsonl")),
+            neighbour,
+            "/tmp/proj",
+            &[
+                turn_started("2026-09-21T12:09:38.000Z"),
+                streamed_output("2026-09-21T12:10:08.200Z"),
+                streamed_output("2026-09-21T12:10:09.900Z"),
+            ],
+        );
+        write_rollout(
+            &day.join(format!("rollout-2026-09-21T12-00-00-{mine}.jsonl")),
+            mine,
+            "/tmp/proj",
+            &[
+                turn_started("2026-09-21T12:01:00.000Z"),
+                turn_started("2026-09-21T12:10:08.420Z"),
+            ],
+        );
+        let pressed = parse_utc_timestamp("2026-09-21T12:10:08.161Z").unwrap();
+
+        assert_eq!(
+            locate_codex_turn(&home, "/tmp/proj", pressed).as_deref(),
+            Some(mine)
+        );
+        // Ход начался не от этого нажатия — сказать нечего.
+        let much_later = parse_utc_timestamp("2026-09-21T12:20:00.000Z").unwrap();
+        assert_eq!(locate_codex_turn(&home, "/tmp/proj", much_later), None);
+    }
+
+    #[test]
+    fn codex_turn_locator_gives_up_when_two_turns_began_together() {
+        let home = temp_dir("codex-turn-tie");
+        let day = home.join("sessions/2026/09/21");
+        let first = "0195c9a1-1111-4222-8333-00000000000c";
+        let second = "0195c9a1-1111-4222-8333-00000000000d";
+        let other_project = "0195c9a1-1111-4222-8333-00000000000e";
+        write_rollout(
+            &day.join(format!("rollout-2026-09-21T12-00-00-{first}.jsonl")),
+            first,
+            "/tmp/proj",
+            &[turn_started("2026-09-21T12:10:08.300Z")],
+        );
+        // Ход в другом проекте в то же мгновение спора не создаёт.
+        write_rollout(
+            &day.join(format!("rollout-2026-09-21T12-00-02-{other_project}.jsonl")),
+            other_project,
+            "/tmp/other",
+            &[turn_started("2026-09-21T12:10:08.500Z")],
+        );
+        let pressed = parse_utc_timestamp("2026-09-21T12:10:08.000Z").unwrap();
+        assert_eq!(
+            locate_codex_turn(&home, "/tmp/proj", pressed).as_deref(),
+            Some(first)
+        );
+
+        // А в том же проекте — создаёт: чей ход чей, по времени уже не понять.
+        write_rollout(
+            &day.join(format!("rollout-2026-09-21T12-00-01-{second}.jsonl")),
+            second,
+            "/tmp/proj",
+            &[turn_started("2026-09-21T12:10:09.100Z")],
+        );
+        assert_eq!(locate_codex_turn(&home, "/tmp/proj", pressed), None);
+    }
+
+    #[test]
+    fn codex_timestamps_are_read_as_utc() {
+        assert_eq!(
+            parse_utc_timestamp("1970-01-01T00:00:00Z"),
+            Some(UNIX_EPOCH)
+        );
+        assert_eq!(
+            parse_utc_timestamp("2026-09-21T12:10:08.161Z"),
+            Some(UNIX_EPOCH + Duration::from_millis(1_789_992_608_161))
+        );
+        // Високосный день и смещение от UTC.
+        assert_eq!(
+            parse_utc_timestamp("2024-03-01T02:59:59+03:00"),
+            Some(UNIX_EPOCH + Duration::from_secs(1_709_251_199))
+        );
+        for broken in [
+            "",
+            "2026-09-21",
+            "2026-13-21T12:10:08Z",
+            "2026-09-21T12:10:08",
+            "2026-09-21T12:10:08.Z",
+            "yesterday at noon, roughly",
+        ] {
+            assert_eq!(parse_utc_timestamp(broken), None, "{broken}");
+        }
+    }
+
     #[test]
     fn copilot_locator_matches_workspace_and_respects_exclude() {
         let home = temp_dir("copilot");
@@ -735,7 +1008,8 @@ mod tests {
                     id TEXT PRIMARY KEY,
                     parent_id TEXT,
                     directory TEXT NOT NULL,
-                    time_created INTEGER NOT NULL
+                    time_created INTEGER NOT NULL,
+                    time_updated INTEGER NOT NULL
                 );",
             )
             .unwrap();
@@ -745,10 +1019,10 @@ mod tests {
             .as_millis() as i64;
         connection
             .execute_batch(&format!(
-                "INSERT INTO session VALUES ('ses_target', NULL, '/tmp/proj', {now_ms});
-                 INSERT INTO session VALUES ('ses_other', NULL, '/tmp/other', {now_ms});
-                 INSERT INTO session VALUES ('ses_child', 'ses_target', '/tmp/proj', {now_ms});
-                 INSERT INTO session VALUES ('ses_old', NULL, '/tmp/proj', 1000);"
+                "INSERT INTO session VALUES ('ses_target', NULL, '/tmp/proj', {now_ms}, {now_ms});
+                 INSERT INTO session VALUES ('ses_other', NULL, '/tmp/other', {now_ms}, {now_ms});
+                 INSERT INTO session VALUES ('ses_child', 'ses_target', '/tmp/proj', {now_ms}, {now_ms});
+                 INSERT INTO session VALUES ('ses_old', NULL, '/tmp/proj', 1000, 1000);"
             ))
             .unwrap();
         drop(connection);
@@ -766,118 +1040,22 @@ mod tests {
             locate_opencode_session(&dir.join("missing.db"), "/tmp/proj", since, &[]),
             None
         );
+
+        // Продолженный разговор: заведён давно, пишут в него сейчас. По времени
+        // появления его не найти уже никогда, а панель именно в нём.
+        let connection = rusqlite::Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(&format!(
+                "UPDATE session SET time_updated = {now_ms} + 5000 WHERE id = 'ses_old';"
+            ))
+            .unwrap();
+        drop(connection);
+        assert_eq!(
+            locate_opencode_session(&db_path, "/tmp/proj", since, &[]).as_deref(),
+            Some("ses_old")
+        );
+
         let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn antigravity_locator_uses_brain_dirs_and_folder_map() {
-        let cli = temp_dir("agy");
-        let since = SystemTime::now();
-        fs::create_dir_all(cli.join("brain/aaaa-1111")).unwrap();
-        fs::create_dir_all(cli.join("brain/bbbb-2222")).unwrap();
-        fs::create_dir_all(cli.join("cache")).unwrap();
-        fs::write(
-            cli.join("cache/last_conversations.json"),
-            b"{\"/tmp/proj\":\"bbbb-2222\",\"/tmp/other\":\"aaaa-1111\"}",
-        )
-        .unwrap();
-
-        // Два кандидата в окне — решает карта «папка → разговор».
-        assert_eq!(
-            locate_antigravity_session(&cli, "/tmp/proj", since, &[]).as_deref(),
-            Some("bbbb-2222")
-        );
-        // Занятый id отдаёт оставшегося единственного кандидата.
-        assert_eq!(
-            locate_antigravity_session(&cli, "/tmp/proj", since, &["bbbb-2222".into()]).as_deref(),
-            Some("aaaa-1111")
-        );
-        let _ = fs::remove_dir_all(cli);
-    }
-
-    #[test]
-    fn grok_locator_matches_cwd_mention_in_session_head() {
-        let grok = temp_dir("grok");
-        let day = grok.join("sessions/nested");
-        fs::create_dir_all(&day).unwrap();
-        fs::write(
-            day.join("sess-target.jsonl"),
-            b"{\"cwd\":\"/tmp/proj\",\"model\":\"grok\"}\n",
-        )
-        .unwrap();
-        fs::write(day.join("sess-other.jsonl"), b"{\"cwd\":\"/tmp/other\"}\n").unwrap();
-
-        let since = SystemTime::now();
-        assert_eq!(
-            locate_grok_session(&grok, "/tmp/proj", since, &[]).as_deref(),
-            Some("sess-target")
-        );
-        assert_eq!(
-            locate_grok_session(&grok, "/tmp/proj", since, &["sess-target".into()]),
-            None
-        );
-        let _ = fs::remove_dir_all(grok);
-    }
-
-    #[test]
-    fn kimi_locator_uses_index_work_dir_and_respects_exclude() {
-        let home = temp_dir("kimi");
-        let sessions = home.join("sessions/wd_project");
-        let target_id = "df13800a-7139-4259-8330-6769145fc02e";
-        let other_id = "ab90edc1-964b-4e04-ad5b-f4b20f5994e0";
-        let target = sessions.join(format!("session_{target_id}/state.json"));
-        let other = sessions.join(format!("session_{other_id}/state.json"));
-        let since = SystemTime::now();
-        touch_with_mtime(&target, since + Duration::from_secs(2));
-        touch_with_mtime(&other, since + Duration::from_secs(1));
-        let target_entry = serde_json::json!({
-            "sessionId": target_id,
-            "sessionDir": target.parent().unwrap().to_string_lossy(),
-            "workDir": "/tmp/proj",
-        });
-        let other_entry = serde_json::json!({
-            "sessionId": other_id,
-            "sessionDir": other.parent().unwrap().to_string_lossy(),
-            "workDir": "/tmp/other",
-        });
-        fs::write(
-            home.join("session_index.jsonl"),
-            format!("{target_entry}\n{other_entry}\n"),
-        )
-        .unwrap();
-
-        assert_eq!(
-            locate_kimi_session(&home, "/tmp/proj", since, &[]).as_deref(),
-            Some(target_id)
-        );
-        assert_eq!(
-            locate_kimi_session(&home, "/tmp/proj", since, &[target_id.into()]),
-            None
-        );
-        let _ = fs::remove_dir_all(home);
-    }
-
-    #[test]
-    fn kimi_locator_rejects_session_dirs_outside_its_store() {
-        let home = temp_dir("kimi-confined");
-        let outside = temp_dir("kimi-outside");
-        let id = "df13800a-7139-4259-8330-6769145fc02e";
-        let state = outside.join("state.json");
-        let since = SystemTime::now();
-        fs::create_dir_all(home.join("sessions")).unwrap();
-        touch_with_mtime(&state, since);
-        fs::write(
-            home.join("session_index.jsonl"),
-            format!(
-                "{{\"sessionId\":\"{id}\",\"sessionDir\":\"{}\",\"workDir\":\"/tmp/proj\"}}\n",
-                outside.display(),
-            ),
-        )
-        .unwrap();
-
-        assert_eq!(locate_kimi_session(&home, "/tmp/proj", since, &[]), None);
-        let _ = fs::remove_dir_all(home);
-        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]

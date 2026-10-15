@@ -36,6 +36,19 @@ export function setPanelTailResolver(
   panelTailResolver = resolver;
 }
 
+// Сессия панели. Двух агентов одного вида в одном проекте баннер иначе не
+// различает вовсе — заголовок и тело у них совпадают до буквы, и два разных
+// события читаются как одно, продублированное. Состав сессий живёт в
+// React-состоянии App, поэтому источник, как и имя проекта, регистрируется
+// снаружи.
+let panelSessionResolver: (terminalId: string) => string | null = () => null;
+
+export function setPanelSessionResolver(
+  resolver: (terminalId: string) => string | null,
+): void {
+  panelSessionResolver = resolver;
+}
+
 function alertTranslationKey(kind: AgentAlertKind) {
   switch (kind) {
     case "permission":
@@ -67,6 +80,7 @@ export function announceAgentAlert(params: {
   const project = params.context.workspaceId
     ? workspaceNameResolver(params.context.workspaceId)
     : null;
+  const session = panelSessionResolver(params.terminalId);
   const detail = selectAlertDetail(
     loadAgentAlertDetailMode(),
     params.notification,
@@ -74,17 +88,21 @@ export function announceAgentAlert(params: {
   );
   // Имя панели сюда не идёт: искать её глазами всё равно по мигающей точке в
   // шапке, а баннер и так занят агентом, проектом и текстом самого агента.
-  const body = [
+  // Сессия — другое дело: у агентских панелей автоимя совпадает с именем
+  // агента, и без неё два зовущих claude в одном проекте выглядят как один,
+  // позвавший дважды.
+  const where = [
     project ? translate("terminal.agentProject", { project }) : "",
-    detail,
+    session ? translate("terminal.agentSession", { session }) : "",
   ]
     .filter(Boolean)
-    .join("\n");
+    .join(" · ");
+  const body = [where, detail].filter(Boolean).join("\n");
   playNotificationSound();
   queueAlertBanner(
     translate(alertTranslationKey(params.kind), { agent }),
     body,
-    [agent, project].filter(Boolean).join(" · "),
+    [agent, project, session].filter(Boolean).join(" · "),
   );
 }
 

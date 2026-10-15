@@ -339,15 +339,15 @@ export function HistoryView(props: {
                     </button>
                     <span
                       className="git-commit-author"
-                      title={`${commit.author} <${commit.authorEmail}>`}
+                      title={`${commit.displayAuthor ?? commit.author} <${commit.authorEmail}>`}
                     >
                       {/* В раскрытой карточке имя дополняется почтой прямо здесь,
                     отдельной строки «Автор» нет — без дублей. */}
                       <AuthorAvatar
-                        name={commit.author}
+                        name={commit.displayAuthor ?? commit.author}
                         email={commit.authorEmail}
                       />
-                      {commit.author}
+                      {commit.displayAuthor ?? commit.author}
                       {expanded && (
                         <span className="git-commit-email">
                           {" "}

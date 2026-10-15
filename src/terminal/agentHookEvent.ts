@@ -12,6 +12,9 @@ export type AgentHookEvent = {
   agent: string;
   event: string;
   message: string;
+  // Диалог, из которого пришло событие. Claude Code и copilot присылают его в
+  // каждом вызове хука; у остальных пусто.
+  sessionId?: string;
 };
 
 // Имена событий у агентов свои, смысл общий. Ключи в нижнем регистре без
@@ -24,8 +27,11 @@ const EVENT_KINDS: Record<string, PreciseAgentAlertKind> = {
   subagentstop: "completed",
   sessionidle: "completed", // opencode
   permissionasked: "permission", // opencode
+  questionasked: "question", // opencode
   agentstop: "completed", // copilot
-  permissionprompt: "permission", // copilot
+  // Вид уведомления, когда хук «Notification» его называет (claude, copilot).
+  permissionprompt: "permission",
+  elicitationdialog: "question", // MCP-сервер просит ответа
   notification: "waiting",
 };
 

@@ -31,9 +31,13 @@
   pointer-events: none;
 }
 
+/* Имя проекта — то, что человек ищет глазами в первую очередь, поэтому оно
+   светлее пути рядом с ним. Раньше оба были одинаково приглушены и читались
+   как одна длинная строка. */
 .titlebar-workspace {
   font-size: 12.5px;
-  color: var(--mc-text-muted);
+  font-weight: 500;
+  color: var(--mc-text);
   letter-spacing: 0.02em;
 }
 
@@ -53,11 +57,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text-muted);
   cursor: pointer;

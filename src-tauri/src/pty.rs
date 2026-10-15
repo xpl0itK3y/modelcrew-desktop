@@ -153,9 +153,6 @@ impl PtyManager {
         cmd.env("MODELCREW_PANEL_ID", &opts.id);
         if let Some(events) = AGENT_EVENTS_DIR.get() {
             cmd.env("MODELCREW_EVENTS_DIR", events);
-            for (key, value) in crate::agent_hooks::env_hooks(events) {
-                cmd.env(key, value);
-            }
         }
         // Тем же путём — адрес сокета MCP и пропуск панели на него. Шим
         // наследует то и другое, поэтому приложение знает, кто позвал, и берёт

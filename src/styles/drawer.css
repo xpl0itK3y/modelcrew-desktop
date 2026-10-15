@@ -22,7 +22,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--mc-border);
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   box-shadow: -14px 0 40px var(--mc-shadow);
   animation: drawer-in 160ms cubic-bezier(0.2, 0, 0.13, 1);

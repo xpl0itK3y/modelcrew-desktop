@@ -351,6 +351,72 @@ fn reads_and_writes_files_within_the_repository() {
     assert!(write_repo_file(root, "../../evil", "x").is_err());
 }
 
+#[test]
+fn reads_the_file_as_the_last_commit_left_it() {
+    // По этой версии редактор считает, что в открытом файле новое: на диске
+    // лежит уже правленое, и сравнивать его не с чем.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+
+    // Коммитов ещё нет: сравнивать не с чем, и это не отказ.
+    std::fs::write(root.join("a.txt"), "одна\n").unwrap();
+    assert!(!read_head_file(root, "a.txt").unwrap().exists);
+
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "первый"]);
+    std::fs::write(root.join("a.txt"), "одна\nдве\n").unwrap();
+
+    // Правка на диске версию в истории не трогает.
+    let head = read_head_file(root, "a.txt").unwrap();
+    assert!(head.exists && !head.is_binary);
+    assert_eq!(head.content, "одна\n");
+    assert_eq!(read_repo_file(root, "a.txt").unwrap().content, "одна\nдве\n");
+
+    // Файла нет в истории — он весь новый.
+    std::fs::write(root.join("b.txt"), "новый\n").unwrap();
+    assert!(!read_head_file(root, "b.txt").unwrap().exists);
+
+    // Каталог с таким именем существует, но содержимого файла у него нет:
+    // `show` отдал бы здесь листинг дерева, и он приехал бы как текст файла.
+    std::fs::create_dir(root.join("sub")).unwrap();
+    std::fs::write(root.join("sub/c.txt"), "внутри\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "второй"]);
+    assert!(!read_head_file(root, "sub").unwrap().exists);
+    assert_eq!(read_head_file(root, "sub/c.txt").unwrap().content, "внутри\n");
+
+    // Двоичное сравнивать нечем, и притворяться текстом оно не должно.
+    std::fs::write(root.join("blob.bin"), [0_u8, 1, 2, 0]).unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "третий"]);
+    assert!(read_head_file(root, "blob.bin").unwrap().is_binary);
+
+    // Побег из репозитория отклоняется так же, как на чтении с диска.
+    assert!(read_head_file(root, "../escape.txt").is_err());
+    assert!(read_head_file(root, "-rf").is_err());
+}
+
+#[test]
+fn says_where_the_project_sits_inside_the_repository() {
+    // Проектом открывают и подкаталог: пути в сводке идут от корня
+    // репозитория, и без приставки дерево не узнало бы в них свои файлы.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::create_dir_all(root.join("apps/web")).unwrap();
+    std::fs::write(root.join("apps/web/a.txt"), "одна\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "первый"]);
+    std::fs::write(root.join("apps/web/a.txt"), "две\n").unwrap();
+
+    assert_eq!(collect_summary(root).unwrap().prefix, None);
+
+    let inner = collect_summary(&root.join("apps/web")).unwrap();
+    assert_eq!(inner.prefix.as_deref(), Some("apps/web"));
+    assert_eq!(inner.files[0].path, "apps/web/a.txt");
+}
+
 /// Ссылка — единственный путь мимо проверки написанного: в `notes/passwd` нет
 /// ни `..`, ни ведущего слэша, а ведёт он куда угодно. Дерево эту дыру уже
 /// закрыло; здесь она оставалась открытой, потому что путь собирался обычным

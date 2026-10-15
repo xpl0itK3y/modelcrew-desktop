@@ -14,7 +14,7 @@
   max-height: min(420px, calc(100vh - 52px));
   overflow: hidden;
   border: 1px solid var(--mc-border);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   outline: none;
   background: var(--mc-surface-raised);
   color: var(--mc-text);
@@ -169,7 +169,7 @@
 .update-popover-clear {
   padding: 3px 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text-faint);
   font: inherit;
@@ -192,7 +192,7 @@
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--mc-border);
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
   color: inherit;
   font: inherit;

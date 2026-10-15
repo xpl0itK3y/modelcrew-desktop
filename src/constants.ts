@@ -5,5 +5,8 @@ export const PANEL_MIN_HEIGHT = 160;
 // Жёсткий предел терминалов на воркспейс: дальше сетка нечитаема.
 export const MAX_TERMINALS = 12;
 
+// Предел проектов в сайдбаре: больше в рейку не помещается без прокрутки.
+export const MAX_WORKSPACES = 10;
+
 export const WORKSPACE_NAME = "modelcrew";
 

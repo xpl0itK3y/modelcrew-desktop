@@ -43,7 +43,7 @@ import { setLocale } from "../i18n";
 
 // Панель у каждой проверки своя: повтор той же попал бы в окно тишины
 // предыдущей и второго сигнала не дал.
-const PANELS = ["hook-owner-grok", "hook-owner-unknown"];
+const PANELS = ["hook-owner-codex", "hook-owner-unknown"];
 
 // Событие приходит из Rust; в тесте дёргаем зарегистрированный слушатель.
 async function deliver(panel: string, agent: string) {
@@ -85,15 +85,15 @@ describe("who a hook event is attributed to", () => {
   it("names the agent running in the panel, not the config the hook came from", async () => {
     const panel = PANELS[0];
     getOrCreateTerminal(panel);
-    // Grok читает настройки claude и hooks.json курсора, поэтому событие
-    // приходит подписанным именем чужого конфига.
-    rememberAgentProcess(panel, "grok");
+    // Форк или обёртка может читать чужой конфиг хуков, и тогда событие
+    // приходит подписанным именем того агента, чей файл сработал.
+    rememberAgentProcess(panel, "codex");
 
     await deliver(panel, "claude");
 
     expect(mocks.systemNotification).toHaveBeenCalledTimes(1);
     const [title] = mocks.systemNotification.mock.calls[0];
-    expect(title).toContain("Grok");
+    expect(title).toContain("Codex");
     expect(title).not.toContain("Claude");
   });
 

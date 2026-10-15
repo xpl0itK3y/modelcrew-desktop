@@ -1,5 +1,161 @@
 # Changelog
 
+## 0.0.22
+
+### Русский
+
+Редактор подсвечивает десятки языков, показывает markdown и картинки, отмечает правки git по строкам и ищет по файлу. Каждая панель агента сразу узнаёт свой чат.
+
+- Подсветка Python, Go, Java, C и C++, C#, PHP, Ruby, Swift, SQL и ещё десятков языков; файл с незнакомым расширением получает общую подсветку вместо серого
+- Markdown, HTML, CSS и патчи разбираются по своим правилам: заголовки, теги, селекторы, добавленные и удалённые строки
+- Markdown и SVG можно смотреть отрендеренными, и выбор запоминается; картинки открываются в просмотрщике с прозрачностью, размером и масштабом 1:1
+- На полях редактора отмечены новые, изменённые и удалённые строки относительно последнего коммита — сразу, ещё до сохранения
+- Дерево файлов и вкладки редактора красят файлы по статусу git, в том числе для пакета внутри монорепозитория
+- ⌘F ищет по файлу; Tab и ⇧Tab двигают отступ, Enter его сохраняет, ⌘/ комментирует, ⇧⌘D дублирует строку, ⌥↑/↓ переносит её, ⌘⌫ удаляет — и на русской раскладке тоже
+- Длинные строки можно переносить, и выбор запоминается
+- Редактор разворачивается поверх терминалов, оставляя дерево и список проектов на месте, а Esc возвращает его в колонку
+- Колонки больше не выталкивают терминалы за край окна
+- Claude, copilot и opencode сами называют свой чат через хук, и панель привязывается к нему сразу, без догадок
+- Две панели codex в одном проекте различаются по ходу, который начал Enter в своей панели
+- Привязка находит и чат, выбранный из списка диалогов, а не только новый
+- Привязки чатов хранятся в файле приложения и переживают очистку данных вебвью и переустановку
+- После перезапуска панели больше не меняются чатами, если первой написать не в ту
+- Запрос разрешения от copilot приходит через его хук уведомлений, от opencode — через плагин; раньше первый не доходил вовсе, а второй приходил с опозданием как «закончил»
+- Первый ответ агента в только что открытой панели больше не глушится, если ему уже написали
+- В списке не больше 10 проектов: кнопка «+» гаснет, а нажатие объясняет почему
+- Один человек с одной почтой показывается в истории git под одним именем
+
+### English
+
+The editor highlights dozens of languages, previews markdown and pictures, marks git changes line by line and finds text in a file. Every agent panel knows its own chat.
+
+- Highlighting for Python, Go, Java, C and C++, C#, PHP, Ruby, Swift, SQL and dozens more; a file with an unknown extension gets a common reading instead of grey
+- Markdown, HTML, CSS and patches are read by their own rules: headings, tags, selectors, added and removed lines
+- Markdown and SVG can be viewed rendered, and the choice is remembered; pictures open in a viewer with transparency, dimensions and a 1:1 scale
+- The editor margin marks lines added, changed and removed since the last commit — right away, before the file is saved
+- The file tree and editor tabs colour files by their git status, including a package inside a monorepo
+- ⌘F finds in the file; Tab and ⇧Tab move the indent, Enter keeps it, ⌘/ comments, ⇧⌘D duplicates a line, ⌥↑/↓ moves it, ⌘⌫ deletes it — on any keyboard layout
+- Long lines can wrap, and the choice is remembered
+- The editor spreads over the terminals while the tree and the project list stay in place, and Esc returns it to its column
+- Columns no longer push the terminals off the edge of the window
+- Claude, copilot and opencode name their own chat through the hook, and the panel binds to it at once, without guessing
+- Two codex panels in one project are told apart by the turn their own Enter started
+- Binding also finds a chat picked from the list of conversations, not only a new one
+- Chat bindings live in a file of the app and survive clearing the webview data and a reinstall
+- Panels no longer swap chats after a restart when the wrong one is written to first
+- A permission prompt from copilot arrives through its notification hook and from opencode through its plugin; before, the first never arrived and the second came late as "finished"
+- An agent's first answer in a freshly opened panel is no longer muted once it has been written to
+- The project list holds up to 10 projects: the plus button dims, and a click explains why
+- One person with one email address shows under one name in the git history
+
+## 0.0.21
+
+### Русский
+
+Панели агентов возвращаются каждая в свой диалог, а уведомления перестали дублироваться, теряться и глохнуть. Новый терминал открывается рядом с предыдущим.
+
+- Две панели одного агента больше не открывают после перезапуска один и тот же чат
+- Диалог остаётся за своей панелью и после того, как агент вышел в оболочку
+- «Продолжить последний чат» не предлагается, когда чат в этой папке уже за другой панелью
+- У opencode вторая панель начинает свой разговор: выбирать диалог при запуске ему нечем
+- Одно событие агента — один баннер, а не звонок и следом хук про то же самое
+- В баннере названы проект и сессия, поэтому две панели не читаются как одна
+- Запрос разрешения от copilot и opencode больше не теряется: их хук о запросах не сообщает
+- Догадка о простое переживает перерисовку строки состояния и не зовёт после ответа
+- Панель, к которой перешли из колокольчика, снова подаёт голос
+- Терминал открывается рядом с предыдущим, а не через полсетки
+- Быстрое повторное добавление панели больше не мерит сетку на лету анимации
+- Шапка окна получила высоту по своему содержимому
+- На пустом экране стоит знак приложения
+- Список хук-каналов запрашивается вне главного потока и не задерживает первый кадр
+
+### English
+
+Agent panels each resume their own conversation, and alerts no longer double up, go missing, or fall silent. A new terminal opens next to the one before it.
+
+- Two panels of the same agent no longer reopen the same chat after a restart
+- A conversation stays with its panel after the agent steps out to the shell
+- The last-chat fallback is withheld when another panel already owns a chat in that folder
+- A second opencode panel starts its own conversation: it has no way to pick one at launch
+- One event from an agent is one banner, not a bell followed by a hook saying the same thing
+- The banner names the project and the session, so two panels never read as one
+- A permission prompt from copilot or opencode is no longer lost: their hook never reports one
+- The idle guess survives a status-line redraw and stops calling after the user has answered
+- A panel reached from the bell can speak up again
+- A terminal opens beside the previous one instead of half a grid away
+- Adding panels in quick succession no longer measures the grid mid-animation
+- The title bar takes its height from what it holds
+- The empty screen carries the application mark
+- The hook channel list is fetched off the main thread and no longer delays the first frame
+
+## 0.0.20
+
+### Русский
+
+Панели опущены до тона окна и обведены краем, каталог агентов сокращён до четырёх проверенных, а их экраны читаются и на светлых темах.
+
+- Тёмные темы держат две ступени вместо трёх: внизу окно вместе с панелями, на ступень выше оснастка, а границу держит край карточки
+- Панель обведена краем, а не выделена заливкой; поле под сеткой одно, без светлой полосы по кайме
+- Колонка редактора стала такой же карточкой, как её соседи, а разделитель перестал закрашивать поле между ними
+- Окно настроек собрано заново из карточек: навигация и группы настроек лежат на плоскости так же, как панели в сетке
+- На вкладке агента стоит марка его компании: Claude, OpenAI, GitHub Copilot, OpenCode
+- В каталоге остались четыре агента, чей канал уведомлений, захват файла и привязка сессии проверены на живом прогоне: Claude Code, Codex, GitHub Copilot, OpenCode
+- Панель с Aider стала обычным терминалом: адресуемых сессий у него нет, и половина того, что обещает каталог, к нему не относилась
+- Экраны агентов остаются читаемыми на светлых темах: терминал поднимает цвет буквы, если она не набирает контраста к фону, на котором лежит
+- Терминалы больше не вытаскиваются из сетки поверх окна, а вытащенные раньше возвращаются на место при восстановлении раскладки
+- Открытый диалог больше не пропускает сквозь себя перетаскивание и горячие клавиши сетки
+- README рассказывает, что такое ModelCrew сейчас, а схемы работы агентов стали анимациями, которые показываются прямо на GitHub
+
+### English
+
+The panels drop to the tone of the window and are outlined instead of filled, the agent catalog is down to the four we finished, and their screens stay readable on the light themes.
+
+- The dark themes hold two steps instead of three: the window and its panels at the bottom, the chrome one step above, and the card edge doing the separating
+- A panel is outlined rather than shaded, and one field runs under the whole grid instead of a lighter band along its rim
+- The editor column became a card like its neighbours, and the divider stopped painting the gap between them
+- The settings window is rebuilt out of cards: its navigation and its groups sit on the plane the way panels sit in the grid
+- Every agent tab carries its company's own mark: Claude, OpenAI, GitHub Copilot, OpenCode
+- The catalog keeps the four agents whose notification channel, file claim and per-panel session binding were verified against a live run: Claude Code, Codex, GitHub Copilot, OpenCode
+- A panel running Aider is an ordinary terminal now: it has no addressable sessions, and half of what the catalog promises never applied to it
+- Agent screens stay readable on the light themes: the terminal lifts a glyph's colour when it does not reach contrast against the background it sits on
+- Terminals can no longer be pulled out of the grid and float above the window, and ones pulled out earlier return to it when the layout is restored
+- An open dialog no longer passes drags and grid shortcuts through to what is behind it
+- The README says what ModelCrew is today, and the diagrams of how the agents run became animations that play on GitHub
+
+## 0.0.19
+
+### Русский
+
+Колонки и панели стали карточками с общим полем между ними, скругления свелись к трём мерам, а выбранное отмечено заливкой строки вместо полосок акцента.
+
+- Боковая панель и дерево файлов — карточки со своим краем, а не области, встречающиеся по волосяной линии
+- Терминалы тоже карточки одной с ними формы: где кончается одна и начинается соседняя, показывает поле между ними
+- Восемь десятков углов, набранных поштучно от двух до четырнадцати пикселей, сведены к трём мерам: карточка, строка внутри неё, элемент управления
+- Всё, что меньше шести пикселей, считается насечкой — ползунок, галочка — и сохраняет прежнее значение
+- Активная панель отмечена одной линией вместо двух: поле вокруг карточки уже отделяет её, и заливке внутри делать нечего
+- Акцент больше не заливает светом всю сетку — на двенадцати панелях это читалось как размывка
+- Выбранная строка проекта и сессии показана заливкой, а не полоской слева; счётчик рядом перестал выглядеть предупреждением
+- Имя проекта отделено от пути за ним: светлее и чуть тяжелее, путь остался прежним
+- Полоса с именем выше на четыре пикселя, кнопки на ней выросли вместе с ней
+- Шапка панели стала просторнее, а черта под ней — волосяной, а не такой же тяжёлой, как край карточки
+- Поля живут на самой карточке, а не на рейке вокруг: спрятанная боковая панель не оставляет за собой полоску
+
+### English
+
+The columns and panels are now cards with a shared field between them, corners come down to three measures, and what is chosen is marked by its fill instead of accent stripes.
+
+- The sidebar and the file tree are cards with an edge of their own, not areas meeting along a hairline
+- The terminals are cards of the same shape, and the field between them is what tells one from the next
+- Eighty-odd corner radii picked one at a time, from two to fourteen pixels, come down to three measures: a card, a row inside it, a control
+- Anything smaller than six pixels counts as a notch — a slider, a tick — and keeps the value it had
+- The active panel is drawn with one line instead of two: the field around the card already sets it apart, so the fill inside had nothing left to do
+- The accent no longer pours light over the whole grid — at twelve panels it read as a wash
+- A chosen project or session is shown by the row's fill rather than a stripe on its left, and the counter beside it stopped looking like a warning
+- The project name is told apart from the path behind it: a shade lighter and half a step heavier, the path unchanged
+- The name strip is four pixels taller and its buttons grow with it
+- The panel header has room to stand in, and the rule under it is a hair rather than a line as heavy as the card's own edge
+- The insets live on the card, not on the rail around it: a hidden sidebar leaves no strip behind
+
 ## 0.0.18
 
 ### Русский

@@ -11,6 +11,8 @@ import {
   subscribeAgentAttention,
 } from "../terminal/attentionStore";
 import { getPanelClaims, subscribePanelClaims } from "../crew/claimStore";
+import { getAgentRecord } from "../agents";
+import { AgentIcon, getAgentMark, TerminalGlyphIcon } from "../ui/Icons";
 import { useI18n } from "../i18n";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
@@ -102,6 +104,22 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       ? t("terminal.statusRunning")
       : t("terminal.statusExited");
 
+  // Значок рода панели: марка агента или обычная оболочка. Читается прямо в
+  // отрисовке, без своего состояния: запись об агенте заводит watcher
+  // заголовков, а он же меняет и заголовок — то есть к каждой её смене вкладка
+  // и так перерисуется. Значок молчит для читающих вслух: что за агент, уже
+  // сказано именем панели.
+  //
+  // Марка компании вместо общего робота: у сетки из двенадцати панелей имя на
+  // вкладке первым уходит под многоточие, а знак не сжимается никогда. Записи
+  // от агентов, поддержку которых убрали, марки не находят — им остаётся
+  // прежний робот, чтобы панель не выдала себя за простую оболочку.
+  const agentId = getAgentRecord(props.api.id)?.agentId;
+  const AgentMark = getAgentMark(agentId);
+  const glyphClass = agentId
+    ? `is-agent${AgentMark ? ` is-${agentId}` : ""}`
+    : "is-shell";
+
   return (
     <div className="terminal-tab" onDoubleClick={() => setEditing(true)}>
       <span
@@ -110,6 +128,15 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
         title={dotLabel}
         aria-label={dotLabel}
       />
+      <span className={`tab-glyph ${glyphClass}`} aria-hidden="true">
+        {AgentMark ? (
+          <AgentMark />
+        ) : agentId ? (
+          <AgentIcon />
+        ) : (
+          <TerminalGlyphIcon />
+        )}
+      </span>
       {editing ? (
         <input
           ref={inputRef}

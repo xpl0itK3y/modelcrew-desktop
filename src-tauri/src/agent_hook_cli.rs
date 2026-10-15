@@ -25,20 +25,17 @@ pub const HOOK_FLAG: &str = "--agent-hook";
 const ANSWER_WAIT: Duration = Duration::from_secs(2);
 const ANSWER_POLL: Duration = Duration::from_millis(100);
 
-/// Имена ключа с инструментом. `name` последним: у antigravity он лежит в
-/// `toolCall.name`, но ключ слишком общий, чтобы спрашивать о нём раньше.
-const TOOL_KEYS: [&str; 4] = ["tool_name", "toolName", "tool", "name"];
+/// Имена ключа с инструментом.
+const TOOL_KEYS: [&str; 3] = ["tool_name", "toolName", "tool"];
 
 /// Имена ключа с путём. Схему полезной нагрузки никто не обещает, поэтому
 /// перебираем известные написания по очереди.
-const FILE_KEYS: [&str; 7] = [
+const FILE_KEYS: [&str; 5] = [
     "file_path",
     "filePath",
     "target_file",
     "absolute_path",
     "path",
-    "TargetFile",
-    "AbsolutePath",
 ];
 
 /// Причины отказа. Их же печатает шелл-хелпер: агент должен слышать одно и то
@@ -56,11 +53,9 @@ pub const HELD_ADVICE: &str =
 /// один: канал разный, договор один.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimFlag {
-    /// Код возврата 2 и причина в stderr: claude, grok, kimi, cursor.
+    /// Код возврата 2 и причина в stderr: claude.
     Plain,
-    /// `decision` JSON-ом в stdout: antigravity.
-    Json,
-    /// `permissionDecision` там же: copilot.
+    /// `permissionDecision` JSON-ом в stdout: copilot.
     Copilot,
     /// Тот же код возврата, но пути лежат внутри патча: codex.
     Codex,
@@ -70,7 +65,6 @@ impl ClaimFlag {
     pub fn from_arg(arg: &str) -> Option<Self> {
         match arg {
             "--claim" => Some(Self::Plain),
-            "--claim-json" => Some(Self::Json),
             "--claim-copilot" => Some(Self::Copilot),
             "--claim-codex" => Some(Self::Codex),
             _ => None,
@@ -80,7 +74,6 @@ impl ClaimFlag {
     pub fn arg(self) -> &'static str {
         match self {
             Self::Plain => "--claim",
-            Self::Json => "--claim-json",
             Self::Copilot => "--claim-copilot",
             Self::Codex => "--claim-codex",
         }
@@ -196,21 +189,7 @@ fn held_reason(task: &str) -> String {
 
 fn answer_in(flag: ClaimFlag, reason: Option<String>) -> Outcome {
     match (flag, reason) {
-        // Antigravity ждёт решение всегда, в том числе разрешающее.
-        (ClaimFlag::Json, None) => Outcome {
-            code: 0,
-            stdout: "{\"decision\":\"allow\"}\n".to_string(),
-            stderr: String::new(),
-        },
         (_, None) => Outcome::allow(),
-        (ClaimFlag::Json, Some(reason)) => Outcome {
-            code: 0,
-            stdout: format!(
-                "{{\"decision\":\"deny\",\"reason\":{}}}\n",
-                json_string(&reason)
-            ),
-            stderr: String::new(),
-        },
         (ClaimFlag::Copilot, Some(reason)) => Outcome {
             code: 0,
             stdout: format!(
@@ -345,8 +324,8 @@ fn files_from_patch(raw: &str) -> Vec<String> {
 }
 
 /// Все строки, лежащие под данным ключом, в порядке обхода. Ключ ищем по всему
-/// дереву, а не на верхнем уровне: antigravity кладёт вызов вложенно, в
-/// `toolCall.args.TargetFile`.
+/// дереву, а не на верхнем уровне: copilot кладёт вызов вложенно, в
+/// `tool_input.path`.
 fn strings_under_key(value: &Value, key: &str, out: &mut Vec<String>) {
     match value {
         Value::Object(fields) => {
@@ -513,18 +492,16 @@ mod tests {
     }
 
     #[test]
-    fn the_antigravity_payload_is_read_where_it_really_lies() {
-        // Ровно то, что прислал agy, вплоть до порядка ключей.
+    fn a_nested_payload_is_read_where_it_really_lies() {
+        // Путь лежит не на верхнем уровне: copilot кладёт его в tool_input.
         let payload = concat!(
-            r#"{"conversationId":"762f086f","modelName":"gemini-3.6-flash-high","#,
-            r#""stepIdx":10,"toolCall":{"args":{"AllowMultiple":false,"#,
-            r#""Instruction":"Добавить комментарий","TargetFile":"/w/README.md"},"#,
-            r#""name":"replace_file_content"},"workspacePaths":["/w"]}"#
+            r#"{"session_id":"762f086f","tool_name":"str_replace_editor","#,
+            r#""tool_input":{"command":"str_replace","path":"/w/README.md"}}"#
         );
         let parsed: Value = serde_json::from_str(payload).unwrap();
 
         assert_eq!(files_from_keys(&parsed), ["/w/README.md"]);
-        assert_eq!(tool_name(&parsed), "replace_file_content");
+        assert_eq!(tool_name(&parsed), "str_replace_editor");
     }
 
     #[test]
@@ -602,16 +579,6 @@ mod tests {
                 },
             ),
             (
-                ClaimFlag::Json,
-                Outcome {
-                    code: 0,
-                    stdout: format!(
-                        "{{\"decision\":\"deny\",\"reason\":\"{HELD_REASON}: чинит сборку{HELD_ADVICE}\"}}\n"
-                    ),
-                    stderr: String::new(),
-                },
-            ),
-            (
                 ClaimFlag::Copilot,
                 Outcome {
                     code: 0,
@@ -660,24 +627,6 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_hears_permission_too_not_only_refusal() {
-        let dir = sandbox("agy-allow");
-        let waiter = answer_once(&dir, r#"{"decision":"allow"}"#);
-
-        let outcome = claim(
-            ClaimFlag::Json,
-            r#"{"toolCall":{"args":{"TargetFile":"/w/a.rs"},"name":"replace_file_content"}}"#,
-            &dir,
-            "panel-1",
-        );
-
-        waiter.join().unwrap();
-        // Молчание он читает как сбой хука, а не как разрешение.
-        assert_eq!(outcome.stdout, "{\"decision\":\"allow\"}\n");
-        assert_eq!(outcome.code, 0);
-    }
-
-    #[test]
     fn a_holder_without_a_task_is_still_a_holder() {
         let dir = sandbox("no-task");
         let waiter = answer_once(&dir, r#"{"decision":"deny","reason":"held","task":""}"#);
@@ -704,18 +653,21 @@ mod tests {
         );
 
         let outcome = claim(
-            ClaimFlag::Json,
+            ClaimFlag::Copilot,
             r#"{"tool_name":"Edit","file_path":"/w/a.rs"}"#,
             &dir,
             "panel-1",
         );
 
         waiter.join().unwrap();
-        // Ответ обязан остаться разбираемым: половину JSON antigravity
-        // прочитает как сбой хука и правку пропустит.
+        // Ответ обязан остаться разбираемым: половину JSON агент прочитает как
+        // сбой хука и правку пропустит.
         let parsed: Value = serde_json::from_str(outcome.stdout.trim()).unwrap();
-        assert_eq!(parsed["decision"], "deny");
-        assert!(parsed["reason"].as_str().unwrap().contains("правит README"));
+        assert_eq!(parsed["permissionDecision"], "deny");
+        assert!(parsed["permissionDecisionReason"]
+            .as_str()
+            .unwrap()
+            .contains("правит README"));
     }
 
     #[test]
@@ -747,7 +699,7 @@ mod tests {
     fn an_empty_payload_still_makes_a_readable_event() {
         let dir = sandbox("notify-empty");
 
-        notify("cursor", "   ", &dir, "panel-4");
+        notify("claude", "   ", &dir, "panel-4");
 
         let entry = std::fs::read_dir(&dir).unwrap().flatten().next().unwrap();
         let event: Value = serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap())

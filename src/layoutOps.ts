@@ -100,6 +100,26 @@ export function localizeDefaultPanelTitles(
   };
 }
 
+// Панели, вытащенные из сетки в плавающее окно. Завести новые уже нельзя
+// (dockview запущен с disableFloatingGroups), но в раскладках, сохранённых
+// раньше, они есть — а fromJSON восстанавливает их как были, поверх всей
+// сетки и мимо неё. Возвращаем каждую такую панель в сетку отдельной ячейкой
+// у правого края: id, а с ним и живой PTY, у неё остаётся прежний.
+export function dockFloatingGroups(api: DockviewApi): number {
+  let docked = 0;
+  // Обходим копии списков: перенос меняет и набор групп, и состав каждой.
+  const floating = api.groups.filter(
+    (group) => group.api.location.type === "floating",
+  );
+  for (const group of floating) {
+    for (const panel of [...group.panels]) {
+      panel.api.moveTo({ position: "right" });
+      docked += 1;
+    }
+  }
+  return docked;
+}
+
 export function addPanel(
   api: DockviewApi,
   workspaceId: string,
@@ -188,42 +208,110 @@ function rowFitsAnotherCell(row: readonly TerminalGridGroup[]): boolean {
   return width / (row.length + 1) >= PANEL_MIN_WIDTH;
 }
 
-// Форма сетки: расширить строку или завести новую. Размеры считает dockview
-// (Sizing.Distribute — равные строки и равные ячейки внутри строки), поэтому
-// формулы «влезет ли» одни на все режимы, и предел ёмкости у них общий.
+// Прямоугольник всей сетки. Считается по краям групп, а не суммой строк:
+// после ручных переносов строки бывают разной высоты, и сумма насчитала бы
+// сетке высоту больше окна — а от этого числа зависит, влезет ли ещё строка.
+function gridBounds(groups: readonly TerminalGridGroup[]): {
+  width: number;
+  height: number;
+} {
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const group of groups) {
+    left = Math.min(left, group.left);
+    top = Math.min(top, group.top);
+    right = Math.max(right, group.left + group.width);
+    bottom = Math.max(bottom, group.top + group.height);
+  }
+  return { width: right - left, height: bottom - top };
+}
+
+// Сколько ячеек класть в строку. Одного корня из числа панелей мало: он
+// целится в квадрат, а окно квадратным не бывает — в широком выходили бы
+// узкие высокие панели, в высоком плоские и длинные. Пропорция сетки входит
+// в счёт, поэтому строка длиннее там, где по горизонтали больше места.
+//
+// Округление вверх, а не к ближайшему: строка, которую уже закрыли, короче не
+// станет — сетка не перестраивается, — а округление вниз сушило бы строки на
+// ровном месте. Слишком широкую придержит нижний предел ширины панели.
+//
+// Первую строку это не спасает: в окне вдвое выше своей ширины идеал для двух
+// панелей и есть один столбец, так что первая строка остаётся в одну ячейку
+// навсегда. Так и задумано — 350 пикселей на терминал в узком окне хуже
+// одинокой строки, — но правило звучит шире, чем работает, и полагаться на
+// него как на защиту от одиночной строки нельзя.
+function targetColumns(
+  count: number,
+  width: number,
+  height: number,
+): number {
+  const ratio = width > 0 && height > 0 ? width / height : 1;
+  return Math.max(1, Math.ceil(Math.sqrt(count * ratio)));
+}
+
+// Строка, которую сейчас наполняют, — заведённая последней. Обычно нижняя;
+// у centerOut строки встают через одну сверху и снизу, и свежая оказывается
+// верхней, когда строк чётное число.
+//
+// Считается это по числу строк, то есть верно ровно для сетки, которую
+// собрал сам планировщик. Закрыли строку или перетащили панель — чётность
+// разошлась с историей, и у centerOut «свежей» назовётся не та строка.
+// Восстановить её неоткуда: порядок появления строк нигде не хранится, а из
+// геометрии он не выводится. Цена ошибки — терминал уйдёт на другой край
+// сетки; следующее добавление снова попадёт в ту же строку, так что путаница
+// не накапливается.
+function activeRowIndex(rowCount: number, mode: TerminalSpawnMode): number {
+  return mode === "centerOut" && rowCount % 2 === 0 ? 0 : rowCount - 1;
+}
+
+// Форма сетки: дорастить наполняемую строку или завести новую.
+//
+// Правило здесь одно на все режимы, и оно про строки: пока в наполняемой
+// строке есть место, терминал остаётся в ней. Соседство ячеек из него следует
+// только у balanced и snake — centerOut растит строку от середины в обе
+// стороны, и там третий терминал встаёт через одну от второго нарочно.
+//
+// Само правило — про порядок, а не про ровность:
+// терминал появляется там, куда смотрит глаз, — следом за предыдущим. Пока в
+// наполняемой строке есть место, он остаётся в ней; кончилось — начинается
+// новая строка. Строки от этого выходят разной длины, и это цена: раньше
+// сетка держалась ровной, но добирала до ровности самую короткую строку, а
+// ей могла оказаться любая. Пятый терминал прыгал в верхнюю строку, седьмой
+// заводил нижнюю, десятый снова уходил наверх — предсказать, где появится
+// следующий, было нельзя.
 function planGridShape(
   rows: readonly TerminalGridGroup[][],
   mode: TerminalSpawnMode,
+  width: number,
+  height: number,
 ): GridShapePlan | null {
   const total = rows.reduce((count, row) => count + row.length, 0);
-  const targetColumns = Math.ceil(Math.sqrt(total + 1));
-  const gridHeight = rows.reduce((height, row) => height + row[0].height, 0);
-  const newRowFits = gridHeight / (rows.length + 1) >= PANEL_MIN_HEIGHT;
+  const columns = targetColumns(total + 1, width, height);
+  const active = activeRowIndex(rows.length, mode);
 
-  // Змейка идёт строками подряд: пока нижняя строка не добрала колонок,
-  // следующий терминал остаётся в ней — рядом с предыдущим.
-  const bottom = rows.length - 1;
   if (
-    mode === "snake" &&
-    rows[bottom].length < targetColumns &&
-    rowFitsAnotherCell(rows[bottom])
+    rows[active].length < columns &&
+    rowFitsAnotherCell(rows[active])
   ) {
-    return { kind: "widen", rowIndex: bottom };
+    return { kind: "widen", rowIndex: active };
+  }
+  if (height / (rows.length + 1) >= PANEL_MIN_HEIGHT) {
+    return { kind: "newRow" };
   }
 
+  // Новой строке места уже нет. Тогда порядком приходится пожертвовать:
+  // доращиваем самую короткую строку, чтобы терминал всё-таки открылся.
   let shortest = 0;
   for (let index = 1; index < rows.length; index += 1) {
     if (rows[index].length < rows[shortest].length) {
       shortest = index;
     }
   }
-  if (
-    rowFitsAnotherCell(rows[shortest]) &&
-    (rows[shortest].length < targetColumns || !newRowFits)
-  ) {
-    return { kind: "widen", rowIndex: shortest };
-  }
-  return newRowFits ? { kind: "newRow" } : null;
+  return rowFitsAnotherCell(rows[shortest])
+    ? { kind: "widen", rowIndex: shortest }
+    : null;
 }
 
 // Строку уже выбрала форма сетки — режим решает только, с какого конца
@@ -271,7 +359,8 @@ export function planTerminalPlacement(
     return null;
   }
   const rows = splitRows(groups);
-  const shape = planGridShape(rows, mode);
+  const { width, height } = gridBounds(groups);
+  const shape = planGridShape(rows, mode, width, height);
   if (!shape) {
     return null;
   }
@@ -297,6 +386,24 @@ export function addTerminalAutoGrid(
   if (groups.length === 0) {
     addPanel(api, workspaceId, sessionId);
     return;
+  }
+
+  // Предыдущее добавление могло ещё доигрывать FLIP: он двигает группы
+  // трансформом, а getBoundingClientRect трансформ учитывает. Нажатие на плюс
+  // внутри этих двухсот миллисекунд намеряло бы положения на полпути
+  // вперемешку с окончательными размерами от dockview — и высота сетки
+  // выходила бы на сотни пикселей мимо, а с ней и решение «влезет ли ещё
+  // строка». Доводим анимацию до конца: планировщику нужна осевшая раскладка,
+  // а не кадр из середины перелёта.
+  for (const group of groups) {
+    for (const animation of group.element.getAnimations?.() ?? []) {
+      try {
+        animation.finish();
+      } catch {
+        // Бесконечную завершить нельзя — такая здесь не наша, и трогать её
+        // мы не вправе.
+      }
+    }
   }
 
   const geometry = groups.map((group) => {

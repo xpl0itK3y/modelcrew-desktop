@@ -14,10 +14,15 @@ import {
   registerSnapshotSource,
 } from "./snapshots";
 import {
+  agentChatClaimedNearby,
+  bindAgentSessionFromHook,
   buildAgentResume,
   discardAgentRecord,
   getAgentRecord,
   loadAgentResumeMode,
+  noteAgentTurn,
+  noteResumedAgentSession,
+  noteSessionWorkspace,
   rememberedSessionId,
   retryAgentSessionBinding,
 } from "../agents";
@@ -25,6 +30,8 @@ import {
   acknowledgeAgentPanel,
   createAgentAlertTracker,
   disposeAgentAlertTracker,
+  endSpawnMuteOnSend,
+  forgetAgentPanel,
   markAgentPanelEngaged,
   muteAlertsAfterSpawn,
   muteAlertsWhileRedrawing,
@@ -33,8 +40,8 @@ import {
   type AgentAlertTracker,
 } from "./agentAlerts";
 import { setPanelTailResolver } from "./alertDelivery";
-import { clearAgentAttention } from "./attentionStore";
 import { agentHookAlert, type AgentHookEvent } from "./agentHookEvent";
+import { loadHookChannels, noteHookChannel } from "./hookChannel";
 import { isMouseReport } from "./terminalInput";
 import {
   forgetAutoTitle,
@@ -46,7 +53,12 @@ import {
   joinWrappedRows,
   type PanelRow,
 } from "./panelTail";
-import { getAppTheme, loadTheme, type ThemeId } from "../theme";
+import {
+  getAppTheme,
+  loadTheme,
+  terminalMinimumContrast,
+  type ThemeId,
+} from "../theme";
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
 import {
@@ -73,6 +85,7 @@ const RESIZE_DEBOUNCE_MS = 250;
 // В обычном браузере (dev-превью UI) Tauri IPC нет — шелл не поднимаем.
 
 let currentTerminalTheme = getAppTheme(loadTheme()).terminal;
+let currentTerminalContrast = terminalMinimumContrast(loadTheme());
 let currentTerminalFontSize = loadTerminalFontSize();
 
 export type TerminalEntry = {
@@ -159,6 +172,28 @@ if (isTauri) {
       // Drag-and-drop не должен мешать запуску терминалов, если API недоступен.
     });
 
+  // Кто из агентов рассказывает о себе сам: их панелям догадки по выводу не
+  // нужны и только дублировали бы точный сигнал.
+  void loadHookChannels();
+
+  // В хранилище агента что-то шевельнулось: там либо завёлся новый разговор,
+  // либо написали в старый — например, в тот, что панель только что выбрала в
+  // списке диалогов. Это единственный момент, когда поиск по каталогу отвечает
+  // уверенно, поэтому спрашиваем сразу, а не по таймеру и не на нажатие
+  // клавиши. Раньше между появлением файла и вопросом помещалась целая гонка:
+  // успей пользователь написать в соседнюю панель первым — и самым свежим
+  // чатом папки оказывался её разговор, а не свой.
+  void listen<{ agent: string }>("agent-session-store", (event) => {
+    for (const entry of registry.values()) {
+      const record = getAgentRecord(entry.id);
+      // Привязанным панелям искать нечего, и ходить за них накладно: агент
+      // пишет разговор потоком, событий много.
+      if (record?.agentId === event.payload.agent && !record.sessionId) {
+        retryAgentSessionBinding(entry.id);
+      }
+    }
+  });
+
   // Агент сообщил о себе сам — через свой хук. Это точный сигнал: и тип
   // события, и текст пришли от него, а не выужены из вывода.
   void listen<AgentHookEvent>("agent-event", (event) => {
@@ -168,12 +203,33 @@ if (isTauri) {
       return;
     }
     // Имя из события — это имя того конфига, где нашёлся хук, а не того, кто
-    // его вызвал: grok по умолчанию читает и настройки claude, и hooks.json
-    // курсора, поэтому подписался бы чужим именем. Панель знает своего агента
-    // по foreground-процессу — на него и полагаемся, пока он известен.
+    // его вызвал: форк или обёртка читает чужие настройки и подписался бы
+    // чужим именем. Панель знает своего агента по foreground-процессу — на
+    // него и полагаемся, пока он известен.
+    const agentId = getAgentRecord(entry.id)?.agentId ?? event.payload.agent;
+    // Канал доказан делом — на случай, если хук встал уже после старта
+    // приложения и в загруженный список попасть не успел. Записываем его на
+    // имя из события, а не на имя панели: хук принадлежит тому конфигу, где
+    // мы его прописали, и это как раз то имя. Имя панели здесь было бы
+    // ошибкой с последствиями шире самого события: список общий на всё
+    // приложение, и одна неверная запись заглушила бы звонки у всех панелей
+    // агента, у которого хука нет и не будет.
+    noteHookChannel(event.payload.agent, alert.kind);
+    // Агент назвал свой диалог сам. Это лучше всего, что может дать поиск по
+    // каталогу сессий: без окна времени, без гонки соседних панелей и без
+    // догадки о том, чей файл появился первым. Панель запоминает его сразу,
+    // и следующий запуск возобновляет её точно — даже когда одинаковых
+    // агентов в проекте несколько.
+    if (event.payload.sessionId) {
+      bindAgentSessionFromHook(
+        entry.id,
+        event.payload.sessionId,
+        entry.workspaceId ?? undefined,
+      );
+    }
     void raiseAgentHookAlert(
       entry.id,
-      getAgentRecord(entry.id)?.agentId ?? event.payload.agent,
+      agentId,
       alert.kind,
       {
         visible: isPanelOnScreen(entry.container),
@@ -202,16 +258,36 @@ if (typeof window !== "undefined") {
     }
     for (const entry of registry.values()) {
       if (isPanelOnScreen(entry.container) && entry.container.contains(active)) {
-        clearAgentAttention(entry.id);
+        acknowledgeAgentPanel(entry.alerts, entry.id);
       }
     }
   });
 }
 
+// Пользователь пришёл к панели из колокольчика. Реакция та же, что нажатие в
+// саму панель, но ни pointerdown, ни focus здесь не срабатывают: панель
+// делают активной программно, а окно и так в фокусе. Без этого отметка
+// «ждёт» оставалась висеть, а вместе с ней и окно тишины, которое пока панель
+// ждёт не истекает вовсе, — и панель замолкала до конца запуска.
+export function acknowledgeTerminalPanel(id: string): void {
+  const entry = registry.get(id);
+  if (entry) {
+    acknowledgeAgentPanel(entry.alerts, entry.id);
+    return;
+  }
+  // Панель из скрытой сессии могла ещё не попасть в реестр: снимаем хотя бы
+  // то, что живёт отдельно от неё.
+  forgetAgentPanel(id);
+}
+
 export function applyTerminalTheme(themeId: ThemeId): void {
   currentTerminalTheme = getAppTheme(themeId).terminal;
+  currentTerminalContrast = terminalMinimumContrast(themeId);
   for (const entry of registry.values()) {
     entry.term.options.theme = { ...currentTerminalTheme };
+    // Порог меняется вместе с темой: агент, запущенный до переключения, свои
+    // цвета не пересматривает — подпирает его уже открытый терминал.
+    entry.term.options.minimumContrastRatio = currentTerminalContrast;
     entry.term.refresh(0, Math.max(0, entry.term.rows - 1));
   }
 }
@@ -270,6 +346,9 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     lineHeight: 1.25,
     scrollback: 5000,
     theme: { ...currentTerminalTheme },
+    // Порог различимости: держит чужие экраны, нарисованные под тёмный
+    // терминал, читаемыми на светлой теме.
+    minimumContrastRatio: currentTerminalContrast,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -322,7 +401,14 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   // такому фокусу значит терять её от одного движения мыши мимо панели.
   container.addEventListener(
     "pointerdown",
-    () => clearAgentAttention(entry.id),
+    () => {
+      // Реакция пользователя всюду значит одно: разговор окончен. Снимаем
+      // вместе с отметкой и окно тишины, иначе следующий сигнал этой панели
+      // ещё пятнадцать секунд оставался бы заглушённым как менее важный, — и
+      // отложенную догадку, иначе она позовёт через полминуты после того, как
+      // пользователь с панелью уже разобрался.
+      acknowledgeAgentPanel(entry.alerts, entry.id);
+    },
     true,
   );
   registry.set(id, entry);
@@ -576,21 +662,40 @@ function maybeResumeAgent(entry: TerminalEntry, workspaceId: string): void {
   if (!record) {
     return;
   }
+  // Первый запуск после обновления: у запомненного чата папки ещё нет, а
+  // решение принимается уже сейчас. Дописываем до вопроса — иначе панель
+  // сочтёт соседкой саму себя из прошлой версии.
+  noteSessionWorkspace(entry.id, workspaceId);
   const key = `${workspaceId}:${record.agentId}`;
-  const picker = resumedAgentKeys.has(key);
+  // Список диалогов вместо последнего чата нужен в двух случаях: панель этого
+  // агента в этой папке уже возобновлялась в этом запуске, либо чат в папке
+  // числится за другой панелью. Второе важнее: «продолжить последний» открывает
+  // самый свежий чат папки и не умеет никого исключать, поэтому именно так
+  // панель без своей привязки забирала разговор у соседки, которая шла по
+  // точному id.
+  const picker =
+    resumedAgentKeys.has(key) ||
+    agentChatClaimedNearby(record.agentId, entry.id, workspaceId);
   resumedAgentKeys.add(key);
   // Свежей привязки может не быть: агент успел выйти в оболочку до закрытия
   // приложения, и запись пересоздалась уже без id. Тогда берём последнюю
   // известную сессию этой панели — она вернее и «последнего чата папки»,
   // и списка диалогов.
+  const sessionId =
+    record.sessionId ?? rememberedSessionId(entry.id, record.agentId);
   const line = buildAgentResume(
-    record.sessionId
-      ? record
-      : { ...record, sessionId: rememberedSessionId(entry.id, record.agentId) },
+    sessionId ? { ...record, sessionId } : record,
     picker,
   );
   if (!line) {
     return;
+  }
+  // Команда несёт точный id — значит панель садится в известный чат. Watcher
+  // сейчас сотрёт запись (в панели пока оболочка) и пересоздаст её без id;
+  // заметка вернёт id обратно, когда агент поднимется. Проверяем по самой
+  // команде: у агента без адресного resume в строке никакого id нет.
+  if (sessionId && line.includes(sessionId)) {
+    noteResumedAgentSession(entry.id, sessionId);
   }
   // Команда вводится после паузы в выводе (оболочка напечатала приглашение),
   // иначе байты перемешиваются с инициализацией шелла.
@@ -668,6 +773,13 @@ async function spawnTerminal(
     // Первое сообщение агенту создаёт файл его сессии — самый момент, чтобы
     // привязать её к панели, если при запуске файла ещё не было.
     retryAgentSessionBinding(entry.id);
+    // Enter отправляет агенту сообщение и начинает ход. По началу хода
+    // разговор панели находится точно, даже когда одинаковых агентов в
+    // проекте два и по свежести файлов их чаты не различить.
+    if (data.includes("\r")) {
+      noteAgentTurn(entry.id);
+      endSpawnMuteOnSend(entry.alerts);
+    }
     if (!entry.exited) {
       void invoke("pty_write", { id: entry.id, data }).catch(() => {});
     }
@@ -737,7 +849,7 @@ export async function destroyTerminal(id: string): Promise<void> {
   // Закрытие панели — намеренное: её история больше не восстановится.
   discardSnapshot(id);
   discardAgentRecord(id);
-  clearAgentAttention(id);
+  forgetAgentPanel(id);
   entry.outputGeneration += 1;
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
