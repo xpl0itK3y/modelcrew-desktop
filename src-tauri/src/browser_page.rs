@@ -157,12 +157,13 @@ pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
     // Ширину снимка берём у самой страницы: она меняется вместе с ящиком, и
     // постоянная здесь означала бы кадр не того размера, что показывают.
     let width = logical_size(&window).map_or(VIEWPORT.0, |size| size.0) as u32;
+    let scale = window.scale_factor().unwrap_or(1.0);
     let (sender, receiver) = std::sync::mpsc::channel();
     window
         .with_webview(move |platform| {
             // Снимок начинает система и отвечает позже своим вызовом, поэтому
             // ответ уходит в канал, а не возвращается отсюда.
-            platform_snapshot(&platform, width, sender);
+            platform_snapshot(&platform, width, scale, sender);
         })
         .map_err(|error| format!("до страницы не достучаться: {error}"))?;
     match receiver.recv_timeout(SNAPSHOT_WAIT) {
@@ -246,6 +247,7 @@ fn platform_is_loading(platform: &tauri::webview::PlatformWebview) -> Result<boo
 fn platform_snapshot(
     platform: &tauri::webview::PlatformWebview,
     width: u32,
+    scale: f64,
     sender: std::sync::mpsc::Sender<Result<Vec<u8>, String>>,
 ) {
     use block2::RcBlock;
@@ -265,10 +267,12 @@ fn platform_snapshot(
     // где живёт webview. Ничего другого по этому адресу быть не может.
     let webview: &WKWebView = unsafe { &*(platform.inner() as *mut WKWebView) };
     let config = unsafe { WKSnapshotConfiguration::new(main_thread) };
-    // На ретине система отдала бы кадр вдвое больше страницы. Агенту он
-    // уходит картинкой в ответе, поэтому просим ровно ширину страницы:
-    // вчетверо меньше байт при той же вёрстке.
-    unsafe { config.setSnapshotWidth(Some(&NSNumber::new_u32(width))) };
+    // Ширину снимка система меряет в точках и отдаёт кадр в пикселях экрана:
+    // на ретине их вдвое больше по каждой стороне. Агенту кадр уходит
+    // картинкой в ответе, поэтому просим столько точек, чтобы пикселей вышло
+    // ровно по ширине страницы: вчетверо меньше байт при той же вёрстке.
+    let points = f64::from(width) / if scale > 0.0 { scale } else { 1.0 };
+    unsafe { config.setSnapshotWidth(Some(&NSNumber::new_f64(points))) };
     let handler = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
         let _ = sender.send(unsafe { png_of(image, error) });
     });
@@ -320,6 +324,7 @@ fn platform_is_loading(_platform: &tauri::webview::PlatformWebview) -> Result<bo
 fn platform_snapshot(
     _platform: &tauri::webview::PlatformWebview,
     _width: u32,
+    _scale: f64,
     sender: std::sync::mpsc::Sender<Result<Vec<u8>, String>>,
 ) {
     let _ = sender.send(Err("снимок страницы здесь пока не поддержан".to_string()));
