@@ -85,3 +85,10 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
     secrets:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+  sync-site:
+    name: Point the site at the release
+    needs: finalize
+    uses: ./.github/workflows/release-sync-site.yml
+    secrets:
+      SITE_TOKEN: ${{ secrets.SITE_TOKEN }}

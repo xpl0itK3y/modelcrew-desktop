@@ -1,0 +1,63 @@
+name: Point the site at the release
+
+# Сайт (xpl0itK3y/modelcrew.com) зашивает в сборку номер последнего выпуска и
+# размеры пакетов: их видит первый кадр, читатель без сети и всякий, кому
+# закрыт api.github.com. Раньше номер подтягивал ежечасный workflow в самом
+# репозитории сайта, но тот приватный, и каждая его минута платная — с
+# выходом 0.0.22 запуски перестали стартовать вовсе. Здесь репозиторий
+# публичный, минуты бесплатные, а запускать нужно ровно раз — когда выпуск
+# уже опубликован.
+#
+# Руками, если выпуск вышел, а сайт его не догнал:
+#   gh workflow run release-sync-site.yml --repo xpl0itK3y/modelcrew-desktop
+
+on:
+  workflow_call:
+    secrets:
+      SITE_TOKEN:
+        required: true
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync the site's release numbers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # SITE_TOKEN — fine-grained токен только на modelcrew.com с правом
+      # Contents: Read and write. Им же уходит push: GITHUB_TOKEN этого
+      # репозитория в чужой писать не может.
+      - name: Check out the site
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: xpl0itK3y/modelcrew.com
+          token: ${{ secrets.SITE_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      # Скрипт живёт в репозитории сайта и правит только VERSION и размеры
+      # пакетов в src/release.ts. Список выпусков он читает токеном этого
+      # репозитория: выпуски здешние, а гостю GitHub даёт шестьдесят запросов
+      # в час на весь раннер.
+      - name: Read the latest release into src/release.ts
+        id: sync
+        run: node scripts/sync-release.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      # Vercel пересобирает сайт на этот коммит сам.
+      - name: Commit and push to the site
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Point the page at $VERSION" -- src/release.ts
+          git push
