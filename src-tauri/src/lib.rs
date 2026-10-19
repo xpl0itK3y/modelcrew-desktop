@@ -36,6 +36,8 @@ mod mcp_settings;
 mod mcp_stdio;
 mod panel_snapshots;
 mod peer;
+#[cfg(windows)]
+mod pipe;
 mod pty;
 mod terminal_snapshots;
 mod update_cache;
@@ -1189,6 +1191,7 @@ mod tests {
         ("mcp_stdio.rs", include_str!("mcp_stdio.rs")),
         ("panel_snapshots.rs", include_str!("panel_snapshots.rs")),
         ("peer.rs", include_str!("peer.rs")),
+        ("pipe.rs", include_str!("pipe.rs")),
         ("pty.rs", include_str!("pty.rs")),
         (
             "terminal_snapshots.rs",

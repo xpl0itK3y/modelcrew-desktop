@@ -35,12 +35,13 @@ pub const TOKEN_ENV: &str = "MODELCREW_MCP_TOKEN";
 #[cfg(unix)]
 const SOCK_NAME: &str = "mcp.sock";
 
-/// Идентификатор пакета — им же назван каталог данных приложения.
+/// Идентификатор пакета — им же назван каталог данных приложения, а на
+/// Windows и канал.
 ///
 /// Продублирован из `tauri.conf.json`, потому что шиму неоткуда взять
 /// настоящий: он поднимается без Tauri. Тест ниже сверяет их дословно, чтобы
 /// переименование пакета не оставило шим искать сокет по старому адресу.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const APP_IDENTIFIER: &str = "com.modelcrew.desktop";
 
 /// Длина `sun_path` в `sockaddr_un`: 104 на macOS, 108 на Linux. Берём
@@ -836,39 +837,50 @@ fn data_dir_of(home: &Path, xdg: Option<PathBuf>) -> PathBuf {
     }
 }
 
-#[cfg(not(unix))]
+/// На Windows вход — именованный канал. Каталога ему не нужно, и предела
+/// длины, как у `sun_path`, у него нет, так что выбирать нечего: адрес один и
+/// тот же у приложения и у шима.
+#[cfg(windows)]
 pub fn socket_path(_app: &tauri::AppHandle) -> Option<PathBuf> {
-    // На Windows нужен именованный канал: у него другое API и другая модель
-    // доступа. Пока труба там не проложена, окружение панели остаётся без
-    // переменной — агент просто не увидит инструмента, вместо того чтобы
-    // видеть его и упираться в мёртвый сокет.
+    well_known_socket_path()
+}
+
+/// Канал пользователя: имя пакета и SID. SID нужен потому, что каналы у всей
+/// машины общие, а вход у каждого человека должен быть свой.
+#[cfg(windows)]
+pub fn well_known_socket_path() -> Option<PathBuf> {
+    crate::pipe::address(&format!("{APP_IDENTIFIER}.mcp"))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn socket_path(_app: &tauri::AppHandle) -> Option<PathBuf> {
     None
 }
 
 /// Живой слушатель: адрес нужен, чтобы разбудить `accept` при выключении.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 static LISTENING: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 /// Номер поколения слушателя. По нему поток `accept` понимает, что снят: путь
 /// для этого не годится — после выключения и включения он тот же самый, и
 /// старый поток принял бы себя за нового.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Сколько агентов сидит на сокете прямо сейчас.
 ///
 /// Единственное, чем человек может проверить, что агент нас видит: сам агент
 /// об этом не скажет, а «сокет открыт» говорит лишь о нашей половине трубы.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 static AGENTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Учёт соединения на всё время разговора. Считаем через жизнь значения, а не
 /// вручную: из разговора выходят из десятка мест, и забытый вычет оставил бы
 /// в настройках агентов, которых давно нет.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 struct CountedAgent;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl CountedAgent {
     fn new() -> Self {
         AGENTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -876,7 +888,7 @@ impl CountedAgent {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl Drop for CountedAgent {
     fn drop(&mut self) {
         AGENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
@@ -887,11 +899,11 @@ impl Drop for CountedAgent {
 /// держит между запросами, но после выключателя поднимает её заново только со
 /// следующим вызовом инструмента.
 pub fn agents() -> usize {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         AGENTS.load(std::sync::atomic::Ordering::SeqCst)
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
         0
     }
@@ -900,7 +912,7 @@ pub fn agents() -> usize {
 /// Поднимает слушателя, если MCP не выключен в настройках. Ошибки не фатальны:
 /// без MCP приложение работает как работало, просто агенты не видят
 /// инструментов.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn serve(app: tauri::AppHandle) {
     if !crate::mcp_settings::enabled(&app) {
         // Файл прошлого запуска, когда сервер был включён. Оставить его —
@@ -910,6 +922,9 @@ pub fn serve(app: tauri::AppHandle) {
         // Не через `socket_path`: тот на слишком глубоком каталоге данных
         // заводит временный, и каждый запуск с выключенным MCP оставлял бы по
         // пустому каталогу.
+        //
+        // Канал Windows уходит вместе с процессом, убирать за ним нечего.
+        #[cfg(unix)]
         if let Some(path) = data_dir_socket_path(&app) {
             let _ = std::fs::remove_file(path);
         }
@@ -920,7 +935,7 @@ pub fn serve(app: tauri::AppHandle) {
 
 /// Снимает слушателя. После этого агент не видит сервер вовсе: сокета нет,
 /// адреса новым панелям не выдаём, и шиму некуда стучаться.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn stop() {
     use std::sync::atomic::Ordering;
 
@@ -931,13 +946,26 @@ pub fn stop() {
     let Some(path) = LISTENING.lock().unwrap().take() else {
         return;
     };
-    // Разбудить `accept`: без соединения поток спит на нём до конца жизни
-    // приложения и держит слушателя, даже когда файл сокета уже удалён.
-    let _ = std::os::unix::net::UnixStream::connect(&path);
-    let _ = std::fs::remove_file(&path);
+    knock(&path);
 }
 
-#[cfg(not(unix))]
+/// Разбудить `accept`: без соединения поток спит на нём до конца жизни
+/// приложения и держит слушателя, даже когда файл сокета уже удалён.
+#[cfg(unix)]
+fn knock(path: &Path) {
+    let _ = std::os::unix::net::UnixStream::connect(path);
+    let _ = std::fs::remove_file(path);
+}
+
+/// То же на Windows. Ждём недолго: выключатель щёлкают из окна, и замёрзнуть
+/// оно не должно. Не достучались — поток так и спит, но канал этим не занят:
+/// следующий слушатель встанет рядом, а не поверх.
+#[cfg(windows)]
+fn knock(path: &Path) {
+    let _ = crate::pipe::connect(path, std::time::Duration::from_secs(1));
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn stop() {}
 
 /// Адрес, на котором стоим прямо сейчас. `None` — не стоим ни на каком.
@@ -945,11 +973,11 @@ pub fn stop() {}
 /// Именно тот, что занят, а не тот, что выбрали бы: настройки показывают
 /// человеку дверь, в которую и правда стучится его агент.
 pub fn listening_at() -> Option<PathBuf> {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         LISTENING.lock().unwrap().clone()
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
         None
     }
@@ -958,11 +986,11 @@ pub fn listening_at() -> Option<PathBuf> {
 /// Включён ли сервер прямо сейчас — то, что видит агент, а не то, что записано
 /// в настройках.
 pub fn listening() -> bool {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         LISTENING.lock().unwrap().is_some()
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
         false
     }
@@ -1040,17 +1068,91 @@ fn start(app: tauri::AppHandle) {
     });
 }
 
+/// Занимали ли мы канал за эту жизнь приложения.
+///
+/// Первый раз имя должно быть свободным: занято — значит, его держит кто-то
+/// другой, и вставать рядом с ним нельзя, клиенты расходились бы между нами.
+/// После выключателя имя остаётся за нами: шимы держат соединения между
+/// запросами, а каждое соединение — экземпляр того же канала. Требуй мы и
+/// тогда свободного имени, включить плагин обратно не вышло бы, пока жив
+/// хоть один агент.
+#[cfg(windows)]
+static CLAIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(windows)]
+fn start(app: tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+
+    // Второй слушатель рядом с первым делил бы с ним клиентов, а первый
+    // остался бы висеть в `accept` навсегда.
+    if listening() {
+        return;
+    }
+
+    let Some(path) = socket_path(&app) else {
+        eprintln!("ModelCrew MCP: не удалось назвать канал — агенты останутся без инструментов.");
+        return;
+    };
+    let first = !CLAIMED.load(Ordering::SeqCst);
+    let mut listener = match crate::pipe::Listener::bind(&path, first) {
+        Ok(listener) => listener,
+        Err(error) => {
+            // Как и на unix: без строки в журнале отказ неотличим от «агент
+            // не захотел позвать».
+            eprintln!(
+                "ModelCrew MCP: не удалось открыть канал {}: {error}",
+                path.display()
+            );
+            return;
+        }
+    };
+    CLAIMED.store(true, Ordering::SeqCst);
+    // Панели узнают адрес только теперь, когда слушатель уже стоит.
+    let generation = GENERATION.load(Ordering::SeqCst);
+    *LISTENING.lock().unwrap() = Some(path.clone());
+    crate::pty::set_mcp_socket(path);
+
+    std::thread::spawn(move || loop {
+        let accepted = listener.accept();
+        // Нас сняли, пока мы ждали: это стук выключателя, а не агент.
+        if GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let Ok((stream, client)) = accepted else {
+            // Система не дала экземпляра канала. Ошибка редкая и обычно
+            // проходящая, но крутить её без паузы значило бы занять ядро.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            continue;
+        };
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _counted = CountedAgent::new();
+            let tools = AppTools { app: app.clone() };
+            // Спрашиваем систему сразу: процесс на том конце заведомо жив,
+            // пока он не сказал ни строки.
+            let ancestry = client.map(crate::peer::ancestry).unwrap_or_default();
+            converse(
+                stream,
+                ancestry,
+                &tools,
+                &|caller| panel_of(&app, caller),
+                &|| GENERATION.load(Ordering::SeqCst) == generation,
+            );
+        });
+    });
+}
+
 /// Включает сервер обратно. Отдельно от `serve`, потому что тот смотрит в
 /// настройки, а сюда приходят уже с принятым решением.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn resume(app: tauri::AppHandle) {
     start(app);
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn resume(_app: tauri::AppHandle) {}
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn serve(_app: tauri::AppHandle) {}
 
 /// Кто позвал: то, что о звонящем известно ещё до первой его строки, плюс
@@ -1251,7 +1353,7 @@ pub const UNREACHABLE: &str = concat!(
 /// порядке: происхождение сообщает ядро, а пропуск — сам звонящий. Пропуск
 /// остаётся запасным путём для агентов, которые запускают сервер в стороне от
 /// своего дерева процессов, и для тех, у кого спросить ядро не вышло.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn panel_of(app: &tauri::AppHandle, caller: &Caller) -> Option<(String, PathBuf)> {
     use tauri::Manager;
     let sessions = app.state::<crate::pty::PtyManager>();
@@ -1270,7 +1372,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn the_name_of_the_data_directory_is_the_one_the_package_really_has() {
         // Шим вычисляет адрес сокета сам и берёт это имя на веру. Переименуют
         // пакет — он молча уйдёт стучаться не туда, а выглядеть это будет как
