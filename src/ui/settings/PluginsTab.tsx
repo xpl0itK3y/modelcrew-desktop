@@ -93,9 +93,8 @@ function Note(props: { status: McpStatus | null; failure: string | null }) {
   if (!props.status.enabled) {
     return <p className="settings-note">{t("settings.pluginOff")}</p>;
   }
-  // Включён, но слушателя нет: платформа его не поддерживает (Windows) или
-  // сокет не открылся. Молчать нельзя — иначе включённый переключатель
-  // обещает работу, которой нет.
+  // Включён, но слушателя нет: сокет или канал не открылся. Молчать нельзя —
+  // иначе включённый переключатель обещает работу, которой нет.
   if (!props.status.listening) {
     return (
       <p className="settings-note is-warning" role="status">

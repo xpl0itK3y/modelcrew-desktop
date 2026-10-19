@@ -433,7 +433,7 @@ export const en: Record<MessageKey, string> = {
   "settings.pluginOff":
     "The plugin is off: the agent sees neither the server nor the tools.",
   "settings.pluginUnavailable":
-    "The plugin is on but the server did not come up: it does not work on this system yet.",
+    "The plugin is on but the server did not come up. Switch it off and on again, or restart ModelCrew.",
   "settings.tabHotkeys": "Shortcuts",
   "settings.hotkeysIntro":
     "Picked for your keyboard. They work while the focus is in a terminal: these combinations are captured before the shell, everything else goes through to it.",
