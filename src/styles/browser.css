@@ -22,6 +22,13 @@
   border-bottom: 1px solid var(--mc-border);
 }
 
+/* Кнопки шага — под рост адресной строки, а не заголовка ящика. */
+.browser-address-bar .icon-button {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
 .browser-address {
   min-width: 0;
   flex: 1;

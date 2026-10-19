@@ -131,3 +131,11 @@ export function watchBrowserFrame(
 export function openPage(workspaceId: string, url: string): Promise<void> {
   return invoke<void>("browser_go", { workspaceId, url });
 }
+
+/** Шаг страницы: кнопки над ней. */
+export type PageStep = "back" | "forward" | "reload";
+
+/** Назад, вперёд или заново. Отказ уходит наверх — его показывают. */
+export function stepPage(workspaceId: string, step: PageStep): Promise<void> {
+  return invoke<void>("browser_step", { workspaceId, step });
+}

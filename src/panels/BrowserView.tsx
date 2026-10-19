@@ -18,11 +18,21 @@ import {
   frameSource,
   normalizeAddress,
   openPage,
+  stepPage,
   watchBrowserFrame,
   type BrowserFrame,
+  type PageStep,
 } from "../browser/browserFrames";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import { localizeBackendError, useI18n } from "../i18n";
+import { BackIcon, ForwardIcon, ReloadIcon } from "../ui/Icons";
+
+// Кнопки над страницей — как у любого браузера, в том же порядке.
+const STEPS = [
+  { step: "back", label: "browser.back", Icon: BackIcon },
+  { step: "forward", label: "browser.forward", Icon: ForwardIcon },
+  { step: "reload", label: "browser.reload", Icon: ReloadIcon },
+] as const;
 
 /**
  * Ящик со страницей проекта.
@@ -138,6 +148,15 @@ function BrowserProjectView(props: { workspaceId: string }) {
       .finally(() => setOpening(false));
   };
 
+  const step = (next: PageStep) => {
+    // Страница уйдёт сама, и адресная строка снова идёт за ней: набранное,
+    // но не открытое, к новой странице уже не относится.
+    typed.current = false;
+    stepPage(props.workspaceId, next).catch((error) =>
+      setTrouble(localizeBackendError(error)),
+    );
+  };
+
   const failure = refusal ?? trouble;
   const picture = frameSource(frame.image);
   // Первый запуск браузера занимает секунды, и без надписи нажатие
@@ -155,6 +174,19 @@ function BrowserProjectView(props: { workspaceId: string }) {
   return (
     <div className="browser-view">
       <form className="browser-address-bar" onSubmit={submit}>
+        {STEPS.map(({ step: kind, label, Icon }) => (
+          <button
+            key={kind}
+            type="button"
+            className={`icon-button ${frame.running ? "" : "is-disabled"}`}
+            title={t(label)}
+            aria-label={t(label)}
+            disabled={!frame.running}
+            onClick={() => step(kind)}
+          >
+            <Icon />
+          </button>
+        ))}
         <input
           type="text"
           className="browser-address"

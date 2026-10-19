@@ -149,6 +149,32 @@ export function UndoIcon(props: IconProps) {
   );
 }
 
+/// Шаги страницы в браузере проекта: назад, вперёд и заново.
+export function BackIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12.5 8h-9M7.5 4 3.5 8l4 4" />
+    </svg>
+  );
+}
+
+export function ForwardIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 8h9M8.5 4l4 4-4 4" />
+    </svg>
+  );
+}
+
+export function ReloadIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12.8 6.5A5 5 0 1 0 13 9.5" />
+      <path d="M13 3v3.5H9.5" />
+    </svg>
+  );
+}
+
 export function GlobeIcon(props: IconProps) {
   // Меридиан и экватор: шар без них читается как пустой кружок.
   return (

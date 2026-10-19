@@ -270,4 +270,85 @@ describe("BrowserView", () => {
 
     expect(screen.getByRole("button", { name: "Открыть" })).toBeDisabled();
   });
+
+  it("does not call a page blank where the live page stands", async () => {
+    // Живая страница стоит поверх ящика, а картинки за ней не просят:
+    // «пусто» здесь было бы про то, что человек видит своими глазами.
+    invoke.mockResolvedValue(
+      frame({ url: "http://localhost:1420/", running: true, dockable: true }),
+    );
+
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() =>
+      expect(address()).toHaveValue("http://localhost:1420/"),
+    );
+
+    expect(screen.queryByText("Страница пока пустая")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("steps the page back, forward and anew", async () => {
+    invoke.mockResolvedValue(frame({ image: PIXEL, running: true }));
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Назад" })).toBeEnabled(),
+    );
+
+    for (const [name, step] of [
+      ["Назад", "back"],
+      ["Вперёд", "forward"],
+      ["Обновить страницу", "reload"],
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+      expect(invoke).toHaveBeenCalledWith("browser_step", {
+        workspaceId: "w1",
+        step,
+      });
+    }
+  });
+
+  it("keeps the step buttons out of reach while the browser is not up", () => {
+    render(<BrowserView workspaceId="w1" />);
+
+    for (const name of ["Назад", "Вперёд", "Обновить страницу"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+  });
+
+  it("follows the page again after a step", async () => {
+    // Набранное, но не открытое, к странице, куда она ушла, не относится:
+    // застрянь оно в поле, адрес врал бы о том, что на экране.
+    let url = "http://example.com/second";
+    invoke.mockImplementation((command: string) =>
+      command === "browser_step"
+        ? Promise.resolve()
+        : Promise.resolve(frame({ image: PIXEL, url, running: true })),
+    );
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() => expect(address()).toHaveValue(url));
+    fireEvent.change(address(), { target: { value: "half-typ" } });
+
+    url = "http://example.com/first";
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+
+    await waitFor(() => expect(address()).toHaveValue(url), {
+      timeout: 4_000,
+    });
+  });
+
+  it("says so when a step does not reach the page", async () => {
+    invoke.mockImplementation((command: string) =>
+      command === "browser_step"
+        ? Promise.reject({ code: "browser_command_failed" })
+        : Promise.resolve(frame({ image: PIXEL, running: true })),
+    );
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Назад" })).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/не смог/);
+  });
 });
