@@ -440,7 +440,14 @@ impl PtyManager {
             return Vec::new();
         }
         let procs = crate::win_proc::snapshot();
-        let edges: Vec<(u32, u32)> = procs.iter().map(|p| (p.pid, p.parent)).collect();
+        let own = std::env::current_exe().ok().and_then(|exe| {
+            exe.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        });
+        let edges = edges_without(
+            procs.iter().map(|p| (p.pid, p.parent, p.name.as_str())),
+            own.as_deref(),
+        );
         roots
             .into_iter()
             .map(|(id, root)| {
@@ -518,6 +525,24 @@ impl PtyManager {
                 .with_debug(failures.join("; ")))
         }
     }
+}
+
+/// Рёбра дерева процессов без наших мостов MCP. Мост — ребёнок агента, свежее
+/// его и без своих детей, то есть тот самый лист, который выбрал бы
+/// `pick_foreground`: панель видела бы вместо claude само приложение и
+/// теряла агента. На unix такого нет — там передний план даёт группа
+/// процессов, и лидер её агент. Поддерево моста уходит вместе с ним: от
+/// корня до него больше не дойти.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn edges_without<'a>(
+    procs: impl IntoIterator<Item = (u32, u32, &'a str)>,
+    own: Option<&str>,
+) -> Vec<(u32, u32)> {
+    procs
+        .into_iter()
+        .filter(|(_, _, name)| own.is_none_or(|own| !name.eq_ignore_ascii_case(own)))
+        .map(|(pid, parent, _)| (pid, parent))
+        .collect()
 }
 
 /// Листья поддерева процессов: потомки root (включая его самого, если
@@ -1240,6 +1265,22 @@ mod tests {
         // настоящих листьев нет — безопасно откатываемся к корню.
         let cyclic = [(2, 1), (1, 2)];
         assert_eq!(descendant_leaves(1, &cyclic), vec![1]);
+    }
+
+    #[test]
+    fn our_mcp_bridge_does_not_pass_for_the_agent() {
+        // pwsh(1) → обёртка cmd(2) → claude(3) → наш мост(4) → его conhost(5).
+        let procs = [
+            (1, 0, "pwsh.exe"),
+            (2, 1, "cmd.exe"),
+            (3, 2, "claude.exe"),
+            (4, 3, "ModelCrew.exe"),
+            (5, 4, "conhost.exe"),
+        ];
+        let edges = edges_without(procs, Some("modelcrew.exe"));
+        assert_eq!(descendant_leaves(1, &edges), vec![3]);
+        // Своего имени не узнали — дерево как есть.
+        assert_eq!(descendant_leaves(1, &edges_without(procs, None)), vec![5]);
     }
 
     #[test]
