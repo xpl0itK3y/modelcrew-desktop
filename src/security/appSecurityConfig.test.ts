@@ -255,18 +255,21 @@ describe("capabilities", () => {
     expect(capabilities.map(([name]) => name)).toEqual(["default.json"]);
   });
 
-  it("binds the default capability to the main window only", () => {
-    expect(defaultCapability.windows).toEqual(["main"]);
+  it("binds the default capability to the main webview only", () => {
+    // Не к окну: права окна получает каждый webview в нём, а страница
+    // проекта, открытая в ящике, живёт в главном окне рядом с интерфейсом.
+    // Привязка к окну отдала бы IPC приложения чужому сайту.
+    expect(defaultCapability.webviews).toEqual(["main"]);
+    expect(defaultCapability.windows).toBeUndefined();
     expect(defaultCapability.identifier).toBe("default");
-    // remote/webviews открыли бы IPC внешним origin'ам или чужим webview.
+    // remote открыл бы IPC внешним origin'ам.
     expect(defaultCapability.remote).toBeUndefined();
-    expect(defaultCapability.webviews).toBeUndefined();
   });
 
-  it("targets a window label that the app actually creates", () => {
+  it("targets a webview label that the app actually creates", () => {
     const windows = config.app?.windows ?? [];
     const labels = windows.map((window) => window.label ?? "main");
-    for (const label of defaultCapability.windows ?? []) {
+    for (const label of defaultCapability.webviews ?? []) {
       expect(labels).toContain(label);
     }
   });

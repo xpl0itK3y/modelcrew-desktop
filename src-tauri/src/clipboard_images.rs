@@ -77,7 +77,7 @@ fn clipboard_images_dir(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
 
 #[tauri::command]
 pub fn terminal_clipboard_image_save(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     request: Request<'_>,
 ) -> CommandResult<String> {

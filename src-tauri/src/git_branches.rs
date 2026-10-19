@@ -689,7 +689,7 @@ pub fn delete_branch(
 
 #[tauri::command]
 pub async fn git_branches(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<Vec<GitBranch>> {
@@ -702,7 +702,7 @@ pub async fn git_branches(
 
 #[tauri::command]
 pub async fn git_switch_branch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     branch: String,
@@ -719,7 +719,7 @@ pub async fn git_switch_branch(
 
 #[tauri::command]
 pub async fn git_create_branch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     name: String,
@@ -733,7 +733,7 @@ pub async fn git_create_branch(
 
 #[tauri::command]
 pub async fn git_rename_branch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     branch: String,
@@ -748,7 +748,7 @@ pub async fn git_rename_branch(
 
 #[tauri::command]
 pub async fn git_delete_branch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     branch: String,
@@ -866,7 +866,7 @@ pub fn rebase_onto(
 
 #[tauri::command]
 pub async fn git_merge_ref(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     reference: String,
@@ -891,7 +891,7 @@ pub async fn git_merge_ref(
 
 #[tauri::command]
 pub async fn git_rebase_onto(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     reference: String,

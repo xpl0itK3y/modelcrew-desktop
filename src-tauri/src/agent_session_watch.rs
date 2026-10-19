@@ -131,7 +131,7 @@ pub fn watch_stores(app: &tauri::AppHandle, home: &Path) -> Vec<String> {
 
 #[tauri::command]
 pub fn agent_sessions_watch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
 ) -> CommandResult<Vec<String>> {
     super::ensure_main_window(&window)?;

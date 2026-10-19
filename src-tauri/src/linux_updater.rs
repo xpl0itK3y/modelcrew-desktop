@@ -227,7 +227,7 @@ impl Drop for UpdaterOperationGuard {
 }
 
 #[tauri::command]
-pub fn updater_install_target(window: tauri::WebviewWindow) -> CommandResult<UpdaterInstallTarget> {
+pub fn updater_install_target(window: tauri::Webview) -> CommandResult<UpdaterInstallTarget> {
     super::ensure_main_window(&window)?;
 
     if cfg!(debug_assertions) {
@@ -267,7 +267,7 @@ pub fn updater_install_target(window: tauri::WebviewWindow) -> CommandResult<Upd
 
 #[tauri::command]
 pub async fn updater_prepare_linux_package(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, LinuxUpdaterState>,
     version: String,
@@ -289,7 +289,7 @@ pub async fn updater_prepare_linux_package(
 
 #[tauri::command]
 pub async fn updater_install_linux_package(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, LinuxUpdaterState>,
     version: String,

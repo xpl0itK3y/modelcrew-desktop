@@ -288,7 +288,7 @@ pub struct CrewClaimView {
 /// корень берётся из реестра по id воркспейса, а не из аргументов.
 #[tauri::command]
 pub async fn crew_claims(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     crew: tauri::State<'_, CrewRegistry>,
     workspace_id: String,

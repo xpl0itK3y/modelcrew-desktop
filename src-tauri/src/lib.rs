@@ -56,9 +56,8 @@ use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
 use file_tree::{
     workspace_create_entry, workspace_delete_entry, workspace_read_dir, workspace_read_file,
-    workspace_read_media,
-    workspace_rename_entry, workspace_reveal_entry, workspace_search_tree, workspace_tree_unwatch,
-    workspace_tree_watch, workspace_write_file, TreeWatchState,
+    workspace_read_media, workspace_rename_entry, workspace_reveal_entry, workspace_search_tree,
+    workspace_tree_unwatch, workspace_tree_watch, workspace_write_file, TreeWatchState,
 };
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
@@ -67,8 +66,7 @@ use git_branches::{
 use git_changes::{
     git_abort_operation, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
     git_continue_operation, git_file_diff, git_head_file, git_read_file, git_revert_file,
-    git_write_file,
-    GitWatchState,
+    git_write_file, GitWatchState,
 };
 use git_history::{git_commit_action, git_delete_tag, git_drop_commit, git_reword_commit};
 use git_log::{git_commit_file_diff, git_commit_files, git_log};
@@ -195,7 +193,7 @@ impl From<BindOutcome> for WorkspaceRootResult {
     }
 }
 
-fn ensure_main_window(window: &tauri::WebviewWindow) -> CommandResult<()> {
+fn ensure_main_window(window: &tauri::Webview) -> CommandResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
@@ -365,7 +363,7 @@ fn spawn_title_watcher(app: tauri::AppHandle) {
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn pty_create(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyManager>,
     roots: tauri::State<'_, WorkspaceRoots>,
@@ -429,13 +427,13 @@ fn list_shells() -> Vec<ShellInfo> {
 }
 
 #[tauri::command]
-fn git_bash_status(window: tauri::WebviewWindow) -> CommandResult<GitBashAvailability> {
+fn git_bash_status(window: tauri::Webview) -> CommandResult<GitBashAvailability> {
     ensure_main_window(&window)?;
     Ok(pty::git_bash_availability())
 }
 
 #[tauri::command]
-async fn git_bash_install(window: tauri::WebviewWindow) -> CommandResult<ShellInfo> {
+async fn git_bash_install(window: tauri::Webview) -> CommandResult<ShellInfo> {
     ensure_main_window(&window)?;
     tauri::async_runtime::spawn_blocking(pty::install_git_bash)
         .await
@@ -444,7 +442,7 @@ async fn git_bash_install(window: tauri::WebviewWindow) -> CommandResult<ShellIn
 
 #[tauri::command]
 fn pty_write(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, PtyManager>,
     id: String,
     data: String,
@@ -455,7 +453,7 @@ fn pty_write(
 
 #[tauri::command]
 fn pty_resize(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, PtyManager>,
     id: String,
     cols: u16,
@@ -467,7 +465,7 @@ fn pty_resize(
 
 #[tauri::command]
 fn pty_kill(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, PtyManager>,
     id: String,
 ) -> CommandResult<()> {
@@ -480,7 +478,7 @@ fn pty_kill(
 /// updater мог завершить установку и контролируемый relaunch.
 #[tauri::command]
 fn pty_kill_all(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyManager>,
 ) -> CommandResult<()> {
@@ -493,7 +491,7 @@ fn pty_kill_all(
 
 #[tauri::command]
 fn workspace_register_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -506,7 +504,7 @@ fn workspace_register_root(
 
 #[tauri::command]
 fn workspace_reconcile_roots(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_ids: Vec<String>,
 ) -> CommandResult<()> {
@@ -516,7 +514,7 @@ fn workspace_reconcile_roots(
 
 #[tauri::command]
 fn workspace_validate_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<String> {
@@ -531,7 +529,7 @@ fn workspace_validate_root(
 
 #[tauri::command]
 async fn workspace_pick_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     locale: String,
@@ -556,7 +554,7 @@ async fn workspace_pick_root(
 
 #[tauri::command]
 fn workspace_unregister_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
@@ -580,7 +578,7 @@ fn workspace_unregister_root(
 // и на холодном или сетевом домашнем каталоге это ожидание видно глазом.
 #[tauri::command]
 async fn agent_hook_channels(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
 ) -> CommandResult<agent_hooks::AgentHookChannels> {
     ensure_main_window(&window)?;
@@ -591,7 +589,7 @@ async fn agent_hook_channels(
 // иконках доков Linux (KDE, GNOME с доком, Cinnamon, Unity); на Windows
 // числовых бейджей нет — красная точка поверх иконки в панели задач.
 #[tauri::command]
-fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandResult<()> {
+fn app_set_badge(window: tauri::Webview, count: Option<i64>) -> CommandResult<()> {
     ensure_main_window(&window)?;
     let count = count.filter(|value| *value > 0);
 
@@ -601,14 +599,14 @@ fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandRes
             let rgba = draw_badge_overlay(&badge_text(value));
             tauri::image::Image::new_owned(rgba, BADGE_SIZE as u32, BADGE_SIZE as u32)
         });
-        window.set_overlay_icon(icon).map_err(|error| {
+        window.window().set_overlay_icon(icon).map_err(|error| {
             CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
         })?;
     }
 
     #[cfg(target_os = "macos")]
     {
-        window.set_badge_count(count).map_err(|error| {
+        window.window().set_badge_count(count).map_err(|error| {
             CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
         })?;
     }
@@ -796,7 +794,7 @@ fn send_unity_badge(count: Option<i64>, app_uri: &str) -> Result<(), zbus::Error
 
 #[tauri::command]
 fn app_set_locale(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     locale: String,
 ) -> CommandResult<()> {
@@ -1169,11 +1167,20 @@ mod tests {
         ("lib.rs", LIB_RS),
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
-        ("agent_session_store.rs", include_str!("agent_session_store.rs")),
-        ("agent_session_watch.rs", include_str!("agent_session_watch.rs")),
+        (
+            "agent_session_store.rs",
+            include_str!("agent_session_store.rs"),
+        ),
+        (
+            "agent_session_watch.rs",
+            include_str!("agent_session_watch.rs"),
+        ),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
         ("browser_page.rs", include_str!("browser_page.rs")),
-        ("browser_page_check.rs", include_str!("browser_page_check.rs")),
+        (
+            "browser_page_check.rs",
+            include_str!("browser_page_check.rs"),
+        ),
         ("browser_view.rs", include_str!("browser_view.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
@@ -1765,7 +1772,10 @@ mod tests {
     fn the_capability_allowlist_stays_minimal() {
         let capability: serde_json::Value = serde_json::from_str(CAPABILITY_JSON).unwrap();
 
-        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        // Права — webview интерфейса, а не окну: права окна достаются каждому
+        // webview в нём, а страница проекта живёт в главном окне.
+        assert_eq!(capability["webviews"], serde_json::json!(["main"]));
+        assert!(capability.get("windows").is_none(), "{capability}");
 
         // Точный список: любая новая привилегия должна пройти через правку
         // теста, потому что capability обходит охрану #[tauri::command].

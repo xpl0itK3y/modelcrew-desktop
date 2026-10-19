@@ -574,7 +574,7 @@ pub(crate) fn opencode_db_candidates(home: &Path) -> Vec<PathBuf> {
 
 #[tauri::command]
 pub fn agent_session_locate(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     agent: String,
     cwd: String,
@@ -609,7 +609,7 @@ pub fn agent_session_locate(
 /// панелям id называет их собственный хук, а не этот поиск.
 #[tauri::command]
 pub fn agent_session_locate_turn(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     agent: String,
     cwd: String,

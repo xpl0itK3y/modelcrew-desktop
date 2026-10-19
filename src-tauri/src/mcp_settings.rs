@@ -106,14 +106,14 @@ fn status(app: &tauri::AppHandle) -> McpStatus {
 }
 
 #[tauri::command]
-pub fn mcp_status(window: tauri::WebviewWindow, app: tauri::AppHandle) -> CommandResult<McpStatus> {
+pub fn mcp_status(window: tauri::Webview, app: tauri::AppHandle) -> CommandResult<McpStatus> {
     crate::ensure_main_window(&window)?;
     Ok(status(&app))
 }
 
 #[tauri::command]
 pub fn mcp_set_enabled(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     enabled: bool,
 ) -> CommandResult<McpStatus> {

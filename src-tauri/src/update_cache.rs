@@ -415,7 +415,7 @@ async fn install_self_update(
 
 #[tauri::command]
 pub async fn updater_prepare_self_update(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, SelfUpdaterState>,
     version: String,
@@ -428,7 +428,7 @@ pub async fn updater_prepare_self_update(
 
 #[tauri::command]
 pub async fn updater_install_self_update(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, SelfUpdaterState>,
     version: String,

@@ -154,7 +154,7 @@ pub fn reword_commit(root: &Path, hash: &str, message: &str) -> CommandResult<()
 
 #[tauri::command]
 pub async fn git_reword_commit(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     hash: String,
@@ -446,7 +446,7 @@ pub fn delete_tag(root: &Path, name: &str) -> CommandResult<()> {
 
 #[tauri::command]
 pub async fn git_delete_tag(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     name: String,
@@ -460,7 +460,7 @@ pub async fn git_delete_tag(
 
 #[tauri::command]
 pub async fn git_drop_commit(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     hash: String,
@@ -599,7 +599,7 @@ pub fn commit_action(
 }
 #[tauri::command]
 pub async fn git_commit_action(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     action: String,

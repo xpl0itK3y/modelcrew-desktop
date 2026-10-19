@@ -235,7 +235,7 @@ fn snapshots_dir(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
 
 #[tauri::command]
 pub fn terminal_snapshot_save(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     id: String,
     data: String,
@@ -246,7 +246,7 @@ pub fn terminal_snapshot_save(
 
 #[tauri::command]
 pub fn terminal_snapshot_load(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     id: String,
 ) -> CommandResult<Option<String>> {
@@ -256,7 +256,7 @@ pub fn terminal_snapshot_load(
 
 #[tauri::command]
 pub fn terminal_snapshot_delete(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     id: String,
 ) -> CommandResult<()> {
@@ -268,7 +268,7 @@ pub fn terminal_snapshot_delete(
 
 #[tauri::command]
 pub fn terminal_snapshots_prune(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     keep: Vec<String>,
 ) -> CommandResult<()> {

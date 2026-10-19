@@ -784,7 +784,7 @@ pub fn write_repo_file(root: &Path, path: &str, content: &str) -> CommandResult<
 
 #[tauri::command]
 pub async fn git_read_file(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -798,7 +798,7 @@ pub async fn git_read_file(
 
 #[tauri::command]
 pub async fn git_head_file(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -812,7 +812,7 @@ pub async fn git_head_file(
 
 #[tauri::command]
 pub async fn git_write_file(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -953,7 +953,7 @@ pub fn revert_file(root: &Path, path: &str, orig_path: Option<&str>) -> CommandR
 
 #[tauri::command]
 pub async fn git_commit(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
@@ -972,7 +972,7 @@ pub async fn git_commit(
 
 #[tauri::command]
 pub async fn git_continue_operation(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<()> {
@@ -985,7 +985,7 @@ pub async fn git_continue_operation(
 
 #[tauri::command]
 pub async fn git_abort_operation(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<()> {
@@ -998,7 +998,7 @@ pub async fn git_abort_operation(
 
 #[tauri::command]
 pub async fn git_revert_file(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -1114,7 +1114,7 @@ fn spawn_watch(
 // на гигантском дереве) — фронтенд остаётся на поллинге.
 #[tauri::command]
 pub fn git_changes_watch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     state: tauri::State<'_, GitWatchState>,
@@ -1140,7 +1140,7 @@ pub fn git_changes_watch(
 
 #[tauri::command]
 pub fn git_changes_unwatch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, GitWatchState>,
     workspace_id: String,
 ) -> CommandResult<()> {
@@ -1155,7 +1155,7 @@ pub fn git_changes_unwatch(
 
 #[tauri::command]
 pub async fn git_changes_summary(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<GitChangesSummary> {
@@ -1168,7 +1168,7 @@ pub async fn git_changes_summary(
 
 #[tauri::command]
 pub async fn git_file_diff(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,

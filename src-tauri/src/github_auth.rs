@@ -188,7 +188,7 @@ pub fn github_auth_available() -> bool {
 }
 
 #[tauri::command]
-pub async fn github_device_start(window: tauri::WebviewWindow) -> CommandResult<DeviceStart> {
+pub async fn github_device_start(window: tauri::Webview) -> CommandResult<DeviceStart> {
     super::ensure_main_window(&window)?;
     if GITHUB_CLIENT_ID.is_empty() {
         return Err(CommandError::new(ErrorCode::GithubNotConfigured));
@@ -219,7 +219,7 @@ pub async fn github_device_start(window: tauri::WebviewWindow) -> CommandResult<
 
 #[tauri::command]
 pub async fn github_device_poll(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     device_code: String,
 ) -> CommandResult<PollResult> {
@@ -263,7 +263,7 @@ pub async fn github_device_poll(
 
 #[tauri::command]
 pub async fn github_current_user(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
 ) -> CommandResult<Option<GithubUser>> {
     super::ensure_main_window(&window)?;
@@ -294,10 +294,7 @@ pub async fn github_current_user(
 }
 
 #[tauri::command]
-pub async fn github_logout(
-    window: tauri::WebviewWindow,
-    app: tauri::AppHandle,
-) -> CommandResult<()> {
+pub async fn github_logout(window: tauri::Webview, app: tauri::AppHandle) -> CommandResult<()> {
     super::ensure_main_window(&window)?;
     clear_token(&app);
     Ok(())
@@ -401,7 +398,7 @@ fn github_slug(root: &Path) -> Option<(String, String)> {
 // открывать ссылку решает фронтенд, здесь мы её только собираем.
 #[tauri::command]
 pub async fn github_commit_url(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     hash: String,
@@ -468,7 +465,7 @@ fn extract_avatars(
 // фронтенд тогда откатывается на Gravatar/инициалы.
 #[tauri::command]
 pub async fn github_commit_avatars(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,

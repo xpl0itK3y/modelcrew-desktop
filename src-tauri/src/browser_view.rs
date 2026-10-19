@@ -43,7 +43,7 @@ impl BrowserFrame {
 /// пустой кадр и говорит об этом сама.
 #[tauri::command]
 pub async fn browser_frame(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
@@ -90,7 +90,7 @@ pub async fn browser_frame(
 /// Открыть страницу по просьбе человека, а не агента.
 #[tauri::command]
 pub async fn browser_go(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
