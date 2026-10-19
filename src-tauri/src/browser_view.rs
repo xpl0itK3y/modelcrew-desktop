@@ -171,3 +171,20 @@ pub async fn browser_undock(
         CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
     })
 }
+
+/// Назад, вперёд или заново — кнопки над страницей в панели.
+#[tauri::command]
+pub async fn browser_step(
+    window: tauri::Webview,
+    app: tauri::AppHandle,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    step: crate::browser_page::Step,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    let key = root.to_string_lossy().to_string();
+    crate::browser_page::step(&app, &key, step).map_err(|reason| {
+        CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
+    })
+}

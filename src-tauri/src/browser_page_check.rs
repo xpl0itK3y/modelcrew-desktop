@@ -165,6 +165,10 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     let (opened, clicked) = same_page(app, out)?;
 
+    // Кнопка «назад» в панели: со синей, куда увела ссылка, — на зелёную.
+    browser_page::step(app, ROOT, browser_page::Step::Back)?;
+    let back = shot(app, out, "back")?;
+
     let scale = app
         .get_webview(&browser_page::label_for(ROOT))
         .and_then(|page| page.window().scale_factor().ok());
@@ -186,6 +190,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "home": home,
         "opened": opened,
         "clicked": clicked,
+        "back": back,
         "closed": !browser_page::is_open(app, ROOT),
     }))
 }

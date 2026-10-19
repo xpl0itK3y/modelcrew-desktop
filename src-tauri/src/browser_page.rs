@@ -234,6 +234,30 @@ pub fn is_web(url: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
+/// Шаг страницы по просьбе человека — кнопки над ней в панели.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Step {
+    Back,
+    Forward,
+    Reload,
+}
+
+/// Назад, вперёд или заново.
+///
+/// История у страницы своя, и ходить по ней проще всего её же руками: так шаг
+/// одинаков во всех трёх webview, без кода под каждую систему. Пустая история
+/// — не ошибка: страница просто останется где была, как и в браузере.
+pub fn step(app: &AppHandle, root: &str, step: Step) -> Result<(), String> {
+    let page = find(app, root)?;
+    let done = match step {
+        Step::Back => page.eval("history.back()"),
+        Step::Forward => page.eval("history.forward()"),
+        Step::Reload => page.reload(),
+    };
+    done.map_err(|error| format!("до страницы не достучаться: {error}"))
+}
+
 /// Открыта ли страница проекта.
 pub fn is_open(app: &AppHandle, root: &str) -> bool {
     app.get_webview(&label_for(root)).is_some()

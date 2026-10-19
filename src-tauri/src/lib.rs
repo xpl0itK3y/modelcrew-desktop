@@ -50,7 +50,7 @@ use agent_session_store::{
 };
 use agent_session_watch::agent_sessions_watch;
 use agent_sessions::{agent_session_locate, agent_session_locate_turn};
-use browser_view::{browser_dock, browser_frame, browser_go, browser_undock};
+use browser_view::{browser_dock, browser_frame, browser_go, browser_step, browser_undock};
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
@@ -1069,6 +1069,7 @@ pub fn run() {
             crew_claims,
             browser_frame,
             browser_go,
+            browser_step,
             browser_dock,
             browser_undock,
             mcp_status,
@@ -1233,6 +1234,7 @@ mod tests {
         "browser_dock",
         "browser_frame",
         "browser_go",
+        "browser_step",
         "browser_undock",
         "crew_claims",
         "git_abort_operation",
