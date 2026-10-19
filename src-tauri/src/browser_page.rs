@@ -56,6 +56,9 @@ const HOST_PREFIX: &str = "pagehost-";
 /// Запись консоли: ставится в каждую страницу раньше её собственных скриптов.
 const CONSOLE_SCRIPT: &str = include_str!("browser_console.js");
 
+/// Новые окна страницы открываются в ней же: вкладок у браузера проекта нет.
+const SAME_PAGE_SCRIPT: &str = include_str!("browser_same_page.js");
+
 /// Забрать записанное. Отвечает строкой JSON, а если записи на странице нет —
 /// `null`: подделать читателя страница не может, но и поставить его могло не
 /// успеть.
@@ -110,6 +113,7 @@ fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String
         // Консоль страницы не узнать задним числом: писать за ней надо с
         // первой её строчки.
         .initialization_script(CONSOLE_SCRIPT)
+        .initialization_script(SAME_PAGE_SCRIPT)
         // Файл, брошенный на страницу, — для сайта: так в него загружают.
         // Перехвати его Tauri, сайт бы его не увидел, а нам он здесь ни к
         // чему — терминалы ловят файлы в своём webview.
@@ -143,6 +147,7 @@ fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String
         // Консоль страницы не узнать задним числом: писать за ней надо с
         // первой её строчки.
         .initialization_script(CONSOLE_SCRIPT)
+        .initialization_script(SAME_PAGE_SCRIPT)
         .visible(false)
         .build()
         .map_err(|error| format!("страница не открылась: {error}"))?;

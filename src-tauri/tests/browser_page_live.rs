@@ -135,6 +135,22 @@ fn the_page_loads_shows_itself_and_closes() {
         }
     }
 
+    // Новых окон у страницы нет: и `window.open`, и ссылка «в новом окне»
+    // уводят её саму. Размер — последний, что ей задали.
+    let last = if cfg!(target_os = "linux") { FIT } else { DOCK };
+    for (name, colour, expected) in [
+        ("opened", "green", Colour::Green),
+        ("clicked", "blue", Colour::Blue),
+    ] {
+        let shot = &report[name];
+        page_is(shot, colour, pixels(last));
+        assert_eq!(
+            centre(&out.path().join(format!("{name}.png"))),
+            expected,
+            "{name}: {shot:#}"
+        );
+    }
+
     assert_eq!(report["closed"], true, "страница не закрылась: {report:#}");
 }
 

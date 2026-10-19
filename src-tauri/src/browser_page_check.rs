@@ -163,6 +163,8 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         (Value::Null, Value::Null)
     };
 
+    let (opened, clicked) = same_page(app, out)?;
+
     let scale = app
         .get_webview(&browser_page::label_for(ROOT))
         .and_then(|page| page.window().scale_factor().ok());
@@ -182,6 +184,8 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "blue_console": blue_console,
         "docked": docked,
         "home": home,
+        "opened": opened,
+        "clicked": clicked,
         "closed": !browser_page::is_open(app, ROOT),
     }))
 }
@@ -248,6 +252,29 @@ fn dock_and_back(app: &AppHandle, out: &Path, before: &Value) -> Result<(Value, 
     })();
     let _ = main.destroy();
     result
+}
+
+/// Увести синюю страницу «в новое окно» — сперва `window.open`, потом
+/// ссылкой с `target="_blank"` — и снять, куда она пришла.
+///
+/// Окон, кроме своего, у страницы нет: и то и другое обязано увести её саму.
+fn same_page(app: &AppHandle, out: &Path) -> Result<(Value, Value), String> {
+    let page = app
+        .get_webview(&browser_page::label_for(ROOT))
+        .ok_or_else(|| "страница пропала".to_string())?;
+    let run = |script: &str| {
+        page.eval(script)
+            .map_err(|error| format!("до страницы не достучаться: {error}"))
+    };
+    run("window.open('/green')")?;
+    let opened = shot(app, out, "opened")?;
+    run(concat!(
+        "{ const link = document.createElement('a');",
+        "link.href = '/blue'; link.target = '_blank';",
+        "document.body.append(link); link.click(); }",
+    ))?;
+    let clicked = shot(app, out, "clicked")?;
+    Ok((opened, clicked))
 }
 
 /// Консоль страницы, когда в ней наберётся хотя бы столько сообщений.
