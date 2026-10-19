@@ -1028,7 +1028,6 @@ pub fn serve(_app: tauri::AppHandle) {}
 
 /// Кто позвал: то, что о звонящем известно ещё до первой его строки, плюс
 /// пропуск, который он предъявил сам.
-#[cfg(unix)]
 pub struct Caller {
     /// Пропуск из рукопожатия. Пусто, когда окружение до шима не дошло.
     pub token: String,
@@ -1037,7 +1036,7 @@ pub struct Caller {
     pub ancestry: Vec<u32>,
 }
 
-/// Разговор на одном соединении.
+/// Разговор на одном соединении unix-сокета.
 ///
 /// Панель берётся через переданную функцию, а не напрямую из `PtyManager`:
 /// так весь путь — рукопожатие, разбор строк, ответы — проверяется на живом
@@ -1049,23 +1048,35 @@ fn serve_connection(
     panel_of: &dyn Fn(&Caller) -> Option<(String, PathBuf)>,
     still_serving: &dyn Fn() -> bool,
 ) {
-    use std::io::{BufRead, BufReader, Write};
-
     // Спрашиваем ядро до первой строки: соединение ещё целое, и процесс на
     // том конце заведомо жив.
     let ancestry = crate::peer::peer_pid(&stream)
         .map(crate::peer::ancestry)
         .unwrap_or_default();
+    converse(stream, ancestry, tools, panel_of, still_serving);
+}
 
-    let Ok(write_half) = stream.try_clone() else {
-        return;
-    };
-    let mut out = write_half;
-    let mut lines = BufReader::new(stream).lines();
+/// Сам разговор — одинаковый для любой трубы.
+///
+/// От трубы нужно только читать и писать: кто на том конце, транспорт узнаёт
+/// сам и приносит готовым. Отдельная половина для записи не нужна — разговор
+/// идёт по очереди, строка туда и строка обратно, и чтение с записью никогда
+/// не встречаются. На Windows это не удобство, а условие: синхронный канал
+/// не пропустит запись, пока по тому же дескриптору ждут чтения.
+fn converse<S: std::io::Read + std::io::Write>(
+    stream: S,
+    ancestry: Vec<u32>,
+    tools: &dyn Tools,
+    panel_of: &dyn Fn(&Caller) -> Option<(String, PathBuf)>,
+    still_serving: &dyn Fn() -> bool,
+) {
+    use std::io::{BufReader, Write};
+
+    let mut reader = BufReader::new(stream);
 
     // Первая строка — рукопожатие. Без неё неизвестно, кого обслуживаем, и
     // разговор дальше не имеет смысла.
-    let Some(Ok(first)) = lines.next() else {
+    let Some(first) = next_line(&mut reader) else {
         return;
     };
     let Some(token) = token_of_handshake(&first) else {
@@ -1073,10 +1084,11 @@ fn serve_connection(
     };
     let caller = Caller { token, ancestry };
 
-    for line in lines.map_while(Result::ok) {
+    while let Some(line) = next_line(&mut reader) {
         if line.trim().is_empty() {
             continue;
         }
+        let out = reader.get_mut();
         // Выключатель щёлкнули посреди сессии агента. Слушателя уже нет, но
         // это соединение открыто до того и осталось от прошлой жизни: отвечать
         // по нему инструментами — значит держать их живыми после того, как
@@ -1113,11 +1125,30 @@ fn serve_connection(
     }
 }
 
+/// Следующая строка без перевода строки — так же, как её отдаёт `lines()`.
+///
+/// `None` — собеседник ушёл или прислал не текст: разговаривать дальше не о
+/// чем.
+fn next_line(reader: &mut impl std::io::BufRead) -> Option<String> {
+    let mut line = String::new();
+    match reader.read_line(&mut line) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => {
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+            Some(line)
+        }
+    }
+}
+
 /// Ответ на запрос, пришедший к уже снятому серверу.
 ///
 /// `None` — отвечать нечему: уведомления ответа не ждут, и молчание на них
 /// правильно.
-#[cfg(unix)]
 fn farewell(line: &str) -> Option<String> {
     let value: Value = serde_json::from_str(line).ok()?;
     let id = value.get("id").cloned()?;
@@ -1131,7 +1162,6 @@ fn farewell(line: &str) -> Option<String> {
 
 /// Что слышит агент от выключенного плагина. Не «сервер умер», а что именно
 /// произошло и кто это может вернуть: выключил человек, включит тоже он.
-#[cfg(unix)]
 const SWITCHED_OFF: &str = concat!(
     "Плагин ModelCrew выключен — браузер проекта сейчас недоступен. ",
     "Инструменты вернутся, когда его включат: Настройки → Плагины → Браузер.",
@@ -2032,6 +2062,128 @@ mod tests {
         out.shutdown(std::net::Shutdown::Write).unwrap();
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Труба в памяти: всё, что скажет агент, известно заранее, а ответы
+    /// копятся в буфере. Разговор идёт по очереди, поэтому заранее записанный
+    /// вход для сервера ничем не отличается от живого — и проверка идёт на
+    /// любой системе, в том числе там, где unix-сокета нет.
+    struct Scripted {
+        said: std::io::Cursor<Vec<u8>>,
+        heard: Vec<u8>,
+    }
+
+    impl Scripted {
+        fn new(lines: &[&str], ending: &str) -> Self {
+            let said: String = lines.iter().map(|line| format!("{line}{ending}")).collect();
+            Self {
+                said: std::io::Cursor::new(said.into_bytes()),
+                heard: Vec::new(),
+            }
+        }
+
+        fn answers(&self) -> Vec<Value> {
+            String::from_utf8_lossy(&self.heard)
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect()
+        }
+    }
+
+    impl std::io::Read for Scripted {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            std::io::Read::read(&mut self.said, buf)
+        }
+    }
+
+    impl std::io::Write for Scripted {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            std::io::Write::write(&mut self.heard, buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn talks_the_same_over_any_pipe() {
+        // Перевод строки — виндовый: клиент на Windows вправе слать \r\n, и
+        // хвостовой \r не должен доехать до разбора JSON.
+        let hello = handshake("pass-of-panel-a");
+        let mut pipe = Scripted::new(
+            &[
+                &hello,
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"crew_ping"}}"#,
+            ],
+            "\r\n",
+        );
+        converse(
+            &mut pipe,
+            vec![7, 3],
+            &StubTools::working(),
+            // Родню приносит транспорт, разговор передаёт её как есть.
+            &|caller: &Caller| {
+                (caller.token == "pass-of-panel-a" && caller.ancestry == [7, 3])
+                    .then(|| ("panel-a".to_string(), PathBuf::from("/w/project")))
+            },
+            &|| true,
+        );
+
+        // На уведомление ответа нет: два запроса — два ответа.
+        let answers = pipe.answers();
+        assert_eq!(answers.len(), 2, "{answers:?}");
+        assert_eq!(answers[0]["id"], 1);
+        assert_eq!(answers[0]["result"]["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(answers[1]["id"], 2);
+        let text = answers[1]["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("/w/project"), "корень не дошёл: {text}");
+    }
+
+    #[test]
+    fn hangs_up_in_words_over_any_pipe() {
+        let hello = handshake("pass");
+        let mut pipe = Scripted::new(
+            &[
+                &hello,
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"crew_ping"}}"#,
+                r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"crew_ping"}}"#,
+            ],
+            "\n",
+        );
+        converse(
+            &mut pipe,
+            Vec::new(),
+            &StubTools::working(),
+            &|_| Some(("panel-a".to_string(), PathBuf::from("/w/project"))),
+            &|| false,
+        );
+
+        // Один отказ с причиной — и трубка положена: второй запрос уже никто
+        // не слушает.
+        let answers = pipe.answers();
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(answers[0]["id"], 1);
+        assert_eq!(answers[0]["result"]["isError"], true);
+        let text = answers[0]["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("выключен"), "{text}");
+    }
+
+    #[test]
+    fn says_nothing_to_a_pipe_that_never_said_who_it_is() {
+        // Первая строка не рукопожатие: кого обслуживаем, неизвестно, и
+        // отвечать нельзя даже на честный запрос.
+        let mut pipe = Scripted::new(&[r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#], "\n");
+        converse(
+            &mut pipe,
+            Vec::new(),
+            &StubTools::working(),
+            &|_| Some(("panel-a".to_string(), PathBuf::from("/w/project"))),
+            &|| true,
+        );
+        assert!(pipe.heard.is_empty(), "{:?}", pipe.answers());
     }
 
     /// Панель закрылась посреди сессии агента — и следующий же запрос это
