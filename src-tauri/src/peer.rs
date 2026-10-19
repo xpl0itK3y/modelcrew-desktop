@@ -9,9 +9,11 @@
 //! даёт ядро, а не собеседник, поэтому подделать его нельзя — в отличие от
 //! любого поля, которое агент присылает сам.
 
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
 /// Докуда идём вверх по родителям. Между шимом и шеллом панели их единицы:
@@ -65,7 +67,46 @@ pub fn peer_pid(_stream: &UnixStream) -> Option<u32> {
 ///
 /// Первым идёт сам процесс: шим и есть тот, кого запустила панель, когда
 /// агент зовёт сервер напрямую, без промежуточной оболочки.
+#[cfg(unix)]
 pub fn ancestry(pid: u32) -> Vec<u32> {
+    climb(pid, parent_of)
+}
+
+/// Цепочка от процесса вверх — по одному снимку всех процессов системы.
+///
+/// Снимок один на всю цепочку: это проход по всей системе, и делать его на
+/// каждом шаге вверх незачем.
+#[cfg(windows)]
+pub fn ancestry(pid: u32) -> Vec<u32> {
+    let parents = crate::win_proc::snapshot()
+        .into_iter()
+        .map(|entry| (entry.pid, entry.parent))
+        .collect();
+    ancestry_in(pid, &parents, crate::win_proc::creation_time)
+}
+
+/// Цепочка по готовой таблице родителей.
+///
+/// Windows помнит pid родителя и после его смерти, а сам номер тем временем
+/// может достаться новому процессу. Поэтому родителем считается только тот,
+/// кто родился не позже ребёнка: процесс моложе ребёнка его родителем быть не
+/// может — это чужой процесс под тем же номером, и панель по нему нашлась бы
+/// чужая. Не узнали, когда кто родился, — дальше не идём: цепочка без
+/// уверенности хуже короткой, за короткой есть пропуск.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ancestry_in(
+    pid: u32,
+    parents: &std::collections::HashMap<u32, u32>,
+    born: impl Fn(u32) -> Option<u64>,
+) -> Vec<u32> {
+    climb(pid, |child| {
+        let parent = *parents.get(&child)?;
+        (born(parent)? <= born(child)?).then_some(parent)
+    })
+}
+
+/// Подъём от процесса к предкам, пока родитель известен.
+fn climb(pid: u32, parent_of: impl Fn(u32) -> Option<u32>) -> Vec<u32> {
     let mut chain = Vec::new();
     let mut current = pid;
     while current > 1 && chain.len() < MAX_DEPTH {
@@ -124,6 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
     fn the_caller_is_named_by_the_kernel_and_not_by_himself() {
         // Соединяемся сами с собой: pid на том конце обязан оказаться нашим.
         // Это и есть всё свойство, ради которого затеяно опознание по
@@ -142,10 +184,9 @@ mod tests {
     #[test]
     fn the_chain_starts_with_the_caller_and_climbs_to_his_parent() {
         let chain = ancestry(std::process::id());
+        let parent = own_parent();
 
         assert_eq!(chain.first(), Some(&std::process::id()));
-        // SAFETY: getppid не трогает память и всегда успешен.
-        let parent = unsafe { libc::getppid() } as u32;
         assert!(
             chain.contains(&parent),
             "родителя нет в цепочке {chain:?}, ждали {parent}"
@@ -158,6 +199,60 @@ mod tests {
         // «не знаю, чей ты», и дальше в дело идёт пропуск.
         assert!(ancestry(0).is_empty());
         assert!(ancestry(1).is_empty());
+    }
+
+    #[cfg(unix)]
+    fn own_parent() -> u32 {
+        // SAFETY: getppid не трогает память и всегда успешен.
+        unsafe { libc::getppid() as u32 }
+    }
+
+    #[cfg(windows)]
+    fn own_parent() -> u32 {
+        crate::win_proc::snapshot()
+            .into_iter()
+            .find(|entry| entry.pid == std::process::id())
+            .map(|entry| entry.parent)
+            .expect("себя в снимке процессов не нашли")
+    }
+
+    #[test]
+    fn climbs_while_every_parent_is_older_than_its_child() {
+        // Шим 30 ← агент 20 ← шелл панели 10 ← приложение 8.
+        let parents = [(30, 20), (20, 10), (10, 8)].into_iter().collect();
+        let born = |pid| {
+            [(30, 4), (20, 3), (10, 2), (8, 1)]
+                .into_iter()
+                .find(|&(p, _)| p == pid)
+                .map(|(_, at)| at)
+        };
+
+        assert_eq!(ancestry_in(30, &parents, born), vec![30, 20, 10, 8]);
+    }
+
+    #[test]
+    fn a_parent_younger_than_its_child_is_a_stranger_under_the_same_number() {
+        // Шелл 10 закрыли, пока агент 20 работал, и номер 10 достался
+        // процессу, родившемуся позже агента. Пойди мы по нему дальше —
+        // агент нашёлся бы в чужой панели, той, где теперь живёт новый 10.
+        let parents = [(30, 20), (20, 10), (10, 8)].into_iter().collect();
+        let born = |pid| {
+            [(30, 4), (20, 3), (10, 5), (8, 1)]
+                .into_iter()
+                .find(|&(p, _)| p == pid)
+                .map(|(_, at)| at)
+        };
+
+        assert_eq!(ancestry_in(30, &parents, born), vec![30, 20]);
+    }
+
+    #[test]
+    fn stops_where_it_cannot_tell_who_was_born_first() {
+        // Времени рождения не узнать — процесс уже ушёл или закрыт от нас.
+        let parents = [(30, 20), (20, 10)].into_iter().collect();
+        let born = |pid| (pid != 10).then_some(1);
+
+        assert_eq!(ancestry_in(30, &parents, born), vec![30, 20]);
     }
 
     #[test]

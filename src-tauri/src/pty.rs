@@ -57,9 +57,9 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
-    // PID корневого процесса (шелла): Windows ищет foreground обходом дерева
-    // потомков; unix берёт лидера группы напрямую у PTY.
-    #[allow(dead_code)]
+    // PID корневого процесса (шелла). По нему MCP узнаёт, из какой панели
+    // вырос агент, а Windows ещё и ищет foreground обходом дерева потомков
+    // (unix берёт лидера группы напрямую у PTY).
     child_pid: Option<u32>,
     // child.wait() подтверждает через этот канал, что процесс уже завершился.
     // Одного успешного killer.kill() недостаточно перед установкой обновления.
@@ -367,7 +367,6 @@ impl PtyManager {
     /// Цепочка идёт от звонящего вверх, поэтому первое совпадение — ближайшая
     /// панель. Ближе шелла панели предков быть не может: сама панель и есть
     /// его корень.
-    #[cfg(unix)]
     pub fn panel_of_ancestry(&self, ancestry: &[u32]) -> Option<(String, PathBuf)> {
         let sessions = self.sessions.lock().unwrap();
         ancestry.iter().find_map(|pid| {
@@ -1934,7 +1933,6 @@ mod tests {
     /// Панель узнаётся по тому, из кого вырос процесс агента, — без всякого
     /// пропуска. Это и есть путь для cursor, который вычищает окружение, и
     /// для постоянной регистрации, где конфиг один на проект, а панелей много.
-    #[cfg(unix)]
     #[test]
     fn a_panel_is_found_by_the_processes_the_agent_grew_out_of() {
         let manager = PtyManager::default();
