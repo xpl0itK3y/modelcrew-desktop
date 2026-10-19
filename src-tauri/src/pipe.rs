@@ -9,8 +9,16 @@
 // - Открыть канал может только этот SID. Остальным система откажет, ещё не
 //   соединив.
 // - Сетевых клиентов канал не принимает: вход локальный, как и сокет.
-// - Имя канала не секрет, и занять его первым может кто угодно. Поэтому
-//   клиент, прежде чем отдать пропуск, проверяет, чей процесс на том конце.
+// - Имя канала не секрет, и занять его первым может кто угодно — со своим
+//   доступом вместо нашего. Поэтому обе стороны проверяют, чей процесс на том
+//   конце: клиент — прежде чем отдать пропуск, сервер — прежде чем отвечать.
+//
+// Занимать имя первыми и только сами, отказываясь стоять рядом с кем-то, —
+// не защита, а ловушка. Экземпляр канала живёт, пока его не закроют с обеих
+// сторон, а шим, который держит связь между запросами, узнаёт о закрытом
+// приложении лишь со следующим запросом. Перезапущенное приложение нашло бы
+// имя занятым остатком собственной прошлой жизни и не поднялось бы, пока жив
+// хоть один такой шим. Вторую копию приложения и так не пускает single-instance.
 
 use std::ffi::OsStr;
 use std::fs::File;
@@ -33,8 +41,8 @@ use windows_sys::Win32::Security::{
     TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    CreateFileW, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
+    SECURITY_SQOS_PRESENT,
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
@@ -66,14 +74,11 @@ pub struct Listener {
 }
 
 impl Listener {
-    /// `first` — имя должно быть свободно, и занимаем его мы. Если оно уже
-    /// занято, это отказ, а не подключение к чужому каналу: иначе клиенты
-    /// расходились бы между нами и тем, кто успел раньше.
-    pub fn bind(name: &Path, first: bool) -> io::Result<Self> {
+    pub fn bind(name: &Path) -> io::Result<Self> {
         let access = OnlyUser::new()
             .ok_or_else(|| io::Error::other("не удалось описать доступ к каналу"))?;
         let name = wide(name.as_os_str());
-        let waiting = instance(&name, &access, first)?;
+        let waiting = instance(&name, &access)?;
         Ok(Self {
             name,
             access,
@@ -81,29 +86,34 @@ impl Listener {
         })
     }
 
-    /// Ждёт клиента. Отдаёт канал к нему и pid процесса на том конце — по
-    /// данным системы, а не по словам клиента.
-    pub fn accept(&mut self) -> io::Result<(File, Option<u32>)> {
-        let pipe = match self.waiting.take() {
-            Some(pipe) => pipe,
-            None => instance(&self.name, &self.access, false)?,
-        };
-        if unsafe { ConnectNamedPipe(pipe.as_raw_handle(), null_mut()) } == 0 {
-            let error = io::Error::last_os_error();
-            let code = error.raw_os_error().unwrap_or(0) as u32;
-            // Клиент успел соединиться раньше, чем мы начали ждать, — или
-            // успел и уйти. Во втором случае разговор прочтёт конец и
-            // закончится сам.
-            if code != ERROR_PIPE_CONNECTED && code != ERROR_NO_DATA {
-                return Err(error);
+    /// Ждёт клиента своего же пользователя. Отдаёт канал к нему и pid
+    /// процесса на том конце — по данным системы, а не по словам клиента.
+    pub fn accept(&mut self) -> io::Result<(File, u32)> {
+        loop {
+            let pipe = match self.waiting.take() {
+                Some(pipe) => pipe,
+                None => instance(&self.name, &self.access)?,
+            };
+            if unsafe { ConnectNamedPipe(pipe.as_raw_handle(), null_mut()) } == 0 {
+                let error = io::Error::last_os_error();
+                let code = error.raw_os_error().unwrap_or(0) as u32;
+                // Клиент успел соединиться раньше, чем мы начали ждать, — или
+                // успел и уйти. Во втором случае разговор прочтёт конец и
+                // закончится сам.
+                if code != ERROR_PIPE_CONNECTED && code != ERROR_NO_DATA {
+                    return Err(error);
+                }
+            }
+            // Следующий экземпляр — сразу, пока этот ещё открыт. Пока жив хоть
+            // один экземпляр, клиент слышит «занято» и ждёт; не останется ни
+            // одного — услышит «канала нет» и решит, что приложение закрыто.
+            self.waiting = instance(&self.name, &self.access).ok();
+            // Чужого кладём молча и ждём следующего: отвечать ему нечего, а
+            // объяснять — значит рассказывать о себе.
+            if let Some(client) = client_pid(&pipe).filter(|&pid| is_ours(pid)) {
+                return Ok((File::from(pipe), client));
             }
         }
-        // Следующий экземпляр — сразу, пока этот ещё открыт. Пока жив хоть
-        // один экземпляр, клиент слышит «занято» и ждёт; не останется ни
-        // одного — услышит «канала нет» и решит, что приложение закрыто.
-        self.waiting = instance(&self.name, &self.access, false).ok();
-        let client = client_pid(&pipe);
-        Ok((File::from(pipe), client))
     }
 }
 
@@ -153,7 +163,7 @@ pub fn connect(name: &Path, wait: Duration) -> io::Result<File> {
     Ok(File::from(pipe))
 }
 
-fn instance(name: &[u16], access: &OnlyUser, first: bool) -> io::Result<OwnedHandle> {
+fn instance(name: &[u16], access: &OnlyUser) -> io::Result<OwnedHandle> {
     // Наследовать нельзя: иначе канал утёк бы в каждый процесс, который
     // приложение запускает, — в том числе в агентов.
     let attributes = SECURITY_ATTRIBUTES {
@@ -161,14 +171,10 @@ fn instance(name: &[u16], access: &OnlyUser, first: bool) -> io::Result<OwnedHan
         lpSecurityDescriptor: access.0,
         bInheritHandle: 0,
     };
-    let mut open = PIPE_ACCESS_DUPLEX;
-    if first {
-        open |= FILE_FLAG_FIRST_PIPE_INSTANCE;
-    }
     let handle = unsafe {
         CreateNamedPipeW(
             name.as_ptr(),
-            open,
+            PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             BUFFER,
@@ -196,6 +202,11 @@ fn server_is_ours(pipe: &OwnedHandle) -> bool {
     if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle(), &mut pid) } == 0 {
         return false;
     }
+    is_ours(pid)
+}
+
+/// Процесс нашего ли пользователя. Не выяснили — не нашего.
+fn is_ours(pid: u32) -> bool {
     match (User::of_pid(pid), User::current()) {
         (Some(theirs), Some(ours)) => theirs.is(&ours),
         _ => false,
@@ -334,7 +345,7 @@ mod tests {
     #[test]
     fn a_line_goes_there_and_back_and_the_server_learns_who_called() {
         let name = fresh_name();
-        let mut listener = Listener::bind(&name, true).unwrap();
+        let mut listener = Listener::bind(&name).unwrap();
         let server = std::thread::spawn(move || {
             let (pipe, client) = listener.accept().unwrap();
             let mut reader = BufReader::new(pipe);
@@ -354,13 +365,13 @@ mod tests {
 
         assert_eq!(answer, "echo hello\n");
         // Клиент — этот же процесс: pid система называет его.
-        assert_eq!(server.join().unwrap(), Some(std::process::id()));
+        assert_eq!(server.join().unwrap(), std::process::id());
     }
 
     #[test]
     fn the_next_client_gets_in_while_the_first_is_still_talking() {
         let name = fresh_name();
-        let mut listener = Listener::bind(&name, true).unwrap();
+        let mut listener = Listener::bind(&name).unwrap();
         let server = std::thread::spawn(move || {
             let first = listener.accept().unwrap();
             let second = listener.accept().unwrap();
@@ -374,10 +385,21 @@ mod tests {
     }
 
     #[test]
-    fn a_name_already_taken_is_not_shared() {
+    fn a_pipe_left_behind_does_not_keep_the_next_listener_out() {
+        // Остаток прошлой жизни: сервер ушёл, а клиент свой конец ещё не
+        // закрыл — так шим держит связь между запросами. Экземпляр жив, а с
+        // ним и имя.
         let name = fresh_name();
-        let _owner = Listener::bind(&name, true).unwrap();
-        assert!(Listener::bind(&name, true).is_err());
+        let mut old = Listener::bind(&name).unwrap();
+        let server = std::thread::spawn(move || old.accept().unwrap());
+        let lingering = connect(&name, Duration::from_secs(5)).unwrap();
+        drop(server.join().unwrap());
+
+        let mut fresh = Listener::bind(&name).unwrap();
+        let server = std::thread::spawn(move || fresh.accept().unwrap().1);
+        let _next = connect(&name, Duration::from_secs(5)).unwrap();
+        assert_eq!(server.join().unwrap(), std::process::id());
+        drop(lingering);
     }
 
     #[test]
@@ -389,7 +411,7 @@ mod tests {
     #[test]
     fn the_pipe_disappears_with_its_last_instance() {
         let name = fresh_name();
-        drop(Listener::bind(&name, true).unwrap());
+        drop(Listener::bind(&name).unwrap());
         let error = connect(&name, Duration::from_secs(1)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }

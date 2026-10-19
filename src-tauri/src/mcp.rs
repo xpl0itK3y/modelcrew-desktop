@@ -1068,17 +1068,6 @@ fn start(app: tauri::AppHandle) {
     });
 }
 
-/// Занимали ли мы канал за эту жизнь приложения.
-///
-/// Первый раз имя должно быть свободным: занято — значит, его держит кто-то
-/// другой, и вставать рядом с ним нельзя, клиенты расходились бы между нами.
-/// После выключателя имя остаётся за нами: шимы держат соединения между
-/// запросами, а каждое соединение — экземпляр того же канала. Требуй мы и
-/// тогда свободного имени, включить плагин обратно не вышло бы, пока жив
-/// хоть один агент.
-#[cfg(windows)]
-static CLAIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 #[cfg(windows)]
 fn start(app: tauri::AppHandle) {
     use std::sync::atomic::Ordering;
@@ -1093,8 +1082,7 @@ fn start(app: tauri::AppHandle) {
         eprintln!("ModelCrew MCP: не удалось назвать канал — агенты останутся без инструментов.");
         return;
     };
-    let first = !CLAIMED.load(Ordering::SeqCst);
-    let mut listener = match crate::pipe::Listener::bind(&path, first) {
+    let mut listener = match crate::pipe::Listener::bind(&path) {
         Ok(listener) => listener,
         Err(error) => {
             // Как и на unix: без строки в журнале отказ неотличим от «агент
@@ -1106,7 +1094,6 @@ fn start(app: tauri::AppHandle) {
             return;
         }
     };
-    CLAIMED.store(true, Ordering::SeqCst);
     // Панели узнают адрес только теперь, когда слушатель уже стоит.
     let generation = GENERATION.load(Ordering::SeqCst);
     *LISTENING.lock().unwrap() = Some(path.clone());
@@ -1130,7 +1117,7 @@ fn start(app: tauri::AppHandle) {
             let tools = AppTools { app: app.clone() };
             // Спрашиваем систему сразу: процесс на том конце заведомо жив,
             // пока он не сказал ни строки.
-            let ancestry = client.map(crate::peer::ancestry).unwrap_or_default();
+            let ancestry = crate::peer::ancestry(client);
             converse(
                 stream,
                 ancestry,
