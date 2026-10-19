@@ -109,7 +109,11 @@ fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String
     let page = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target))
         // Консоль страницы не узнать задним числом: писать за ней надо с
         // первой её строчки.
-        .initialization_script(CONSOLE_SCRIPT);
+        .initialization_script(CONSOLE_SCRIPT)
+        // Файл, брошенный на страницу, — для сайта: так в него загружают.
+        // Перехвати его Tauri, сайт бы его не увидел, а нам он здесь ни к
+        // чему — терминалы ловят файлы в своём webview.
+        .disable_drag_drop_handler();
     #[cfg(windows)]
     let page = system::watch_loading(page, label);
     let placed = host.add_child(
