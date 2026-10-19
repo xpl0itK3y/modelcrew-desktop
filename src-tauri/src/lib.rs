@@ -854,7 +854,9 @@ fn build_macos_menu<R: tauri::Runtime>(
 
 #[cfg(desktop)]
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
+    // Окно, а не webview-окно: в главном окне может оказаться не один webview,
+    // и тогда Tauri не признаёт его webview-окном.
+    if let Some(window) = app.get_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();

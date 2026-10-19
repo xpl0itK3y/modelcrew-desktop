@@ -8,14 +8,16 @@
 //! появляется ничего, потому что появляться нечему.
 //!
 //! Окно страницы человеку не показывается, а видит её человек кадром в панели
-//! браузера, как и раньше. На macOS и Windows окно стоит за краем экранов. На
-//! Linux так нельзя: Wayland не даёт приложению ставить окна, и композитор
-//! вывел бы страницу прямо перед человеком. Там окно Tauri спрятано, а сама
-//! страница живёт в окне GTK без экрана.
+//! браузера, как и раньше. На macOS и Windows страница — отдельный webview в
+//! своём окне за краем экранов. Окно и webview у неё разные: webview можно
+//! пересадить в другое окно, и страница при этом не перезагрузится. На Linux
+//! так нельзя: Wayland не даёт приложению ставить окна, и композитор вывел бы
+//! страницу прямо перед человеком. Там окно Tauri спрятано, а сама страница
+//! живёт в окне GTK без экрана.
 
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Webview, WebviewUrl};
 
 /// Размер страницы, пока о ней никто не спрашивал. От него зависит вёрстка,
 /// которую увидит агент, открывший страницу до того, как человек открыл ящик.
@@ -43,9 +45,13 @@ const LOAD_START: Duration = Duration::from_millis(150);
 /// Как часто переспрашивать, догрузилась ли страница.
 const LOAD_POLL: Duration = Duration::from_millis(100);
 
-/// С чего начинается метка окна страницы: по нему они находятся среди окон
+/// С чего начинается метка страницы: по нему они находятся среди webview
 /// самого приложения.
 const LABEL_PREFIX: &str = "page-";
+
+/// С чего начинается метка окна, в котором живёт страница.
+#[cfg(not(target_os = "linux"))]
+const HOST_PREFIX: &str = "pagehost-";
 
 /// Запись консоли: ставится в каждую страницу раньше её собственных скриптов.
 const CONSOLE_SCRIPT: &str = include_str!("browser_console.js");
@@ -75,18 +81,62 @@ pub fn label_for(root: &str) -> String {
     format!("{LABEL_PREFIX}{name}")
 }
 
+/// Метка окна, в котором живёт страница.
+#[cfg(not(target_os = "linux"))]
+fn host_label(label: &str) -> String {
+    format!("{HOST_PREFIX}{}", label.trim_start_matches(LABEL_PREFIX))
+}
+
 /// Открыть страницу проекта или перевести уже открытую на новый адрес.
 pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
     let target: tauri::Url = url
         .parse()
         .map_err(|_| format!("адрес не разобрать: {url}"))?;
     let label = label_for(root);
-    if let Some(window) = app.get_webview_window(&label) {
-        return window
+    if let Some(page) = app.get_webview(&label) {
+        return page
             .navigate(target)
             .map_err(|error| format!("страница не перешла по адресу: {error}"));
     }
-    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(target))
+    create(app, &label, target)
+}
+
+/// Новая страница: webview в своём окне за краем экранов.
+#[cfg(not(target_os = "linux"))]
+fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String> {
+    let host = tauri::window::WindowBuilder::new(app, host_label(label))
+        .title("ModelCrew")
+        .inner_size(VIEWPORT.0, VIEWPORT.1)
+        .position(OFFSCREEN.0, OFFSCREEN.1)
+        .decorations(false)
+        .skip_taskbar(true)
+        .focused(false)
+        .build()
+        .map_err(|error| format!("страница не открылась: {error}"))?;
+    let page = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target))
+        // Консоль страницы не узнать задним числом: писать за ней надо с
+        // первой её строчки.
+        .initialization_script(CONSOLE_SCRIPT);
+    #[cfg(windows)]
+    let page = system::watch_loading(page, label);
+    let placed = host.add_child(
+        page,
+        tauri::LogicalPosition::new(0.0, 0.0),
+        tauri::LogicalSize::new(VIEWPORT.0, VIEWPORT.1),
+    );
+    if let Err(error) = placed {
+        // Пустое окно за краем экрана держало бы память, а показать его
+        // некому.
+        let _ = host.destroy();
+        return Err(format!("страница не открылась: {error}"));
+    }
+    Ok(())
+}
+
+/// Новая страница: окно Tauri, чей webview уезжает в окно GTK без экрана.
+#[cfg(target_os = "linux")]
+fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String> {
+    let page = tauri::WebviewWindowBuilder::new(app, label, WebviewUrl::External(target))
         .title("ModelCrew")
         .inner_size(VIEWPORT.0, VIEWPORT.1)
         .position(OFFSCREEN.0, OFFSCREEN.1)
@@ -95,21 +145,19 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
         .focused(false)
         // Консоль страницы не узнать задним числом: писать за ней надо с
         // первой её строчки.
-        .initialization_script(CONSOLE_SCRIPT);
-    #[cfg(windows)]
-    let builder = system::watch_loading(builder, &label);
-    #[cfg(target_os = "linux")]
-    let builder = builder.visible(false);
-    let page = builder
+        .initialization_script(CONSOLE_SCRIPT)
+        .visible(false)
         .build()
         .map_err(|error| format!("страница не открылась: {error}"))?;
-    // Спрятанное окно WebKitGTK не снимает, поэтому на Linux страница
-    // переезжает в окно без экрана, а окно Tauri так и не покажется.
-    #[cfg(target_os = "linux")]
-    system::move_offscreen(&page)?;
-    #[cfg(not(target_os = "linux"))]
-    let _ = page;
-    Ok(())
+    // Спрятанное окно WebKitGTK не снимает, поэтому страница переезжает в
+    // окно без экрана, а окно Tauri так и не покажется.
+    system::move_offscreen(&page)
+}
+
+/// Страница проекта, если она открыта.
+fn find(app: &AppHandle, root: &str) -> Result<Webview, String> {
+    app.get_webview(&label_for(root))
+        .ok_or_else(|| "страница ещё не открыта".to_string())
 }
 
 /// Подогнать страницу под то место, где её показывают.
@@ -118,35 +166,44 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
 /// ширине ящика, снизу остаётся чёрная полоса, а агент видит вёрстку, которой
 /// перед человеком нет.
 pub fn fit(app: &AppHandle, root: &str, width: f64, height: f64) -> Result<(), String> {
-    let window = app
-        .get_webview_window(&label_for(root))
-        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let page = find(app, root)?;
     let wanted = (width.max(MIN_VIEWPORT.0), height.max(MIN_VIEWPORT.1));
     // На Linux размер страницы знает только окно без экрана: спрятанному
     // окну Tauri система о его размере не сообщает.
     #[cfg(target_os = "linux")]
-    return system::resize(&window, wanted.0, wanted.1);
+    return system::resize(&page, wanted.0, wanted.1);
     #[cfg(not(target_os = "linux"))]
     {
         // Кадр просят раз в секунду, а перерисовка страницы стоит времени:
         // меняем размер, только когда он и правда разъехался с местом.
-        if let Some(current) = logical_size(&window) {
+        if let Some(current) = logical_size(&page) {
             if (current.0 - wanted.0).abs() < 1.0 && (current.1 - wanted.1).abs() < 1.0 {
                 return Ok(());
             }
         }
-        window
-            .set_size(tauri::LogicalSize::new(wanted.0, wanted.1))
+        let size = tauri::LogicalSize::new(wanted.0, wanted.1);
+        // Окно растёт вместе со страницей: что вылезло за его край, система
+        // может и не рисовать.
+        if let Some(host) = app.get_window(&host_label(page.label())) {
+            host.set_size(size)
+                .map_err(|error| format!("страницу не изменить в размере: {error}"))?;
+        }
+        page.set_size(size)
             .map_err(|error| format!("страницу не изменить в размере: {error}"))
     }
 }
 
-/// Размер окна страницы в тех же единицах, в которых его задают, — точках, а
-/// не пикселях устройства.
-fn logical_size(window: &tauri::WebviewWindow) -> Option<(f64, f64)> {
-    let scale = window.scale_factor().ok()?;
-    let size = window.inner_size().ok()?;
-    (scale > 0.0).then(|| (f64::from(size.width) / scale, f64::from(size.height) / scale))
+/// Размер страницы в тех же единицах, в которых его задают, — точках, а не
+/// пикселях устройства.
+fn logical_size(page: &Webview) -> Option<(f64, f64)> {
+    let scale = page.window().scale_factor().ok()?;
+    let size = page.size().ok()?;
+    (scale > 0.0).then(|| {
+        (
+            f64::from(size.width) / scale,
+            f64::from(size.height) / scale,
+        )
+    })
 }
 
 /// Адрес, по которому странице можно ходить.
@@ -160,14 +217,12 @@ pub fn is_web(url: &str) -> bool {
 
 /// Открыта ли страница проекта.
 pub fn is_open(app: &AppHandle, root: &str) -> bool {
-    app.get_webview_window(&label_for(root)).is_some()
+    app.get_webview(&label_for(root)).is_some()
 }
 
 /// Закрыть страницу проекта.
 pub fn close(app: &AppHandle, root: &str) {
-    if let Some(window) = app.get_webview_window(&label_for(root)) {
-        let _ = window.destroy();
-    }
+    remove(app, &label_for(root));
 }
 
 /// Закрыть все страницы: выход из приложения и выключенный плагин.
@@ -175,33 +230,57 @@ pub fn close(app: &AppHandle, root: &str) {
 /// Без этого окна остались бы висеть за краем экрана: человеку их не видно,
 /// а память и загруженные страницы они держат.
 pub fn close_all(app: &AppHandle) {
-    for window in app.webview_windows().into_values() {
-        if window.label().starts_with(LABEL_PREFIX) {
-            // `destroy`, а не `close`: закрытие — это просьба, её слушает
-            // обработчик окон и её можно отменить. Здесь просьб не место:
-            // плагин выключили — страницы быть не должно.
-            let _ = window.destroy();
+    for label in app.webviews().into_keys() {
+        if label.starts_with(LABEL_PREFIX) {
+            remove(app, &label);
+        }
+    }
+    // Окно, чья страница не открылась или уже закрыта, тоже никому не нужно.
+    #[cfg(not(target_os = "linux"))]
+    for (label, host) in app.windows() {
+        if label.starts_with(HOST_PREFIX) {
+            let _ = host.destroy();
+        }
+    }
+}
+
+/// Убрать страницу вместе с её окном.
+///
+/// `destroy`, а не `close`: закрытие окна — это просьба, её слушает
+/// обработчик окон и её можно отменить. Здесь просьб не место: страницы быть
+/// не должно.
+fn remove(app: &AppHandle, label: &str) {
+    #[cfg(target_os = "linux")]
+    if let Some(window) = app.get_window(label) {
+        let _ = window.destroy();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Сначала сама страница: окно уносит с собой лишь те webview, что
+        // сидят в нём сейчас.
+        if let Some(page) = app.get_webview(label) {
+            let _ = page.close();
+        }
+        if let Some(host) = app.get_window(&host_label(label)) {
+            let _ = host.destroy();
         }
     }
 }
 
 /// Кадр страницы проекта, PNG.
 pub fn snapshot(app: &AppHandle, root: &str) -> Result<Vec<u8>, String> {
-    let window = app
-        .get_webview_window(&label_for(root))
-        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let page = find(app, root)?;
     // Ширину снимка берём у самой страницы: она меняется вместе с ящиком, и
     // постоянная здесь означала бы кадр не того размера, что показывают.
-    let width = logical_size(&window).map_or(VIEWPORT.0, |size| size.0) as u32;
-    let scale = window.scale_factor().unwrap_or(1.0);
+    let width = logical_size(&page).map_or(VIEWPORT.0, |size| size.0) as u32;
+    let scale = page.window().scale_factor().unwrap_or(1.0);
     let (sender, receiver) = std::sync::mpsc::channel();
-    window
-        .with_webview(move |platform| {
-            // Снимок начинает система и отвечает позже своим вызовом, поэтому
-            // ответ уходит в канал, а не возвращается отсюда.
-            system::snapshot(&platform, width, scale, sender);
-        })
-        .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+    page.with_webview(move |platform| {
+        // Снимок начинает система и отвечает позже своим вызовом, поэтому
+        // ответ уходит в канал, а не возвращается отсюда.
+        system::snapshot(&platform, width, scale, sender);
+    })
+    .map_err(|error| format!("до страницы не достучаться: {error}"))?;
     match receiver.recv_timeout(SNAPSHOT_WAIT) {
         Ok(result) => result,
         Err(_) => Err("страница не отдала кадр".to_string()),
@@ -235,15 +314,12 @@ pub struct ConsoleMessage {
 /// Платформенного кода здесь нет: спросить страницу и получить ответ JSON
 /// умеют все три webview, и Tauri даёт это одним вызовом.
 pub fn console(app: &AppHandle, root: &str) -> Result<ConsoleLog, String> {
-    let window = app
-        .get_webview_window(&label_for(root))
-        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let page = find(app, root)?;
     let (sender, receiver) = std::sync::mpsc::channel();
-    window
-        .eval_with_callback(READ_CONSOLE, move |answer| {
-            let _ = sender.send(answer);
-        })
-        .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+    page.eval_with_callback(READ_CONSOLE, move |answer| {
+        let _ = sender.send(answer);
+    })
+    .map_err(|error| format!("до страницы не достучаться: {error}"))?;
     // До первой загрузки wry держит скрипт в очереди и ответа не будет вовсе.
     let answer = receiver
         .recv_timeout(SNAPSHOT_WAIT)
@@ -294,15 +370,12 @@ fn ask<T: Send + 'static>(
     root: &str,
     probe: fn(&tauri::webview::PlatformWebview) -> Result<T, String>,
 ) -> Result<T, String> {
-    let window = app
-        .get_webview_window(&label_for(root))
-        .ok_or_else(|| "страница ещё не открыта".to_string())?;
+    let page = find(app, root)?;
     let (sender, receiver) = std::sync::mpsc::channel();
-    window
-        .with_webview(move |platform| {
-            let _ = sender.send(probe(&platform));
-        })
-        .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+    page.with_webview(move |platform| {
+        let _ = sender.send(probe(&platform));
+    })
+    .map_err(|error| format!("до страницы не достучаться: {error}"))?;
     match receiver.recv_timeout(SNAPSHOT_WAIT) {
         Ok(result) => result,
         Err(_) => Err("страница не ответила".to_string()),
@@ -448,18 +521,17 @@ mod system {
     /// Не дожидаясь ответа: зовут нас с рантайма команд, а размер меняется на
     /// главном потоке. Тот же размер повторно не ставится — иначе страница
     /// перекладывалась бы при каждом кадре.
-    pub fn resize(window: &tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+    pub fn resize(page: &tauri::Webview, width: f64, height: f64) -> Result<(), String> {
         let wanted = (width.round() as i32, height.round() as i32);
-        window
-            .with_webview(move |platform| {
-                let Some(page) = offscreen(&platform.inner()) else {
-                    return;
-                };
-                if page.default_size() != wanted {
-                    page.set_default_size(wanted.0, wanted.1);
-                }
-            })
-            .map_err(|error| format!("страницу не изменить в размере: {error}"))
+        page.with_webview(move |platform| {
+            let Some(page) = offscreen(&platform.inner()) else {
+                return;
+            };
+            if page.default_size() != wanted {
+                page.set_default_size(wanted.0, wanted.1);
+            }
+        })
+        .map_err(|error| format!("страницу не изменить в размере: {error}"))
     }
 
     fn offscreen(webview: &webkit2gtk::WebView) -> Option<gtk::OffscreenWindow> {
@@ -552,8 +624,8 @@ mod system {
     use std::collections::BTreeSet;
     use std::sync::Mutex;
 
-    use tauri::webview::{PageLoadEvent, PlatformWebview};
-    use tauri::{AppHandle, Manager, WebviewWindowBuilder};
+    use tauri::webview::{PageLoadEvent, PlatformWebview, WebviewBuilder};
+    use tauri::{AppHandle, Manager};
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
     };
@@ -584,19 +656,19 @@ mod system {
 
     /// Следить за переходами страницы: начало — по запросу перехода, конец —
     /// по его завершению, удачному или нет.
-    pub fn watch_loading<'a>(
-        builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+    pub fn watch_loading(
+        builder: WebviewBuilder<tauri::Wry>,
         label: &str,
-    ) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    ) -> WebviewBuilder<tauri::Wry> {
         let started = label.to_string();
         builder
             .on_navigation(move |_| {
                 mark(&started, true);
                 true
             })
-            .on_page_load(|window, payload| {
+            .on_page_load(|page, payload| {
                 if matches!(payload.event(), PageLoadEvent::Finished) {
-                    mark(window.label(), false);
+                    mark(page.label(), false);
                 }
             })
     }
@@ -604,7 +676,7 @@ mod system {
     /// Идёт ли ещё загрузка.
     pub fn is_loading(app: &AppHandle, root: &str) -> Result<bool, String> {
         let label = super::label_for(root);
-        if app.get_webview_window(&label).is_none() {
+        if app.get_webview(&label).is_none() {
             return Err("страница ещё не открыта".to_string());
         }
         let pages = LOADING

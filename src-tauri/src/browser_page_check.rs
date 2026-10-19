@@ -159,8 +159,8 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
     let blue_console = console(app, 1)?;
 
     let scale = app
-        .get_webview_window(&browser_page::label_for(ROOT))
-        .and_then(|window| window.scale_factor().ok());
+        .get_webview(&browser_page::label_for(ROOT))
+        .and_then(|page| page.window().scale_factor().ok());
 
     browser_page::close(app, ROOT);
     let deadline = Instant::now() + SETTLE_WAIT;
