@@ -197,6 +197,11 @@ impl PtyManager {
             if let Ok(joined) = std::env::join_paths(paths) {
                 cmd.env("PATH", joined);
             }
+            // Путь к приложению — для обёртки codex под cmd: в текст `.cmd`
+            // его не впишешь (см. mcp_register::cmd_body).
+            if let Ok(exe) = std::env::current_exe() {
+                cmd.env(crate::mcp_register::EXE_ENV, exe);
+            }
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.

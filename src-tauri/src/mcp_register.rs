@@ -60,6 +60,10 @@ const WRAPPED: [&str; 3] = ["claude", "codex", "copilot"];
 /// Переменная окружения opencode: конфиг в ней лежит строкой, целиком.
 pub const OPENCODE_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
+/// Путь к приложению в окружении панели. Нужен одной обёртке codex для cmd:
+/// написать его в сам файл нельзя — см. `cmd_body`.
+pub const EXE_ENV: &str = "MODELCREW_EXE";
+
 /// Схема конфига opencode. Не проверка, а подсказка редактору, — но раз она
 /// стоит в их собственных примерах, пусть стоит и у нас.
 const OPENCODE_SCHEMA: &str = "https://opencode.ai/config.json";
@@ -130,19 +134,34 @@ fn write_shims(dir: &Path, exe: &Path) -> std::io::Result<()> {
     std::fs::write(dir.join(CONFIG_FILE), format!("{}\n", config_body(exe)))?;
     for agent in WRAPPED {
         let path = dir.join(agent);
-        std::fs::write(&path, shim_body(agent, exe))?;
+        std::fs::write(&path, shim_body(agent, &shim_flags(agent, exe)))?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
 }
 
-/// На Windows обёртки ещё нет: там и `PATH` панели, и сами оболочки устроены
-/// иначе, а делать это вслепую — хуже, чем не делать.
-#[cfg(not(unix))]
+/// На Windows обёрток у агента две, как раскладывает их и npm: `.cmd` для cmd
+/// и PowerShell и файл без расширения для Git Bash. Каждая оболочка берёт
+/// свою и чужой не видит: cmd файл без расширения не запустит, а Git Bash
+/// `.cmd` не ищет.
+#[cfg(windows)]
+fn write_shims(dir: &Path, exe: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let config = dir.join(CONFIG_FILE);
+    std::fs::write(&config, format!("{}\n", config_body(exe)))?;
+    for agent in WRAPPED {
+        std::fs::write(dir.join(format!("{agent}.cmd")), cmd_body(agent))?;
+        let flags = git_bash_flags(agent, exe, &config);
+        std::fs::write(dir.join(agent), shim_body(agent, &flags))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn write_shims(_dir: &Path, _exe: &Path) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "обёртки агентов пока только для unix",
+        "обёртки агентов здесь не умеют",
     ))
 }
 
@@ -165,8 +184,7 @@ fn config_body(exe: &Path) -> String {
 /// поэтому обычный поиск нашёл бы её саму и агент запустил бы сам себя. Не
 /// нашли — говорим словами и уходим с кодом «команды нет», как сделала бы
 /// оболочка.
-fn shim_body(agent: &str, exe: &Path) -> String {
-    let flags = shim_flags(agent, exe);
+fn shim_body(agent: &str, flags: &str) -> String {
     format!(
         r#"#!/bin/sh
 # Создано ModelCrew. Браузер проекта доступен агенту только здесь, в панели:
@@ -211,6 +229,76 @@ fn shim_flags(agent: &str, exe: &Path) -> String {
                 "mcp_servers.{SERVER}.args=[{}]",
                 toml_string(STDIO_FLAG)
             )),
+        ),
+        _ => String::new(),
+    }
+}
+
+/// Флаги обёртки для Git Bash. Тело у неё unix-овое, а вот путь к конфигу
+/// claude получает виндовый: свой каталог оболочка видит как `/c/Users/…`, а
+/// claude.exe такого пути не знает. Остальным хватает unix-овых: copilot
+/// получает содержимое файла, а путь к приложению у codex и так виндовый.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn git_bash_flags(agent: &str, exe: &Path, config: &Path) -> String {
+    match agent {
+        "claude" => format!("--mcp-config={}", sh_quote(&config.to_string_lossy())),
+        _ => shim_flags(agent, exe),
+    }
+}
+
+/// Обёртка для cmd и PowerShell.
+///
+/// Только ASCII и с CRLF: cmd читает пакетный файл в кодировке консоли, и
+/// путь с кириллицей в тексте файла исказился бы. Поэтому путей в нём нет:
+/// к конфигу обёртка идёт от себя (`%~dp0`), путь к приложению берёт из
+/// окружения панели, а по-русски не пишет.
+///
+/// Настоящий CLI ищется в одном `PATH`: без `$PATH:` where заглянул бы и в
+/// текущий каталог, то есть в проект, — PowerShell, откуда тоже зовут эту
+/// обёртку, туда не смотрит. По той же причине и сам where — по полному
+/// пути. Файл без расширения — sh-обёртка для Git Bash, её cmd не запустит.
+///
+/// Настоящий `.cmd` (npm) cmd запускает без `call` — управление уходит к нему
+/// насовсем, как `exec` в sh. Код выхода 9009 — тот же, каким cmd отвечает
+/// на неизвестную команду.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn cmd_body(agent: &str) -> String {
+    let flags = cmd_flags(agent);
+    format!(
+        r#"@echo off
+rem Made by ModelCrew. The project browser reaches the agent only here, in
+rem the panel: the app writes nothing into the agent's own config.
+setlocal DisableDelayedExpansion
+set "modelcrew_real="
+for /f "delims=" %%G in ('%SystemRoot%\System32\where.exe $PATH:{agent} 2^>nul') do (
+  if /i not "%%~dpG"=="%~dp0" for %%E in (.exe .com .bat .cmd) do (
+    if /i "%%~xG"=="%%E" if not defined modelcrew_real set "modelcrew_real=%%G"
+  )
+)
+if not defined modelcrew_real (
+  >&2 echo ModelCrew: {agent} was not found in PATH
+  exit /b 9009
+)
+"%modelcrew_real%" {flags} %*
+"#
+    )
+    .replace('\n', "\r\n")
+}
+
+/// Те же флаги, что в `shim_flags`, но словами cmd. Каждый целиком в
+/// кавычках: внутри них cmd не трогает ни `&`, ни скобок в путях.
+///
+/// Путь к приложению codex получает строкой TOML в тройных одинарных
+/// кавычках: внутри неё обратная косая — просто символ, а одинарная кавычка
+/// из имени папки строку не закроет.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn cmd_flags(agent: &str) -> String {
+    match agent {
+        "claude" => format!(r#""--mcp-config=%~dp0{CONFIG_FILE}""#),
+        // Файл copilot тоже берёт — путём после «@».
+        "copilot" => format!(r#""--additional-mcp-config=@%~dp0{CONFIG_FILE}""#),
+        "codex" => format!(
+            r#"-c "mcp_servers.{SERVER}.command='''%{EXE_ENV}%'''" -c "mcp_servers.{SERVER}.args=['{STDIO_FLAG}']""#
         ),
         _ => String::new(),
     }
@@ -391,7 +479,7 @@ mod tests {
 
     #[test]
     fn the_wrapper_runs_the_real_agent_and_not_itself() {
-        let body = shim_body("claude", &exe());
+        let body = shim_body("claude", &shim_flags("claude", &exe()));
         // Поиск идёт по PATH мимо собственного каталога — иначе обёртка нашла
         // бы себя и запустила рекурсию вместо агента.
         assert!(body.contains(r#"[ "$dir" = "$self" ] && continue"#));
@@ -416,6 +504,153 @@ mod tests {
         // не закрыть её и превратить остаток в отдельные слова.
         assert!(flags.contains(r#"'\''"#));
         assert!(flags.starts_with("-c '"));
+    }
+
+    #[test]
+    fn the_cmd_wrapper_looks_only_in_path_and_past_itself() {
+        let body = cmd_body("claude");
+        // Не в проекте: where без `$PATH:` начал бы с текущего каталога.
+        assert!(body.contains(r"%SystemRoot%\System32\where.exe $PATH:claude "));
+        assert!(body.contains(r#"if /i not "%%~dpG"=="%~dp0""#));
+        // sh-обёртку без расширения cmd не запустит — её пропускаем.
+        assert!(body.contains("(.exe .com .bat .cmd)"));
+        assert!(body.contains(r#""%modelcrew_real%" "--mcp-config=%~dp0mcp.json" %*"#));
+    }
+
+    #[test]
+    fn the_cmd_wrapper_says_nothing_cmd_would_misread() {
+        for agent in WRAPPED {
+            let body = cmd_body(agent);
+            assert!(
+                body.is_ascii(),
+                "{agent}: cmd читает файл в кодировке консоли"
+            );
+            assert_eq!(
+                body.matches('\n').count(),
+                body.matches("\r\n").count(),
+                "{agent}: строки через CRLF"
+            );
+        }
+    }
+
+    #[test]
+    fn each_agent_gets_its_flag_in_cmd_too() {
+        assert_eq!(cmd_flags("claude"), r#""--mcp-config=%~dp0mcp.json""#);
+        assert_eq!(
+            cmd_flags("copilot"),
+            r#""--additional-mcp-config=@%~dp0mcp.json""#
+        );
+        let codex = cmd_flags("codex");
+        assert!(codex.contains("mcp_servers.modelcrew-browser.command='''%MODELCREW_EXE%'''"));
+        assert!(codex.contains("mcp_servers.modelcrew-browser.args=['--mcp-stdio']"));
+    }
+
+    #[test]
+    fn git_bash_hands_claude_a_path_it_can_open() {
+        let config = Path::new(r"C:\Users\o'brien\AppData\Roaming\agent-shims\mcp.json");
+        assert_eq!(
+            git_bash_flags("claude", &exe(), config),
+            r"--mcp-config='C:\Users\o'\''brien\AppData\Roaming\agent-shims\mcp.json'"
+        );
+        // Остальным путь к каталогу не нужен — флаги те же, что на unix.
+        assert_eq!(
+            git_bash_flags("codex", &exe(), config),
+            shim_flags("codex", &exe())
+        );
+    }
+
+    /// Обёртку запускает сам cmd, а настоящий агент — `.cmd`, как у npm: он
+    /// записывает, с чем его позвали, и выходит со своим кодом.
+    #[cfg(windows)]
+    fn through_cmd(agent: &str, app: &str) -> (Option<i32>, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe()).unwrap();
+        let real = dir.path().join("real");
+        write(
+            &real,
+            &format!("{agent}.cmd"),
+            "@>\"%~dp0args.txt\" echo %*\r\n@exit /b 7\r\n",
+        );
+        let status = std::process::Command::new(shims.join(format!("{agent}.cmd")))
+            .arg("hello")
+            .env("PATH", std::env::join_paths([&shims, &real]).unwrap())
+            .env(EXE_ENV, app)
+            .status()
+            .unwrap();
+        let args = std::fs::read_to_string(real.join("args.txt")).unwrap_or_default();
+        let config = shims.join(CONFIG_FILE).display().to_string();
+        (status.code(), args, config)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_cmd_wrapper_hands_the_real_agent_our_config_and_the_persons_words() {
+        let (code, args, config) = through_cmd("claude", "");
+        assert_eq!(code, Some(7), "код выхода — настоящего агента");
+        assert!(args.contains(&format!("--mcp-config={config}")), "{args}");
+        assert!(args.trim_end().ends_with("hello"), "{args}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_through_cmd_gets_the_app_path_whatever_its_folder_is_called() {
+        let app = r"C:\Tools (x86)\R&D\ModelCrew.exe";
+        let (code, args, _) = through_cmd("codex", app);
+        assert_eq!(code, Some(7));
+        assert!(
+            args.contains(&format!(
+                "mcp_servers.modelcrew-browser.command='''{app}'''"
+            )),
+            "{args}"
+        );
+        assert!(args.trim_end().ends_with("hello"), "{args}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_cmd_wrapper_without_the_real_agent_says_so_and_does_not_call_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe()).unwrap();
+        let output = std::process::Command::new(shims.join("copilot.cmd"))
+            .env("PATH", &shims)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(9009));
+        let said = String::from_utf8_lossy(&output.stderr);
+        assert!(said.contains("copilot was not found"), "{said}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_git_bash_wrapper_runs_the_real_agent_with_a_windows_path() {
+        let Some(git) = std::env::var_os("ProgramFiles")
+            .map(|root| PathBuf::from(root).join(r"Git\usr\bin"))
+            .filter(|bin| bin.join("bash.exe").is_file())
+        else {
+            eprintln!("Git Bash не установлен — проверять не на чем");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe()).unwrap();
+        let real = dir.path().join("real");
+        write(
+            &real,
+            "claude",
+            "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/args.txt\"\nexit 7\n",
+        );
+        let status = std::process::Command::new(git.join("bash.exe"))
+            .args(["-c", "claude hello"])
+            .env("PATH", std::env::join_paths([&shims, &real, &git]).unwrap())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(7));
+        let args = std::fs::read_to_string(real.join("args.txt")).unwrap();
+        let config = shims.join(CONFIG_FILE).display().to_string();
+        assert!(args.contains(&format!("--mcp-config={config}")), "{args}");
+        assert!(args.trim_end().ends_with("hello"), "{args}");
     }
 
     #[test]
