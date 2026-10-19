@@ -40,6 +40,14 @@ const SETTLE_WAIT: Duration = Duration::from_secs(5);
 /// Размер, под который проверка подгоняет страницу.
 const FIT: (f64, f64) = (800.0, 600.0);
 
+/// Место, на которое проверка ставит страницу в главном окне.
+const DOCK: browser_page::Place = browser_page::Place {
+    x: 100.0,
+    y: 50.0,
+    width: 600.0,
+    height: 400.0,
+};
+
 /// Что зелёная страница пишет в консоль: всё, что запись обязана поймать, —
 /// подстановки с цветом, предупреждение, ошибку, исключение, которое никто не
 /// поймал, отказ промиса и картинку, которой нет.
@@ -142,21 +150,18 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
     let green = shot(app, out, "green")?;
     let green_console = console(app, GREEN_MESSAGES)?;
 
-    // Размер меняет система, и кадр в новом размере выходит не сразу.
     browser_page::fit(app, ROOT, FIT.0, FIT.1)?;
-    let wide = green["width"].as_u64();
-    let deadline = Instant::now() + SETTLE_WAIT;
-    let small = loop {
-        let small = shot(app, out, "small")?;
-        if small["width"].as_u64() != wide || Instant::now() >= deadline {
-            break small;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
+    let small = reshot(app, out, "small", &green)?;
 
     browser_page::open(app, ROOT, &site.url("blue"))?;
     let blue = shot(app, out, "blue")?;
     let blue_console = console(app, 1)?;
+
+    let (docked, home) = if browser_page::CAN_DOCK {
+        dock_and_back(app, out, &blue)?
+    } else {
+        (Value::Null, Value::Null)
+    };
 
     let scale = app
         .get_webview(&browser_page::label_for(ROOT))
@@ -175,6 +180,8 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "small": small,
         "blue": blue,
         "blue_console": blue_console,
+        "docked": docked,
+        "home": home,
         "closed": !browser_page::is_open(app, ROOT),
     }))
 }
@@ -195,6 +202,52 @@ fn shot(app: &AppHandle, out: &Path, name: &str) -> Result<Value, String> {
         "width": width,
         "height": height,
     }))
+}
+
+/// Снять страницу, которой только что сменили размер.
+///
+/// Размер меняет система, и кадр в новом размере выходит не сразу: снимаем,
+/// пока ширина не уйдёт от прежней или не выйдет время.
+fn reshot(app: &AppHandle, out: &Path, name: &str, before: &Value) -> Result<Value, String> {
+    let deadline = Instant::now() + SETTLE_WAIT;
+    loop {
+        let after = shot(app, out, name)?;
+        if after["width"] != before["width"] || Instant::now() >= deadline {
+            return Ok(after);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Пересадить страницу в главное окно и вернуть домой, снимая её и там, и
+/// там.
+///
+/// Главного окна у проверки нет — заводим своё, за краем экрана, как и окно
+/// страницы.
+fn dock_and_back(app: &AppHandle, out: &Path, before: &Value) -> Result<(Value, Value), String> {
+    let main = tauri::window::WindowBuilder::new(app, "main")
+        .inner_size(1000.0, 700.0)
+        .position(-31_000.0, -31_000.0)
+        .decorations(false)
+        .skip_taskbar(true)
+        .focused(false)
+        .build()
+        .map_err(|error| format!("главное окно проверки: {error}"))?;
+    let result = (|| {
+        browser_page::dock(app, ROOT, DOCK)?;
+        if !browser_page::is_docked(app, ROOT) {
+            return Err("страница не встала в главное окно".to_string());
+        }
+        let docked = reshot(app, out, "docked", before)?;
+        browser_page::undock(app, ROOT)?;
+        if browser_page::is_docked(app, ROOT) {
+            return Err("страница не вернулась в своё окно".to_string());
+        }
+        let home = shot(app, out, "home")?;
+        Ok((docked, home))
+    })();
+    let _ = main.destroy();
+    result
 }
 
 /// Консоль страницы, когда в ней наберётся хотя бы столько сообщений.

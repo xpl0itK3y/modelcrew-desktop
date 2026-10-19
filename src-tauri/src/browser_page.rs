@@ -104,14 +104,7 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
 /// Новая страница: webview в своём окне за краем экранов.
 #[cfg(not(target_os = "linux"))]
 fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String> {
-    let host = tauri::window::WindowBuilder::new(app, host_label(label))
-        .title("ModelCrew")
-        .inner_size(VIEWPORT.0, VIEWPORT.1)
-        .position(OFFSCREEN.0, OFFSCREEN.1)
-        .decorations(false)
-        .skip_taskbar(true)
-        .focused(false)
-        .build()
+    let host = make_host(app, &host_label(label))
         .map_err(|error| format!("страница не открылась: {error}"))?;
     let page = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target))
         // Консоль страницы не узнать задним числом: писать за ней надо с
@@ -154,6 +147,19 @@ fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String
     system::move_offscreen(&page)
 }
 
+/// Окно за краем экранов, в котором страница живёт, пока её не показывают.
+#[cfg(not(target_os = "linux"))]
+fn make_host(app: &AppHandle, label: &str) -> tauri::Result<tauri::Window> {
+    tauri::window::WindowBuilder::new(app, label)
+        .title("ModelCrew")
+        .inner_size(VIEWPORT.0, VIEWPORT.1)
+        .position(OFFSCREEN.0, OFFSCREEN.1)
+        .decorations(false)
+        .skip_taskbar(true)
+        .focused(false)
+        .build()
+}
+
 /// Страница проекта, если она открыта.
 fn find(app: &AppHandle, root: &str) -> Result<Webview, String> {
     app.get_webview(&label_for(root))
@@ -174,6 +180,10 @@ pub fn fit(app: &AppHandle, root: &str, width: f64, height: f64) -> Result<(), S
     return system::resize(&page, wanted.0, wanted.1);
     #[cfg(not(target_os = "linux"))]
     {
+        // В панели размер страницы задаёт сама панель, вместе с местом.
+        if sits_in_main(&page) {
+            return Ok(());
+        }
         // Кадр просят раз в секунду, а перерисовка страницы стоит времени:
         // меняем размер, только когда он и правда разъехался с местом.
         if let Some(current) = logical_size(&page) {
@@ -265,6 +275,133 @@ fn remove(app: &AppHandle, label: &str) {
             let _ = host.destroy();
         }
     }
+}
+
+/// Метка главного окна: в нём страницу показывают живой.
+const MAIN_WINDOW: &str = "main";
+
+/// Где показать страницу: точки от левого верхнего угла главного окна.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub struct Place {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Умеет ли эта система показать страницу живой, а не кадром.
+///
+/// На Linux страница живёт в окне GTK без экрана, и пересадить её в главное
+/// окно нельзя: там её показывают кадром.
+pub const CAN_DOCK: bool = cfg!(not(target_os = "linux"));
+
+/// Стоит ли страница проекта сейчас в главном окне.
+pub fn is_docked(app: &AppHandle, root: &str) -> bool {
+    app.get_webview(&label_for(root))
+        .is_some_and(|page| sits_in_main(&page))
+}
+
+fn sits_in_main(page: &Webview) -> bool {
+    page.window().label() == MAIN_WINDOW
+}
+
+/// Все открытые страницы.
+fn pages(app: &AppHandle) -> Vec<Webview> {
+    app.webviews()
+        .into_iter()
+        .filter(|(label, _)| label.starts_with(LABEL_PREFIX))
+        .map(|(_, page)| page)
+        .collect()
+}
+
+/// Показать страницу живой: пересадить её в главное окно, поверх панели
+/// браузера.
+///
+/// Там она остаётся собой: щелчки, ввод и прокрутка идут прямо в неё, а
+/// рисует её система в полном разрешении экрана. Место задаёт панель, в
+/// точках от угла окна: главный webview занимает окно целиком, и его вёрстка
+/// меряется в них же.
+#[cfg(not(target_os = "linux"))]
+pub fn dock(app: &AppHandle, root: &str, place: Place) -> Result<(), String> {
+    let page = find(app, root)?;
+    let bounds = tauri::Rect {
+        position: tauri::LogicalPosition::new(place.x, place.y).into(),
+        size: tauri::LogicalSize::new(place.width.max(1.0), place.height.max(1.0)).into(),
+    };
+    let misplaced = |error: tauri::Error| format!("страницу не поставить в панель: {error}");
+    if sits_in_main(&page) {
+        return page.set_bounds(bounds).map_err(misplaced);
+    }
+    let main = app
+        .get_window(MAIN_WINDOW)
+        .ok_or_else(|| "главного окна нет".to_string())?;
+    // Место в панели одно: страница другого проекта уходит к себе.
+    for other in pages(app) {
+        if other.label() != page.label() && sits_in_main(&other) {
+            send_home(app, &other)?;
+        }
+    }
+    // Пересаженная страница стоит там же, где стояла дома, — в углу окна и
+    // в размер дома. Пока её не поставили на место, её не видно, иначе она
+    // на миг закрыла бы собой всё окно.
+    page.hide().map_err(misplaced)?;
+    page.reparent(&main).map_err(misplaced)?;
+    page.set_bounds(bounds).map_err(misplaced)?;
+    page.show().map_err(misplaced)
+}
+
+#[cfg(target_os = "linux")]
+pub fn dock(_app: &AppHandle, _root: &str, _place: Place) -> Result<(), String> {
+    Err("здесь страницу показывают только кадром".to_string())
+}
+
+/// Вернуть страницу проекта из панели в её окно.
+pub fn undock(app: &AppHandle, root: &str) -> Result<(), String> {
+    match app.get_webview(&label_for(root)) {
+        Some(page) => send_home(app, &page),
+        None => Ok(()),
+    }
+}
+
+/// Вернуть в свои окна все страницы: главное окно прячут.
+///
+/// В спрятанном окне страница перестала бы рисоваться, и агент, попросив
+/// снимок, получил бы пустоту.
+pub fn undock_all(app: &AppHandle) {
+    for page in pages(app) {
+        let _ = send_home(app, &page);
+    }
+}
+
+/// Вернуть страницу в её окно за краем экранов.
+#[cfg(not(target_os = "linux"))]
+fn send_home(app: &AppHandle, page: &Webview) -> Result<(), String> {
+    if !sits_in_main(page) {
+        return Ok(());
+    }
+    let unplaced = |error: tauri::Error| format!("страницу не убрать из панели: {error}");
+    let label = host_label(page.label());
+    let host = match app.get_window(&label) {
+        Some(host) => host,
+        None => make_host(app, &label).map_err(unplaced)?,
+    };
+    // Размер страница уносит с собой: агент, снявший её дома, увидит ту же
+    // вёрстку, что видел человек.
+    let (width, height) = logical_size(page).unwrap_or(VIEWPORT);
+    let size = tauri::LogicalSize::new(width, height);
+    host.set_size(size).map_err(unplaced)?;
+    page.reparent(&host).map_err(unplaced)?;
+    page.set_bounds(tauri::Rect {
+        position: tauri::LogicalPosition::new(0.0, 0.0).into(),
+        size: size.into(),
+    })
+    .map_err(unplaced)
+}
+
+#[cfg(target_os = "linux")]
+fn send_home(_app: &AppHandle, _page: &Webview) -> Result<(), String> {
+    Ok(())
 }
 
 /// Кадр страницы проекта, PNG.

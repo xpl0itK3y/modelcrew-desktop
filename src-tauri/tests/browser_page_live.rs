@@ -20,9 +20,11 @@ const APP: &str = env!("CARGO_BIN_EXE_modelcrew-desktop");
 /// кончилась и за полторы минуты — повисла, и ждать дальше бессмысленно.
 const WATCHDOG: Duration = Duration::from_secs(90);
 
-/// Страница по умолчанию и та, под которую проверка её подгоняет.
+/// Страница по умолчанию, та, под которую проверка её подгоняет, и место, на
+/// которое она ставит её в главном окне.
 const VIEWPORT: (f64, f64) = (1280.0, 800.0);
 const FIT: (f64, f64) = (800.0, 600.0);
+const DOCK: (f64, f64) = (600.0, 400.0);
 
 #[test]
 fn the_page_loads_shows_itself_and_closes() {
@@ -117,6 +119,21 @@ fn the_page_loads_shows_itself_and_closes() {
         "{:#}",
         report["blue_console"]
     );
+
+    // Страница пересаживается в главное окно и обратно, не перезагружаясь:
+    // в панели она той величины, что панель, и домой уносит тот же размер.
+    // На Linux пересаживать некуда — там страницу показывают кадром.
+    if cfg!(not(target_os = "linux")) {
+        for name in ["docked", "home"] {
+            let shot = &report[name];
+            page_is(shot, "blue", pixels(DOCK));
+            assert_eq!(
+                centre(&out.path().join(format!("{name}.png"))),
+                Colour::Blue,
+                "{name}: {shot:#}"
+            );
+        }
+    }
 
     assert_eq!(report["closed"], true, "страница не закрылась: {report:#}");
 }

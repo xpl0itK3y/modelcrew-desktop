@@ -50,7 +50,7 @@ use agent_session_store::{
 };
 use agent_session_watch::agent_sessions_watch;
 use agent_sessions::{agent_session_locate, agent_session_locate_turn};
-use browser_view::{browser_frame, browser_go};
+use browser_view::{browser_dock, browser_frame, browser_go, browser_undock};
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
@@ -1029,6 +1029,9 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
+                    // Страница, стоявшая в панели, уходит к себе: в спрятанном
+                    // окне она перестала бы рисоваться для агента.
+                    browser_page::undock_all(window.app_handle());
                     let _ = window.hide();
                 }
             }
@@ -1066,6 +1069,8 @@ pub fn run() {
             crew_claims,
             browser_frame,
             browser_go,
+            browser_dock,
+            browser_undock,
             mcp_status,
             mcp_set_enabled,
             panel_snapshots,
@@ -1225,8 +1230,10 @@ mod tests {
         "agent_sessions_watch",
         "app_set_badge",
         "app_set_locale",
+        "browser_dock",
         "browser_frame",
         "browser_go",
+        "browser_undock",
         "crew_claims",
         "git_abort_operation",
         "git_bash_install",
