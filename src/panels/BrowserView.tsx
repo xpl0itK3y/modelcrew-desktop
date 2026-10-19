@@ -1,9 +1,12 @@
 // Страница проекта внутри ModelCrew.
 //
 // Браузер живёт без своего окна, и его страницу человек видит здесь, а не в
-// отдельном приложении поверх нашего. Приходит она картинкой: встроить сайт
-// рамкой нельзя — `frame-src` в CSP стоит в `none`, и это охраняется тестом
-// (`security/appSecurityConfig.test.ts`).
+// отдельном приложении поверх нашего. Встроить сайт рамкой нельзя —
+// `frame-src` в CSP стоит в `none`, и это охраняется тестом
+// (`security/appSecurityConfig.test.ts`). Поэтому на место ящика бэкенд
+// ставит саму страницу, отдельным webview, и в ней щёлкают и печатают как в
+// браузере (`browser/pageDock.ts`). Где система так не умеет и пока место
+// чем-то закрыто, страница приходит картинкой.
 //
 // Тем же браузером пользуются агенты проекта. Поэтому ящик — не только
 // просмотр: набранный здесь адрес открывается в той же вкладке, которую
@@ -18,6 +21,7 @@ import {
   watchBrowserFrame,
   type BrowserFrame,
 } from "../browser/browserFrames";
+import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import { localizeBackendError, useI18n } from "../i18n";
 
 /**
@@ -51,8 +55,11 @@ function BrowserProjectView(props: { workspaceId: string }) {
   // что видно, и убирается сам.
   const refusedAt = useRef<string | null>(null);
   // Место под кадр: по нему бэкенд подгоняет саму страницу, чтобы картинка
-  // была той же формы, что и ящик.
+  // была той же формы, что и ящик. Живую страницу ставят ровно сюда же.
   const pageRef = useRef<HTMLDivElement | null>(null);
+  // Стоит ли страница здесь живой. Пока стоит, картинку не просим.
+  const docked = useRef(false);
+  const dock = useRef<PageDock | null>(null);
 
   useEffect(() => {
     return watchBrowserFrame(
@@ -60,6 +67,11 @@ function BrowserProjectView(props: { workspaceId: string }) {
       (next) => {
         setFrame(next);
         setTrouble(null);
+        // Страницу открыли заново или увели из ящика, пока окно прятали:
+        // место надо прислать снова, хоть оно и не сдвинулось.
+        if (docked.current && !next.docked) {
+          dock.current?.forget();
+        }
         if (!typed.current) {
           setAddress(next.url);
         }
@@ -77,8 +89,31 @@ function BrowserProjectView(props: { workspaceId: string }) {
           ? { width: Math.round(box.width), height: Math.round(box.height) }
           : null;
       },
+      () => docked.current,
     );
   }, [props.workspaceId]);
+
+  const dockable = frame.running && frame.dockable;
+  useEffect(() => {
+    const place = pageRef.current;
+    if (!dockable || !place) {
+      return;
+    }
+    const current = keepPageDocked(
+      props.workspaceId,
+      place,
+      (next) => {
+        docked.current = next;
+      },
+      (error) => setTrouble(localizeBackendError(error)),
+    );
+    dock.current = current;
+    return () => {
+      current.stop();
+      dock.current = null;
+      docked.current = false;
+    };
+  }, [dockable, props.workspaceId]);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -105,6 +140,17 @@ function BrowserProjectView(props: { workspaceId: string }) {
 
   const failure = refusal ?? trouble;
   const picture = frameSource(frame.image);
+  // Первый запуск браузера занимает секунды, и без надписи нажатие
+  // «Открыть» выглядит как будто ничего не произошло. Живая страница стоит
+  // поверх этого места или вот-вот встанет, а её кадр придёт со следующим
+  // опросом: «пусто» про неё соврало бы.
+  const notice = opening
+    ? t("browser.opening")
+    : !frame.running
+      ? t("browser.notRunning")
+      : dockable
+        ? null
+        : t("browser.blank");
 
   return (
     <div className="browser-view">
@@ -142,17 +188,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
             alt={frame.title || t("browser.frameAlt")}
           />
         ) : (
-          <p className="browser-empty">
-            {
-              // Первый запуск браузера занимает секунды, и без этой строки
-              // нажатие «Открыть» выглядит как будто ничего не произошло.
-              opening
-                ? t("browser.opening")
-                : frame.running
-                  ? t("browser.blank")
-                  : t("browser.notRunning")
-            }
-          </p>
+          notice && <p className="browser-empty">{notice}</p>
         )}
       </div>
     </div>

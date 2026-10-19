@@ -160,6 +160,36 @@ describe("watchBrowserFrame", () => {
     stop();
   });
 
+  it("asks for no picture while the page itself stands in the drawer", async () => {
+    // Живую страницу видно и так: снимок за ней только грел бы процессор, а
+    // подгонка размера спорила бы с местом, которое ей задаёт ящик.
+    invoke.mockResolvedValue(NO_FRAME);
+    let live = true;
+
+    const stop = watchBrowserFrame(
+      "workspace-1",
+      () => {},
+      () => {},
+      () => ({ width: 792, height: 560 }),
+      () => live,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(invoke).toHaveBeenLastCalledWith("browser_frame", {
+      workspaceId: "workspace-1",
+      picture: false,
+    });
+
+    live = false;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(invoke).toHaveBeenLastCalledWith("browser_frame", {
+      workspaceId: "workspace-1",
+      width: 792,
+      height: 560,
+    });
+    stop();
+  });
+
   it("waits for one frame before asking for the next", async () => {
     // Снимок иногда идёт дольше секунды. С обычным интервалом запросы
     // наложились бы, и браузер снимал бы кадры вместо того, чтобы работать.

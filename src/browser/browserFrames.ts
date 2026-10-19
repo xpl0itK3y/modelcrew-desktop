@@ -5,8 +5,11 @@
 // — `img-src` в CSP это уже разрешает, новых прав не нужно.
 //
 // Опрос, а не подписка: снимок кадра стоит времени, и просить его надо
-// ровно тогда, когда на него кто-то смотрит. Живая трансляция (screencast)
-// — следующий шаг, и она заменит здесь только источник кадров.
+// ровно тогда, когда на него кто-то смотрит.
+//
+// Где система умеет, панель показывает саму страницу, живой
+// (`pageDock.ts`). Тогда картинка не нужна, и опрос приносит только адрес с
+// заголовком — для адресной строки.
 
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "../platform";
@@ -19,6 +22,10 @@ export type BrowserFrame = {
   // Поднят ли браузер проекта. Пока нет — ящик говорит об этом сам, а не
   // показывает пустой прямоугольник.
   running: boolean;
+  // Стоит ли страница сейчас живой в ящике — по словам бэкенда.
+  docked: boolean;
+  // Умеет ли система показать страницу живой. Где не умеет — только кадр.
+  dockable: boolean;
 };
 
 export const NO_FRAME: BrowserFrame = {
@@ -26,6 +33,8 @@ export const NO_FRAME: BrowserFrame = {
   url: "",
   title: "",
   running: false,
+  docked: false,
+  dockable: false,
 };
 
 // Раз в секунду: страницу смотрит человек, а не машина. Чаще — впустую
@@ -70,6 +79,9 @@ export function watchBrowserFrame(
   // однажды: ящик тянут за край, окно разворачивают, и страница обязана идти
   // за местом следом. Без размера бэкенд оставит страницу как есть.
   sizeOf: () => { width: number; height: number } | null = () => null,
+  // Стоит ли страница в ящике живой. Тогда ни картинка, ни размер не нужны:
+  // место ей задаёт сам ящик.
+  live: () => boolean = () => false,
 ): () => void {
   if (!isTauri || !workspaceId) {
     onFrame(NO_FRAME);
@@ -82,12 +94,14 @@ export function watchBrowserFrame(
     // Окно свёрнуто или перекрыто — смотреть некому, кадр не нужен.
     if (!document.hidden) {
       try {
-        const size = sizeOf();
-        const frame = await invoke<BrowserFrame>("browser_frame", {
-          workspaceId,
-          width: size?.width,
-          height: size?.height,
-        });
+        let request;
+        if (live()) {
+          request = { workspaceId, picture: false };
+        } else {
+          const size = sizeOf();
+          request = { workspaceId, width: size?.width, height: size?.height };
+        }
+        const frame = await invoke<BrowserFrame>("browser_frame", request);
         if (!stopped) {
           onFrame(frame);
         }
