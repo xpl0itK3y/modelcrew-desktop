@@ -1097,7 +1097,7 @@ fn converse<S: std::io::Read + std::io::Write>(
     panel_of: &dyn Fn(&Caller) -> Option<(String, PathBuf)>,
     still_serving: &dyn Fn() -> bool,
 ) {
-    use std::io::{BufReader, Write};
+    use std::io::BufReader;
 
     let mut reader = BufReader::new(stream);
 
