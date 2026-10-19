@@ -7,19 +7,120 @@
 //! рукопожатие или молчание вместо ответа выглядят точно так же, как «агент не
 //! видит инструментов».
 
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+
+use app::Listener;
 
 const APP: &str = env!("CARGO_BIN_EXE_modelcrew-desktop");
 
-fn socket_path(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("mc-shim-{name}-{}.sock", std::process::id()));
-    let _ = std::fs::remove_file(&path);
-    path
+/// Приложение на том конце — без приложения: только вход, через который к нему
+/// приходит шим. Свой адрес каждому тесту: тесты идут параллельно.
+#[cfg(unix)]
+mod app {
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::path::{Path, PathBuf};
+
+    pub fn address(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("mc-shim-{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    /// Файл сокета переживает слушателя — убираем сами.
+    pub fn forget(address: &Path) {
+        let _ = std::fs::remove_file(address);
+    }
+
+    pub struct Listener(UnixListener);
+
+    impl Listener {
+        pub fn bind(address: &Path) -> Self {
+            Self(UnixListener::bind(address).unwrap())
+        }
+
+        /// Одно соединение, и больше слушатель не нужен: уходя, он закрывает
+        /// вход, и следующий стук шима получает отказ.
+        pub fn accept(self) -> UnixStream {
+            self.0.accept().unwrap().0
+        }
+    }
+}
+
+/// На Windows вход — именованный канал. Свой, а не тот, что поднимает
+/// приложение: тест проверяет шим, и сервер на том конце должен быть
+/// простейшим. Пускать ли шим, решает уже шим: он сверяет, что канал держит
+/// процесс того же пользователя, — тест им и является.
+#[cfg(windows)]
+mod app {
+    use std::fs::File;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::path::{Path, PathBuf};
+    use std::ptr::{null, null_mut};
+
+    use windows_sys::Win32::Foundation::{ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+    use windows_sys::Win32::System::Pipes::{
+        ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
+    };
+
+    pub fn address(name: &str) -> PathBuf {
+        PathBuf::from(format!(
+            r"\\.\pipe\com.modelcrew.desktop.test.shim-{name}-{}",
+            std::process::id()
+        ))
+    }
+
+    /// Канал исчезает с последним дескриптором — убирать нечего.
+    pub fn forget(_address: &Path) {}
+
+    /// Единственный экземпляр канала. Другого нет, и когда этот закроется,
+    /// следующий стук шима услышит «канала нет» — как от закрытого приложения.
+    pub struct Listener(OwnedHandle);
+
+    impl Listener {
+        pub fn bind(address: &Path) -> Self {
+            let name: Vec<u16> = address.as_os_str().encode_wide().chain([0]).collect();
+            let handle = unsafe {
+                CreateNamedPipeW(
+                    name.as_ptr(),
+                    PIPE_ACCESS_DUPLEX,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                    1,
+                    64 * 1024,
+                    64 * 1024,
+                    0,
+                    null(),
+                )
+            };
+            assert_ne!(
+                handle,
+                INVALID_HANDLE_VALUE,
+                "{}",
+                std::io::Error::last_os_error()
+            );
+            Self(unsafe { OwnedHandle::from_raw_handle(handle) })
+        }
+
+        pub fn accept(self) -> File {
+            if unsafe { ConnectNamedPipe(self.0.as_raw_handle(), null_mut()) } == 0 {
+                // Шим успел соединиться раньше, чем мы начали ждать.
+                let error = std::io::Error::last_os_error();
+                assert_eq!(
+                    error.raw_os_error(),
+                    Some(ERROR_PIPE_CONNECTED as i32),
+                    "{error}"
+                );
+            }
+            File::from(self.0)
+        }
+    }
 }
 
 fn shim(socket: &PathBuf, token: Option<&str>) -> std::process::Child {
@@ -45,6 +146,7 @@ fn shim(socket: &PathBuf, token: Option<&str>) -> std::process::Child {
 /// Короткий и в `/tmp` намеренно: `sun_path` — 104 байта на macOS, а обычный
 /// временный каталог там начинается с `/var/folders/…` и один только префикс
 /// съедает половину.
+#[cfg(unix)]
 fn fake_home(name: &str) -> PathBuf {
     let home = PathBuf::from(format!("/tmp/mc-home-{name}-{}", std::process::id()));
     let data = home
@@ -58,6 +160,7 @@ fn fake_home(name: &str) -> PathBuf {
     home
 }
 
+#[cfg(unix)]
 fn well_known_socket(home: &Path) -> PathBuf {
     home.join(if cfg!(target_os = "macos") {
         "Library/Application Support"
@@ -68,6 +171,9 @@ fn well_known_socket(home: &Path) -> PathBuf {
     .join("mcp.sock")
 }
 
+// Только unix: на Windows известный адрес — канал, общий на всю машину, и
+// запущенный рядом ModelCrew ответил бы шиму вместо теста.
+#[cfg(unix)]
 #[test]
 fn finds_the_socket_itself_when_nobody_told_it_the_address() {
     // cursor чистит окружение перед запуском MCP-сервера: ни адреса, ни
@@ -76,10 +182,10 @@ fn finds_the_socket_itself_when_nobody_told_it_the_address() {
     let home = fake_home("plain");
     let socket = well_known_socket(&home);
     let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = Listener::bind(&socket);
 
     let served = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let stream = listener.accept();
         let mut out = stream.try_clone().unwrap();
         let mut lines = BufReader::new(stream).lines();
         let handshake = lines.next().unwrap().unwrap();
@@ -123,12 +229,12 @@ fn finds_the_socket_itself_when_nobody_told_it_the_address() {
 
 #[test]
 fn carries_the_pass_of_its_panel_and_brings_the_answer_back() {
-    let socket = socket_path("ok");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let socket = app::address("ok");
+    let listener = Listener::bind(&socket);
 
     // Приложение на том конце: читает рукопожатие, затем запросы.
     let served = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let stream = listener.accept();
         let mut out = stream.try_clone().unwrap();
         let mut lines = BufReader::new(stream).lines();
         let handshake = lines.next().unwrap().unwrap();
@@ -162,19 +268,19 @@ fn carries_the_pass_of_its_panel_and_brings_the_answer_back() {
     assert!(answer.contains("\"ok\":true"), "{answer}");
     assert_eq!(status.code(), Some(0));
 
-    let _ = std::fs::remove_file(&socket);
+    app::forget(&socket);
 }
 
 #[test]
 fn says_out_loud_that_it_was_not_let_in() {
-    let socket = socket_path("closed");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let socket = app::address("closed");
+    let listener = Listener::bind(&socket);
 
     // Приложение закрывает соединение сразу: пропуск ни с одной панелью не
     // сошёлся — ровно то, что видит агент чужой или закрытой панели. Второго
     // соединения оно уже не примет: слушатель уходит вместе с потоком.
     let served = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let stream = listener.accept();
         drop(stream);
     });
 
@@ -217,7 +323,7 @@ fn says_out_loud_that_it_was_not_let_in() {
     let reason = answers[1]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(reason.contains("ModelCrew сейчас недоступен"), "{reason}");
 
-    let _ = std::fs::remove_file(&socket);
+    app::forget(&socket);
 }
 
 #[test]
@@ -226,11 +332,11 @@ fn goes_on_without_a_pass_and_lets_the_application_work_out_who_called() {
     // (cursor), и так же будет приходить любой при постоянной регистрации:
     // конфиг один на проект, а панелей у проекта много. Падать здесь значит
     // не дать приложению даже попытаться опознать звонящего по процессам.
-    let socket = socket_path("nopass");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let socket = app::address("nopass");
+    let listener = Listener::bind(&socket);
 
     let served = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let stream = listener.accept();
         let mut out = stream.try_clone().unwrap();
         let mut lines = BufReader::new(stream).lines();
         let handshake = lines.next().unwrap().unwrap();
@@ -262,5 +368,5 @@ fn goes_on_without_a_pass_and_lets_the_application_work_out_who_called() {
     assert!(answer.contains("\"ok\":true"), "{answer}");
     assert_eq!(status.code(), Some(0));
 
-    let _ = std::fs::remove_file(&socket);
+    app::forget(&socket);
 }
