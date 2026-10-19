@@ -1,4 +1,5 @@
-//! Шим: агент говорит с ним по stdio, он передаёт всё в сокет приложения.
+//! Шим: агент говорит с ним по stdio, он передаёт всё в сокет приложения —
+//! на Windows в именованный канал.
 //!
 //! Это то же самое приложение, запущенное с `--mcp-stdio`, — ровно тот приём,
 //! которым уже работают хуки на Windows: exe запускает любая оболочка, а
@@ -40,7 +41,7 @@ where
         .is_some_and(|arg| arg.as_ref() == mcp::STDIO_FLAG)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn run() -> i32 {
     // Окружение — первый и точный источник: только оно знает адрес, если сокет
     // ушёл во временный каталог. Но полагаться на него одно нельзя: cursor
@@ -55,7 +56,7 @@ fn run() -> i32 {
         // нашими силами. Но строка в журнале — единственный способ для
         // человека узнать, почему инструменты молчат при любом выключателе.
         eprintln!(
-            "ModelCrew MCP: {} не задана и домашний каталог неизвестен — стучаться некуда.",
+            "ModelCrew MCP: {} не задана, а свой адрес вычислить не вышло — стучаться некуда.",
             mcp::SOCK_ENV
         );
     }
@@ -73,10 +74,8 @@ fn run() -> i32 {
     )
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn run() -> i32 {
-    // На Windows нужен именованный канал. Пока его нет, приложение не ставит
-    // панели переменную окружения, так что сюда попасть можно только вручную.
     eprintln!("ModelCrew MCP: на этой платформе плагин пока не поддержан.");
     1
 }
@@ -89,7 +88,7 @@ fn run() -> i32 {
 ///
 /// Уходим всегда нулём: ненулевой код клиент читает как «сервер сломался» и
 /// больше к нему не возвращается, а сломаться здесь может только связь.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn pump<R: BufRead, W: Write>(bridge: &mut Bridge, input: R, mut output: W) -> i32 {
     for line in input.lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -116,7 +115,7 @@ fn pump<R: BufRead, W: Write>(bridge: &mut Bridge, input: R, mut output: W) -> i
 }
 
 /// Связь с приложением: не постоянная, а восстанавливаемая.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 struct Bridge {
     /// `None` — адрес сокета не вычислился. Такой шим работает целиком сам:
     /// сессию он держит, но инструменты у него не работают никогда.
@@ -125,7 +124,7 @@ struct Bridge {
     link: Option<Link>,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl Bridge {
     fn new(path: Option<std::path::PathBuf>, token: String) -> Self {
         Self {
@@ -199,7 +198,7 @@ impl Bridge {
 }
 
 /// Чем кончилась попытка донести запрос.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 enum Reply {
     /// Приложение ответило.
     Answer(String),
@@ -209,7 +208,7 @@ enum Reply {
     Unsent,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl Reply {
     fn answer(self) -> Option<String> {
         match self {
@@ -225,16 +224,38 @@ impl Reply {
 /// обслуживает один цикл: приложение отвечает по строке на запрос, в том же
 /// порядке, и само по себе не заговаривает. Отдельный поток дал бы здесь одно
 /// — возможность не заметить, что ответа уже не будет.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 struct Link {
-    out: std::os::unix::net::UnixStream,
-    back: BufReader<std::os::unix::net::UnixStream>,
+    out: Stream,
+    back: BufReader<Stream>,
 }
 
+/// Труба к приложению.
 #[cfg(unix)]
+type Stream = std::os::unix::net::UnixStream;
+
+#[cfg(windows)]
+type Stream = std::fs::File;
+
+#[cfg(unix)]
+fn connect(path: &std::path::Path) -> Option<Stream> {
+    std::os::unix::net::UnixStream::connect(path).ok()
+}
+
+/// Канал занят, только пока приложение выставляет следующий экземпляр, —
+/// мгновения. Дольше — значит, оно не отвечает, и честнее ответить самим.
+#[cfg(windows)]
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[cfg(windows)]
+fn connect(path: &std::path::Path) -> Option<Stream> {
+    crate::pipe::connect(path, BUSY_WAIT).ok()
+}
+
+#[cfg(any(unix, windows))]
 impl Link {
     fn open(path: &std::path::Path, token: &str) -> Option<Self> {
-        let stream = std::os::unix::net::UnixStream::connect(path).ok()?;
+        let stream = connect(path)?;
         let back = BufReader::new(stream.try_clone().ok()?);
         let mut link = Self { out: stream, back };
         // Первой строкой — пропуск панели: без него приложение не знает, кого
@@ -257,7 +278,10 @@ impl Link {
             Ok(_) => Some(line.trim_end().to_string()),
         }
     }
+}
 
+#[cfg(unix)]
+impl Link {
     /// Жив ли тот конец. Спрашиваем у сокета, а не у себя: приложение могло
     /// закрыться когда угодно между запросами, и записи это не видно — она
     /// уходит в буфер ядра и удаётся даже в закрытое соединение.
@@ -294,6 +318,31 @@ impl Link {
     }
 }
 
+#[cfg(windows)]
+impl Link {
+    /// Жив ли тот конец — на Windows. Заглядываем в канал, ничего не забирая
+    /// и не дожидаясь: закрытый сервер система называет сразу, а живой, но
+    /// молчащий, — пустым каналом.
+    fn is_alive(&self) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use std::ptr::null_mut;
+
+        // SAFETY: живой дескриптор нашего же канала; буфера нет, и размер его
+        // мы передаём нулём.
+        let ok = unsafe {
+            windows_sys::Win32::System::Pipes::PeekNamedPipe(
+                self.out.as_raw_handle(),
+                null_mut(),
+                0,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+            )
+        };
+        ok != 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,7 +366,7 @@ mod tests {
         assert!(crate::agent_hook_cli::mode_from_args(["ModelCrew", mcp::STDIO_FLAG]).is_none());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use serde_json::Value;
 
     /// Приложение на том конце: принимает соединение, читает пропуск и
@@ -349,29 +398,9 @@ mod tests {
                     if !serving.load(Ordering::SeqCst) {
                         return;
                     }
-                    let mut out = stream.try_clone().unwrap();
+                    let out = stream.try_clone().unwrap();
                     kept.lock().unwrap().push(stream.try_clone().unwrap());
-                    let mut back = BufReader::new(stream).lines();
-                    // Первая строка — пропуск панели.
-                    let _pass = back.next();
-                    for line in back.map_while(Result::ok) {
-                        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                            continue;
-                        };
-                        let Some(id) = value.get("id").cloned() else {
-                            continue;
-                        };
-                        let answer =
-                            serde_json::json!({"jsonrpc":"2.0","id":id,"result":{"from":"app"}});
-                        if out
-                            .write_all(answer.to_string().as_bytes())
-                            .and_then(|()| out.write_all(b"\n"))
-                            .and_then(|()| out.flush())
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
+                    answer_each(stream, out);
                 }
             });
             Self {
@@ -400,7 +429,87 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    /// То же приложение на Windows.
+    #[cfg(windows)]
+    struct FakeApp {
+        alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    #[cfg(windows)]
+    impl FakeApp {
+        fn start(path: &std::path::Path) -> Self {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            use std::sync::Arc;
+
+            let mut listener = crate::pipe::Listener::bind(path).unwrap();
+            let alive = Arc::new(AtomicBool::new(true));
+            let serving = Arc::clone(&alive);
+            let thread = std::thread::spawn(move || {
+                while serving.load(Ordering::SeqCst) {
+                    let Ok((pipe, _)) = listener.accept() else {
+                        continue;
+                    };
+                    let out = pipe.try_clone().unwrap();
+                    answer_each(pipe, out);
+                }
+            });
+            Self {
+                alive,
+                thread: Some(thread),
+            }
+        }
+
+        /// Приложение закрылось. Его поток спит в системе — ждёт клиента или
+        /// строку от него, — а `shutdown`, как у сокета, у канала нет. Будит
+        /// только отмена ожидания. Отменяем, пока поток не выйдет: попади
+        /// отмена между двумя ожиданиями, отменять было бы нечего.
+        fn stop(&mut self) {
+            use std::os::windows::io::AsRawHandle;
+            use std::sync::atomic::Ordering;
+
+            self.alive.store(false, Ordering::SeqCst);
+            let Some(thread) = self.thread.take() else {
+                return;
+            };
+            while !thread.is_finished() {
+                // SAFETY: дескриптор живого потока, который мы сами и подняли.
+                unsafe {
+                    windows_sys::Win32::System::IO::CancelSynchronousIo(thread.as_raw_handle())
+                };
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let _ = thread.join();
+        }
+    }
+
+    /// Разговор приложения: пропуск первой строкой, дальше по ответу на
+    /// каждый запрос.
+    #[cfg(any(unix, windows))]
+    fn answer_each(stream: impl std::io::Read, mut out: impl Write) {
+        let mut back = BufReader::new(stream).lines();
+        // Первая строка — пропуск панели.
+        let _pass = back.next();
+        for line in back.map_while(Result::ok) {
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(id) = value.get("id").cloned() else {
+                continue;
+            };
+            let answer = serde_json::json!({"jsonrpc":"2.0","id":id,"result":{"from":"app"}});
+            if out
+                .write_all(answer.to_string().as_bytes())
+                .and_then(|()| out.write_all(b"\n"))
+                .and_then(|()| out.flush())
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+
+    #[cfg(any(unix, windows))]
     impl Drop for FakeApp {
         fn drop(&mut self) {
             self.stop();
@@ -412,8 +521,17 @@ mod tests {
         std::env::temp_dir().join(format!("mc-shim-{name}-{}.sock", std::process::id()))
     }
 
+    #[cfg(windows)]
+    fn sock(name: &str) -> std::path::PathBuf {
+        crate::pipe::address(&format!(
+            "com.modelcrew.desktop.test.shim-{name}-{}",
+            std::process::id()
+        ))
+        .unwrap()
+    }
+
     /// Прогнать через шим готовые строки и разобрать то, что он сказал в ответ.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn talk(bridge: &mut Bridge, lines: &[String]) -> Vec<Value> {
         let input = lines.join("\n");
         let mut out = Vec::new();
@@ -429,13 +547,13 @@ mod tests {
             .collect()
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn a_call(id: u32) -> String {
         format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"crew_ping"}}}}"#)
     }
 
     /// Кто ответил на вызов: приложение или сам шим.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn answered_by(answer: &Value) -> &str {
         if answer["result"]["from"] == "app" {
             "приложение"
@@ -447,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn a_closed_application_does_not_take_the_session_with_it() {
         // Сокета нет вовсе: приложение закрыто или плагин выключен. Клиент
         // MCP поднимает сервер один раз за сессию — уйди шим отсюда, агент
@@ -490,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn comes_back_to_the_application_that_returned() {
         // Тот самый случай: выключил плагин, включил — и агент его больше не
         // видит. Сессия здесь одна и та же от начала до конца, как у живого
@@ -520,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn keeps_quiet_about_a_notification() {
         // У уведомления нет `id`, ответа на него не ждут, и ответ был бы
         // нарушением протокола. А ждать ответа на него нельзя тем более:

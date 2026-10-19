@@ -1294,7 +1294,7 @@ const SWITCHED_OFF: &str = concat!(
 /// только оно вернётся.
 ///
 /// `None` — отвечать нечего: это уведомление, ответа на него не ждут.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn offline_answer(line: &str, reason: &str) -> Option<String> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         // Тот же ответ, что дало бы приложение: разбор не удался, `id` взять
@@ -1327,7 +1327,7 @@ pub fn offline_answer(line: &str, reason: &str) -> Option<String> {
 /// Главное здесь — последняя фраза. Без неё модель разумно решает, что сервер
 /// сломан, и больше к нему не возвращается: перезапустить агента она не может,
 /// а ждать неизвестно чего не станет.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub const UNREACHABLE: &str = concat!(
     "ModelCrew сейчас недоступен: приложение закрыто или плагин выключен ",
     "(Настройки → Плагины → Браузер). Перезапускать агента не нужно — ",
