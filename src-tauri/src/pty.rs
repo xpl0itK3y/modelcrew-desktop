@@ -51,6 +51,11 @@ pub struct SpawnOptions {
     // Папка изолированной истории команд панели (ZDOTDIR/HISTFILE);
     // None — общесистемная история.
     pub history_dir: Option<PathBuf>,
+    // Каталог обёрток агентов, которые подключают им наш MCP. На unix его
+    // ставит в PATH rc-файл панели (см. terminal_snapshots), здесь — только
+    // на Windows.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub agent_shims: Option<PathBuf>,
 }
 
 struct PtySession {
@@ -159,9 +164,9 @@ impl PtyManager {
         // корень проекта у себя, а не из аргументов вызова. Пропуск случайный:
         // id панели виден любому процессу пользователя, и по нему агент одной
         // панели представился бы другой.
-        #[cfg_attr(not(unix), allow(unused_mut))]
+        #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
         let mut mcp_token = String::new();
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if let Some(socket) = MCP_SOCKET.lock().unwrap().clone() {
             if let Some(token) = crate::mcp::new_token() {
                 cmd.env(crate::mcp::SOCK_ENV, socket);
@@ -177,6 +182,20 @@ impl PtyManager {
                     crate::mcp_register::OPENCODE_ENV,
                     crate::mcp_register::opencode_config(&exe, inherited.as_deref()),
                 );
+            }
+        }
+        // Обёртки агентов — в начало PATH. На unix это делает rc-файл панели,
+        // и обязательно после файла пользователя: тот пересобирает PATH. Ни
+        // cmd, ни PowerShell PATH из своих файлов не пересобирают, а Git Bash
+        // дописывает унаследованный следом за своими каталогами, где агентов
+        // нет. Поэтому на Windows хватает окружения.
+        #[cfg(windows)]
+        if let Some(shims) = &opts.agent_shims {
+            let inherited = cmd.get_env("PATH").map(std::ffi::OsStr::to_os_string);
+            let paths = std::iter::once(shims.clone())
+                .chain(inherited.iter().flat_map(std::env::split_paths));
+            if let Ok(joined) = std::env::join_paths(paths) {
+                cmd.env("PATH", joined);
             }
         }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
@@ -1060,6 +1079,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1101,6 +1121,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 move |code| {
@@ -1138,6 +1159,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = stale_out_tx.send(bytes);
@@ -1159,6 +1181,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = fresh_out_tx.send(bytes);
@@ -1244,6 +1267,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1298,6 +1322,7 @@ mod tests {
                     cols: 120,
                     rows: 40,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1379,6 +1404,7 @@ mod tests {
                         cols: 80,
                         rows: 24,
                         history_dir: None,
+                        agent_shims: None,
                     },
                     move |bytes| {
                         let _ = out_tx.send(bytes);
@@ -1427,6 +1453,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1466,6 +1493,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1509,6 +1537,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 |_| {},
@@ -1546,6 +1575,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1572,6 +1602,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 |_| {},
@@ -1608,6 +1639,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1691,6 +1723,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1730,6 +1763,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1793,6 +1827,7 @@ mod tests {
                     cols: 0,
                     rows: 0,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1839,6 +1874,7 @@ mod tests {
                     cols: 120,
                     rows: 40,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1897,6 +1933,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1945,6 +1982,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 |_| {},
@@ -1990,6 +2028,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -2058,6 +2097,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = off_tx.send(bytes);
@@ -2150,6 +2190,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: Some(history.path().to_path_buf()),
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);

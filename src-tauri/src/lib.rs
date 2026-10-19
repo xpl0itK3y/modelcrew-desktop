@@ -379,14 +379,14 @@ fn pty_create(
 ) -> CommandResult<PtyCreateResult> {
     ensure_main_window(&window)?;
     let cwd = roots.resolve(&workspace_id)?;
+    // Обёртки агентов: они нужны только панели, и путь к ним видит только её
+    // оболочка.
+    let shims = mcp_register::shims(&app, mcp_settings::enabled(&app));
     // Своя история команд у каждой панели (по умолчанию включено).
     let history_dir = if isolated_history.unwrap_or(true) {
         let home = app.path().home_dir().map_err(|error| {
             CommandError::new(ErrorCode::TerminalSnapshotStorageFailed).with_debug(error)
         })?;
-        // Обёртки агентов кладём здесь же: они нужны только панели, и путь к
-        // ним видит только её оболочка.
-        let shims = mcp_register::shims(&app, mcp_settings::enabled(&app));
         Some(terminal_snapshots::prepare_panel_history(
             &terminal_snapshots::history_base(&app)?,
             &id,
@@ -407,6 +407,7 @@ fn pty_create(
             cols,
             rows,
             history_dir,
+            agent_shims: shims,
         },
         move |bytes| {
             let _ = on_output.send(InvokeResponseBody::Raw(bytes));
