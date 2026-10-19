@@ -88,7 +88,34 @@ pub fn new_token() -> Option<String> {
         .ok()?
         .read_exact(&mut bytes)
         .ok()?;
-    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    Some(token_text(&bytes))
+}
+
+/// На Windows `/dev/urandom` нет: случайность даёт сама система, тем же
+/// генератором, на котором стоит её криптография.
+#[cfg(windows)]
+pub fn new_token() -> Option<String> {
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+    };
+
+    let mut bytes = [0_u8; 32];
+    // SAFETY: буфер жив до конца вызова, и длина — ровно его размер. Без
+    // алгоритма система берёт свой генератор: об этом и просит флаг.
+    let status = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            bytes.as_mut_ptr(),
+            bytes.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    // Отрицательный статус — отказ. Пропуск из нулей был бы одним на всех.
+    (status >= 0).then(|| token_text(&bytes))
+}
+
+fn token_text(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// То, что инструменты умеют делать по-настоящему.
@@ -2473,7 +2500,6 @@ mod tests {
         assert!(token_of_handshake(r#"{"panelId":"panel-b"}"#).is_none());
     }
 
-    #[cfg(unix)]
     #[test]
     fn mints_a_pass_that_cannot_be_guessed() {
         let first = new_token().unwrap();
