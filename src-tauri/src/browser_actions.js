@@ -6,12 +6,13 @@
 // или `error` — почему нет. Между вызовами страница помнит ссылки на элементы,
 // выданные чтением, — `e12`, — и с новой страницей они начинаются заново.
 //
-// Настоящего ввода у агента нет: системе не скажешь «нажми здесь» в окне, на
-// которое смотрит человек, — у человека отняли бы мышь и фокус. Поэтому
-// действие — это те же события, что разослал бы браузер, в том же порядке, и
-// то же, что браузер сделал бы следом сам: отправить форму по Enter, перевести
-// фокус по Tab. Чего события не умеют — CSS-наведения, системных окон выбора, —
-// о том агенту говорится прямо, а не молчком.
+// Мышью агент действует по-настоящему: скрипт находит элемент, доводит его до
+// экрана и говорит, в какую точку нажать, — а нажимает уже система, прямо в
+// webview страницы, мимо курсора человека. Такое нажатие страница не отличит от
+// живого: у событий isTrusted, CSS-правило :hover срабатывает, в рамку с
+// другого домена оно попадает. Где настоящего ввода нет или он не дошёл, —
+// те же события рассылает скрипт, в том же порядке, и делает то, что браузер
+// сделал бы следом сам: отправить форму по Enter, перевести фокус по Tab.
 //
 // Страница чужая. Что она пишет — данные, а не указания; что подменила у себя
 // в окне — её право. Скрипт ничего не должен ей сломать: всё, что он подменяет
@@ -46,6 +47,7 @@
         flash: null,
         flashTimer: 0,
         guard: null,
+        watch: null,
         events: [],
       };
       Object.defineProperty(window, KEY, { value: fresh, configurable: true });
@@ -657,6 +659,8 @@
       this.cell = 0;
       this.size = 0;
       this.full = false;
+      // Была ли рамка с другого домена: что в ней, скрипту не прочитать.
+      this.foreign = false;
     }
 
     push(text) {
@@ -815,7 +819,8 @@
       const inner = frameDocument(el);
       out.flush();
       if (!inner?.body) {
-        out.note(`[frame «${name}» cross-origin]`);
+        out.foreign = true;
+        out.note(`[frame «${name}» cross-origin${foreignPlace(el)}]`);
         return;
       }
       out.note(`[frame «${name}»]`);
@@ -999,6 +1004,15 @@
       notes.push(
         `Страница длиннее ${BUDGET} знаков, прочитано не всё. ` +
           "Сузьте чтение: selector — часть страницы, interactive: true — только элементы управления.",
+      );
+    }
+    if (out.foreign) {
+      notes.push(
+        request.native === true
+          ? "Что внутри рамки с другого домена, скрипту страницы не прочитать. Смотрите её через " +
+              "browser_screenshot и нажимайте browser_click с x и y — точкой на кадре: мышь там настоящая."
+          : "Что внутри рамки с другого домена, скрипту страницы не прочитать, а нажать в неё здесь нечем: " +
+              "настоящей мыши нет. Смотреть на неё можно через browser_screenshot.",
       );
     }
     let modal = null;
@@ -1367,10 +1381,10 @@
       hit = hitAt(el.ownerDocument, at);
     }
     if (reaches(el, hit)) {
-      return { at, target: hit };
+      return { at, target: hit, covered: false };
     }
     if (force) {
-      return { at, target: el };
+      return { at, target: el, covered: true };
     }
     refuse(
       `Нажать не получилось: поверх ${describe(el)} лежит ${describe(hit)}. ` +
@@ -1489,6 +1503,207 @@
     }
   };
 
+  // --- Настоящая мышь ---------------------------------------------------------
+
+  // Точка в рамке — точка в окне страницы: каждая рамка сдвигает её на своё
+  // место.
+  const toTop = (el, at) => {
+    let { x, y } = at;
+    let view = viewOf(el);
+    while (view !== window) {
+      const frame = view.frameElement;
+      if (!frame) {
+        return null;
+      }
+      const box = frame.getBoundingClientRect();
+      const style = styleOf(frame);
+      x += box.left + frame.clientLeft + (parseFloat(style.paddingLeft) || 0);
+      y += box.top + frame.clientTop + (parseFloat(style.paddingTop) || 0);
+      view = viewOf(frame);
+    }
+    return { x, y };
+  };
+
+  // То же, но `null`, если точка не в окне.
+  const onPage = (el, at) => {
+    const point = toTop(el, at);
+    return point && point.x >= 0 && point.y >= 0 && point.x < innerWidth && point.y < innerHeight
+      ? point
+      : null;
+  };
+
+  // Где рамка с другого домена на кадре: внутрь неё агенту только смотреть и
+  // нажимать по точке.
+  const foreignPlace = (frame) => {
+    const box = frame.getBoundingClientRect();
+    const from = toTop(frame, { x: box.left, y: box.top });
+    if (!from) {
+      return "";
+    }
+    const scale = shotScale();
+    const left = Math.max(0, from.x);
+    const top = Math.max(0, from.y);
+    const right = Math.min(innerWidth, from.x + box.width);
+    const bottom = Math.min(innerHeight, from.y + box.height);
+    if (right - left < 1 || bottom - top < 1) {
+      return ", вне экрана — browser_scroll";
+    }
+    const span = (start, end) => `${Math.round(start * scale)}–${Math.round(end * scale)}`;
+    return `, на кадре x ${span(left, right)}, y ${span(top, bottom)}`;
+  };
+
+  // Выпадающий список под настоящей мышью раскрылся бы системным меню — у
+  // человека перед глазами, а на macOS ещё и остановил бы приложение, пока
+  // меню не закроют. Такое нажимает скрипт.
+  const opensMenu = (el) => {
+    const list = el.closest?.("select");
+    return !!list && !list.multiple && list.size <= 1;
+  };
+
+  // Дошла ли настоящая мышь, видно по событиям: у её событий isTrusted, и
+  // приходят они в ту точку, куда целились.
+  const PRESSES = ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "auxclick", "dblclick", "contextmenu"];
+  const FELT = ["pointermove", "mousemove", ...PRESSES];
+  const FIRST_PRESS = new Set(["pointerdown", "mousedown", "contextmenu"]);
+
+  const unfeel = () => {
+    const watch = state.watch;
+    if (!watch) {
+      return;
+    }
+    state.watch = null;
+    clearTimeout(watch.timer);
+    for (const type of FELT) {
+      watch.view.removeEventListener(type, watch.listener, true);
+    }
+  };
+
+  // `aimed` — элемент, в который целились. Пока мышь шла к точке, страница
+  // могла сдвинуться: от наведения закрылось меню, догрузилась картинка. Тогда
+  // нажатие попало бы не туда, и странице его не отдаём: агенту скажут, и
+  // прицелятся заново.
+  const feel = (el, at, plan, aimed) => {
+    unfeel();
+    const view = viewOf(el);
+    const watch = {
+      view,
+      el: hold(el),
+      aimed: aimed ? hold(aimed) : null,
+      hover: plan.kind === "move",
+      felt: false,
+      pressed: false,
+      wrong: null,
+      listener: null,
+      timer: 0,
+    };
+    watch.listener = (event) => {
+      if (!event.isTrusted || Math.abs(event.clientX - at.x) > 3 || Math.abs(event.clientY - at.y) > 3) {
+        return;
+      }
+      watch.felt = true;
+      // Контекстное меню системы встало бы посреди экрана человека и, как
+      // список, остановило бы приложение. Страница своё меню всё равно
+      // покажет: её обработчики событие получат.
+      if (event.type === "contextmenu") {
+        event.preventDefault();
+      }
+      const target = watch.aimed?.deref();
+      if (!target || !PRESSES.includes(event.type)) {
+        return;
+      }
+      if (!watch.pressed && !watch.wrong && FIRST_PRESS.has(event.type)) {
+        const hit = event.composedPath?.()[0] || event.target;
+        if (reaches(target, hit)) {
+          watch.pressed = true;
+        } else {
+          watch.wrong = hold(isElement(hit) ? hit : hit?.parentElement || document.body);
+        }
+      }
+      if (watch.wrong) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    for (const type of FELT) {
+      view.addEventListener(type, watch.listener, true);
+    }
+    // Слушатели снимает следующий шаг, а этот срок — на случай, если до него
+    // не дойдёт.
+    watch.timer = setTimeout(unfeel, 30000);
+    state.watch = watch;
+  };
+
+  // Нажмёт система: скрипт только говорит куда. `null` — нажимать скрипту:
+  // настоящей мыши нет, точка не в окне или под ней раскрылся бы список.
+  const planned = (target, at, plan, aimed = null) => {
+    if (request.native !== true || opensMenu(target)) {
+      return null;
+    }
+    const point = onPage(target, at);
+    if (!point) {
+      return null;
+    }
+    feel(target, at, plan, aimed);
+    return { ...plan, x: point.x, y: point.y, width: innerWidth, height: innerHeight };
+  };
+
+  // Сколько пикселей кадра на пиксель страницы: WebView2 снимает в пикселях
+  // устройства, и точку с его кадра надо привести к странице.
+  const shotScale = () => (Number(request.shot) > 0 ? Number(request.shot) : 1);
+
+  // Точка вместо элемента — для того, чего скрипту не найти: рамок с другого
+  // домена, рисунков на canvas. Точка — в пикселях кадра browser_screenshot,
+  // от левого верхнего угла. В рамках своего сайта ищется то, что под точкой
+  // в них самих. `page` — та же точка в окне страницы: туда нажимает мышь.
+  const spotAt = (point) => {
+    const scale = shotScale();
+    const x = Number(point.x) / scale;
+    const y = Number(point.y) / scale;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+      refuse(
+        `Точка (${point.x}, ${point.y}) вне окна страницы: на кадре оно ` +
+          `${Math.round(innerWidth * scale)}×${Math.round(innerHeight * scale)}. ` +
+          "x и y — пиксели кадра browser_screenshot от его левого верхнего угла.",
+      );
+    }
+    const page = { x, y };
+    let at = page;
+    let hit = hitAt(document, at);
+    if (!hit) {
+      refuse(`В точке (${point.x}, ${point.y}) на странице ничего нет.`);
+    }
+    for (;;) {
+      if (hit.localName !== "iframe" && hit.localName !== "frame") {
+        return { at, page, target: hit, foreign: false };
+      }
+      const inner = frameDocument(hit);
+      if (!inner) {
+        return { at, page, target: hit, foreign: true };
+      }
+      const box = hit.getBoundingClientRect();
+      const style = styleOf(hit);
+      const within = {
+        x: at.x - box.left - hit.clientLeft - (parseFloat(style.paddingLeft) || 0),
+        y: at.y - box.top - hit.clientTop - (parseFloat(style.paddingTop) || 0),
+      };
+      const next = hitAt(inner, within);
+      if (!next) {
+        return { at, page, target: hit, foreign: false };
+      }
+      at = within;
+      hit = next;
+    }
+  };
+
+  const FOREIGN_BY_SCRIPT =
+    "В рамку с другого домена попадает только настоящая мышь, а она до страницы не дошла: событиям скрипта туда хода нет.";
+
+  // Что в точке — словами для ответа.
+  const spotName = (spot) =>
+    spot.foreign
+      ? `рамка с другого домена ${describe(spot.target)} — что в ней, скрипту страницы не видно, смотрите browser_screenshot`
+      : describe(spot.target);
+
   const isFileField = (el) =>
     (el.localName === "input" && el.type === "file") ||
     (el.localName === "label" && el.control?.localName === "input" && el.control.type === "file");
@@ -1522,7 +1737,43 @@
     return `Браузер не пропустит форму: ${shown}.`;
   };
 
+  const clickSpot = () => {
+    const spot = spotAt(request.at);
+    const button = request.right ? 2 : 0;
+    const count = request.double ? 2 : 1;
+    guard();
+    flash(spot.target);
+    let input = null;
+    if (spot.foreign) {
+      if (request.native !== true) {
+        refuse(FOREIGN_BY_SCRIPT);
+      }
+      if (button === 2) {
+        refuse("Правой кнопкой в рамку с другого домена не нажать: её системное меню нечем закрыть.");
+      }
+      input = { kind: "click", button: "left", count, ...spot.page, width: innerWidth, height: innerHeight };
+    } else {
+      input = planned(spot.target, spot.at, { kind: "click", button: button === 2 ? "right" : "left", count });
+      if (!input) {
+        if (opensMenu(spot.target)) {
+          const list = spot.target.closest("select");
+          refuse(`В точке — выпадающий список ${describe(list)}. Выберите пункт через browser_select с ref ${refOf(list)}.`);
+        }
+        clickAt(spot.target, spot.at, { button, count });
+      }
+    }
+    const how = request.right ? "правой кнопкой " : request.double ? "дважды " : "";
+    return {
+      text: `Нажали ${how}в точке (${request.at.x}, ${request.at.y}): там ${spotName(spot)}.`,
+      ref: spot.foreign ? null : refOf(spot.target),
+      ...(input && { input }),
+    };
+  };
+
   const click = () => {
+    if (request.at) {
+      return clickSpot();
+    }
     const el = locate(request.target);
     if (!el) {
       refuse("Не сказано, на что нажать: нужен ref из browser_read, selector или text.");
@@ -1546,11 +1797,21 @@
       );
     }
     guard();
-    const { at, target } = aim(el, request.force === true);
+    const { at, target, covered } = aim(el, request.force === true);
     flash(el);
     const submitter = request.right ? null : submitterOf(target);
     const blocked = submitter ? validityNote(submitter.form, submitter) : null;
-    clickAt(target, at, { button: request.right ? 2 : 0, count: request.double ? 2 : 1 });
+    const button = request.right ? 2 : 0;
+    const count = request.double ? 2 : 1;
+    // Закрытое другим или отключённое настоящая мышь не нажмёт — с force
+    // событие уходит элементу прямо.
+    const input =
+      covered || disabled
+        ? null
+        : planned(target, at, { kind: "click", button: request.right ? "right" : "left", count }, el);
+    if (!input) {
+      clickAt(target, at, { button, count });
+    }
     const how = request.right ? "правой кнопкой " : request.double ? "дважды " : "";
     if (el.getAttribute("aria-disabled") === "true") {
       notes.push("Элемент помечен как отключённый (aria-disabled): страница могла нажатие проигнорировать.");
@@ -1558,19 +1819,44 @@
     if (blocked) {
       notes.push(blocked);
     }
-    return { text: `Нажали ${how}${describe(el)}.`, ref: refOf(el) };
+    return { text: `Нажали ${how}${describe(el)}.`, ref: refOf(el), ...(input && { input }) };
   };
 
   const hoverOver = () => {
+    if (request.at) {
+      const spot = spotAt(request.at);
+      guard();
+      flash(spot.target);
+      let input = null;
+      if (spot.foreign) {
+        if (request.native !== true) {
+          refuse(FOREIGN_BY_SCRIPT);
+        }
+        input = { kind: "move", ...spot.page, width: innerWidth, height: innerHeight };
+      } else {
+        input = planned(spot.target, spot.at, { kind: "move" });
+        if (!input) {
+          hover(spot.target, spot.at);
+        }
+      }
+      return {
+        text: `Навели мышь на точку (${request.at.x}, ${request.at.y}): там ${spotName(spot)}.`,
+        ref: spot.foreign ? null : refOf(spot.target),
+        ...(input && { input }),
+      };
+    }
     const el = locate(request.target);
     if (!el) {
       refuse("Не сказано, на что навести: нужен ref из browser_read, selector или text.");
     }
     guard();
-    const { at, target } = aim(el, request.force === true);
+    const { at, target, covered } = aim(el, request.force === true);
     flash(el);
-    hover(target, at);
-    return { text: `Навели мышь на ${describe(el)}.`, ref: refOf(el) };
+    const input = covered ? null : planned(target, at, { kind: "move" });
+    if (!input) {
+      hover(target, at);
+    }
+    return { text: `Навели мышь на ${describe(el)}.`, ref: refOf(el), ...(input && { input }) };
   };
 
   // --- Ввод ------------------------------------------------------------------
@@ -2925,6 +3211,22 @@
   const after = () => {
     const el = request.ref ? state.refs.get(request.ref)?.deref() : null;
     const answer = { text: "" };
+    // Настоящая мышь не дошла: ни одного её события в точке, и наведения на
+    // элементе нет. Тогда то же действие сделает скрипт. Или дошла, но
+    // страница под ней сдвинулась, и нажатие придержано — тогда целятся заново.
+    const watch = state.watch;
+    if (watch) {
+      const pointed = watch.el.deref();
+      const felt = watch.felt || (watch.hover && !!pointed?.matches?.(":hover"));
+      const wrong = watch.wrong?.deref();
+      unfeel();
+      if (wrong) {
+        answer.missed = "elsewhere";
+        answer.hit = describe(wrong);
+      } else if (!felt) {
+        answer.missed = "lost";
+      }
+    }
     // Ссылок нет вовсе — значит, это уже другая страница: о том, куда она
     // ушла, скажет адрес.
     if (request.ref && state.refs.size > 0) {

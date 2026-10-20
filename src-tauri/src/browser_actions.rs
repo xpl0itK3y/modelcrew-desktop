@@ -3,14 +3,15 @@
 //!
 //! Сами действия — в скрипте страницы: элементы видны только оттуда. Здесь —
 //! как его позвать и чего дождаться после: перехода, перерисовки, ответа
-//! промиса. Системного ввода нет нарочно: он отнял бы у человека мышь и фокус
-//! в окне, на которое тот смотрит.
+//! промиса. Мышью нажимает система: скрипт только целится, а настоящее
+//! нажатие уходит прямо в webview страницы, мимо курсора человека.
 
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
+use crate::browser_input::{self, Input};
 use crate::browser_page;
 use crate::mcp::Acted;
 
@@ -34,6 +35,16 @@ pub const WAIT_DEFAULT: f64 = 10.0;
 pub const WAIT_LONGEST: f64 = 30.0;
 const WAIT_POLL: Duration = Duration::from_millis(200);
 
+/// Настоящий ввод не дошёл, и действие сделал скрипт: агенту стоит знать, чем
+/// такое нажатие хуже.
+const BY_SCRIPT: &str = concat!(
+    "Настоящий ввод до страницы не дошёл — действие сделали события скрипта: ",
+    "isTrusted у них ложь, и CSS :hover от них не включается.",
+);
+
+/// Сколько раз целиться заново, если страница сдвигается под мышью.
+const AIMS: usize = 3;
+
 /// Пустой ответ на выражение — значит, скрипт целиком не разобрался.
 const EXPRESSION_BROKEN: &str = concat!(
     "Выражение не выполнилось: в нём синтаксическая ошибка. Пишите одно ",
@@ -56,6 +67,12 @@ pub fn perform(app: &AppHandle, root: &str, mut request: Value) -> Result<Acted,
         .as_object_mut()
         .and_then(|fields| fields.remove("expression"))
         .and_then(|value| value.as_str().map(str::to_string));
+    // Есть ли настоящая мышь и в каких пикселях кадр, с которого агент берёт
+    // точки, — скрипт сам этого не узнает.
+    if let Some(fields) = request.as_object_mut() {
+        fields.insert("native".into(), Value::Bool(browser_input::AVAILABLE));
+        fields.insert("shot".into(), json!(browser_page::shot_scale(app, root)));
+    }
     let (before, _) = browser_page::info(app, root).unwrap_or_default();
     let answer = match op.as_str() {
         "read" => act(app, root, &request, None)?,
@@ -63,12 +80,17 @@ pub fn perform(app: &AppHandle, root: &str, mut request: Value) -> Result<Acted,
         "evaluate" => {
             let answer = evaluate(app, root, &request, expression.as_deref())?;
             settle(app, root);
-            follow(app, root, answer)
+            follow(app, root, answer).0
         }
         _ => {
             let answer = act(app, root, &request, None)?;
-            settle(app, root);
-            follow(app, root, answer)
+            match answer.get("input").cloned() {
+                Some(plan) => by_system(app, root, &request, answer, plan)?,
+                None => {
+                    settle(app, root);
+                    follow(app, root, answer).0
+                }
+            }
         }
     };
     let (url, title) = browser_page::info(app, root).unwrap_or_default();
@@ -134,14 +156,78 @@ fn settle(app: &AppHandle, root: &str) {
     std::thread::sleep(SETTLE);
 }
 
+/// Действие нацелил скрипт, а нажимает система. Страница сдвинулась под мышью
+/// — целимся заново; ввод до неё не дошёл — то же действие делает скрипт.
+fn by_system(
+    app: &AppHandle,
+    root: &str,
+    request: &Value,
+    mut answer: Value,
+    mut plan: Value,
+) -> Result<Value, String> {
+    for _ in 0..AIMS {
+        let sent = Input::from_plan(&plan).and_then(|input| browser_input::send(app, root, input));
+        if sent.is_err() {
+            break;
+        }
+        settle(app, root);
+        let (followed, missed) = follow(app, root, answer);
+        match missed {
+            Missed::No => return Ok(followed),
+            Missed::Lost => break,
+            Missed::Elsewhere => {}
+        }
+        answer = act(app, root, request, None)?;
+        match answer.get("input").cloned() {
+            Some(next) => plan = next,
+            None => {
+                settle(app, root);
+                return Ok(follow(app, root, answer).0);
+            }
+        }
+    }
+    let mut request = request.clone();
+    if let Some(fields) = request.as_object_mut() {
+        fields.insert("native".into(), Value::Bool(false));
+    }
+    let answer = act(app, root, &request, None)?;
+    settle(app, root);
+    let (mut answer, _) = follow(app, root, answer);
+    if let Some(fields) = answer.as_object_mut() {
+        let notes = fields
+            .entry("notes")
+            .or_insert_with(|| Value::Array(Vec::new()));
+        if let Some(notes) = notes.as_array_mut() {
+            notes.push(Value::String(BY_SCRIPT.to_string()));
+        }
+    }
+    Ok(answer)
+}
+
+/// Дошла ли до страницы настоящая мышь.
+#[derive(Debug, PartialEq)]
+enum Missed {
+    /// Дошла — или не узнать: страница ушла дальше.
+    No,
+    /// Ни одного её события там, куда целились.
+    Lost,
+    /// Дошла, но под ней оказался не тот элемент, и нажатие придержано.
+    Elsewhere,
+}
+
 /// После действия: каким стал элемент и что страница сделала сама — диалоги,
 /// попытки открыть системные окна. Не ответила — значит, ушла дальше, и об
 /// этом скажет адрес.
-fn follow(app: &AppHandle, root: &str, mut answer: Value) -> Value {
+fn follow(app: &AppHandle, root: &str, mut answer: Value) -> (Value, Missed) {
     let request =
         json!({ "op": "after", "ref": answer.get("ref").cloned().unwrap_or(Value::Null) });
     let Ok(after) = act(app, root, &request, None) else {
-        return answer;
+        return (answer, Missed::No);
+    };
+    let missed = match after.get("missed").and_then(Value::as_str) {
+        Some("lost") => Missed::Lost,
+        Some("elsewhere") => Missed::Elsewhere,
+        _ => Missed::No,
     };
     let (text, notes) = split(&after);
     if let Some(fields) = answer.as_object_mut() {
@@ -161,7 +247,7 @@ fn follow(app: &AppHandle, root: &str, mut answer: Value) -> Value {
             fields.insert("notes".into(), Value::Array(all));
         }
     }
-    answer
+    (answer, missed)
 }
 
 /// Ответ на действие и то, каким элемент стал после. Если он такой же, каким
