@@ -189,8 +189,8 @@ fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String
         .map_err(|error| format!("страница не открылась: {error}"))?;
     let page = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(target))
         // Консоль страницы не узнать задним числом: писать за ней надо с
-        // первой её строчки.
-        .initialization_script(CONSOLE_SCRIPT)
+        // первой её строчки — и в рамках тоже, их ошибки видны только там.
+        .initialization_script_for_all_frames(CONSOLE_SCRIPT)
         .initialization_script(SAME_PAGE_SCRIPT)
         // Файл, брошенный на страницу, — для сайта: так в него загружают.
         // Перехвати его Tauri, сайт бы его не увидел, а нам он здесь ни к
@@ -223,8 +223,8 @@ fn create(app: &AppHandle, label: &str, target: tauri::Url) -> Result<(), String
         .skip_taskbar(true)
         .focused(false)
         // Консоль страницы не узнать задним числом: писать за ней надо с
-        // первой её строчки.
-        .initialization_script(CONSOLE_SCRIPT)
+        // первой её строчки — и в рамках тоже, их ошибки видны только там.
+        .initialization_script_for_all_frames(CONSOLE_SCRIPT)
         .initialization_script(SAME_PAGE_SCRIPT)
         .visible(false)
         .build()
@@ -585,6 +585,12 @@ pub struct ConsoleMessage {
     /// не писала сама: exception, rejection, resource.
     pub level: String,
     pub text: String,
+    /// Адрес рамки, если написала рамка, а не сама страница.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<String>,
+    /// Адрес скрипта потока (Worker), если упал он.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<String>,
 }
 
 /// Консоль страницы проекта.
@@ -1149,9 +1155,37 @@ mod tests {
                 messages: vec![ConsoleMessage {
                     level: "error".to_string(),
                     text: "boom".to_string(),
+                    frame: None,
+                    worker: None,
                 }],
                 dropped: 3,
                 started: 0.0,
+            })
+        );
+    }
+
+    #[test]
+    fn a_message_says_which_frame_or_worker_wrote_it() {
+        let answer = serde_json::to_string(concat!(
+            r#"{"messages":[{"level":"log","text":"hi","frame":"https://pay.test/widget"},"#,
+            r#"{"level":"exception","text":"Error: boom","worker":"https://app.test/w.js"}]}"#,
+        ))
+        .unwrap();
+        let messages = console_of(&answer).unwrap().messages;
+        assert_eq!(
+            messages[0].frame.as_deref(),
+            Some("https://pay.test/widget")
+        );
+        assert_eq!(messages[0].worker, None);
+        assert_eq!(messages[1].frame, None);
+        assert_eq!(messages[1].worker.as_deref(), Some("https://app.test/w.js"));
+        // Панели уходит только то, что есть: у сообщения страницы подписей нет.
+        assert_eq!(
+            serde_json::to_value(&messages[1]).unwrap(),
+            serde_json::json!({
+                "level": "exception",
+                "text": "Error: boom",
+                "worker": "https://app.test/w.js",
             })
         );
     }
