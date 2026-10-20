@@ -68,6 +68,33 @@ const GREEN_MESSAGES: usize = 6;
 /// Синяя страница пишет одно: после перехода консоль обязана начаться заново.
 const BLUE_SCRIPT: &str = "<script>console.info(\"синяя\");</script>";
 
+/// Страница для действий агента: всё, что они умеют, — поле с подписью,
+/// кнопка, форма поиска, список, флажок, прокручиваемый блок, поле файла,
+/// confirm, ответ с задержкой и ссылка. Страница длиннее экрана: прокрутка
+/// тоже проверяется.
+const FORM_BODY: &str = concat!(
+    "<main style=\"background:#fff\">",
+    "<h1>Форма проверки</h1><p>Обычный текст абзаца.</p>",
+    "<label for=\"name\">Имя</label> <input id=\"name\" required>",
+    "<button id=\"send\" type=\"button\" onclick=\"out.textContent = ",
+    "'Привет, ' + document.getElementById('name').value\">Поздороваться</button>",
+    "<p id=\"out\"></p>",
+    "<form onsubmit=\"event.preventDefault(); found.textContent = 'Искали: ' + this.q.value\">",
+    "<input name=\"q\" aria-label=\"Поиск\"></form><p id=\"found\"></p>",
+    "<label>Город <select id=\"city\"><option>Москва</option>",
+    "<option value=\"spb\">Санкт-Петербург</option></select></label>",
+    "<label><input type=\"checkbox\" id=\"agree\"> Согласен</label>",
+    "<div id=\"box\" style=\"height:80px;overflow:auto\"><div style=\"height:1000px\">",
+    "Длинный список</div></div>",
+    "<label>Файл <input type=\"file\" id=\"file\" onchange=\"picked.textContent = ",
+    "'Файл: ' + this.files[0].name + ' ' + this.files[0].size\"></label><p id=\"picked\"></p>",
+    "<button id=\"ask\" onclick=\"answer.textContent = confirm('Удалить?') ? 'да' : 'нет'\">",
+    "Спросить</button><p id=\"answer\"></p>",
+    "<button onclick=\"setTimeout(() => late.textContent = 'Сохранено', 500)\">Сохранить</button>",
+    "<p id=\"late\"></p><a href=\"/green\">На зелёную</a>",
+    "<div style=\"height:3000px\"></div></main>",
+);
+
 /// Чем закончилась проверка. Код, переданный в `exit`, Tauri возвращает не
 /// везде — на Linux он теряется, и проваленная проверка выходила бы нулём.
 static OUTCOME: AtomicI32 = AtomicI32::new(1);
@@ -169,6 +196,8 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
     browser_page::step(app, ROOT, browser_page::Step::Back)?;
     let back = shot(app, out, "back")?;
 
+    let actions = actions(app, &site)?;
+
     let scale = app
         .get_webview(&browser_page::label_for(ROOT))
         .and_then(|page| page.window().scale_factor().ok());
@@ -189,6 +218,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "docked": docked,
         "home": home,
         "back": back,
+        "actions": actions,
         "closed": !browser_page::is_open(app, ROOT),
     });
     if let Value::Object(fields) = &mut report {
@@ -337,6 +367,128 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Valu
     Ok(seen)
 }
 
+/// Действия агента на странице с формой — так, как их зовёт сервер MCP. Что
+/// вышло из каждого, разбирает тест.
+fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
+    browser_page::open(app, ROOT, &site.url("form"))?;
+    browser_page::wait_ready(app, ROOT, LOAD_WAIT);
+    let value = |expression: &str| json!({ "op": "evaluate", "expression": expression });
+    let steps = [
+        ("read", json!({ "op": "read" })),
+        ("controls", json!({ "op": "read", "interactive": true })),
+        (
+            "type",
+            json!({ "op": "type", "target": { "text": "Имя" }, "text": "Ада" }),
+        ),
+        (
+            "click",
+            json!({ "op": "click", "target": { "text": "Поздороваться" } }),
+        ),
+        (
+            "greeted",
+            value("document.getElementById('out').textContent"),
+        ),
+        (
+            "search",
+            json!({ "op": "type", "target": { "text": "Поиск" }, "text": "кошки", "submit": true }),
+        ),
+        (
+            "searched",
+            value("document.getElementById('found').textContent"),
+        ),
+        (
+            "select",
+            json!({ "op": "select", "target": { "text": "Город" }, "options": "Санкт-Петербург" }),
+        ),
+        ("city", value("document.getElementById('city').value")),
+        (
+            "check",
+            json!({ "op": "click", "target": { "text": "Согласен" } }),
+        ),
+        ("agreed", value("document.getElementById('agree').checked")),
+        (
+            "tab",
+            json!({ "op": "press", "target": { "selector": "#name" }, "key": "Tab" }),
+        ),
+        ("focused", value("document.activeElement.id")),
+        (
+            "hover",
+            json!({ "op": "hover", "target": { "selector": "#send" } }),
+        ),
+        ("scroll", json!({ "op": "scroll", "direction": "down" })),
+        (
+            "scroll_box",
+            json!({ "op": "scroll", "target": { "selector": "#box" }, "direction": "down", "amount": 200 }),
+        ),
+        (
+            "upload",
+            json!({ "op": "upload", "files": [{ "name": "cat.txt", "type": "text/plain", "data": "bWVvdw==" }] }),
+        ),
+        (
+            "picked",
+            value("document.getElementById('picked').textContent"),
+        ),
+        (
+            "dismissed",
+            json!({ "op": "click", "target": { "selector": "#ask" } }),
+        ),
+        (
+            "dismissed_answer",
+            value("document.getElementById('answer').textContent"),
+        ),
+        (
+            "accepted",
+            json!({ "op": "click", "target": { "selector": "#ask" }, "dialog": "accept" }),
+        ),
+        (
+            "accepted_answer",
+            value("document.getElementById('answer').textContent"),
+        ),
+        (
+            "save",
+            json!({ "op": "click", "target": { "text": "Сохранить" } }),
+        ),
+        (
+            "waited",
+            json!({ "op": "check", "text": "Сохранено", "seconds": 3 }),
+        ),
+        (
+            "not_waited",
+            json!({ "op": "check", "text": "Никогда", "seconds": 0.5 }),
+        ),
+        (
+            "promise",
+            value("new Promise((done) => setTimeout(() => done(42), 300))"),
+        ),
+        ("element", value("document.querySelector('h1')")),
+        ("broken", value("(")),
+        ("thrown", value("() => { throw new Error('нарочно'); }")),
+        (
+            "missing",
+            json!({ "op": "click", "target": { "text": "Такой кнопки нет" } }),
+        ),
+        (
+            "link",
+            json!({ "op": "click", "target": { "text": "На зелёную" } }),
+        ),
+        ("stale", json!({ "op": "click", "target": { "ref": "e1" } })),
+    ];
+    let mut seen = serde_json::Map::new();
+    for (name, request) in steps {
+        let outcome = match crate::browser_actions::perform(app, ROOT, request) {
+            Ok(acted) => json!({
+                "text": acted.text,
+                "notes": acted.notes,
+                "url": acted.url,
+                "left": acted.left,
+            }),
+            Err(error) => json!({ "error": error }),
+        };
+        seen.insert(name.into(), outcome);
+    }
+    Ok(Value::Object(seen))
+}
+
 /// Дождаться в консоли страницы сообщения с этим текстом.
 fn heard(app: &AppHandle, text: &str) -> Result<bool, String> {
     let deadline = Instant::now() + SETTLE_WAIT;
@@ -386,7 +538,7 @@ fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     Some((number(16), number(20)))
 }
 
-/// Сайт проверки: две страницы сплошного цвета на петле. Всё прочее —
+/// Сайт проверки: две страницы сплошного цвета и форма на петле. Всё прочее —
 /// «не найдено»: на это и рассчитана картинка, которой нет.
 ///
 /// Свой сервер, а не адрес в сети: проверка не должна зависеть от того, есть
@@ -434,6 +586,7 @@ fn answer(mut stream: TcpStream) {
     let path = target.split('?').next().unwrap_or(target);
     let (status, body) = match path {
         "/green" => ("200 OK", page("green", "#00c000", GREEN_SCRIPT)),
+        "/form" => ("200 OK", page("form", "#ffffff", FORM_BODY)),
         "/blue" => {
             std::thread::sleep(SLOW_PAGE);
             ("200 OK", page("blue", "#0000ff", BLUE_SCRIPT))

@@ -171,7 +171,131 @@ fn the_page_loads_shows_itself_and_closes() {
         );
     }
 
+    // Действия агента — на странице с формой, по очереди, как их зовёт сервер.
+    let actions = &report["actions"];
+    let read = done(actions, "read");
+    for part in [
+        "# Форма проверки",
+        "Обычный текст абзаца.",
+        "[e1 textbox «Имя» required]",
+        "[e2 button «Поздороваться»]",
+        "[e4 combobox «Город» = «Москва»",
+        "[e9 link «На зелёную» → /green]",
+    ] {
+        assert!(read.contains(part), "в чтении нет «{part}»: {read}");
+    }
+    // Страница длиннее экрана — чтение говорит, что ниже есть ещё.
+    assert!(
+        actions["read"]["notes"]
+            .to_string()
+            .contains("browser_scroll"),
+        "{actions:#}"
+    );
+    let controls = done(actions, "controls");
+    assert!(
+        controls.contains("[e2 button «Поздороваться»]") && !controls.contains("Обычный текст"),
+        "{controls}"
+    );
+
+    // Ввод, нажатие, Enter в форме, список, флажок и Tab видны самой странице.
+    for (name, expected) in [
+        ("greeted", "Привет, Ада"),
+        ("searched", "Искали: кошки"),
+        ("city", "spb"),
+        ("agreed", "true"),
+        ("focused", "send"),
+        ("picked", "Файл: cat.txt 4"),
+        ("dismissed_answer", "нет"),
+        ("accepted_answer", "да"),
+        ("promise", "42"),
+    ] {
+        let text = done(actions, name);
+        assert!(text.ends_with(&format!("\n{expected}")), "{name}: {text}");
+    }
+    assert!(
+        done(actions, "search").contains("форму отправили"),
+        "{actions:#}"
+    );
+    assert!(
+        done(actions, "hover").starts_with("Навели мышь"),
+        "{actions:#}"
+    );
+    assert!(
+        done(actions, "scroll").contains("Прокрутили страницу вниз"),
+        "{actions:#}"
+    );
+    assert!(
+        done(actions, "scroll_box").contains("вниз на 200 px"),
+        "{actions:#}"
+    );
+    assert!(
+        done(actions, "element").contains("<h1> ref=e"),
+        "{actions:#}"
+    );
+
+    // confirm человеку не показан, а агенту сказано, о чём спросили.
+    assert!(
+        actions["dismissed"]["notes"]
+            .to_string()
+            .contains("confirm «Удалить?» — ответили «нет»"),
+        "{actions:#}"
+    );
+
+    assert!(
+        done(actions, "waited").starts_with("Дождались"),
+        "{actions:#}"
+    );
+    assert!(
+        refused(actions, "not_waited").contains("не дождались"),
+        "{actions:#}"
+    );
+    assert!(
+        refused(actions, "broken").contains("синтаксическая ошибка"),
+        "{actions:#}"
+    );
+    // Строк самого скрипта в исключении нет: агенту они ничего не скажут.
+    assert_eq!(
+        refused(actions, "thrown"),
+        "Выражение бросило исключение:\nError: нарочно",
+        "{actions:#}"
+    );
+    assert!(
+        refused(actions, "missing").contains("browser_read"),
+        "{actions:#}"
+    );
+
+    // Ссылка увела страницу — и ответ это говорит, а старые ссылки не годятся.
+    let link = &actions["link"];
+    assert!(
+        link["left"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/form"))
+            && link["url"]
+                .as_str()
+                .is_some_and(|url| url.ends_with("/green")),
+        "{link:#}"
+    );
+    assert!(
+        refused(actions, "stale").contains("browser_read"),
+        "{actions:#}"
+    );
+
     assert_eq!(report["closed"], true, "страница не закрылась: {report:#}");
+}
+
+/// Текст действия, которое удалось.
+fn done<'a>(actions: &'a Value, name: &str) -> &'a str {
+    let step = &actions[name];
+    assert!(step.get("error").is_none(), "{name} не удалось: {step:#}");
+    step["text"].as_str().unwrap_or_default()
+}
+
+/// Причина, по которой действие не сделано.
+fn refused<'a>(actions: &'a Value, name: &str) -> &'a str {
+    let step = &actions[name];
+    step["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{name} должно было не выйти: {step:#}"))
 }
 
 /// Что проверка узнала о странице: что дождалась её, куда пришла, как та
