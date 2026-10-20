@@ -9,14 +9,18 @@
 // чем-то закрыто, страница приходит картинкой.
 //
 // Тем же браузером пользуются агенты проекта. Поэтому ящик — не только
-// просмотр: набранный здесь адрес открывается в той же вкладке, которую
-// агент и увидит.
+// просмотр: адрес, набранный здесь и отправленный Enter, открывается в той же
+// вкладке, которую агент и увидит. Кнопка «Открыть» уводит адрес в основной
+// браузер системы — тот, что человек выбрал сам: там его закладки, вход на
+// сайты и инструменты разработчика.
 
 import { useEffect, useRef, useState } from "react";
 import {
   NO_FRAME,
   frameSource,
+  isWebAddress,
   normalizeAddress,
+  openOutside,
   openPage,
   stepPage,
   watchBrowserFrame,
@@ -148,6 +152,24 @@ function BrowserProjectView(props: { workspaceId: string }) {
       .finally(() => setOpening(false));
   };
 
+  // Набранное или то, где стоит страница: поле показывает ровно это.
+  const outside = () => {
+    const url = normalizeAddress(address);
+    if (!url) {
+      return;
+    }
+    setRefusal(null);
+    refusedAt.current = null;
+    openOutside(url).catch(() => {
+      setRefusal(
+        isWebAddress(url)
+          ? t("browser.outsideFailed")
+          : t("error.browserUrlUnsupported"),
+      );
+      refusedAt.current = frame.url;
+    });
+  };
+
   const step = (next: PageStep) => {
     // Страница уйдёт сама, и адресная строка снова идёт за ней: набранное,
     // но не открытое, к новой странице уже не относится.
@@ -200,9 +222,11 @@ function BrowserProjectView(props: { workspaceId: string }) {
           }}
         />
         <button
-          type="submit"
+          type="button"
           className="browser-open"
-          disabled={opening || !normalizeAddress(address)}
+          title={t("browser.openOutside")}
+          disabled={!normalizeAddress(address)}
+          onClick={outside}
         >
           {t("browser.open")}
         </button>

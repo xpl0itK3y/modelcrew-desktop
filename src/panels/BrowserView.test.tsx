@@ -7,6 +7,8 @@ import { BrowserView } from "./BrowserView";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+const openUrl = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 
 const PIXEL = "iVBORw0KGgo=";
 
@@ -21,6 +23,8 @@ function address(): HTMLInputElement {
 beforeEach(() => {
   invoke.mockReset();
   invoke.mockResolvedValue(frame());
+  openUrl.mockReset();
+  openUrl.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -263,6 +267,58 @@ describe("BrowserView", () => {
     // Сразу же, тем же кадром отрисовки, а не после первого ответа нового.
     expect(address()).toHaveValue("");
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("sends the page to the system browser from the open button", async () => {
+    // Кнопка — в основной браузер человека, а не в браузер проекта: там его
+    // закладки, вход на сайты и инструменты разработчика.
+    invoke.mockResolvedValue(
+      frame({ image: PIXEL, url: "http://localhost:1420/x", running: true }),
+    );
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() => expect(address()).toHaveValue("http://localhost:1420/x"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
+    await waitFor(() =>
+      expect(openUrl).toHaveBeenCalledWith("http://localhost:1420/x"),
+    );
+    expect(invoke).not.toHaveBeenCalledWith("browser_go", expect.anything());
+  });
+
+  it("sends a typed address out with the scheme filled in", async () => {
+    render(<BrowserView workspaceId="w1" />);
+
+    fireEvent.change(address(), { target: { value: "localhost:3000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
+    await waitFor(() =>
+      expect(openUrl).toHaveBeenCalledWith("http://localhost:3000"),
+    );
+  });
+
+  it("keeps anything but the web inside", async () => {
+    render(<BrowserView workspaceId="w1" />);
+
+    fireEvent.change(address(), { target: { value: "file:///etc/passwd" } });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "годятся только http и https",
+    );
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("says so when the system browser does not open", async () => {
+    openUrl.mockRejectedValue("no handler");
+    render(<BrowserView workspaceId="w1" />);
+
+    fireEvent.change(address(), { target: { value: "example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Основной браузер не открылся",
+    );
   });
 
   it("keeps the open button out of reach while there is nothing to open", () => {

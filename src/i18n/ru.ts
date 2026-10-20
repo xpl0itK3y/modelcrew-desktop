@@ -75,6 +75,9 @@ export const ru = {
   "browser.reload": "Обновить страницу",
   "browser.address": "Адрес страницы",
   "browser.open": "Открыть",
+  "browser.openOutside":
+    "Открыть в основном браузере системы. Enter в поле адреса открывает страницу здесь",
+  "browser.outsideFailed": "Основной браузер не открылся",
   "browser.frameAlt": "Страница в браузере проекта",
   "browser.pageOpened": "Агент открыл страницу",
   "browser.pageOpenedIn": "Агент открыл страницу — {project}",

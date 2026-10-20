@@ -76,6 +76,9 @@ export const en: Record<MessageKey, string> = {
   "browser.reload": "Reload the page",
   "browser.address": "Page address",
   "browser.open": "Open",
+  "browser.openOutside":
+    "Open in the system's default browser. Enter in the address field opens the page here",
+  "browser.outsideFailed": "The default browser did not open",
   "browser.frameAlt": "The page in the project browser",
   "browser.pageOpened": "An agent opened a page",
   "browser.pageOpenedIn": "An agent opened a page — {project}",

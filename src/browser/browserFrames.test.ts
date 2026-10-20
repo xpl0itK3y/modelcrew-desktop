@@ -4,12 +4,49 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   NO_FRAME,
   frameSource,
+  isWebAddress,
   normalizeAddress,
+  openOutside,
   watchBrowserFrame,
 } from "./browserFrames";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+const openUrl = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
+
+describe("openOutside", () => {
+  beforeEach(() => {
+    openUrl.mockReset();
+    openUrl.mockResolvedValue(undefined);
+  });
+
+  it("hands a web address to the system browser", async () => {
+    await openOutside("http://localhost:1420/x");
+
+    expect(openUrl).toHaveBeenCalledWith("http://localhost:1420/x");
+  });
+
+  it("sends nothing but http and https out of the app", async () => {
+    // Системе всё равно, чем открыть адрес: файл она отдаст редактору, а
+    // `javascript:` — неизвестно кому. Из адресной строки уходит только веб.
+    for (const url of [
+      "file:///etc/passwd",
+      "javascript:alert(1)",
+      "data:text/html,<b>x</b>",
+      "vscode://file/etc/passwd",
+      "http://",
+    ]) {
+      expect(isWebAddress(url)).toBe(false);
+      await expect(openOutside(url)).rejects.toThrow();
+    }
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("takes either case of the scheme", () => {
+    expect(isWebAddress("HTTPS://EXAMPLE.COM")).toBe(true);
+  });
+});
 
 describe("normalizeAddress", () => {
   it("dresses a bare host as http", () => {

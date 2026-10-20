@@ -12,6 +12,7 @@
 // заголовком — для адресной строки.
 
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { isTauri } from "../platform";
 
 export type BrowserFrame = {
@@ -57,6 +58,20 @@ export function normalizeAddress(text: string): string | null {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
     ? trimmed
     : `http://${trimmed}`;
+}
+
+/**
+ * Годится ли адрес для браузера. Только http и https: всё прочее — файлы,
+ * `javascript:`, чужие схемы приложений — система открыла бы не браузером, а
+ * чем попало, и уже не по воле человека.
+ */
+export function isWebAddress(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /** Кадр как значение `src`. Пустая строка — картинки нет. */
@@ -130,6 +145,17 @@ export function watchBrowserFrame(
 /** Открыть страницу по просьбе человека. Отказ уходит наверх — его показывают. */
 export function openPage(workspaceId: string, url: string): Promise<void> {
   return invoke<void>("browser_go", { workspaceId, url });
+}
+
+/**
+ * Открыть адрес в основном браузере системы — том, что человек выбрал сам, а
+ * не в браузере проекта. Неподходящий адрес не уходит никуда.
+ */
+export async function openOutside(url: string): Promise<void> {
+  if (!isWebAddress(url)) {
+    throw new Error(`not a web address: ${url}`);
+  }
+  await openUrl(url);
 }
 
 /** Шаг страницы: кнопки над ней. */
