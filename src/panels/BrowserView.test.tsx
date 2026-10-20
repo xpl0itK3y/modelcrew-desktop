@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveDevice } from "../browser/pageDevice";
 import { setLocale } from "../i18n";
+import { KEYS, removeSetting } from "../settings/storage";
 import { BrowserView } from "./BrowserView";
 
 const invoke = vi.hoisted(() => vi.fn());
@@ -13,8 +14,19 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 
 const PIXEL = "iVBORw0KGgo=";
 
+// Один ответ на всё: кадр для `browser_frame` и пустая консоль для
+// `browser_console` — у страницы, которой нет, нет ни того, ни другого.
 function frame(over: Record<string, unknown> = {}) {
-  return { image: "", url: "", title: "", running: false, ...over };
+  return {
+    image: "",
+    url: "",
+    title: "",
+    running: false,
+    started: 0,
+    dropped: 0,
+    messages: [],
+    ...over,
+  };
 }
 
 function address(): HTMLInputElement {
@@ -27,6 +39,7 @@ beforeEach(() => {
   openUrl.mockReset();
   openUrl.mockResolvedValue(undefined);
   saveDevice("desktop");
+  removeSetting(KEYS.browserConsole);
 });
 
 afterEach(() => {
@@ -211,7 +224,7 @@ describe("BrowserView", () => {
         frame({ image: PIXEL, url: "http://localhost:1420/", running: true }),
       );
     invoke.mockImplementation((command: string) =>
-      command === "browser_frame" ? answer() : Promise.resolve(),
+      command === "browser_frame" ? answer() : Promise.resolve(frame()),
     );
 
     render(<BrowserView workspaceId="w1" />);
@@ -452,6 +465,90 @@ describe("BrowserView", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Компьютер/ }));
 
     expect(place.style.width).toBe("");
+  });
+
+  it("counts errors on the console button while the console is closed", async () => {
+    invoke.mockResolvedValue(
+      frame({
+        running: true,
+        started: 1,
+        messages: [
+          { level: "error", text: "boom" },
+          { level: "exception", text: "TypeError: x is undefined" },
+          { level: "warn", text: "careful" },
+          { level: "log", text: "hello" },
+        ],
+      }),
+    );
+    render(<BrowserView workspaceId="w1" />);
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Консоль — ошибок: 2, предупреждений: 1",
+      }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText("hello")).not.toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("browser_console", {
+      workspaceId: "w1",
+    });
+  });
+
+  it("shows the console, filters it and clears it for the person only", async () => {
+    invoke.mockResolvedValue(
+      frame({
+        running: true,
+        started: 1,
+        messages: [
+          { level: "error", text: "boom" },
+          { level: "exception", text: "TypeError: x is undefined" },
+          { level: "warn", text: "careful" },
+          { level: "log", text: "hello" },
+        ],
+      }),
+    );
+    render(<BrowserView workspaceId="w1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Консоль/ }));
+
+    expect(await screen.findByText("hello")).toBeInTheDocument();
+    expect(screen.getByText("careful")).toBeInTheDocument();
+    // Исключение подписано: иначе его не отличить от console.error.
+    expect(screen.getByText("Исключение")).toBeInTheDocument();
+    expect(localStorage.getItem(KEYS.browserConsole)).toBe("open");
+
+    fireEvent.click(screen.getByRole("button", { name: "Ошибки" }));
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    expect(screen.queryByText("hello")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Все" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Фильтр" }), {
+      target: { value: "CARE" },
+    });
+    expect(screen.getByText("careful")).toBeInTheDocument();
+    expect(screen.queryByText("boom")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Очистить консоль" }));
+
+    expect(screen.queryByText("careful")).not.toBeInTheDocument();
+    expect(screen.getByText("Консоль пуста")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Консоль" })).toBeInTheDocument();
+  });
+
+  it("keeps the page text as text", async () => {
+    // Пишет в консоль чужая страница: разметка из её сообщений не должна
+    // стать разметкой ящика.
+    invoke.mockResolvedValue(
+      frame({
+        running: true,
+        started: 1,
+        messages: [{ level: "log", text: "<b>loud</b>" }],
+      }),
+    );
+    localStorage.setItem(KEYS.browserConsole, "open");
+    render(<BrowserView workspaceId="w1" />);
+
+    expect(await screen.findByText("<b>loud</b>")).toBeInTheDocument();
+    expect(document.querySelector(".browser-console b")).toBeNull();
   });
 
   it("keeps the step buttons out of reach while the browser is not up", () => {

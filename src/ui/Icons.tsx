@@ -175,6 +175,25 @@ export function ReloadIcon(props: IconProps) {
   );
 }
 
+export function ConsoleIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M4.5 6l2 2-2 2M8.5 10.5h3" />
+    </svg>
+  );
+}
+
+export function ClearIcon(props: IconProps) {
+  // Перечёркнутый круг — «очистить» в любой консоли разработчика.
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M4.1 11.9l7.8-7.8" />
+    </svg>
+  );
+}
+
 export function PhoneIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

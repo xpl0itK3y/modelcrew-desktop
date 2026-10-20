@@ -28,6 +28,18 @@ import {
   type PageStep,
 } from "../browser/browserFrames";
 import { saveAutoReload, useAutoReload } from "../browser/autoReload";
+import { PageConsolePanel } from "../browser/PageConsolePanel";
+import {
+  NO_CONSOLE,
+  countKinds,
+  endOf,
+  entriesSince,
+  lostSince,
+  sameConsole,
+  watchPageConsole,
+  type ConsoleMark,
+  type PageConsole,
+} from "../browser/pageConsole";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import {
   DEVICES,
@@ -36,10 +48,12 @@ import {
   useDevice,
 } from "../browser/pageDevice";
 import { localizeBackendError, useI18n } from "../i18n";
+import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import {
   AutoReloadIcon,
   BackIcon,
   CloseIcon,
+  ConsoleIcon,
   DesktopIcon,
   ForwardIcon,
   PhoneIcon,
@@ -100,6 +114,15 @@ function BrowserProjectView(props: { workspaceId: string }) {
     width: number;
     height: number;
   } | null>(null);
+  // Консоль страницы. Открыта ли — помним между открытиями ящика: кто её
+  // открыл, тот и дальше смотрит на страницу с ней.
+  const [consoleOpen, setConsoleOpen] = useState(
+    () => readSetting(KEYS.browserConsole) === "open",
+  );
+  const [pageLog, setPageLog] = useState<PageConsole>(NO_CONSOLE);
+  const [consoleTrouble, setConsoleTrouble] = useState<string | null>(null);
+  // С какого места показывать после «очистить».
+  const [consoleMark, setConsoleMark] = useState<ConsoleMark | null>(null);
   // Поле трогали руками. Пока это так, адрес за страницей не следует: кадр
   // приходит раз в секунду и стирал бы набранное — достаточно было увести
   // курсор из поля, и от адреса ничего не оставалось.
@@ -151,6 +174,20 @@ function BrowserProjectView(props: { workspaceId: string }) {
       () => docked.current,
     );
   }, [props.workspaceId]);
+
+  // Открыли консоль — читаем сразу, а не через три секунды закрытой.
+  useEffect(() => {
+    return watchPageConsole(
+      props.workspaceId,
+      (next) => {
+        // Запись только растёт: не выросла — и перерисовывать нечего.
+        setPageLog((current) => (sameConsole(current, next) ? current : next));
+        setConsoleTrouble(null);
+      },
+      (error) => setConsoleTrouble(localizeBackendError(error)),
+      consoleOpen,
+    );
+  }, [props.workspaceId, consoleOpen]);
 
   useEffect(() => {
     const place = pageRef.current;
@@ -237,6 +274,12 @@ function BrowserProjectView(props: { workspaceId: string }) {
     });
   };
 
+  const toggleConsole = () => {
+    const next = !consoleOpen;
+    setConsoleOpen(next);
+    writeSetting(KEYS.browserConsole, next ? "open" : "closed");
+  };
+
   const step = (next: PageStep) => {
     // Страница уйдёт сама, и адресная строка снова идёт за ней: набранное,
     // но не открытое, к новой странице уже не относится.
@@ -260,6 +303,12 @@ function BrowserProjectView(props: { workspaceId: string }) {
 
   const loading = frame.running && (awaiting || frame.loading);
   const deviceSize = DEVICE_SIZES[device];
+  const consoleEntries = entriesSince(pageLog, consoleMark);
+  const { errors, warnings } = countKinds(consoleEntries);
+  const consoleName =
+    errors + warnings > 0
+      ? t("browser.consoleCounted", { errors, warnings })
+      : t("browser.console");
   const failure = refusal ?? trouble;
   const picture = frameSource(frame.image);
   // Первый запуск браузера занимает секунды, и без надписи нажатие
@@ -363,7 +412,33 @@ function BrowserProjectView(props: { workspaceId: string }) {
           )}
         </div>
       </div>
+      {consoleOpen && (
+        <PageConsolePanel
+          entries={consoleEntries}
+          lost={lostSince(pageLog, consoleMark)}
+          running={pageLog.running}
+          trouble={consoleTrouble}
+          onClear={() => setConsoleMark(endOf(pageLog))}
+        />
+      )}
       <div className="browser-status-bar">
+        <button
+          type="button"
+          className="browser-console-toggle"
+          title={t("browser.consoleHint")}
+          aria-label={consoleName}
+          aria-pressed={consoleOpen}
+          onClick={toggleConsole}
+        >
+          <ConsoleIcon />
+          <span>{t("browser.console")}</span>
+          {errors > 0 && (
+            <span className="browser-console-count is-error">{errors}</span>
+          )}
+          {warnings > 0 && (
+            <span className="browser-console-count is-warning">{warnings}</span>
+          )}
+        </button>
         <div className="browser-status-end">
           {frame.running && viewport && (
             <span className="browser-viewport" title={t("browser.viewport")}>
