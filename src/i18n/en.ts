@@ -89,6 +89,7 @@ export const en: Record<MessageKey, string> = {
   "browser.pageOpenedIn": "An agent opened a page — {project}",
   "browser.showPage": "Open browser",
   "browser.dismissNotice": "Dismiss",
+  "browser.pagesMore": "and {count} more",
   "titlebar.browserOpened":
     "Project browser: pages an agent opened — {count}",
   "browser.blank": "The page is still blank",

@@ -88,6 +88,7 @@ export const ru = {
   "browser.pageOpenedIn": "Агент открыл страницу — {project}",
   "browser.showPage": "Открыть браузер",
   "browser.dismissNotice": "Скрыть",
+  "browser.pagesMore": "и ещё {count}",
   "titlebar.browserOpened":
     "Браузер проекта: агент открыл страниц — {count}",
   "browser.blank": "Страница пока пустая",

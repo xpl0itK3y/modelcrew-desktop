@@ -20,6 +20,9 @@ type Props = {
   // Проект страницы, если он не тот, что открыт сейчас. Тогда кнопка сначала
   // переключит на него.
   otherProject: string | null;
+  // Сколько ещё страниц этого проекта ждёт, кроме показанной. Агент
+  // открывает их сериями, и плашка говорит о последней, не теряя прочих.
+  more: number;
   onOpen: () => void;
   onDismiss: () => void;
 };
@@ -83,8 +86,15 @@ export function PageOpenedNotice(props: Props) {
             ? t("browser.pageOpenedIn", { project: props.otherProject })
             : t("browser.pageOpened")}
         </span>
-        <span className="page-opened-notice-page" title={page.url}>
-          {pageLabel(page)}
+        <span className="page-opened-notice-page">
+          <span className="page-opened-notice-label" title={page.url}>
+            {pageLabel(page)}
+          </span>
+          {props.more > 0 && (
+            <span className="page-opened-notice-more">
+              {t("browser.pagesMore", { count: props.more })}
+            </span>
+          )}
         </span>
       </span>
       <button

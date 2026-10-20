@@ -33,6 +33,7 @@ function notice(over: Partial<Parameters<typeof PageOpenedNotice>[0]> = {}) {
     <PageOpenedNotice
       page={page}
       otherProject={null}
+      more={0}
       onOpen={onOpen}
       onDismiss={onDismiss}
       {...over}
@@ -59,6 +60,20 @@ describe("PageOpenedNotice", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Агент открыл страницу — shop",
     );
+  });
+
+  it("counts the other pages the agent opened meanwhile", () => {
+    notice({ more: 2 });
+
+    // Показана последняя, а о прочих сказано числом.
+    expect(screen.getByRole("status")).toHaveTextContent("Streamlit");
+    expect(screen.getByRole("status")).toHaveTextContent("и ещё 2");
+  });
+
+  it("says nothing more about a single page", () => {
+    notice();
+
+    expect(screen.getByRole("status")).not.toHaveTextContent("ещё");
   });
 
   it("goes away by itself while the person is here", () => {

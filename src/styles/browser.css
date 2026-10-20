@@ -218,11 +218,23 @@
 }
 
 .page-opened-notice-page {
-  overflow: hidden;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
   color: var(--mc-text-muted);
   font-size: 11.5px;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Длинный заголовок режется, а «и ещё N» остаётся видно целиком. */
+.page-opened-notice-label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.page-opened-notice-more {
+  flex: none;
 }
 
 .page-opened-notice-open {

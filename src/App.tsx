@@ -35,6 +35,7 @@ import {
 } from "./panels/git/GitPanelLazy";
 import { BrowserView } from "./panels/BrowserView";
 import {
+  createBannerGate,
   pageLabel,
   watchPagesOpened,
   type OpenedPage,
@@ -699,6 +700,12 @@ export default function App() {
   // Агент открыл страницу. У неё нет своего окна, поэтому о ней говорим сами:
   // числом на глобусе и плашкой под ним, а когда окно не впереди — ещё и
   // баннером системы.
+  const bannerGate = useRef(createBannerGate());
+  useEffect(() => {
+    const back = () => bannerGate.current.reset();
+    window.addEventListener("focus", back);
+    return () => window.removeEventListener("focus", back);
+  }, []);
   useEffect(() => {
     return watchPagesOpened((page) => {
       // Ящик этого проекта открыт — страница уже перед глазами, стоит только
@@ -711,8 +718,9 @@ export default function App() {
         setPageNotice(page);
       }
       // Пока окно впереди, баннер повторил бы плашку, а macOS его и не
-      // покажет.
-      if (!document.hasFocus()) {
+      // покажет. Пока человек не вернулся — один баннер на проект: страницы
+      // агент открывает сериями.
+      if (!document.hasFocus() && bannerGate.current.claim(page.root)) {
         const project = workspaceNameOfRoot(
           workspacesRef.current.list,
           page.root,
@@ -1094,6 +1102,9 @@ export default function App() {
       </div>
       <PageOpenedNotice
         page={pageNotice}
+        more={
+          pageNotice ? Math.max(0, (pagesUnseen[pageNotice.root] ?? 0) - 1) : 0
+        }
         otherProject={
           pageNotice && pageNotice.root !== activeRoot
             ? workspaceNameOfRoot(workspaces.list, pageNotice.root)
