@@ -28,6 +28,8 @@ pub struct BrowserFrame {
     pub docked: bool,
     /// Умеет ли система показать страницу живой. Где не умеет — только кадр.
     pub dockable: bool,
+    /// Грузится ли страница: панель показывает полосу и кнопку «Стоп».
+    pub loading: bool,
 }
 
 impl BrowserFrame {
@@ -39,6 +41,7 @@ impl BrowserFrame {
             running: false,
             docked: false,
             dockable: crate::browser_page::CAN_DOCK,
+            loading: false,
         }
     }
 }
@@ -99,6 +102,7 @@ pub async fn browser_frame(
             running: true,
             docked: crate::browser_page::is_docked(&app, &key),
             dockable: crate::browser_page::CAN_DOCK,
+            loading: crate::browser_page::is_loading(&app, &key),
         })
     })
     .await

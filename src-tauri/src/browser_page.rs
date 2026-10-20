@@ -244,6 +244,8 @@ pub enum Step {
     Back,
     Forward,
     Reload,
+    /// Бросить загрузку: сервер завис, а ждать его человек не хочет.
+    Stop,
 }
 
 /// Назад, вперёд или заново.
@@ -257,8 +259,17 @@ pub fn step(app: &AppHandle, root: &str, step: Step) -> Result<(), String> {
         Step::Back => page.eval("history.back()"),
         Step::Forward => page.eval("history.forward()"),
         Step::Reload => page.reload(),
+        // Тем же путём, что и браузер по Esc: и для начатого перехода, и для
+        // картинок со скриптами, что ещё догружаются.
+        Step::Stop => page.eval("window.stop()"),
     };
     done.map_err(|error| format!("до страницы не достучаться: {error}"))
+}
+
+/// Грузится ли страница проекта. Не ответила — считаем, что нет: полоса
+/// загрузки, застрявшая навсегда, хуже пропавшей на миг.
+pub fn is_loading(app: &AppHandle, root: &str) -> bool {
+    system::is_loading(app, root).unwrap_or(false)
 }
 
 /// Открыта ли страница проекта.
@@ -987,6 +998,13 @@ mod tests {
                 .all(|c| c.is_ascii_hexdigit()),
             "метка окна должна остаться простой: {label}"
         );
+    }
+
+    #[test]
+    fn steps_come_from_the_panel_by_their_lowercase_names() {
+        let steps: Vec<Step> =
+            serde_json::from_str(r#"["back","forward","reload","stop"]"#).unwrap();
+        assert_eq!(steps, [Step::Back, Step::Forward, Step::Reload, Step::Stop]);
     }
 
     #[test]
