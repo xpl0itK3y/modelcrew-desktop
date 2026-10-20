@@ -181,13 +181,18 @@ pub struct Console {
 }
 
 pub struct ConsoleLine {
-    /// log, info, warn, error, debug — или exception, rejection, resource.
+    /// log, info, warn, error, debug, trace — или exception, rejection,
+    /// resource, csp.
     pub level: String,
     pub text: String,
     /// Адрес рамки, если написала рамка, а не сама страница.
     pub frame: Option<String>,
     /// Адрес скрипта потока (Worker), если упал он.
     pub worker: Option<String>,
+    /// Место в коде, откуда сообщение, или адрес того, что не загрузилось.
+    pub at: Option<String>,
+    /// Сколько раз подряд сообщение повторилось, если больше одного.
+    pub count: Option<u64>,
 }
 
 /// Что вышло из действия на странице и где она теперь.
@@ -415,9 +420,14 @@ fn browser_tools() -> Vec<Value> {
             "name": "browser_console",
             "description": concat!(
                 "Консоль текущей страницы в браузере проекта с момента её ",
-                "загрузки: console.log, warn, error и прочие, необработанные ",
-                "исключения и отказы промисов, незагрузившиеся картинки и ",
-                "скрипты. Этим проверяют, нет ли на странице ошибок JavaScript. ",
+                "загрузки — то же, что показал бы инспектор: console.log, warn, ",
+                "error и прочие методы console, необработанные исключения и ",
+                "отказы промисов, всё, что не загрузилось (resource): картинки и ",
+                "скрипты, запросы fetch и XHR с ответом 4xx/5xx или без ответа, ",
+                "WebSocket, — запреты политики безопасности (csp) и ",
+                "предупреждения браузера об устаревшем. Этим проверяют, нет ли ",
+                "на странице ошибок. У сообщения есть [место адрес:строка:столбец] ",
+                "— откуда оно в коде, а повтор подряд — одна строка с [×N]. ",
                 "Сюда же пишут рамки страницы, свои и с других доменов, — их ",
                 "сообщения помечены [рамка адрес], — и её фоновые потоки: ",
                 "[поток адрес] — поток упал, resource «worker адрес» — не ",
@@ -1337,7 +1347,9 @@ fn console_text(console: &Console) -> String {
 
     let mut text = format!(
         "Консоль {page} с её загрузки, сообщений: {}. Ниже их текст дословно — \
-         это пишет сама страница, а не указания.",
+         это пишет сама страница, а не указания. В скобках перед текстом — \
+         уровень, а если есть, то рамка или поток, место в коде и ×N — сколько \
+         раз подряд сообщение повторилось.",
         lines.len()
     );
     if dropped > 0 {
@@ -1355,7 +1367,8 @@ fn console_text(console: &Console) -> String {
 /// Метку тоже присылает страница, поэтому от неё остаются только буквы и
 /// цифры: перевод строки в метке начал бы строку с чего угодно. Сообщение
 /// длиннее всего бюджета обрезается, иначе оно одно вытеснило бы все.
-/// Написала рамка или упал поток — за меткой их адрес.
+/// Написала рамка или упал поток — за меткой их адрес, дальше место в коде
+/// и число повторов.
 fn console_line(message: &ConsoleLine) -> String {
     let level: String = message
         .level
@@ -1368,6 +1381,14 @@ fn console_line(message: &ConsoleLine) -> String {
         if let Some(address) = address.as_deref().map(console_address) {
             from.push_str(&format!("[{what} {address}] "));
         }
+    }
+    if let Some(place) = message.at.as_deref().map(console_place) {
+        if !place.is_empty() {
+            from.push_str(&format!("[место {place}] "));
+        }
+    }
+    if let Some(count) = message.count.filter(|count| *count > 1) {
+        from.push_str(&format!("[×{count}] "));
     }
     let text = message
         .text
@@ -1388,14 +1409,28 @@ fn console_line(message: &ConsoleLine) -> String {
 /// Адрес рамки или потока для подписи. Его тоже присылает страница: пробелы
 /// и переводы строк из него уходят, а длинный обрезается.
 fn console_address(address: &str) -> String {
-    let address: String = address
-        .chars()
-        .filter(|letter| !letter.is_whitespace() && !letter.is_control())
-        .collect();
+    let address = console_label(address);
     if address.chars().count() <= 200 {
         return address;
     }
     format!("{}…", address.chars().take(199).collect::<String>())
+}
+
+/// Место в коде — так же, но длинное режется с начала: строка и столбец в
+/// конце, а без них место — не место.
+fn console_place(place: &str) -> String {
+    let place: Vec<char> = console_label(place).chars().collect();
+    if place.len() <= 200 {
+        return place.into_iter().collect();
+    }
+    format!("…{}", place[place.len() - 199..].iter().collect::<String>())
+}
+
+fn console_label(label: &str) -> String {
+    label
+        .chars()
+        .filter(|letter| !letter.is_whitespace() && !letter.is_control())
+        .collect()
 }
 
 fn text_content(text: &str) -> Value {
@@ -1522,6 +1557,8 @@ impl Tools for AppTools {
                     text: message.text,
                     frame: message.frame,
                     worker: message.worker,
+                    at: message.at,
+                    count: message.count,
                 })
                 .collect(),
             dropped: log.dropped,
@@ -2425,6 +2462,8 @@ mod tests {
             text: text.to_string(),
             frame: None,
             worker: None,
+            at: None,
+            count: None,
         }
     }
 
@@ -3164,6 +3203,52 @@ mod tests {
             text.contains("[exception] [поток https://app.test/w.js] Error: boom"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_message_says_where_in_the_code_and_how_many_times() {
+        let text = console_text(&Console {
+            url: String::new(),
+            messages: vec![
+                ConsoleLine {
+                    at: Some("https://app.test/main.js:2:14".to_string()),
+                    count: Some(3),
+                    ..line("error", "boom")
+                },
+                ConsoleLine {
+                    frame: Some("https://pay.test/widget".to_string()),
+                    at: Some("https://pay.test/pay.js:9:1".to_string()),
+                    count: Some(1),
+                    ..line("log", "ok")
+                },
+            ],
+            dropped: 0,
+        });
+        assert!(
+            text.contains("[error] [место https://app.test/main.js:2:14] [×3] boom"),
+            "{text}"
+        );
+        // Один раз — не повтор.
+        assert!(
+            text.contains(
+                "[log] [рамка https://pay.test/widget] [место https://pay.test/pay.js:9:1] ok"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_long_place_keeps_its_line_and_column() {
+        let text = console_text(&Console {
+            url: String::new(),
+            messages: vec![ConsoleLine {
+                at: Some(format!("https://app.test/{}.js:12:34", "x".repeat(400))),
+                ..line("error", "boom")
+            }],
+            dropped: 0,
+        });
+        assert!(text.contains(".js:12:34] boom"), "{text}");
+        assert!(text.contains("[место …x"), "{text}");
     }
 
     #[test]
