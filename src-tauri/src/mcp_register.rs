@@ -83,7 +83,9 @@ const CODEX_BRIEF: &str = concat!(
     "shown to the human right next to this terminal, and the modelcrew-browser ",
     "MCP server drives it. Whenever you open, check or show a web page, be it a ",
     "local dev server, a preview or any site, use only its tools: browser_open, ",
-    "browser_navigate, browser_screenshot and browser_console. In code mode they ",
+    "browser_navigate, browser_reload, browser_screenshot and browser_console. ",
+    "After changing code, call browser_reload before you look at the page. In ",
+    "code mode they ",
     "are tools.mcp__modelcrew_browser__browser_open and so on. They may be ",
     "deferred: look them up with tool search before deciding they are missing. ",
     "Never open pages with open, xdg-open, start, explorer, osascript, a browser ",
@@ -541,6 +543,7 @@ mod tests {
         for tool in [
             "browser_open",
             "browser_navigate",
+            "browser_reload",
             "browser_screenshot",
             "browser_console",
         ] {
