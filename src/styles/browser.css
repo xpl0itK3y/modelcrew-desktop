@@ -47,6 +47,12 @@
   outline: none;
 }
 
+/* Выключатель горит, пока включён: по нему видно, обновится ли страница
+   сама, ещё до первой правки. */
+.browser-auto-reload[aria-pressed="true"] {
+  color: var(--mc-accent);
+}
+
 .browser-open {
   flex: none;
   padding: 4px 10px;

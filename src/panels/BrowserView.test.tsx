@@ -321,6 +321,26 @@ describe("BrowserView", () => {
     );
   });
 
+  it("switches reloading on edits from the address bar", async () => {
+    // Страница на localhost сама идёт за правками в проекте. Кому это мешает
+    // — набирает в форме, — выключает здесь же, не уходя в настройки.
+    render(<BrowserView workspaceId="w1" />);
+    const toggle = screen.getByRole("button", {
+      name: "Обновлять при правках",
+    });
+    const pressed = toggle.getAttribute("aria-pressed");
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute(
+      "aria-pressed",
+      pressed === "true" ? "false" : "true",
+    );
+    expect(invoke).toHaveBeenCalledWith("browser_auto_reload", {
+      enabled: pressed !== "true",
+    });
+  });
+
   it("keeps the open button out of reach while there is nothing to open", () => {
     render(<BrowserView workspaceId="w1" />);
 

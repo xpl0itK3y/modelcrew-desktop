@@ -175,6 +175,17 @@ export function ReloadIcon(props: IconProps) {
   );
 }
 
+export function AutoReloadIcon(props: IconProps) {
+  // Та же стрелка «обновить», но с точкой посередине: обновляется сама.
+  return (
+    <svg {...base(props)}>
+      <path d="M12.8 6.5A5 5 0 1 0 13 9.5" />
+      <path d="M13 3v3.5H9.5" />
+      <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function GlobeIcon(props: IconProps) {
   // Меридиан и экватор: шар без них читается как пустой кружок.
   return (

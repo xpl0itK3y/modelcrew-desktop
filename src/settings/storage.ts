@@ -30,6 +30,8 @@ export const KEYS = {
   terminalAgents: "modelcrew.terminalAgents",
   agentSessions: "modelcrew.agentSessions",
 
+  browserAutoReload: "modelcrew.browserAutoReload",
+
   notificationSound: "modelcrew.notificationSound",
   notificationVolume: "modelcrew.notificationVolume",
   systemNotifications: "modelcrew.systemNotifications",

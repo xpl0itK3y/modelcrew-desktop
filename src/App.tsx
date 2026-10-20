@@ -40,6 +40,7 @@ import {
   type OpenedPage,
 } from "./browser/pagesOpened";
 import { PageOpenedNotice } from "./browser/PageOpenedNotice";
+import { syncAutoReload } from "./browser/autoReload";
 import { sendSystemNotification } from "./notifications";
 import { subscribeGitChanges, type GitChangesSummary } from "./git/gitChanges";
 import { aggregateCounts } from "./git/unifiedDiff";
@@ -252,6 +253,12 @@ export default function App() {
   useEffect(() => {
     applyTerminalTheme(themeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // За файлами следит бэкенд, а выбор человека хранится здесь. Говорим его
+  // сразу, а не когда откроют ящик: агент правит код и при закрытом.
+  useEffect(() => {
+    void syncAutoReload();
   }, []);
 
   // Сироты-снимки терминалов (панели/сессии удалены в прошлых запусках)

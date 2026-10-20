@@ -73,6 +73,11 @@ export const ru = {
   "browser.back": "Назад",
   "browser.forward": "Вперёд",
   "browser.reload": "Обновить страницу",
+  "browser.autoReload": "Обновлять при правках",
+  "browser.autoReloadOn":
+    "Локальная страница обновляется сама, когда меняются файлы проекта. Нажмите, чтобы выключить",
+  "browser.autoReloadOff":
+    "Страница не обновляется сама. Нажмите, чтобы обновлять её, когда меняются файлы проекта",
   "browser.address": "Адрес страницы",
   "browser.open": "Открыть",
   "browser.openOutside":

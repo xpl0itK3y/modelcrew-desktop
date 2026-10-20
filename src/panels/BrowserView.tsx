@@ -27,9 +27,15 @@ import {
   type BrowserFrame,
   type PageStep,
 } from "../browser/browserFrames";
+import { saveAutoReload, useAutoReload } from "../browser/autoReload";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import { localizeBackendError, useI18n } from "../i18n";
-import { BackIcon, ForwardIcon, ReloadIcon } from "../ui/Icons";
+import {
+  AutoReloadIcon,
+  BackIcon,
+  ForwardIcon,
+  ReloadIcon,
+} from "../ui/Icons";
 
 // Кнопки над страницей — как у любого браузера, в том же порядке.
 const STEPS = [
@@ -61,6 +67,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const autoReload = useAutoReload();
   // Поле трогали руками. Пока это так, адрес за страницей не следует: кадр
   // приходит раз в секунду и стирал бы набранное — достаточно было увести
   // курсор из поля, и от адреса ничего не оставалось.
@@ -209,6 +216,16 @@ function BrowserProjectView(props: { workspaceId: string }) {
             <Icon />
           </button>
         ))}
+        <button
+          type="button"
+          className="icon-button browser-auto-reload"
+          title={t(autoReload ? "browser.autoReloadOn" : "browser.autoReloadOff")}
+          aria-label={t("browser.autoReload")}
+          aria-pressed={autoReload}
+          onClick={() => saveAutoReload(!autoReload)}
+        >
+          <AutoReloadIcon />
+        </button>
         <input
           type="text"
           className="browser-address"
