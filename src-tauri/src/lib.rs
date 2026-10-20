@@ -16,6 +16,7 @@ mod agent_session_watch;
 mod agent_sessions;
 mod browser_actions;
 mod browser_auto_reload;
+mod browser_input;
 mod browser_page;
 #[cfg(debug_assertions)]
 mod browser_page_check;
@@ -1203,6 +1204,7 @@ mod tests {
             "browser_auto_reload.rs",
             include_str!("browser_auto_reload.rs"),
         ),
+        ("browser_input.rs", include_str!("browser_input.rs")),
         ("browser_page.rs", include_str!("browser_page.rs")),
         (
             "browser_page_check.rs",

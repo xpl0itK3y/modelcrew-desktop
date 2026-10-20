@@ -60,8 +60,8 @@ libc = "0.2"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration"] }
-objc2-app-kit = { version = "0.3", features = ["NSImage", "NSBitmapImageRep", "NSGraphics"] }
-objc2-foundation = { version = "0.3", features = ["NSError", "NSData", "NSDictionary", "NSString", "NSURL", "NSValue"] }
+objc2-app-kit = { version = "0.3", features = ["NSImage", "NSBitmapImageRep", "NSGraphics", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", features = ["NSError", "NSData", "NSDictionary", "NSString", "NSURL", "NSValue", "NSProcessInfo"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

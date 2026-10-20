@@ -303,6 +303,20 @@ fn logical_size(page: &Webview) -> Option<(f64, f64)> {
     })
 }
 
+/// Сколько пикселей кадра на точку страницы. WebView2 снимает в пикселях
+/// устройства, остальные — в точках: точку с кадра агента странице надо
+/// привести к её точкам.
+pub fn shot_scale(app: &AppHandle, root: &str) -> f64 {
+    if !cfg!(windows) {
+        return 1.0;
+    }
+    find(app, root)
+        .ok()
+        .and_then(|page| page.window().scale_factor().ok())
+        .filter(|scale| *scale > 0.0)
+        .unwrap_or(1.0)
+}
+
 /// Адрес, по которому странице можно ходить.
 ///
 /// Всё остальное — `file://`, `javascript:` и прочее — это уже не «сходи
@@ -649,10 +663,10 @@ pub fn wait_ready(app: &AppHandle, root: &str, wait: Duration) -> bool {
 ///
 /// Отвечает он на главном потоке, а спрашивают с чужого, поэтому ответ
 /// возвращается каналом.
-fn ask<T: Send + 'static>(
+pub(crate) fn ask<T: Send + 'static>(
     app: &AppHandle,
     root: &str,
-    probe: fn(&tauri::webview::PlatformWebview) -> Result<T, String>,
+    probe: impl FnOnce(&tauri::webview::PlatformWebview) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     let page = find(app, root)?;
     let (sender, receiver) = std::sync::mpsc::channel();
