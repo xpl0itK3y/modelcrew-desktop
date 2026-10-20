@@ -30,12 +30,7 @@ import {
 import { saveAutoReload, useAutoReload } from "../browser/autoReload";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import { localizeBackendError, useI18n } from "../i18n";
-import {
-  AutoReloadIcon,
-  BackIcon,
-  ForwardIcon,
-  ReloadIcon,
-} from "../ui/Icons";
+import { AutoReloadIcon, BackIcon, ForwardIcon, ReloadIcon } from "../ui/Icons";
 
 // Кнопки над страницей — как у любого браузера, в том же порядке.
 const STEPS = [
@@ -219,7 +214,9 @@ function BrowserProjectView(props: { workspaceId: string }) {
         <button
           type="button"
           className="icon-button browser-auto-reload"
-          title={t(autoReload ? "browser.autoReloadOn" : "browser.autoReloadOff")}
+          title={t(
+            autoReload ? "browser.autoReloadOn" : "browser.autoReloadOff",
+          )}
           aria-label={t("browser.autoReload")}
           aria-pressed={autoReload}
           onClick={() => saveAutoReload(!autoReload)}
