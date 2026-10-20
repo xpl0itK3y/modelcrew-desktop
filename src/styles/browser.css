@@ -433,6 +433,34 @@
   color: var(--mc-git-modified);
 }
 
+/* Значок и число повторов — в первой строке сообщения, какой бы длины оно ни
+   было, и одной ширины: текст у всех строк начинается ровно. */
+.browser-console-icon {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 2.5px;
+}
+
+.browser-console-repeat {
+  flex: none;
+  align-self: flex-start;
+  min-width: 12px;
+  height: 14px;
+  margin-top: 1.5px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.browser-console-entry.is-log .browser-console-repeat {
+  color: var(--mc-text-muted);
+}
+
 .browser-console-tag {
   flex: none;
   font-weight: 600;
@@ -442,8 +470,8 @@
   min-width: 0;
 }
 
-/* Чьё сообщение — справа, как место в инспекторе. Длинный адрес не теснит
-   текст: обрезан, а целиком — в подсказке. */
+/* Откуда сообщение — справа, как место в инспекторе. Длинный адрес не
+   теснит текст: обрезан, а целиком — в подсказке. */
 .browser-console-source {
   flex: 0 1 auto;
   max-width: 40%;

@@ -194,6 +194,25 @@ export function ClearIcon(props: IconProps) {
   );
 }
 
+export function ErrorIcon(props: IconProps) {
+  // Круг с крестом — ошибка в консоли разработчика.
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2" />
+    </svg>
+  );
+}
+
+export function WarningIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 2.2l6.1 10.8H1.9z" />
+      <path d="M8 6.6v2.8M8 11.3v.05" />
+    </svg>
+  );
+}
+
 export function PhoneIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

@@ -12,12 +12,14 @@ import {
   removeSetting,
   writeSetting,
 } from "../settings/storage";
-import { ClearIcon } from "../ui/Icons";
+import { ClearIcon, ErrorIcon, WarningIcon } from "../ui/Icons";
 import { ResizeHandle } from "../ui/ResizeHandle";
 import {
   kindOf,
   matches,
+  shortPlace,
   sourceOf,
+  timesOf,
   type ConsoleEntry,
   type ConsoleFilter,
   type NumberedEntry,
@@ -36,6 +38,8 @@ const TAGS: Partial<Record<string, MessageKey>> = {
   exception: "browser.consoleException",
   rejection: "browser.consoleRejection",
   resource: "browser.consoleResource",
+  csp: "browser.consoleCsp",
+  trace: "browser.consoleTrace",
 };
 
 // Чьё сообщение, если не самой страницы. Ошибка виджета оплаты в рамке —
@@ -73,20 +77,61 @@ function loadHeight(): number | null {
   return Number.isFinite(stored) && stored > 0 ? stored : null;
 }
 
-/** Подпись справа, как место в инспекторе: рамка или поток и их адрес. */
+/**
+ * Подпись справа, как в инспекторе: место в коде — файл и строка, — а если
+ * написала рамка или поток, то сначала они и их адрес.
+ */
 function Source(props: { entry: ConsoleEntry }) {
   const { t } = useI18n();
   const source = sourceOf(props.entry);
-  if (!source) {
+  const at = props.entry.at;
+  if (!source && !at) {
     return null;
   }
   // Протокол подписи ничего не даёт, а места занимает. Целиком — в подсказке.
-  const address = source.address.replace(/^https?:\/\//, "");
+  const who = source
+    ? t(SOURCES[source.kind], {
+        address: source.address.replace(/^https?:\/\//, ""),
+      })
+    : null;
+  const full = [
+    source ? t(SOURCES[source.kind], { address: source.address }) : null,
+    at ?? null,
+  ].filter((line) => line !== null);
   return (
-    <span className="browser-console-source" title={source.address}>
-      {t(SOURCES[source.kind], { address })}
+    <span className="browser-console-source" title={full.join("\n")}>
+      {[who, at ? shortPlace(at) : null]
+        .filter((part) => part !== null)
+        .join(" · ")}
     </span>
   );
+}
+
+/**
+ * Слева, как в инспекторе: повтор — число в кружке, а иначе значок ошибки
+ * или предупреждения. У простой записи значка нет.
+ */
+function Mark(props: { entry: ConsoleEntry }) {
+  const { t } = useI18n();
+  const times = timesOf(props.entry);
+  if (times > 1) {
+    return (
+      <span
+        className="browser-console-repeat"
+        title={t("browser.consoleRepeated", { count: times })}
+      >
+        {times}
+      </span>
+    );
+  }
+  switch (kindOf(props.entry.level)) {
+    case "error":
+      return <ErrorIcon className="browser-console-icon" aria-hidden />;
+    case "warning":
+      return <WarningIcon className="browser-console-icon" aria-hidden />;
+    default:
+      return null;
+  }
 }
 
 export function PageConsolePanel(props: {
@@ -231,6 +276,7 @@ export function PageConsolePanel(props: {
               key={entry.index}
               className={`browser-console-entry is-${kindOf(entry.level)}`}
             >
+              <Mark entry={entry} />
               {tag && <span className="browser-console-tag">{t(tag)}</span>}
               <span className="browser-console-text">{entry.text}</span>
               <Source entry={entry} />

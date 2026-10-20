@@ -16,6 +16,11 @@ export type ConsoleEntry = {
   frame?: string;
   // Адрес скрипта потока (Worker), если упал он.
   worker?: string;
+  // Место в коде — `адрес:строка:столбец`, откуда сообщение, — или адрес
+  // того, что не загрузилось.
+  at?: string;
+  // Сколько раз подряд сообщение повторилось, если больше одного.
+  count?: number;
 };
 
 export type PageConsole = {
@@ -86,13 +91,27 @@ export function watchPageConsole(
   };
 }
 
-/** Одно и то же ли записано. Запись только растёт, поэтому хватает счёта. */
+/** Сколько раз записано сообщение: повтор подряд — та же запись. */
+export function timesOf(entry: ConsoleEntry): number {
+  return entry.count ?? 1;
+}
+
+function lastTimes(log: PageConsole): number {
+  const last = log.messages[log.messages.length - 1];
+  return last ? timesOf(last) : 0;
+}
+
+/**
+ * Одно и то же ли записано. Запись только растёт — новым сообщением или
+ * повтором последнего, — поэтому хватает счёта.
+ */
 export function sameConsole(left: PageConsole, right: PageConsole): boolean {
   return (
     left.running === right.running &&
     left.started === right.started &&
     left.dropped === right.dropped &&
-    left.messages.length === right.messages.length
+    left.messages.length === right.messages.length &&
+    lastTimes(left) === lastTimes(right)
   );
 }
 
@@ -105,6 +124,7 @@ export function kindOf(level: string): ConsoleKind {
     case "exception":
     case "rejection":
     case "resource":
+    case "csp":
       return "error";
     case "warn":
       return "warning";
@@ -118,13 +138,18 @@ export type NumberedEntry = ConsoleEntry & { index: number };
 
 /**
  * Откуда показывать после «очистить»: номер первого сообщения, которого
- * человек ещё не видел, на той загрузке страницы, где очищали.
+ * человек ещё не видел, на той загрузке страницы, где очищали, и сколько
+ * повторов последнего он уже видел.
  */
-export type ConsoleMark = { started: number; next: number };
+export type ConsoleMark = { started: number; next: number; seen: number };
 
 /** Конец записанного — то, что запоминает «очистить». */
 export function endOf(log: PageConsole): ConsoleMark {
-  return { started: log.started, next: log.dropped + log.messages.length };
+  return {
+    started: log.started,
+    next: log.dropped + log.messages.length,
+    seen: lastTimes(log),
+  };
 }
 
 /** Номер, с которого показывать. Страницу загрузили заново — с начала. */
@@ -132,7 +157,10 @@ function firstShown(log: PageConsole, mark: ConsoleMark | null): number {
   return mark !== null && mark.started === log.started ? mark.next : 0;
 }
 
-/** Что показывать после «очистить». */
+/**
+ * Что показывать после «очистить». Последнее очищенное сообщение, если
+ * страница повторила его снова, возвращается — с числом новых повторов.
+ */
 export function entriesSince(
   log: PageConsole,
   mark: ConsoleMark | null,
@@ -143,6 +171,8 @@ export function entriesSince(
     const index = log.dropped + position;
     if (index >= from) {
       entries.push({ ...message, index });
+    } else if (mark && index === from - 1 && timesOf(message) > mark.seen) {
+      entries.push({ ...message, index, count: timesOf(message) - mark.seen });
     }
   });
   return entries;
@@ -163,12 +193,13 @@ export function countKinds(entries: readonly ConsoleEntry[]): {
 } {
   let errors = 0;
   let warnings = 0;
+  // Повторы считаются, как в инспекторе: ошибка в цикле — не одна ошибка.
   for (const entry of entries) {
     const kind = kindOf(entry.level);
     if (kind === "error") {
-      errors += 1;
+      errors += timesOf(entry);
     } else if (kind === "warning") {
-      warnings += 1;
+      warnings += timesOf(entry);
     }
   }
   return { errors, warnings };
@@ -186,11 +217,12 @@ export function matches(
     return false;
   }
   const needle = search.trim().toLowerCase();
-  // Ищут и по адресу: «покажи всё, что пишет виджет оплаты».
+  // Ищут и по адресу: «покажи всё, что пишет виджет оплаты», — и по месту:
+  // «всё из main.js».
   return (
     needle === "" ||
-    [entry.text, entry.frame ?? "", entry.worker ?? ""].some((said) =>
-      said.toLowerCase().includes(needle),
+    [entry.text, entry.frame ?? "", entry.worker ?? "", entry.at ?? ""].some(
+      (said) => said.toLowerCase().includes(needle),
     )
   );
 }
@@ -206,4 +238,17 @@ export function sourceOf(
     return { kind: "frame", address: entry.frame };
   }
   return null;
+}
+
+/**
+ * Место в коде коротко, как справа в инспекторе: файл и строка. Страница
+ * без файла в адресе — корень сайта — названа хостом.
+ */
+export function shortPlace(at: string): string {
+  const [, address, line] = /^(.*?)(?::(\d+)(?::\d+)?)?$/.exec(at) ?? [];
+  const path = (address ?? at).replace(/[?#].*$/, "");
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const host = /^[a-z][\w+.-]*:\/\/([^/]+)/i.exec(path)?.[1];
+  const file = name || (host ? `${host}/` : path);
+  return line ? `${file}:${line}` : file;
 }

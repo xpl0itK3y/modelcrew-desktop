@@ -122,14 +122,56 @@ describe("PageConsolePanel height", () => {
     );
 
     const frame = screen.getByText("рамка pay.test/widget");
-    expect(frame.title).toBe("https://pay.test/widget");
+    expect(frame.title).toBe("рамка https://pay.test/widget");
     expect(screen.getByText("поток app.test/w.js").title).toBe(
-      "http://app.test/w.js",
+      "поток http://app.test/w.js",
     );
     // Своё страница пишет без подписи.
     expect(screen.getByText("страница").parentElement?.children).toHaveLength(
       1,
     );
+  });
+
+  it("shows where a message came from and how often, like an inspector", () => {
+    const { container } = render(
+      <PageConsolePanel
+        entries={[
+          {
+            index: 0,
+            level: "error",
+            text: "boom",
+            at: "http://127.0.0.1:4321/assets/main.js?v=2:12:7",
+            count: 3,
+          },
+          {
+            index: 1,
+            level: "warn",
+            text: "осторожно",
+            frame: "https://pay.test/widget",
+            at: "https://pay.test/pay.js:9:1",
+          },
+          { index: 2, level: "log", text: "просто" },
+        ]}
+        lost={0}
+        running
+        trouble={null}
+        onClear={() => {}}
+      />,
+    );
+
+    // Справа — файл и строка, целиком — в подсказке.
+    const place = screen.getByText("main.js:12");
+    expect(place.title).toBe("http://127.0.0.1:4321/assets/main.js?v=2:12:7");
+    expect(screen.getByText("рамка pay.test/widget · pay.js:9").title).toBe(
+      "рамка https://pay.test/widget\nhttps://pay.test/pay.js:9:1",
+    );
+    // Повтор — число вместо значка, предупреждение — со значком, а простая
+    // запись — без.
+    expect(screen.getByTitle("Повторилось подряд: 3")).toHaveTextContent("3");
+    const rows = container.querySelectorAll(".browser-console-entry");
+    expect(rows[0].querySelector(".browser-console-icon")).toBeNull();
+    expect(rows[1].querySelector(".browser-console-icon")).not.toBeNull();
+    expect(rows[2].querySelector(".browser-console-icon")).toBeNull();
   });
 
   it("goes back to the usual height on a double click", () => {

@@ -10,6 +10,7 @@ import {
   lostSince,
   matches,
   sameConsole,
+  shortPlace,
   sourceOf,
   watchPageConsole,
   type PageConsole,
@@ -102,11 +103,12 @@ describe("watchPageConsole", () => {
 
 describe("console entries", () => {
   it("counts what the page did not write itself as errors", () => {
-    expect(["error", "exception", "rejection", "resource"].map(kindOf)).toEqual(
-      ["error", "error", "error", "error"],
-    );
+    expect(
+      ["error", "exception", "rejection", "resource", "csp"].map(kindOf),
+    ).toEqual(["error", "error", "error", "error", "error"]);
     expect(kindOf("warn")).toBe("warning");
-    expect(["log", "info", "debug", "anything"].map(kindOf)).toEqual([
+    expect(["log", "info", "debug", "trace", "anything"].map(kindOf)).toEqual([
+      "log",
       "log",
       "log",
       "log",
@@ -143,11 +145,24 @@ describe("console entries", () => {
     ]);
   });
 
+  it("brings a cleared message back when the page repeats it", () => {
+    // Повтор подряд — та же запись с большим счётом. После «очистить» человек
+    // должен увидеть, что ошибка случилась снова, — и сколько раз.
+    const times = (count: number) =>
+      log({ messages: [{ level: "error", text: "x", count }] });
+    const mark = endOf(times(2));
+
+    expect(entriesSince(times(5), mark)).toEqual([
+      { level: "error", text: "x", count: 3, index: 0 },
+    ]);
+    expect(entriesSince(times(2), mark)).toEqual([]);
+  });
+
   it("says how many messages fell out before anyone saw them", () => {
     const busy = log({ dropped: 5, messages: said("x") });
 
     expect(lostSince(busy, null)).toBe(5);
-    expect(lostSince(busy, { started: 1, next: 3 })).toBe(2);
+    expect(lostSince(busy, { started: 1, next: 3, seen: 1 })).toBe(2);
   });
 
   it("counts errors and warnings for the button", () => {
@@ -159,6 +174,11 @@ describe("console entries", () => {
         { level: "log", text: "" },
       ]),
     ).toEqual({ errors: 2, warnings: 1 });
+    // Повторы — тоже ошибки, как на счётчике инспектора.
+    expect(countKinds([{ level: "exception", text: "", count: 4 }])).toEqual({
+      errors: 4,
+      warnings: 0,
+    });
   });
 
   it("filters by kind and by text, ignoring case", () => {
@@ -185,6 +205,24 @@ describe("console entries", () => {
     expect(matches(fromFrame, "all", "pay.test")).toBe(true);
     expect(matches(fromWorker, "error", "w.js")).toBe(true);
     expect(matches(fromFrame, "all", "w.js")).toBe(false);
+    expect(
+      matches(
+        { level: "log", text: "hi", at: "http://app.test/main.js:1:2" },
+        "all",
+        "main.js",
+      ),
+    ).toBe(true);
+  });
+
+  it("names a place by its file and line, like an inspector", () => {
+    expect(shortPlace("http://127.0.0.1:4321/assets/main.js:12:7")).toBe(
+      "main.js:12",
+    );
+    expect(shortPlace("https://app.test/a.js?v=1#x:3:4")).toBe("a.js:3");
+    // Скрипт прямо в странице, у которой в адресе нет файла.
+    expect(shortPlace("http://127.0.0.1:4321/:5:9")).toBe("127.0.0.1:4321/:5");
+    // То, что не загрузилось, — без строки.
+    expect(shortPlace("http://localhost:4321/pic.png")).toBe("pic.png");
   });
 
   it("names who wrote a message unless it was the page itself", () => {
@@ -214,5 +252,8 @@ describe("console entries", () => {
     expect(sameConsole(first, log({ started: 2, messages: said("a") }))).toBe(
       false,
     );
+    // Повтор последнего — тоже новое.
+    const repeated = log({ messages: [{ level: "log", text: "a", count: 2 }] });
+    expect(sameConsole(first, repeated)).toBe(false);
   });
 });
