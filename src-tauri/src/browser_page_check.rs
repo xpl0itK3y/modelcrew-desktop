@@ -165,7 +165,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     let same = same_page(app, out)?;
 
-    // Кнопка «назад» в панели: с зелёной, куда увела ссылка, — на синюю.
+    // Кнопка «назад» в панели: с зелёной, куда увела форма, — на синюю.
     browser_page::step(app, ROOT, browser_page::Step::Back)?;
     let back = shot(app, out, "back")?;
 
@@ -262,9 +262,9 @@ fn dock_and_back(app: &AppHandle, out: &Path, before: &Value) -> Result<(Value, 
 }
 
 /// Увести синюю страницу «в новое окно» — сперва `window.open`, потом
-/// ссылкой с `target="_blank"`, потом ссылкой, которой новое окно задал
-/// `<base>`, — и снять, куда она пришла. Между ними — ссылка в рамку самой
-/// страницы.
+/// ссылкой с `target="_blank"`, ссылкой, которой новое окно задал `<base>`, и
+/// формами, — и снять, куда она пришла. Между ними — ссылка и форма в рамку
+/// самой страницы.
 ///
 /// Окон, кроме своего, у страницы нет: новое окно обязано увести её саму. А
 /// рамка у страницы есть, и в неё ссылка обязана прийти, не трогая страницу.
@@ -280,18 +280,25 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Valu
     run("window.open('/green')")?;
     seen.insert("opened".into(), shot(app, out, "opened")?);
 
-    // Рамка — крошечная, в углу: середина кадра остаётся страницей. Что в
-    // рамку пришло, страница пишет в консоль — консоль рамки нам не видна.
+    // Рамка — крошечная, в углу: середина кадра остаётся страницей. В рамку
+    // ведут ссылка, а за ней форма. Что в рамку пришло, страница пишет в
+    // консоль — консоль самой рамки нам не видна.
     run(concat!(
         "{ const frame = document.createElement('iframe'); frame.name = 'side';",
         "frame.style.cssText = 'position:fixed;left:0;top:0;width:8px;height:8px;border:0';",
         "document.body.append(frame);",
-        "frame.onload = () => { if (frame.contentWindow.location.pathname === '/blue')",
-        " console.log('рамка: синяя'); };",
+        "const form = document.createElement('form'); form.action = '/green';",
+        "form.target = 'side'; document.body.append(form);",
+        "frame.onload = () => { const path = frame.contentWindow.location.pathname;",
+        " if (path === '/blue') form.requestSubmit();",
+        " if (path === '/green') console.log('рамка: синяя, потом зелёная'); };",
         "const link = document.createElement('a'); link.href = '/blue'; link.target = 'side';",
         "document.body.append(link); link.click(); }",
     ))?;
-    seen.insert("frame_heard".into(), heard(app, "рамка: синяя")?.into());
+    seen.insert(
+        "frame_heard".into(),
+        heard(app, "рамка: синяя, потом зелёная")?.into(),
+    );
     seen.insert("framed".into(), shot(app, out, "framed")?);
 
     run(concat!(
@@ -309,6 +316,24 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Valu
         "document.body.append(link); link.click(); }",
     ))?;
     seen.insert("based".into(), shot(app, out, "based")?);
+
+    // Формы: новое окно задаёт кнопка отправки, а потом сама форма, которую
+    // отправляет скрипт, — `submit()` события не шлёт. Поле с именем
+    // `getAttribute` заслоняет у формы её метод: скрипт страницы на нём
+    // спотыкаться не должен.
+    run(concat!(
+        "{ const form = document.createElement('form'); form.action = '/blue';",
+        "const button = document.createElement('button'); button.formTarget = '_blank';",
+        "form.append(button); document.body.append(form); form.requestSubmit(button); }",
+    ))?;
+    seen.insert("sent".into(), shot(app, out, "sent")?);
+    run(concat!(
+        "{ const form = document.createElement('form'); form.action = '/green';",
+        "form.target = '_blank'; const field = document.createElement('input');",
+        "field.name = 'getAttribute'; form.append(field);",
+        "document.body.append(form); form.submit(); }",
+    ))?;
+    seen.insert("submitted".into(), shot(app, out, "submitted")?);
     Ok(seen)
 }
 
@@ -403,7 +428,10 @@ fn answer(mut stream: TcpStream) {
     while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
         line.clear();
     }
-    let path = request.split_whitespace().nth(1).unwrap_or("/");
+    let target = request.split_whitespace().nth(1).unwrap_or("/");
+    // Формы без полей оставляют в адресе пустой запрос, `/blue?`: страница
+    // та же.
+    let path = target.split('?').next().unwrap_or(target);
     let (status, body) = match path {
         "/green" => ("200 OK", page("green", "#00c000", GREEN_SCRIPT)),
         "/blue" => {

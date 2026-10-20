@@ -135,9 +135,10 @@ fn the_page_loads_shows_itself_and_closes() {
         }
     }
 
-    // Новых окон у страницы нет: и `window.open`, и ссылка «в новом окне»
-    // уводят её саму. Ссылка в рамку страницы приходит в рамку, а страница
-    // остаётся где была. А «назад» возвращает туда, откуда увела ссылка.
+    // Новых окон у страницы нет: и `window.open`, и ссылка или форма «в новом
+    // окне» уводят её саму. Ссылка и форма в рамку страницы приходят в рамку,
+    // а страница остаётся где была. А «назад» возвращает туда, откуда увела
+    // форма.
     // Размер — последний, что ей задали.
     assert_eq!(
         report["frame_heard"], true,
@@ -149,6 +150,8 @@ fn the_page_loads_shows_itself_and_closes() {
         ("framed", "green", Colour::Green),
         ("clicked", "blue", Colour::Blue),
         ("based", "green", Colour::Green),
+        ("sent", "blue", Colour::Blue),
+        ("submitted", "green", Colour::Green),
         ("back", "blue", Colour::Blue),
     ] {
         let shot = &report[name];
@@ -167,10 +170,12 @@ fn the_page_loads_shows_itself_and_closes() {
 /// называется и какого размера кадр.
 fn page_is(shot: &Value, name: &str, size: (f64, f64)) {
     assert_eq!(shot["ready"], true, "не дождались загрузки: {shot:#}");
+    // Форма оставляет в адресе запрос с полями, пусть и пустой: `/blue?`.
     assert!(
         shot["url"]
             .as_str()
-            .is_some_and(|url| url.ends_with(&format!("/{name}"))),
+            .and_then(|url| url.split('?').next())
+            .is_some_and(|path| path.ends_with(&format!("/{name}"))),
         "не тот адрес: {shot:#}"
     );
     assert_eq!(
