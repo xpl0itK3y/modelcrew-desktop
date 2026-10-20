@@ -86,6 +86,13 @@ export const ru = {
   "browser.screenWidth": "Ширина страницы",
   "browser.screenHeight": "Высота страницы",
   "browser.screenRotate": "Повернуть экран",
+  "browser.screens": "Другие экраны",
+  "browser.screensPhones": "Телефоны",
+  "browser.screensTablets": "Планшеты",
+  "browser.screensComputers": "Компьютеры",
+  "browser.screensSaved": "Мои размеры",
+  "browser.screenRemember": "Запомнить {width} × {height}",
+  "browser.screenForget": "Забыть {width} × {height}",
   "browser.console": "Консоль",
   "browser.consoleCounted":
     "Консоль — ошибок: {errors}, предупреждений: {warnings}",

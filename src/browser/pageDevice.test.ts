@@ -82,3 +82,35 @@ describe("screen sizes", () => {
     expect(rotated(size)).toEqual({ width: 915, height: 412 });
   });
 });
+
+describe("saved screens", () => {
+  it("puts the newest first and does not repeat a size", async () => {
+    const { loadSavedScreens, rememberScreen } = await import("./pageDevice");
+
+    rememberScreen({ width: 1500, height: 900 });
+    rememberScreen({ width: 800, height: 600 });
+    rememberScreen({ width: 1500, height: 900 });
+
+    expect(loadSavedScreens()).toEqual([
+      { width: 1500, height: 900 },
+      { width: 800, height: 600 },
+    ]);
+  });
+
+  it("finds them again after a restart", async () => {
+    const first = await import("./pageDevice");
+    first.rememberScreen({ width: 1500, height: 900 });
+    vi.resetModules();
+
+    const second = await import("./pageDevice");
+
+    expect(second.loadSavedScreens()).toEqual([{ width: 1500, height: 900 }]);
+  });
+
+  it("shrugs off a damaged record", async () => {
+    localStorage.setItem(KEYS.browserScreens, '["1500x900", 7, "oops"');
+    const { loadSavedScreens } = await import("./pageDevice");
+
+    expect(loadSavedScreens()).toEqual([]);
+  });
+});

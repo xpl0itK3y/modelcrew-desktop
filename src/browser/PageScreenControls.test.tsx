@@ -3,7 +3,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { setLocale } from "../i18n";
-import { loadScreen, saveScreen } from "./pageDevice";
+import {
+  forgetScreen,
+  loadSavedScreens,
+  loadScreen,
+  saveScreen,
+} from "./pageDevice";
 import { PageScreenControls } from "./PageScreenControls";
 
 const DRAWER = { width: 699, height: 316 };
@@ -12,7 +17,12 @@ beforeEach(() => {
   setLocale("ru");
   localStorage.clear();
   saveScreen(null);
+  for (const size of loadSavedScreens()) {
+    forgetScreen(size);
+  }
 });
+
+const list = () => screen.getByRole("combobox", { name: "Другие экраны" });
 
 const width = () => screen.getByRole("textbox", { name: "Ширина страницы" });
 const height = () => screen.getByRole("textbox", { name: "Высота страницы" });
@@ -103,5 +113,37 @@ describe("PageScreenControls", () => {
     expect(fields).toHaveClass("is-squeezed");
     expect(fields.title).toContain("699 × 316");
     expect(width()).toHaveValue("1920");
+  });
+
+  it("offers common devices to pick from", () => {
+    render(<PageScreenControls viewport={DRAWER} />);
+    expect(
+      screen.getByRole("option", { name: "iPhone SE — 375 × 667" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(list(), { target: { value: "375x667" } });
+
+    expect(loadScreen()).toEqual({ width: 375, height: 667 });
+  });
+
+  it("keeps a size of one's own in the list until it is forgotten", () => {
+    render(<PageScreenControls viewport={DRAWER} />);
+    act(() => saveScreen({ width: 1500, height: 900 }));
+
+    fireEvent.change(list(), { target: { value: "remember" } });
+
+    expect(loadSavedScreens()).toEqual([{ width: 1500, height: 900 }]);
+    expect(
+      screen.getByRole("option", { name: "1500 × 900" }),
+    ).toBeInTheDocument();
+    // Нынешний размер в списке — система отметит его.
+    expect(list()).toHaveValue("1500x900");
+
+    fireEvent.change(list(), { target: { value: "forget" } });
+
+    expect(loadSavedScreens()).toEqual([]);
+    expect(
+      screen.queryByRole("option", { name: "1500 × 900" }),
+    ).not.toBeInTheDocument();
   });
 });

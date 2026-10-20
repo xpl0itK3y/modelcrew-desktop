@@ -87,6 +87,13 @@ export const en: Record<MessageKey, string> = {
   "browser.screenWidth": "Page width",
   "browser.screenHeight": "Page height",
   "browser.screenRotate": "Rotate the screen",
+  "browser.screens": "More screens",
+  "browser.screensPhones": "Phones",
+  "browser.screensTablets": "Tablets",
+  "browser.screensComputers": "Computers",
+  "browser.screensSaved": "My sizes",
+  "browser.screenRemember": "Save {width} × {height}",
+  "browser.screenForget": "Forget {width} × {height}",
   "browser.console": "Console",
   "browser.consoleCounted": "Console — errors: {errors}, warnings: {warnings}",
   "browser.consoleHint":

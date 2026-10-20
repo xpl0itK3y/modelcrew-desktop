@@ -32,6 +32,7 @@ export const KEYS = {
 
   browserAutoReload: "modelcrew.browserAutoReload",
   browserDevice: "modelcrew.browserDevice",
+  browserScreens: "modelcrew.browserScreens",
   browserConsole: "modelcrew.browserConsole",
   browserConsoleHeight: "modelcrew.browserConsoleHeight",
 

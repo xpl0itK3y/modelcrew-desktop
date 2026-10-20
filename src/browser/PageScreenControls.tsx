@@ -1,18 +1,30 @@
 // Экран страницы внизу ящика — как панель устройств в инструментах
-// разработчика: размер вписывают руками, экран поворачивают набок, а три
-// самых частых экрана стоят кнопками.
+// разработчика: размер вписывают руками, экран поворачивают набок, три
+// самых частых экрана стоят кнопками, а остальные и свои — в списке.
 
 import { useRef, useState, type KeyboardEvent } from "react";
 import { useI18n, type MessageKey } from "../i18n";
-import { DesktopIcon, PhoneIcon, RotateIcon, TabletIcon } from "../ui/Icons";
+import {
+  ChevronDownIcon,
+  DesktopIcon,
+  PhoneIcon,
+  RotateIcon,
+  TabletIcon,
+} from "../ui/Icons";
 import {
   DEVICES,
   DEVICE_SIZES,
+  SCREEN_PRESETS,
   deviceOf,
   fitScreen,
+  forgetScreen,
+  parseScreen,
+  rememberScreen,
   rotated,
   sameScreen,
   saveScreen,
+  screenKey,
+  useSavedScreens,
   useScreen,
   type ScreenSize,
 } from "./pageDevice";
@@ -23,6 +35,21 @@ const DEVICE_BUTTONS = {
   tablet: { label: "browser.deviceTablet", Icon: TabletIcon },
   phone: { label: "browser.devicePhone", Icon: PhoneIcon },
 } as const;
+
+const PRESET_GROUPS: readonly {
+  group: keyof typeof SCREEN_PRESETS;
+  label: MessageKey;
+}[] = [
+  { group: "phones", label: "browser.screensPhones" },
+  { group: "tablets", label: "browser.screensTablets" },
+  { group: "computers", label: "browser.screensComputers" },
+];
+
+// Пункты списка, которые не размер, а действие над своими размерами.
+const REMEMBER = "remember";
+const FORGET = "forget";
+
+const sizeName = (size: ScreenSize) => `${size.width} × ${size.height}`;
 
 type Side = "width" | "height";
 type Draft = Record<Side, string>;
@@ -39,6 +66,15 @@ export function PageScreenControls(props: {
   const { t } = useI18n();
   const wanted = useScreen();
   const device = deviceOf(wanted);
+  const savedScreens = useSavedScreens();
+  const isSaved =
+    wanted !== null && savedScreens.some((own) => sameScreen(own, wanted));
+  // Нынешний экран есть в списке — система отметит его галочкой.
+  const listed = [...Object.values(SCREEN_PRESETS).flat(), ...savedScreens];
+  const chosen =
+    wanted && listed.some((size) => sameScreen(size, wanted))
+      ? screenKey(wanted)
+      : "";
   // У страницы во весь ящик своего размера нет: поля показывают, сколько
   // есть, — и с этого же размера удобнее всего начать свой.
   const shown = wanted ?? props.viewport;
@@ -82,6 +118,19 @@ export function PageScreenControls(props: {
     const next = fitScreen(typedSize.width, typedSize.height);
     if (next && !sameScreen(next, shown)) {
       saveScreen(next);
+    }
+  };
+
+  const choose = (value: string) => {
+    if (value === REMEMBER && wanted) {
+      rememberScreen(wanted);
+    } else if (value === FORGET && wanted) {
+      forgetScreen(wanted);
+    } else {
+      const size = parseScreen(value);
+      if (size) {
+        saveScreen(size);
+      }
     }
   };
 
@@ -176,6 +225,49 @@ export function PageScreenControls(props: {
           );
         })}
       </div>
+      {/* Список — родной `select`: его меню рисует система поверх всего окна.
+          Своё меню живая страница накрыла бы собой. */}
+      <label className="browser-screens" title={t("browser.screens")}>
+        <ChevronDownIcon aria-hidden="true" />
+        <select
+          className="browser-screens-list"
+          value={chosen}
+          aria-label={t("browser.screens")}
+          onChange={(event) => choose(event.target.value)}
+        >
+          <option value="" disabled hidden>
+            {t("browser.screens")}
+          </option>
+          {PRESET_GROUPS.map(({ group, label }) => (
+            <optgroup key={group} label={t(label)}>
+              {SCREEN_PRESETS[group].map((preset) => (
+                <option key={screenKey(preset)} value={screenKey(preset)}>
+                  {preset.name
+                    ? `${preset.name} — ${sizeName(preset)}`
+                    : sizeName(preset)}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+          {(savedScreens.length > 0 || wanted) && (
+            <optgroup label={t("browser.screensSaved")}>
+              {savedScreens.map((size) => (
+                <option key={screenKey(size)} value={screenKey(size)}>
+                  {sizeName(size)}
+                </option>
+              ))}
+              {wanted && (
+                <option value={isSaved ? FORGET : REMEMBER}>
+                  {t(
+                    isSaved ? "browser.screenForget" : "browser.screenRemember",
+                    wanted,
+                  )}
+                </option>
+              )}
+            </optgroup>
+          )}
+        </select>
+      </label>
     </>
   );
 }
