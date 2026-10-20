@@ -71,7 +71,7 @@ impl Input {
 }
 
 /// Есть ли здесь настоящий ввод. Нет — действует скрипт страницы.
-pub const AVAILABLE: bool = cfg!(any(target_os = "macos", target_os = "linux"));
+pub const AVAILABLE: bool = cfg!(any(target_os = "macos", target_os = "linux", windows));
 
 /// Отдать ввод странице проекта.
 pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
@@ -288,8 +288,136 @@ mod system {
     }
 }
 
+/// Windows: события мыши через DevTools самого WebView2 — те же, что шлёт
+/// Playwright. Окно и курсор системы они не трогают.
+#[cfg(windows)]
+mod system {
+    use std::collections::VecDeque;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+    use tauri::AppHandle;
+    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
+    use windows::core::HSTRING;
+
+    use super::{Button, Input};
+
+    /// Страница отвечает на событие, когда его разошлёт. Дольше этого — уже
+    /// не ответит.
+    const WAIT: Duration = Duration::from_secs(5);
+
+    type Done = mpsc::Sender<Result<(), String>>;
+
+    pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
+        let events = events(input);
+        // Ответ DevTools приходит на главный поток позже, своим вызовом:
+        // ждём его здесь, а не там.
+        let done = crate::browser_page::ask(app, root, move |platform| {
+            let webview = unsafe { platform.controller().CoreWebView2() }
+                .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+            let (sender, receiver) = mpsc::channel();
+            next(webview, events, sender);
+            Ok(receiver)
+        })?;
+        done.recv_timeout(WAIT)
+            .unwrap_or_else(|_| Err("страница не ответила на ввод".to_string()))
+    }
+
+    /// Точки — в CSS-пикселях страницы: так их и ждёт DevTools.
+    fn events(input: Input) -> VecDeque<Value> {
+        let (at, press) = match input {
+            Input::Move(at) => (at, None),
+            Input::Click { at, button, count } => (at, Some((button, count))),
+        };
+        let mut events = VecDeque::from([json!({
+            "type": "mouseMoved", "x": at.x, "y": at.y, "button": "none", "buttons": 0,
+        })]);
+        if let Some((button, count)) = press {
+            let (name, held) = match button {
+                Button::Left => ("left", 1),
+                Button::Right => ("right", 2),
+            };
+            for clicks in 1..=count {
+                events.push_back(json!({
+                    "type": "mousePressed", "x": at.x, "y": at.y,
+                    "button": name, "buttons": held, "clickCount": clicks,
+                }));
+                events.push_back(json!({
+                    "type": "mouseReleased", "x": at.x, "y": at.y,
+                    "button": name, "buttons": 0, "clickCount": clicks,
+                }));
+            }
+        }
+        events
+    }
+
+    /// События по одному: следующее — когда страница разослала прошлое.
+    fn next(webview: ICoreWebView2, mut events: VecDeque<Value>, done: Done) {
+        let Some(event) = events.pop_front() else {
+            let _ = done.send(Ok(()));
+            return;
+        };
+        let failed = done.clone();
+        let after = webview.clone();
+        let handler =
+            CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _answer| {
+                match result {
+                    Ok(()) => next(after, events, done),
+                    Err(error) => {
+                        let _ = done.send(Err(format!("ввод до страницы не дошёл: {error}")));
+                    }
+                }
+                Ok(())
+            }));
+        let method = HSTRING::from("Input.dispatchMouseEvent");
+        let params = HSTRING::from(event.to_string());
+        if let Err(error) =
+            unsafe { webview.CallDevToolsProtocolMethod(&method, &params, &handler) }
+        {
+            let _ = failed.send(Err(format!("ввод не начался: {error}")));
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::browser_input::Spot;
+
+        #[test]
+        fn a_double_click_is_two_presses_counted_up() {
+            let at = Spot {
+                x: 5.0,
+                y: 6.0,
+                width: 100.0,
+                height: 100.0,
+            };
+            let events = events(Input::Click {
+                at,
+                button: Button::Left,
+                count: 2,
+            });
+            let kinds: Vec<_> = events
+                .iter()
+                .map(|event| (event["type"].clone(), event["clickCount"].clone()))
+                .collect();
+            assert_eq!(
+                kinds,
+                [
+                    (json!("mouseMoved"), Value::Null),
+                    (json!("mousePressed"), json!(1)),
+                    (json!("mouseReleased"), json!(1)),
+                    (json!("mousePressed"), json!(2)),
+                    (json!("mouseReleased"), json!(2)),
+                ]
+            );
+        }
+    }
+}
+
 /// Остальные системы: настоящего ввода нет, действует скрипт страницы.
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod system {
     use tauri::AppHandle;
 
