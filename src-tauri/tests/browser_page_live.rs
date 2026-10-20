@@ -235,7 +235,8 @@ fn the_page_loads_shows_itself_and_closes() {
 
     // Настоящая мышь: меню на одном CSS :hover открывается, страница видит
     // isTrusted, а в рамку с другого домена попадают точкой с кадра. Прочитать
-    // такую рамку нельзя — чтение говорит, где она на кадре.
+    // такую рамку нельзя — чтение говорит, где она на кадре. В поле рамки
+    // печатает настоящая клавиатура: прежнее заменяется, Enter отправляет.
     let frame = done(actions, "frame_read");
     assert!(
         frame.contains("[frame «Чужая рамка» cross-origin, "),
@@ -254,6 +255,10 @@ fn the_page_loads_shows_itself_and_closes() {
             "double",
             "right",
             "frame_click",
+            "frame_field",
+            "frame_type",
+            "frame_press",
+            "frame_more",
         ] {
             let notes = actions[name]["notes"].to_string();
             assert!(
@@ -267,10 +272,16 @@ fn the_page_loads_shows_itself_and_closes() {
             ("double_how", "двойное: настоящее"),
             ("right_how", "меню: настоящее"),
             ("frame_how", "рамка: настоящее"),
+            ("frame_typed", "ввод: Привет, рамка"),
+            ("frame_appended", "ввод: Привет, рамка!"),
         ] {
             let text = done(actions, name);
             assert!(text.ends_with(&format!("\n{expected}")), "{name}: {text}");
         }
+        assert!(
+            done(actions, "frame_type").starts_with("Ввели в то, что в фокусе в рамке"),
+            "{actions:#}"
+        );
     } else {
         let text = done(actions, "real_how");
         assert!(text.ends_with("\nскрипт"), "{text}");

@@ -111,10 +111,14 @@ const FORM_BODY: &str = concat!(
     "<div style=\"height:3000px\"></div></main>",
 );
 
-/// Рамка с другого домена: кнопка во всю рамку говорит странице, как её нажали.
+/// Рамка с другого домена: кнопка говорит странице, как её нажали, а форма —
+/// что в неё ввели.
 const FRAME_BODY: &str = concat!(
-    "<button style=\"width:100%;height:120px\" onclick=\"parent.postMessage(",
+    "<button style=\"width:100%;height:60px\" onclick=\"parent.postMessage(",
     "'рамка: ' + (event.isTrusted ? 'настоящее' : 'скрипт'), '*')\">Внутри рамки</button>",
+    "<form onsubmit=\"event.preventDefault(); parent.postMessage('ввод: ' + word.value, '*')\">",
+    "<input id=\"word\" value=\"старое\" style=\"width:100%;height:60px;box-sizing:border-box\">",
+    "</form>",
 );
 
 /// Чем закончилась проверка. Код, переданный в `exit`, Tauri возвращает не
@@ -532,26 +536,43 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
     perform_all(app, &mut seen, steps);
 
     // В рамку с другого домена скрипт страницы не попадёт — только мышь, в
-    // точку на экране: в середину рамки.
-    let middle = browser_page::run(
+    // точку на экране, и клавиатура туда, где в рамке фокус. Кнопка — в
+    // верхней половине рамки, поле — в нижней.
+    let points = browser_page::run(
         app,
         ROOT,
         "(() => { const frame = document.getElementById('other'); \
          frame.scrollIntoView({ block: 'center' }); const box = frame.getBoundingClientRect(); \
-         return JSON.stringify({ x: Math.round(box.left + box.width / 2), \
-         y: Math.round(box.top + box.height / 2) }); })()",
+         const at = (y) => ({ x: Math.round(box.left + box.width / 2), y: Math.round(box.top + y) }); \
+         return JSON.stringify({ button: at(30), field: at(90) }); })()",
     )?
     .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-    .ok_or("середину рамки не узнать")?;
+    .ok_or("где кнопка и поле в рамке, не узнать")?;
+    let inside = || value("document.getElementById('inside').textContent");
     perform_all(
         app,
         &mut seen,
         [
-            ("frame_click", json!({ "op": "click", "at": middle })),
             (
-                "frame_how",
-                value("document.getElementById('inside').textContent"),
+                "frame_click",
+                json!({ "op": "click", "at": points["button"] }),
             ),
+            ("frame_how", inside()),
+            (
+                "frame_field",
+                json!({ "op": "click", "at": points["field"] }),
+            ),
+            (
+                "frame_type",
+                json!({ "op": "type", "text": "Привет, рамка" }),
+            ),
+            ("frame_press", json!({ "op": "press", "key": "Enter" })),
+            ("frame_typed", inside()),
+            (
+                "frame_more",
+                json!({ "op": "type", "text": "!", "append": true, "submit": true }),
+            ),
+            ("frame_appended", inside()),
             (
                 "link",
                 json!({ "op": "click", "target": { "text": "На зелёную" } }),
