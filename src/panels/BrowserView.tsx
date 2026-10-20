@@ -29,13 +29,22 @@ import {
 } from "../browser/browserFrames";
 import { saveAutoReload, useAutoReload } from "../browser/autoReload";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
+import {
+  DEVICES,
+  DEVICE_SIZES,
+  saveDevice,
+  useDevice,
+} from "../browser/pageDevice";
 import { localizeBackendError, useI18n } from "../i18n";
 import {
   AutoReloadIcon,
   BackIcon,
   CloseIcon,
+  DesktopIcon,
   ForwardIcon,
+  PhoneIcon,
   ReloadIcon,
+  TabletIcon,
 } from "../ui/Icons";
 
 // Кнопки над страницей — как у любого браузера, в том же порядке.
@@ -44,6 +53,13 @@ const STEPS = [
   { step: "forward", label: "browser.forward", Icon: ForwardIcon },
   { step: "reload", label: "browser.reload", Icon: ReloadIcon },
 ] as const;
+
+// Экраны внизу ящика — от широкого к узкому.
+const DEVICE_BUTTONS = {
+  desktop: { label: "browser.deviceDesktop", Icon: DesktopIcon },
+  tablet: { label: "browser.deviceTablet", Icon: TabletIcon },
+  phone: { label: "browser.devicePhone", Icon: PhoneIcon },
+} as const;
 
 // Сколько после нажатия верить себе, а не кадру. Сразу после шага загрузка
 // ещё не началась, и кадр сказал бы «уже не грузится» — полоса мигнула бы и
@@ -77,6 +93,13 @@ function BrowserProjectView(props: { workspaceId: string }) {
   const [awaiting, setAwaiting] = useState(false);
   const awaitingSince = useRef(0);
   const autoReload = useAutoReload();
+  const device = useDevice();
+  // Сколько странице досталось на деле: экран планшета в узкий ящик не
+  // влезает, и подпись должна говорить правду, а не повторять выбор.
+  const [viewport, setViewport] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   // Поле трогали руками. Пока это так, адрес за страницей не следует: кадр
   // приходит раз в секунду и стирал бы набранное — достаточно было увести
   // курсор из поля, и от адреса ничего не оставалось.
@@ -128,6 +151,22 @@ function BrowserProjectView(props: { workspaceId: string }) {
       () => docked.current,
     );
   }, [props.workspaceId]);
+
+  useEffect(() => {
+    const place = pageRef.current;
+    if (!place || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      const box = place.getBoundingClientRect();
+      setViewport({
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      });
+    });
+    observer.observe(place);
+    return () => observer.disconnect();
+  }, []);
 
   const dockable = frame.running && frame.dockable;
   useEffect(() => {
@@ -220,6 +259,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
   };
 
   const loading = frame.running && (awaiting || frame.loading);
+  const deviceSize = DEVICE_SIZES[device];
   const failure = refusal ?? trouble;
   const picture = frameSource(frame.image);
   // Первый запуск браузера занимает секунды, и без надписи нажатие
@@ -303,16 +343,56 @@ function BrowserProjectView(props: { workspaceId: string }) {
           {failure}
         </p>
       )}
-      <div className="browser-page" ref={pageRef} aria-busy={loading}>
-        {picture ? (
-          <img
-            className="browser-frame"
-            src={picture}
-            alt={frame.title || t("browser.frameAlt")}
-          />
-        ) : (
-          notice && <p className="browser-empty">{notice}</p>
-        )}
+      {/* Страницу ставят ровно на место `.browser-page`: экран телефона —
+          это место размером с телефон, а сцена вокруг лишь его обрамляет. */}
+      <div className={`browser-stage ${deviceSize ? "is-device" : ""}`}>
+        <div
+          className={`browser-page ${deviceSize ? "is-device" : ""}`}
+          ref={pageRef}
+          aria-busy={loading}
+          style={deviceSize ?? undefined}
+        >
+          {picture ? (
+            <img
+              className="browser-frame"
+              src={picture}
+              alt={frame.title || t("browser.frameAlt")}
+            />
+          ) : (
+            notice && <p className="browser-empty">{notice}</p>
+          )}
+        </div>
+      </div>
+      <div className="browser-status-bar">
+        <div className="browser-status-end">
+          {frame.running && viewport && (
+            <span className="browser-viewport" title={t("browser.viewport")}>
+              {viewport.width} × {viewport.height}
+            </span>
+          )}
+          <div
+            className="browser-devices"
+            role="group"
+            aria-label={t("browser.device")}
+          >
+            {DEVICES.map((kind) => {
+              const { label, Icon } = DEVICE_BUTTONS[kind];
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  className="icon-button browser-device"
+                  title={t(label)}
+                  aria-label={t(label)}
+                  aria-pressed={device === kind}
+                  onClick={() => saveDevice(kind)}
+                >
+                  <Icon />
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

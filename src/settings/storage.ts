@@ -31,6 +31,7 @@ export const KEYS = {
   agentSessions: "modelcrew.agentSessions",
 
   browserAutoReload: "modelcrew.browserAutoReload",
+  browserDevice: "modelcrew.browserDevice",
 
   notificationSound: "modelcrew.notificationSound",
   notificationVolume: "modelcrew.notificationVolume",

@@ -175,6 +175,33 @@ export function ReloadIcon(props: IconProps) {
   );
 }
 
+export function PhoneIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="4.5" y="1.5" width="7" height="13" rx="1.5" />
+      <path d="M7.25 12.25h1.5" />
+    </svg>
+  );
+}
+
+export function TabletIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" />
+      <path d="M7.25 12.25h1.5" />
+    </svg>
+  );
+}
+
+export function DesktopIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="2.5" width="13" height="8.5" rx="1" />
+      <path d="M5.5 14h5M8 11v3" />
+    </svg>
+  );
+}
+
 export function AutoReloadIcon(props: IconProps) {
   // Та же стрелка «обновить», но с точкой посередине: обновляется сама.
   return (

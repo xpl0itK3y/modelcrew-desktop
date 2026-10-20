@@ -113,8 +113,28 @@
   font-size: 11.5px;
 }
 
+/* Сцена вокруг страницы. Компьютер — страница во всю сцену; планшет и
+   телефон — место их размера сверху посередине, а что вокруг, видно как
+   рамку, не как страницу. */
+.browser-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--mc-bg);
+}
+
+.browser-stage.is-device {
+  align-items: flex-start;
+  padding: 12px;
+  background: var(--mc-panel-header);
+}
+
 .browser-page {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1;
   align-items: flex-start;
@@ -123,12 +143,64 @@
   background: var(--mc-bg);
 }
 
+/* Размер экрана приходит из разметки. Не влезает — ужимается до сцены:
+   место, вылезшее за край, страница заняла бы целиком, поверх соседей. */
+.browser-page.is-device {
+  flex: none;
+  max-width: 100%;
+  max-height: 100%;
+  outline: 1px solid var(--mc-border);
+  box-shadow: 0 6px 20px var(--mc-shadow);
+}
+
 /* Кадр снят в своём размере (1280×800) и здесь только ужимается по ширине:
    растянутый до высоты ящика, он потерял бы пропорции страницы. */
 .browser-frame {
   width: 100%;
   height: auto;
   display: block;
+}
+
+/* ---------- Строка под страницей ---------- */
+
+.browser-status-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border-top: 1px solid var(--mc-border);
+  color: var(--mc-text-muted);
+  font-size: 11px;
+}
+
+.browser-status-bar .icon-button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.browser-status-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.browser-viewport {
+  font-variant-numeric: tabular-nums;
+}
+
+.browser-devices {
+  display: flex;
+  gap: 2px;
+}
+
+.browser-device[aria-pressed="true"] {
+  background: var(--mc-hover-strong);
+  color: var(--mc-text-bright);
 }
 
 .browser-empty {

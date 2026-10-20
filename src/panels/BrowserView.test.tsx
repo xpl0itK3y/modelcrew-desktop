@@ -2,6 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveDevice } from "../browser/pageDevice";
 import { setLocale } from "../i18n";
 import { BrowserView } from "./BrowserView";
 
@@ -25,6 +26,7 @@ beforeEach(() => {
   invoke.mockResolvedValue(frame());
   openUrl.mockReset();
   openUrl.mockResolvedValue(undefined);
+  saveDevice("desktop");
 });
 
 afterEach(() => {
@@ -430,6 +432,26 @@ describe("BrowserView", () => {
       () => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument(),
       { timeout: 3_000 },
     );
+  });
+
+  it("gives the page a phone-sized place once a phone is chosen", () => {
+    // Живая страница встаёт ровно на это место: вёрстка перестроится под
+    // ширину телефона, и агент увидит её такой же.
+    render(<BrowserView workspaceId="w1" />);
+    const place = document.querySelector(".browser-page") as HTMLElement;
+    expect(place.style.width).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Телефон/ }));
+
+    expect(place).toHaveStyle({ width: "390px", height: "844px" });
+    expect(screen.getByRole("button", { name: /^Телефон/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Компьютер/ }));
+
+    expect(place.style.width).toBe("");
   });
 
   it("keeps the step buttons out of reach while the browser is not up", () => {

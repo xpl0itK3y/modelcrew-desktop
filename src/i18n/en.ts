@@ -76,6 +76,11 @@ export const en: Record<MessageKey, string> = {
   "browser.reload": "Reload the page",
   "browser.stop": "Stop loading",
   "browser.loading": "The page is loading",
+  "browser.device": "Screen size",
+  "browser.deviceDesktop": "Desktop — fill the drawer",
+  "browser.deviceTablet": "Tablet — 768 × 1024",
+  "browser.devicePhone": "Phone — 390 × 844",
+  "browser.viewport": "Current page size",
   "browser.autoReload": "Reload on edits",
   "browser.autoReloadOn":
     "The local page reloads by itself when project files change. Click to turn it off",

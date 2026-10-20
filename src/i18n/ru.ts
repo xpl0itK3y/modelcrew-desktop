@@ -75,6 +75,11 @@ export const ru = {
   "browser.reload": "Обновить страницу",
   "browser.stop": "Остановить загрузку",
   "browser.loading": "Страница загружается",
+  "browser.device": "Размер экрана",
+  "browser.deviceDesktop": "Компьютер — во весь ящик",
+  "browser.deviceTablet": "Планшет — 768 × 1024",
+  "browser.devicePhone": "Телефон — 390 × 844",
+  "browser.viewport": "Размер страницы сейчас",
   "browser.autoReload": "Обновлять при правках",
   "browser.autoReloadOn":
     "Локальная страница обновляется сама, когда меняются файлы проекта. Нажмите, чтобы выключить",
