@@ -17,6 +17,8 @@ import { ResizeHandle } from "../ui/ResizeHandle";
 import {
   kindOf,
   matches,
+  sourceOf,
+  type ConsoleEntry,
   type ConsoleFilter,
   type NumberedEntry,
 } from "./pageConsole";
@@ -34,6 +36,13 @@ const TAGS: Partial<Record<string, MessageKey>> = {
   exception: "browser.consoleException",
   rejection: "browser.consoleRejection",
   resource: "browser.consoleResource",
+};
+
+// Чьё сообщение, если не самой страницы. Ошибка виджета оплаты в рамке —
+// не ошибка страницы, и человеку это видно сразу.
+const SOURCES: Record<"frame" | "worker", MessageKey> = {
+  frame: "browser.consoleFrame",
+  worker: "browser.consoleWorker",
 };
 
 // Насколько можно не дотянуть до низа и всё ещё считаться внизу.
@@ -62,6 +71,22 @@ function fitHeight(wanted: number, room: number): number {
 function loadHeight(): number | null {
   const stored = Number(readSetting(KEYS.browserConsoleHeight));
   return Number.isFinite(stored) && stored > 0 ? stored : null;
+}
+
+/** Подпись справа, как место в инспекторе: рамка или поток и их адрес. */
+function Source(props: { entry: ConsoleEntry }) {
+  const { t } = useI18n();
+  const source = sourceOf(props.entry);
+  if (!source) {
+    return null;
+  }
+  // Протокол подписи ничего не даёт, а места занимает. Целиком — в подсказке.
+  const address = source.address.replace(/^https?:\/\//, "");
+  return (
+    <span className="browser-console-source" title={source.address}>
+      {t(SOURCES[source.kind], { address })}
+    </span>
+  );
 }
 
 export function PageConsolePanel(props: {
@@ -208,6 +233,7 @@ export function PageConsolePanel(props: {
             >
               {tag && <span className="browser-console-tag">{t(tag)}</span>}
               <span className="browser-console-text">{entry.text}</span>
+              <Source entry={entry} />
             </div>
           );
         })}

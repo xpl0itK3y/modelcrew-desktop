@@ -108,6 +108,8 @@ export const ru = {
   "browser.consoleException": "Исключение",
   "browser.consoleRejection": "Промис отклонён",
   "browser.consoleResource": "Не загрузилось",
+  "browser.consoleFrame": "рамка {address}",
+  "browser.consoleWorker": "поток {address}",
   "browser.consoleLost": "Ранние сообщения вытеснены: {count}",
   "browser.consoleNotRunning": "Консоль появится, когда откроется страница",
   "browser.consoleEmpty": "Консоль пуста",

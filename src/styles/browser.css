@@ -442,6 +442,18 @@
   min-width: 0;
 }
 
+/* Чьё сообщение — справа, как место в инспекторе. Длинный адрес не теснит
+   текст: обрезан, а целиком — в подсказке. */
+.browser-console-source {
+  flex: 0 1 auto;
+  max-width: 40%;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--mc-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .browser-console-note,
 .browser-console-empty {
   margin: 0;

@@ -10,6 +10,7 @@ import {
   lostSince,
   matches,
   sameConsole,
+  sourceOf,
   watchPageConsole,
   type PageConsole,
 } from "./pageConsole";
@@ -167,6 +168,42 @@ describe("console entries", () => {
     expect(matches(entry, "warning", "deprecated")).toBe(true);
     expect(matches(entry, "error", "")).toBe(false);
     expect(matches(entry, "all", "missing")).toBe(false);
+  });
+
+  it("finds a frame's and a worker's messages by their address", () => {
+    const fromFrame = {
+      level: "error",
+      text: "declined",
+      frame: "https://pay.test/widget",
+    };
+    const fromWorker = {
+      level: "exception",
+      text: "boom",
+      worker: "https://app.test/w.js",
+    };
+
+    expect(matches(fromFrame, "all", "pay.test")).toBe(true);
+    expect(matches(fromWorker, "error", "w.js")).toBe(true);
+    expect(matches(fromFrame, "all", "w.js")).toBe(false);
+  });
+
+  it("names who wrote a message unless it was the page itself", () => {
+    expect(sourceOf({ level: "log", text: "hi" })).toBeNull();
+    expect(
+      sourceOf({ level: "log", text: "hi", frame: "https://pay.test/" }),
+    ).toEqual({
+      kind: "frame",
+      address: "https://pay.test/",
+    });
+    // Поток в рамке — прежде всего поток: упал он, а не рамка.
+    expect(
+      sourceOf({
+        level: "exception",
+        text: "boom",
+        frame: "https://pay.test/",
+        worker: "https://pay.test/w.js",
+      }),
+    ).toEqual({ kind: "worker", address: "https://pay.test/w.js" });
   });
 
   it("notices when nothing new was written", () => {

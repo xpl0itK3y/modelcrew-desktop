@@ -9,7 +9,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "../platform";
 
-export type ConsoleEntry = { level: string; text: string };
+export type ConsoleEntry = {
+  level: string;
+  text: string;
+  // Адрес рамки, если написала рамка, а не сама страница.
+  frame?: string;
+  // Адрес скрипта потока (Worker), если упал он.
+  worker?: string;
+};
 
 export type PageConsole = {
   // Открыта ли страница. Нет — и консоли нет.
@@ -179,5 +186,24 @@ export function matches(
     return false;
   }
   const needle = search.trim().toLowerCase();
-  return needle === "" || entry.text.toLowerCase().includes(needle);
+  // Ищут и по адресу: «покажи всё, что пишет виджет оплаты».
+  return (
+    needle === "" ||
+    [entry.text, entry.frame ?? "", entry.worker ?? ""].some((said) =>
+      said.toLowerCase().includes(needle),
+    )
+  );
+}
+
+/** Чьё сообщение, если не самой страницы: рамки или потока, и откуда он. */
+export function sourceOf(
+  entry: ConsoleEntry,
+): { kind: "frame" | "worker"; address: string } | null {
+  if (entry.worker) {
+    return { kind: "worker", address: entry.worker };
+  }
+  if (entry.frame) {
+    return { kind: "frame", address: entry.frame };
+  }
+  return null;
 }

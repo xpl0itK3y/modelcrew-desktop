@@ -96,6 +96,42 @@ describe("PageConsolePanel height", () => {
     expect(panel.style.height).toBe("300px");
   });
 
+  it("signs a frame's and a worker's messages with their address", () => {
+    render(
+      <PageConsolePanel
+        entries={[
+          { index: 0, level: "log", text: "страница" },
+          {
+            index: 1,
+            level: "error",
+            text: "карта",
+            frame: "https://pay.test/widget",
+          },
+          {
+            index: 2,
+            level: "exception",
+            text: "boom",
+            worker: "http://app.test/w.js",
+          },
+        ]}
+        lost={0}
+        running
+        trouble={null}
+        onClear={() => {}}
+      />,
+    );
+
+    const frame = screen.getByText("рамка pay.test/widget");
+    expect(frame.title).toBe("https://pay.test/widget");
+    expect(screen.getByText("поток app.test/w.js").title).toBe(
+      "http://app.test/w.js",
+    );
+    // Своё страница пишет без подписи.
+    expect(screen.getByText("страница").parentElement?.children).toHaveLength(
+      1,
+    );
+  });
+
   it("goes back to the usual height on a double click", () => {
     writeSetting(KEYS.browserConsoleHeight, "300");
     const { edge, panel } = openConsole();

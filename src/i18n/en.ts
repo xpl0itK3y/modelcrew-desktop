@@ -108,6 +108,8 @@ export const en: Record<MessageKey, string> = {
   "browser.consoleException": "Exception",
   "browser.consoleRejection": "Promise rejected",
   "browser.consoleResource": "Failed to load",
+  "browser.consoleFrame": "frame {address}",
+  "browser.consoleWorker": "worker {address}",
   "browser.consoleLost": "Earlier messages dropped: {count}",
   "browser.consoleNotRunning": "The console appears once a page is open",
   "browser.consoleEmpty": "The console is empty",
