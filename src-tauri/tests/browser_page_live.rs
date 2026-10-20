@@ -136,11 +136,17 @@ fn the_page_loads_shows_itself_and_closes() {
     }
 
     // Новых окон у страницы нет: и `window.open`, и ссылка «в новом окне»
-    // уводят её саму. А «назад» возвращает туда, откуда увела ссылка. Размер
-    // — последний, что ей задали.
+    // уводят её саму. Ссылка в рамку страницы приходит в рамку, а страница
+    // остаётся где была. А «назад» возвращает туда, откуда увела ссылка.
+    // Размер — последний, что ей задали.
+    assert_eq!(
+        report["frame_heard"], true,
+        "ссылка в рамку до рамки не дошла: {report:#}"
+    );
     let last = if cfg!(target_os = "linux") { FIT } else { DOCK };
     for (name, colour, expected) in [
         ("opened", "green", Colour::Green),
+        ("framed", "green", Colour::Green),
         ("clicked", "blue", Colour::Blue),
         ("back", "green", Colour::Green),
     ] {

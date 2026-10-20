@@ -163,7 +163,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         (Value::Null, Value::Null)
     };
 
-    let (opened, clicked) = same_page(app, out)?;
+    let same = same_page(app, out)?;
 
     // Кнопка «назад» в панели: со синей, куда увела ссылка, — на зелёную.
     browser_page::step(app, ROOT, browser_page::Step::Back)?;
@@ -179,7 +179,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    Ok(json!({
+    let mut report = json!({
         "scale": scale,
         "green": green,
         "green_console": green_console,
@@ -188,11 +188,13 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "blue_console": blue_console,
         "docked": docked,
         "home": home,
-        "opened": opened,
-        "clicked": clicked,
         "back": back,
         "closed": !browser_page::is_open(app, ROOT),
-    }))
+    });
+    if let Value::Object(fields) = &mut report {
+        fields.extend(same);
+    }
+    Ok(report)
 }
 
 /// Дождаться страницы, снять её и записать, что о ней известно.
@@ -260,10 +262,12 @@ fn dock_and_back(app: &AppHandle, out: &Path, before: &Value) -> Result<(Value, 
 }
 
 /// Увести синюю страницу «в новое окно» — сперва `window.open`, потом
-/// ссылкой с `target="_blank"` — и снять, куда она пришла.
+/// ссылкой с `target="_blank"` — и снять, куда она пришла. Между ними —
+/// ссылка в рамку самой страницы.
 ///
-/// Окон, кроме своего, у страницы нет: и то и другое обязано увести её саму.
-fn same_page(app: &AppHandle, out: &Path) -> Result<(Value, Value), String> {
+/// Окон, кроме своего, у страницы нет: новое окно обязано увести её саму. А
+/// рамка у страницы есть, и в неё ссылка обязана прийти, не трогая страницу.
+fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Value>, String> {
     let page = app
         .get_webview(&browser_page::label_for(ROOT))
         .ok_or_else(|| "страница пропала".to_string())?;
@@ -271,15 +275,50 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<(Value, Value), String> {
         page.eval(script)
             .map_err(|error| format!("до страницы не достучаться: {error}"))
     };
+    let mut seen = serde_json::Map::new();
     run("window.open('/green')")?;
-    let opened = shot(app, out, "opened")?;
+    seen.insert("opened".into(), shot(app, out, "opened")?);
+
+    // Рамка — крошечная, в углу: середина кадра остаётся страницей. Что в
+    // рамку пришло, страница пишет в консоль — консоль рамки нам не видна.
+    run(concat!(
+        "{ const frame = document.createElement('iframe'); frame.name = 'side';",
+        "frame.style.cssText = 'position:fixed;left:0;top:0;width:8px;height:8px;border:0';",
+        "document.body.append(frame);",
+        "frame.onload = () => { if (frame.contentWindow.location.pathname === '/blue')",
+        " console.log('рамка: синяя'); };",
+        "const link = document.createElement('a'); link.href = '/blue'; link.target = 'side';",
+        "document.body.append(link); link.click(); }",
+    ))?;
+    seen.insert("frame_heard".into(), heard(app, "рамка: синяя")?.into());
+    seen.insert("framed".into(), shot(app, out, "framed")?);
+
     run(concat!(
         "{ const link = document.createElement('a');",
         "link.href = '/blue'; link.target = '_blank';",
         "document.body.append(link); link.click(); }",
     ))?;
-    let clicked = shot(app, out, "clicked")?;
-    Ok((opened, clicked))
+    seen.insert("clicked".into(), shot(app, out, "clicked")?);
+    Ok(seen)
+}
+
+/// Дождаться в консоли страницы сообщения с этим текстом.
+fn heard(app: &AppHandle, text: &str) -> Result<bool, String> {
+    let deadline = Instant::now() + SETTLE_WAIT;
+    loop {
+        let log = browser_page::console(app, ROOT)?;
+        if log
+            .messages
+            .iter()
+            .any(|message| message.text.contains(text))
+        {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// Консоль страницы, когда в ней наберётся хотя бы столько сообщений.

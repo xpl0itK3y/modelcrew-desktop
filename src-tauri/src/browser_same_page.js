@@ -20,6 +20,23 @@
   // Эти цели и так оставляют страницу на месте: выше неё окон нет.
   const here = new Set(["", "_self", "_parent", "_top"]);
 
+  // Уводит ли цель в новое окно. Так бывает с `_blank` и с именем, которого
+  // нет ни у самой страницы, ни у её рамок. Рамку с таким именем браузер
+  // находит сам — в неё ведут оплаты и встроенные окна входа, и уводить их
+  // из рамки нельзя.
+  const leaves = (name) => {
+    const keyword = name.toLowerCase();
+    if (here.has(keyword) || name === window.name) {
+      return false;
+    }
+    if (keyword === "_blank") {
+      return true;
+    }
+    return !Array.from(document.querySelectorAll("iframe, frame")).some(
+      (frame) => frame.name === name,
+    );
+  };
+
   const resolve = (text) => {
     try {
       return new URL(text, document.baseURI);
@@ -44,7 +61,7 @@
     }
     const elsewhere =
       middle ||
-      !here.has(link.target.toLowerCase()) ||
+      leaves(link.target) ||
       event.metaKey ||
       event.ctrlKey ||
       event.shiftKey;
@@ -62,12 +79,10 @@
   window.open = function (url, target, features) {
     // Без цели, как и с пустой, `window.open` открывает новое окно.
     const name =
-      typeof target === "string" && target !== ""
-        ? target.toLowerCase()
-        : "_blank";
+      typeof target === "string" && target !== "" ? target : "_blank";
     const address =
       url === undefined || url === "" ? null : resolve(String(url));
-    if (here.has(name) || !address || !isWeb(address)) {
+    if (!leaves(name) || !address || !isWeb(address)) {
       return open.call(window, url, target, features);
     }
     window.location.assign(address.href);
