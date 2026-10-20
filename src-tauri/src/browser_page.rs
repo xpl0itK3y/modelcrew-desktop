@@ -581,8 +581,8 @@ pub struct ConsoleLog {
 
 #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ConsoleMessage {
-    /// Метод console — log, info, warn, error, debug, — либо то, что страница
-    /// не писала сама: exception, rejection, resource.
+    /// Метод console — log, info, warn, error, debug, trace, — либо то, что
+    /// страница не писала сама: exception, rejection, resource, csp.
     pub level: String,
     pub text: String,
     /// Адрес рамки, если написала рамка, а не сама страница.
@@ -591,6 +591,13 @@ pub struct ConsoleMessage {
     /// Адрес скрипта потока (Worker), если упал он.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
+    /// Место в коде — `адрес:строка:столбец`, откуда сообщение, — или адрес
+    /// того, что не загрузилось.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// Сколько раз подряд сообщение повторилось, если больше одного.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u64>,
 }
 
 /// Консоль страницы проекта.
@@ -1157,6 +1164,8 @@ mod tests {
                     text: "boom".to_string(),
                     frame: None,
                     worker: None,
+                    at: None,
+                    count: None,
                 }],
                 dropped: 3,
                 started: 0.0,
@@ -1186,6 +1195,30 @@ mod tests {
                 "level": "exception",
                 "text": "Error: boom",
                 "worker": "https://app.test/w.js",
+            })
+        );
+    }
+
+    #[test]
+    fn a_message_says_where_it_came_from_and_how_often() {
+        let answer = serde_json::to_string(concat!(
+            r#"{"messages":[{"level":"error","text":"boom","#,
+            r#""at":"https://app.test/main.js:2:14","count":3}]}"#,
+        ))
+        .unwrap();
+        let messages = console_of(&answer).unwrap().messages;
+        assert_eq!(
+            messages[0].at.as_deref(),
+            Some("https://app.test/main.js:2:14")
+        );
+        assert_eq!(messages[0].count, Some(3));
+        assert_eq!(
+            serde_json::to_value(&messages[0]).unwrap(),
+            serde_json::json!({
+                "level": "error",
+                "text": "boom",
+                "at": "https://app.test/main.js:2:14",
+                "count": 3,
             })
         );
     }
