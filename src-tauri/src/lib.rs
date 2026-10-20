@@ -979,6 +979,17 @@ pub fn run_browser_page_check() -> Option<i32> {
     None
 }
 
+/// Плагины приложения. Они служат его окну, и в страницу проекта их скрипты
+/// не ставим. Живая проверка страницы поднимается с ними же: иначе она не
+/// увидела бы, что они делают со страницей.
+fn with_app_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
+        .plugin(AppOnly(tauri_plugin_opener::init()))
+        .plugin(AppOnly(tauri_plugin_dialog::init()))
+        .plugin(AppOnly(tauri_plugin_process::init()))
+        .plugin(AppOnly(tauri_plugin_notification::init()))
+}
+
 /// Сборка приложения: настройки, иконки и интерфейс.
 ///
 /// Одна на все запуски: макрос встраивает интерфейс в программу, и второй его
@@ -1002,27 +1013,20 @@ pub fn run() {
         show_main_window(app);
     }));
 
-    let builder = builder
-        // Плагины служат окну приложения: в страницу проекта их скрипты не
-        // ставим.
-        .plugin(AppOnly(tauri_plugin_opener::init()))
-        .plugin(AppOnly(tauri_plugin_dialog::init()))
-        .plugin(AppOnly(tauri_plugin_process::init()))
-        .plugin(AppOnly(tauri_plugin_notification::init()))
-        .setup(|app| {
-            #[cfg(desktop)]
-            app.handle()
-                .plugin(AppOnly(tauri_plugin_updater::Builder::new().build()))?;
-            spawn_title_watcher(app.handle().clone());
-            agent_hooks::install(app.handle());
-            mcp::serve(app.handle().clone());
-            // Наружу, в общие конфиги агентов, мы не пишем: плагин внутренний.
-            // Записи прежних версий снимаем.
-            mcp_register::clean_shared_configs(app.handle());
-            #[cfg(desktop)]
-            setup_tray(app)?;
-            Ok(())
-        });
+    let builder = with_app_plugins(builder).setup(|app| {
+        #[cfg(desktop)]
+        app.handle()
+            .plugin(AppOnly(tauri_plugin_updater::Builder::new().build()))?;
+        spawn_title_watcher(app.handle().clone());
+        agent_hooks::install(app.handle());
+        mcp::serve(app.handle().clone());
+        // Наружу, в общие конфиги агентов, мы не пишем: плагин внутренний.
+        // Записи прежних версий снимаем.
+        mcp_register::clean_shared_configs(app.handle());
+        #[cfg(desktop)]
+        setup_tray(app)?;
+        Ok(())
+    });
 
     // На macOS Tauri ставит дефолтное меню, чей пункт Close Window съедает
     // Cmd+W раньше веб-вью. Собираем своё меню без Close/New, оставляя

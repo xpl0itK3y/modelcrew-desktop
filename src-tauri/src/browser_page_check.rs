@@ -93,7 +93,7 @@ fn run(out: PathBuf) -> i32 {
     // было бы лишним окном на экране того, кто запустил тесты.
     let mut context = crate::app_context();
     context.config_mut().app.windows.clear();
-    let app = tauri::Builder::default()
+    let app = crate::with_app_plugins(tauri::Builder::default())
         .setup(move |app| {
             // Без этого на время теста в Dock появлялась бы иконка.
             #[cfg(target_os = "macos")]

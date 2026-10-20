@@ -99,6 +99,13 @@ fn the_page_loads_shows_itself_and_closes() {
         );
     }
 
+    // Плагины приложения в страницу не лезут: их команды ей запрещены, и
+    // отказ каждой лёг бы в консоль ошибкой, которой у проекта нет.
+    assert!(
+        !console.to_string().contains("plugin:"),
+        "в консоли страницы — плагин приложения: {console:#}"
+    );
+
     // Страница подогнана под ящик — и кадр с ней.
     let small = &report["small"];
     page_is(small, "green", pixels(FIT));
