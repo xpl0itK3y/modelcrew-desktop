@@ -72,6 +72,10 @@ const BLUE_SCRIPT: &str = "<script>console.info(\"синяя\");</script>";
 /// кнопка, форма поиска, список, флажок, прокручиваемый блок, поле файла,
 /// confirm, ответ с задержкой и ссылка. Страница длиннее экрана: прокрутка
 /// тоже проверяется.
+///
+/// Ниже ссылки — то, чего события скрипта не умеют: меню, которое открывает
+/// только CSS-правило :hover, кнопка, что отличает настоящее нажатие, и рамка
+/// с другого домена — localhost вместо 127.0.0.1.
 const FORM_BODY: &str = concat!(
     "<main style=\"background:#fff\">",
     "<h1>Форма проверки</h1><p>Обычный текст абзаца.</p>",
@@ -92,7 +96,25 @@ const FORM_BODY: &str = concat!(
     "Спросить</button><p id=\"answer\"></p>",
     "<button onclick=\"setTimeout(() => late.textContent = 'Сохранено', 500)\">Сохранить</button>",
     "<p id=\"late\"></p><a href=\"/green\">На зелёную</a>",
+    "<nav id=\"menu\"><style>#menu .sub{display:none}#menu:hover .sub{display:block}</style>",
+    "<span>Меню</span><div class=\"sub\"><button id=\"deep\" ",
+    "onclick=\"chosen.textContent = 'Пункт выбран'\">Пункт меню</button></div></nav>",
+    "<p id=\"chosen\"></p>",
+    "<button id=\"real\" onclick=\"how.textContent = event.isTrusted ? 'настоящее' : 'скрипт'\" ",
+    "ondblclick=\"how.textContent = 'двойное: ' + (event.isTrusted ? 'настоящее' : 'скрипт')\" ",
+    "oncontextmenu=\"how.textContent = 'меню: ' + (event.isTrusted ? 'настоящее' : 'скрипт')\">",
+    "Как нажали</button><p id=\"how\"></p>",
+    "<iframe id=\"other\" title=\"Чужая рамка\" style=\"width:300px;height:120px;border:0\"></iframe>",
+    "<p id=\"inside\"></p>",
+    "<script>other.src = 'http://localhost:' + location.port + '/frame';",
+    "addEventListener('message', (event) => { inside.textContent = String(event.data); });</script>",
     "<div style=\"height:3000px\"></div></main>",
+);
+
+/// Рамка с другого домена: кнопка во всю рамку говорит странице, как её нажали.
+const FRAME_BODY: &str = concat!(
+    "<button style=\"width:100%;height:120px\" onclick=\"parent.postMessage(",
+    "'рамка: ' + (event.isTrusted ? 'настоящее' : 'скрипт'), '*')\">Внутри рамки</button>",
 );
 
 /// Чем закончилась проверка. Код, переданный в `exit`, Tauri возвращает не
@@ -210,6 +232,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     let mut report = json!({
         "scale": scale,
+        "native": crate::browser_input::AVAILABLE,
         "green": green,
         "green_console": green_console,
         "small": small,
@@ -468,12 +491,83 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
             json!({ "op": "click", "target": { "text": "Такой кнопки нет" } }),
         ),
         (
-            "link",
-            json!({ "op": "click", "target": { "text": "На зелёную" } }),
+            "menu",
+            json!({ "op": "hover", "target": { "text": "Меню" } }),
         ),
-        ("stale", json!({ "op": "click", "target": { "ref": "e1" } })),
+        (
+            "menu_item",
+            json!({ "op": "click", "target": { "selector": "#deep" } }),
+        ),
+        (
+            "chosen",
+            value("document.getElementById('chosen').textContent"),
+        ),
+        (
+            "real",
+            json!({ "op": "click", "target": { "selector": "#real" } }),
+        ),
+        (
+            "real_how",
+            value("document.getElementById('how').textContent"),
+        ),
+        (
+            "double",
+            json!({ "op": "click", "target": { "selector": "#real" }, "double": true }),
+        ),
+        (
+            "double_how",
+            value("document.getElementById('how').textContent"),
+        ),
+        (
+            "right",
+            json!({ "op": "click", "target": { "selector": "#real" }, "right": true }),
+        ),
+        (
+            "right_how",
+            value("document.getElementById('how').textContent"),
+        ),
+        ("frame_read", json!({ "op": "read", "selector": "#other" })),
     ];
     let mut seen = serde_json::Map::new();
+    perform_all(app, &mut seen, steps);
+
+    // В рамку с другого домена скрипт страницы не попадёт — только мышь, в
+    // точку на экране: в середину рамки.
+    let middle = browser_page::run(
+        app,
+        ROOT,
+        "(() => { const frame = document.getElementById('other'); \
+         frame.scrollIntoView({ block: 'center' }); const box = frame.getBoundingClientRect(); \
+         return JSON.stringify({ x: Math.round(box.left + box.width / 2), \
+         y: Math.round(box.top + box.height / 2) }); })()",
+    )?
+    .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+    .ok_or("середину рамки не узнать")?;
+    perform_all(
+        app,
+        &mut seen,
+        [
+            ("frame_click", json!({ "op": "click", "at": middle })),
+            (
+                "frame_how",
+                value("document.getElementById('inside').textContent"),
+            ),
+            (
+                "link",
+                json!({ "op": "click", "target": { "text": "На зелёную" } }),
+            ),
+            ("stale", json!({ "op": "click", "target": { "ref": "e1" } })),
+        ],
+    );
+    Ok(Value::Object(seen))
+}
+
+/// Шаги по очереди — каждый так, как его позвал бы сервер, — и что вышло.
+fn perform_all(
+    app: &AppHandle,
+    seen: &mut serde_json::Map<String, Value>,
+    steps: impl IntoIterator<Item = (&'static str, Value)>,
+) {
     for (name, request) in steps {
         let outcome = match crate::browser_actions::perform(app, ROOT, request) {
             Ok(acted) => json!({
@@ -486,7 +580,6 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
         };
         seen.insert(name.into(), outcome);
     }
-    Ok(Value::Object(seen))
 }
 
 /// Дождаться в консоли страницы сообщения с этим текстом.
@@ -587,6 +680,7 @@ fn answer(mut stream: TcpStream) {
     let (status, body) = match path {
         "/green" => ("200 OK", page("green", "#00c000", GREEN_SCRIPT)),
         "/form" => ("200 OK", page("form", "#ffffff", FORM_BODY)),
+        "/frame" => ("200 OK", page("frame", "#ffeecc", FRAME_BODY)),
         "/blue" => {
             std::thread::sleep(SLOW_PAGE);
             ("200 OK", page("blue", "#0000ff", BLUE_SCRIPT))

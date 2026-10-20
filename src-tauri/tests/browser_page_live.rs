@@ -233,6 +233,53 @@ fn the_page_loads_shows_itself_and_closes() {
         "{actions:#}"
     );
 
+    // Настоящая мышь: меню на одном CSS :hover открывается, страница видит
+    // isTrusted, а в рамку с другого домена попадают точкой с кадра. Прочитать
+    // такую рамку нельзя — чтение говорит, где она на кадре.
+    let frame = done(actions, "frame_read");
+    assert!(
+        frame.contains("[frame «Чужая рамка» cross-origin, "),
+        "{frame}"
+    );
+    if report["native"] == true {
+        assert!(
+            frame.contains(", на кадре x ") || frame.contains(", вне экрана"),
+            "{frame}"
+        );
+        for name in [
+            "hover",
+            "menu",
+            "menu_item",
+            "real",
+            "double",
+            "right",
+            "frame_click",
+        ] {
+            let notes = actions[name]["notes"].to_string();
+            assert!(
+                !notes.contains("Настоящий ввод до страницы не дошёл"),
+                "{name}: настоящая мышь не дошла: {notes}"
+            );
+        }
+        for (name, expected) in [
+            ("chosen", "Пункт выбран"),
+            ("real_how", "настоящее"),
+            ("double_how", "двойное: настоящее"),
+            ("right_how", "меню: настоящее"),
+            ("frame_how", "рамка: настоящее"),
+        ] {
+            let text = done(actions, name);
+            assert!(text.ends_with(&format!("\n{expected}")), "{name}: {text}");
+        }
+    } else {
+        let text = done(actions, "real_how");
+        assert!(text.ends_with("\nскрипт"), "{text}");
+        assert!(
+            refused(actions, "frame_click").contains("настоящая мышь"),
+            "{actions:#}"
+        );
+    }
+
     // confirm человеку не показан, а агенту сказано, о чём спросили.
     assert!(
         actions["dismissed"]["notes"]
