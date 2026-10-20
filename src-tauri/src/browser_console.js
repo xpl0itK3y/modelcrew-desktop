@@ -28,6 +28,9 @@
   const toText = String;
   const entries = [];
   let dropped = 0;
+  // Когда началась запись. После перезагрузки счёт сообщений идёт заново, и
+  // по этой метке панель отличает новую страницу от старой.
+  const started = Date.now();
 
   const cut = (text) =>
     text.length > LENGTH ? text.slice(0, LENGTH - 1) + "…" : text;
@@ -177,7 +180,7 @@
   });
 
   Object.defineProperty(window, "__modelcrewConsole", {
-    value: () => stringify({ messages: entries, dropped }),
+    value: () => stringify({ messages: entries, dropped, started }),
     writable: false,
     configurable: false,
     enumerable: false,

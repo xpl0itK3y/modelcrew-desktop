@@ -52,7 +52,8 @@ use agent_session_store::{
 use agent_session_watch::agent_sessions_watch;
 use agent_sessions::{agent_session_locate, agent_session_locate_turn};
 use browser_view::{
-    browser_auto_reload, browser_dock, browser_frame, browser_go, browser_step, browser_undock,
+    browser_auto_reload, browser_console, browser_dock, browser_frame, browser_go, browser_step,
+    browser_undock,
 };
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
@@ -1074,6 +1075,7 @@ pub fn run() {
             browser_go,
             browser_step,
             browser_auto_reload,
+            browser_console,
             browser_dock,
             browser_undock,
             mcp_status,
@@ -1240,6 +1242,7 @@ mod tests {
         "app_set_badge",
         "app_set_locale",
         "browser_auto_reload",
+        "browser_console",
         "browser_dock",
         "browser_frame",
         "browser_go",

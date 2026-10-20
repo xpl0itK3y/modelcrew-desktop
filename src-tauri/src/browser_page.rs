@@ -486,9 +486,13 @@ pub struct ConsoleLog {
     /// Сколько ранних сообщений вытеснено новыми.
     #[serde(default)]
     pub dropped: u64,
+    /// Когда страница начала запись, в миллисекундах эпохи. Сменилась —
+    /// значит, страницу загрузили заново и счёт пошёл с нуля.
+    #[serde(default)]
+    pub started: f64,
 }
 
-#[derive(Debug, PartialEq, serde::Deserialize)]
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ConsoleMessage {
     /// Метод console — log, info, warn, error, debug, — либо то, что страница
     /// не писала сама: exception, rejection, resource.
@@ -1023,7 +1027,19 @@ mod tests {
                     text: "boom".to_string(),
                 }],
                 dropped: 3,
+                started: 0.0,
             })
+        );
+    }
+
+    #[test]
+    fn the_console_says_when_the_page_started_writing() {
+        let answer =
+            serde_json::to_string(r#"{"messages":[],"dropped":0,"started":1760000000000}"#)
+                .unwrap();
+        assert_eq!(
+            console_of(&answer).map(|log| log.started),
+            Ok(1_760_000_000_000.0)
         );
     }
 

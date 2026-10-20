@@ -193,6 +193,56 @@ pub async fn browser_step(
     })
 }
 
+/// Консоль страницы для панели — та же запись, что читает агент
+/// (`browser_console`).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserConsole {
+    /// Открыта ли страница. Нет — панели и показывать нечего.
+    pub running: bool,
+    /// Когда страница начала запись. Сменилось — страницу загрузили заново.
+    pub started: f64,
+    /// Сколько ранних сообщений вытеснено новыми.
+    pub dropped: u64,
+    pub messages: Vec<crate::browser_page::ConsoleMessage>,
+}
+
+/// Консоль страницы проекта.
+#[tauri::command]
+pub async fn browser_console(
+    window: tauri::Webview,
+    app: tauri::AppHandle,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<BrowserConsole> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    let key = root.to_string_lossy().to_string();
+    if !crate::browser_page::is_open(&app, &key) {
+        return Ok(BrowserConsole {
+            running: false,
+            started: 0.0,
+            dropped: 0,
+            messages: Vec::new(),
+        });
+    }
+    // Ответ страницы приходит своим вызовом; ждать его на рантайме команд
+    // нельзя, как и кадр.
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = crate::browser_page::console(&app, &key).map_err(|reason| {
+            CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
+        })?;
+        Ok(BrowserConsole {
+            running: true,
+            started: log.started,
+            dropped: log.dropped,
+            messages: log.messages,
+        })
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::BrowserCommandFailed).with_debug(error))?
+}
+
 /// Обновлять ли страницы проектов, когда меняются их файлы. Сам выключатель
 /// живёт в настройках интерфейса и приходит сюда при старте и при каждой
 /// перемене.
