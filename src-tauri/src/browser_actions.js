@@ -1010,7 +1010,8 @@
       notes.push(
         request.native === true
           ? "Что внутри рамки с другого домена, скрипту страницы не прочитать. Смотрите её через " +
-              "browser_screenshot и нажимайте browser_click с x и y — точкой на кадре: мышь там настоящая."
+              "browser_screenshot и нажимайте browser_click с x и y — точкой на кадре: мышь там настоящая. " +
+              "В поле рамки, куда нажали, вводят browser_type и browser_press без ref — клавиатура тоже настоящая."
           : "Что внутри рамки с другого домена, скрипту страницы не прочитать, а нажать в неё здесь нечем: " +
               "настоящей мыши нет. Смотреть на неё можно через browser_screenshot.",
       );
@@ -1993,6 +1994,10 @@
     const text = String(request.text ?? "");
     let el = locate(request.target, { accept: fieldOf, what: "поле ввода" });
     if (!el) {
+      const frame = foreignFocus();
+      if (frame) {
+        return typeIntoFrame(frame, text);
+      }
       const active = deepActive();
       el = active && fieldOf(active);
       if (!el) {
@@ -2318,6 +2323,75 @@
       refuse(`В «${text}» перед последней клавишей могут стоять только Shift, Control, Alt и Meta.`);
     }
     return { mods: resolved, main };
+  };
+
+  // --- Клавиатура в рамке с другого домена -----------------------------------
+
+  // Рамка с другого домена, в которой фокус, — или `null`. Что в ней в фокусе,
+  // скрипту не видно, и ввести туда может только система.
+  const foreignFocus = () => {
+    const el = deepActive();
+    return el && (el.localName === "iframe" || el.localName === "frame") && !frameDocument(el) ? el : null;
+  };
+
+  const isForeignFrame = (el) => (el.localName === "iframe" || el.localName === "frame") && !frameDocument(el);
+
+  // Клавиша для системы: как её назовёт событие и что зажато вместе с ней.
+  const strokeOf = (spec) => {
+    const { mods, main } = parseKeys(spec);
+    if (MODIFIER_KEYS[main]) {
+      refuse(`${main} в рамку с другого домена нажимают только вместе с другой клавишей — например Shift+Tab.`);
+    }
+    const info = keyInfo(main, mods.includes("Shift"));
+    return {
+      key: info.key,
+      code: info.code,
+      keyCode: info.keyCode,
+      shift: mods.includes("Shift"),
+      control: mods.includes("Control"),
+      alt: mods.includes("Alt"),
+      meta: mods.includes("Meta"),
+    };
+  };
+
+  // Ввод в рамку несёт система — туда, что в ней в фокусе. Дошёл ли он,
+  // скрипту не узнать: события рамки до страницы не долетают.
+  const keysInto = (frame, text, steps) => {
+    if (request.native !== true) {
+      refuse(
+        `Фокус — в рамке ${describe(frame)} с другого домена. Туда печатает только настоящая клавиатура, ` +
+          "а она до страницы не дошла: событиям скрипта в рамку хода нет.",
+      );
+    }
+    // Слежка за мышью от прошлого действия сказала бы, что ввод не дошёл, —
+    // а клавиатуру ей не видно вовсе.
+    unfeel();
+    guard();
+    flash(frame);
+    notes.push("Что в рамке теперь, скрипту страницы не видно — проверьте через browser_screenshot.");
+    return { text, ref: refOf(frame), input: { kind: "keys", steps } };
+  };
+
+  // Поле — в рамке с другого домена, куда нажали по точке. Как и в обычном
+  // поле: прежнее выделяется и заменяется, если не сказано дописать.
+  const typeIntoFrame = (frame, text) => {
+    const steps = request.append ? [] : [{ select: "all" }];
+    if (request.slowly) {
+      steps.push(...[...text].map((char) => ({ text: char })));
+    } else if (text) {
+      steps.push({ text });
+    }
+    if (!text && !request.append) {
+      steps.push(strokeOf("Backspace"));
+    }
+    if (request.submit) {
+      steps.push(strokeOf("Enter"));
+    }
+    let what = `Ввели в то, что в фокусе в рамке ${describe(frame)} с другого домена.`;
+    if (request.submit) {
+      what += " Нажали Enter.";
+    }
+    return keysInto(frame, what, steps);
   };
 
   const key = (target, type, info) => {
@@ -2731,6 +2805,17 @@
 
   const pressOn = () => {
     const el = locate(request.target);
+    if (el && isForeignFrame(el) && deepActive() !== el) {
+      el.focus({ preventScroll: true });
+    }
+    const frame = el ? (isForeignFrame(el) ? el : null) : foreignFocus();
+    if (frame) {
+      return keysInto(
+        frame,
+        `Нажали ${request.key} в рамке ${describe(frame)} с другого домена — на том, что в ней в фокусе.`,
+        [strokeOf(request.key)],
+      );
+    }
     guard();
     if (el) {
       if (!fullyInView(el)) {
