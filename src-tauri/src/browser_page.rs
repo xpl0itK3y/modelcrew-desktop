@@ -101,7 +101,10 @@ pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
             .navigate(target)
             .map_err(|error| format!("страница не перешла по адресу: {error}"));
     }
-    create(app, &label, target)
+    create(app, &label, target)?;
+    // Пока страница открыта, она идёт следом за правками в проекте.
+    crate::browser_auto_reload::start(app, root);
+    Ok(())
 }
 
 /// Новая страница: webview в своём окне за краем экранов.
@@ -293,6 +296,7 @@ pub fn close_all(app: &AppHandle) {
 /// обработчик окон и её можно отменить. Здесь просьб не место: страницы быть
 /// не должно.
 fn remove(app: &AppHandle, label: &str) {
+    crate::browser_auto_reload::stop(label);
     #[cfg(target_os = "linux")]
     if let Some(window) = app.get_window(label) {
         let _ = window.destroy();

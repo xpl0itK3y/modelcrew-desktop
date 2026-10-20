@@ -14,6 +14,7 @@ mod agent_hooks;
 mod agent_session_store;
 mod agent_session_watch;
 mod agent_sessions;
+mod browser_auto_reload;
 mod browser_page;
 #[cfg(debug_assertions)]
 mod browser_page_check;
@@ -50,7 +51,9 @@ use agent_session_store::{
 };
 use agent_session_watch::agent_sessions_watch;
 use agent_sessions::{agent_session_locate, agent_session_locate_turn};
-use browser_view::{browser_dock, browser_frame, browser_go, browser_step, browser_undock};
+use browser_view::{
+    browser_auto_reload, browser_dock, browser_frame, browser_go, browser_step, browser_undock,
+};
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
@@ -1070,6 +1073,7 @@ pub fn run() {
             browser_frame,
             browser_go,
             browser_step,
+            browser_auto_reload,
             browser_dock,
             browser_undock,
             mcp_status,
@@ -1184,6 +1188,10 @@ mod tests {
             include_str!("agent_session_watch.rs"),
         ),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
+        (
+            "browser_auto_reload.rs",
+            include_str!("browser_auto_reload.rs"),
+        ),
         ("browser_page.rs", include_str!("browser_page.rs")),
         (
             "browser_page_check.rs",
@@ -1231,6 +1239,7 @@ mod tests {
         "agent_sessions_watch",
         "app_set_badge",
         "app_set_locale",
+        "browser_auto_reload",
         "browser_dock",
         "browser_frame",
         "browser_go",

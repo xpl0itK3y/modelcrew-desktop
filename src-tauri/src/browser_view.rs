@@ -188,3 +188,13 @@ pub async fn browser_step(
         CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
     })
 }
+
+/// Обновлять ли страницы проектов, когда меняются их файлы. Сам выключатель
+/// живёт в настройках интерфейса и приходит сюда при старте и при каждой
+/// перемене.
+#[tauri::command]
+pub fn browser_auto_reload(window: tauri::Webview, enabled: bool) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    crate::browser_auto_reload::set_enabled(enabled);
+    Ok(())
+}
