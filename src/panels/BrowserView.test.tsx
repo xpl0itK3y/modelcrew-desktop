@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { saveDevice } from "../browser/pageDevice";
+import { saveScreen } from "../browser/pageDevice";
 import { setLocale } from "../i18n";
 import { KEYS, removeSetting } from "../settings/storage";
 import { BrowserView } from "./BrowserView";
@@ -38,7 +38,7 @@ beforeEach(() => {
   invoke.mockResolvedValue(frame());
   openUrl.mockReset();
   openUrl.mockResolvedValue(undefined);
-  saveDevice("desktop");
+  saveScreen(null);
   removeSetting(KEYS.browserConsole);
 });
 

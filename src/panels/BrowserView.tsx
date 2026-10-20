@@ -44,8 +44,9 @@ import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import {
   DEVICES,
   DEVICE_SIZES,
-  saveDevice,
-  useDevice,
+  deviceOf,
+  saveScreen,
+  useScreen,
 } from "../browser/pageDevice";
 import { localizeBackendError, useI18n } from "../i18n";
 import { KEYS, readSetting, writeSetting } from "../settings/storage";
@@ -107,7 +108,9 @@ function BrowserProjectView(props: { workspaceId: string }) {
   const [awaiting, setAwaiting] = useState(false);
   const awaitingSince = useRef(0);
   const autoReload = useAutoReload();
-  const device = useDevice();
+  // Экран страницы: `null` — во весь ящик.
+  const deviceSize = useScreen();
+  const device = deviceOf(deviceSize);
   // Сколько странице досталось на деле: экран планшета в узкий ящик не
   // влезает, и подпись должна говорить правду, а не повторять выбор.
   const [viewport, setViewport] = useState<{
@@ -302,7 +305,6 @@ function BrowserProjectView(props: { workspaceId: string }) {
   };
 
   const loading = frame.running && (awaiting || frame.loading);
-  const deviceSize = DEVICE_SIZES[device];
   const consoleEntries = entriesSince(pageLog, consoleMark);
   const { errors, warnings } = countKinds(consoleEntries);
   const consoleName =
@@ -460,7 +462,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
                   title={t(label)}
                   aria-label={t(label)}
                   aria-pressed={device === kind}
-                  onClick={() => saveDevice(kind)}
+                  onClick={() => saveScreen(DEVICE_SIZES[kind])}
                 >
                   <Icon />
                 </button>
