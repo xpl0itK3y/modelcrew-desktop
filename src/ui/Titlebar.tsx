@@ -280,7 +280,9 @@ export function Titlebar(props: TitlebarProps) {
         {props.browserAvailable && (
           <button
             type="button"
-            className="icon-button browser-titlebar-button"
+            className={`icon-button browser-titlebar-button ${
+              props.browserUnseen > 0 ? "has-news" : ""
+            }`}
             title={
               props.browserUnseen > 0
                 ? t("titlebar.browserOpened", { count: props.browserUnseen })
@@ -296,9 +298,18 @@ export function Titlebar(props: TitlebarProps) {
           >
             <GlobeIcon />
             {props.browserUnseen > 0 && (
-              <span className="browser-titlebar-badge" aria-hidden="true">
-                {props.browserUnseen > 9 ? "9+" : props.browserUnseen}
-              </span>
+              <>
+                {/* key по счётчику: волна расходится заново на каждую новую
+                    страницу, а не только на первую. */}
+                <span
+                  key={props.browserUnseen}
+                  className="browser-titlebar-pulse"
+                  aria-hidden="true"
+                />
+                <span className="browser-titlebar-badge" aria-hidden="true">
+                  {props.browserUnseen > 9 ? "9+" : props.browserUnseen}
+                </span>
+              </>
             )}
           </button>
         )}

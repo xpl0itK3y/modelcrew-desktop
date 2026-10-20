@@ -134,3 +134,36 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+
+/* Цифру в углу легко не заметить, пока смотришь в терминал. Сам глобус
+   загорается акцентом, а от него пару раз расходится волна — на каждую новую
+   страницу заново. */
+.browser-titlebar-button.has-news {
+  color: var(--mc-accent);
+}
+
+.browser-titlebar-pulse {
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  pointer-events: none;
+  animation: browser-titlebar-pulse 1.2s ease-out 3;
+  opacity: 0;
+}
+
+@keyframes browser-titlebar-pulse {
+  from {
+    box-shadow: 0 0 0 0 var(--mc-accent);
+    opacity: 0.7;
+  }
+  to {
+    box-shadow: 0 0 0 9px var(--mc-accent);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-titlebar-pulse {
+    animation: none;
+  }
+}

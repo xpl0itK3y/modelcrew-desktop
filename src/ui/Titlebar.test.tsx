@@ -126,6 +126,25 @@ describe("Titlebar browser button", () => {
     expect(
       document.querySelector(".browser-titlebar-badge"),
     ).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".browser-titlebar-button"),
+    ).not.toHaveClass("has-news");
+  });
+
+  it("lights the globe up, not only its corner", () => {
+    // Цифру в углу не видно, пока смотришь в терминал.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 1,
+      }),
+    );
+
+    expect(document.querySelector(".browser-titlebar-button")).toHaveClass(
+      "has-news",
+    );
+    expect(
+      document.querySelector(".browser-titlebar-pulse"),
+    ).toBeInTheDocument();
   });
 });
 
