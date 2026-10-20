@@ -162,8 +162,107 @@
   }
 }
 
+/* ---------- Плашка «агент открыл страницу» ---------- */
+
+/* Под глобусом, в правом углу: туда человек и посмотрит, а кнопка рядом
+   показывает саму страницу. Ящик в это время закрыт — открытый плашку не
+   вызывает, — так что страницу она не заслоняет. */
+.page-opened-notice {
+  position: fixed;
+  top: calc(var(--mc-titlebar-height) + 8px);
+  right: 12px;
+  z-index: 100;
+  display: flex;
+  max-width: min(440px, calc(100vw - 24px));
+  box-sizing: border-box;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--mc-accent) 45%, var(--mc-border));
+  border-radius: var(--mc-radius-sm);
+  background: color-mix(in srgb, var(--mc-accent) 8%, var(--mc-surface-raised));
+  color: var(--mc-text);
+  font-size: 12.5px;
+  box-shadow: 0 8px 24px var(--mc-shadow);
+  animation: page-opened-notice-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.page-opened-notice.is-closing {
+  animation: page-opened-notice-out 160ms ease-in forwards;
+  pointer-events: none;
+}
+
+.page-opened-notice-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--mc-accent);
+}
+
+.page-opened-notice-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.page-opened-notice-title {
+  color: var(--mc-text-bright);
+  font-weight: 600;
+}
+
+.page-opened-notice-page {
+  overflow: hidden;
+  color: var(--mc-text-muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-opened-notice-open {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font-size: 12px;
+}
+
+.page-opened-notice-open:hover:not(:disabled) {
+  background: var(--mc-button-hover);
+}
+
+.page-opened-notice-close {
+  flex: none;
+}
+
+@keyframes page-opened-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-opened-notice-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .browser-titlebar-pulse {
+  .browser-titlebar-pulse,
+  .page-opened-notice {
     animation: none;
+  }
+
+  .page-opened-notice.is-closing {
+    animation: none;
+    opacity: 0;
   }
 }

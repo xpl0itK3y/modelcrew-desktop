@@ -78,6 +78,8 @@ export const ru = {
   "browser.frameAlt": "Страница в браузере проекта",
   "browser.pageOpened": "Агент открыл страницу",
   "browser.pageOpenedIn": "Агент открыл страницу — {project}",
+  "browser.showPage": "Открыть браузер",
+  "browser.dismissNotice": "Скрыть",
   "titlebar.browserOpened":
     "Браузер проекта: агент открыл страниц — {count}",
   "browser.blank": "Страница пока пустая",

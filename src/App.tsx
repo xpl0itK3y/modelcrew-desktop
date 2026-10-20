@@ -34,7 +34,12 @@ import {
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
 import { BrowserView } from "./panels/BrowserView";
-import { pageLabel, watchPagesOpened } from "./browser/pagesOpened";
+import {
+  pageLabel,
+  watchPagesOpened,
+  type OpenedPage,
+} from "./browser/pagesOpened";
+import { PageOpenedNotice } from "./browser/PageOpenedNotice";
 import { sendSystemNotification } from "./notifications";
 import { subscribeGitChanges, type GitChangesSummary } from "./git/gitChanges";
 import { aggregateCounts } from "./git/unifiedDiff";
@@ -681,31 +686,44 @@ export default function App() {
     liveBrowserWorkspaceId ?? browserPresence?.item ?? null;
   const browserDrawerClosing =
     liveBrowserWorkspaceId === null || Boolean(browserPresence?.closing);
+  // Последняя страница, которую агент открыл мимо глаз человека, — для
+  // плашки у глобуса.
+  const [pageNotice, setPageNotice] = useState<OpenedPage | null>(null);
   // Агент открыл страницу. У неё нет своего окна, поэтому о ней говорим сами:
-  // числом на глобусе, а когда человек смотрит не сюда — ещё и баннером.
+  // числом на глобусе и плашкой под ним, а когда окно не впереди — ещё и
+  // баннером системы.
   useEffect(() => {
     return watchPagesOpened((page) => {
-      if (page.root === watchedRootRef.current && document.hasFocus()) {
-        return;
+      // Ящик этого проекта открыт — страница уже перед глазами, стоит только
+      // вернуться в окно.
+      if (page.root !== watchedRootRef.current) {
+        setPagesUnseen((counts) => ({
+          ...counts,
+          [page.root]: (counts[page.root] ?? 0) + 1,
+        }));
+        setPageNotice(page);
       }
-      setPagesUnseen((counts) => ({
-        ...counts,
-        [page.root]: (counts[page.root] ?? 0) + 1,
-      }));
-      const project = workspaceNameOfRoot(workspaces.list, page.root);
-      void sendSystemNotification(
-        project
-          ? t("browser.pageOpenedIn", { project })
-          : t("browser.pageOpened"),
-        pageLabel(page),
-      );
+      // Пока окно впереди, баннер повторил бы плашку, а macOS его и не
+      // покажет.
+      if (!document.hasFocus()) {
+        const project = workspaceNameOfRoot(
+          workspacesRef.current.list,
+          page.root,
+        );
+        void sendSystemNotification(
+          project
+            ? t("browser.pageOpenedIn", { project })
+            : t("browser.pageOpened"),
+          pageLabel(page),
+        );
+      }
     });
-    // Список проектов нужен только для подписи баннера: пересобирать
-    // подписку из-за него — терять события на каждой правке списка.
+    // Подписка одна на всё время: пересобирая её, мы теряли бы события.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Открыли ящик — страницы этого проекта просмотрены.
+  // Открыли ящик — страницы этого проекта просмотрены, и плашка о них больше
+  // не нужна.
   useEffect(() => {
     if (!browserDrawerOpen || !activeRoot) {
       return;
@@ -713,7 +731,29 @@ export default function App() {
     setPagesUnseen((counts) =>
       counts[activeRoot] ? { ...counts, [activeRoot]: 0 } : counts,
     );
+    setPageNotice((notice) => (notice?.root === activeRoot ? null : notice));
   }, [browserDrawerOpen, activeRoot]);
+
+  // Кнопка плашки: показать страницу — в её проекте, если открыт другой.
+  const showNoticedPage = () => {
+    const root = pageNotice?.root;
+    if (!root) {
+      return;
+    }
+    if (root !== activeRoot) {
+      const owner = workspaces.list.find(
+        (workspace) => workspace.folder?.selectedPath === root,
+      );
+      if (!owner) {
+        setPageNotice(null);
+        return;
+      }
+      selectWorkspace(owner.id);
+    }
+    setGitDrawerOpen(false);
+    setBrowserDrawerOpen(true);
+    setPageNotice(null);
+  };
 
   useEffect(() => {
     if (!browserDrawerOpen) {
@@ -1045,6 +1085,16 @@ export default function App() {
           )}
         </main>
       </div>
+      <PageOpenedNotice
+        page={pageNotice}
+        otherProject={
+          pageNotice && pageNotice.root !== activeRoot
+            ? workspaceNameOfRoot(workspaces.list, pageNotice.root)
+            : null
+        }
+        onOpen={showNoticedPage}
+        onDismiss={() => setPageNotice(null)}
+      />
       {toastPresence && (
         <div
           className={`toast ${toastPresence.closing ? "is-closing" : ""}`}
