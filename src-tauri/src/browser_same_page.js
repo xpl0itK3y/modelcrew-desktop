@@ -37,6 +37,16 @@
     );
   };
 
+  // Цель ссылки: своя, а нет её — общая для документа, из `<base target>`.
+  const aim = (element, attribute) => {
+    const own = element.getAttribute(attribute);
+    if (own !== null) {
+      return own;
+    }
+    const base = document.querySelector("base[target]");
+    return base ? base.getAttribute("target") : "";
+  };
+
   const resolve = (text) => {
     try {
       return new URL(text, document.baseURI);
@@ -61,7 +71,7 @@
     }
     const elsewhere =
       middle ||
-      leaves(link.target) ||
+      leaves(aim(link, "target")) ||
       event.metaKey ||
       event.ctrlKey ||
       event.shiftKey;

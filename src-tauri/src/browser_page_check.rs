@@ -165,7 +165,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     let same = same_page(app, out)?;
 
-    // Кнопка «назад» в панели: со синей, куда увела ссылка, — на зелёную.
+    // Кнопка «назад» в панели: с зелёной, куда увела ссылка, — на синюю.
     browser_page::step(app, ROOT, browser_page::Step::Back)?;
     let back = shot(app, out, "back")?;
 
@@ -262,8 +262,9 @@ fn dock_and_back(app: &AppHandle, out: &Path, before: &Value) -> Result<(Value, 
 }
 
 /// Увести синюю страницу «в новое окно» — сперва `window.open`, потом
-/// ссылкой с `target="_blank"` — и снять, куда она пришла. Между ними —
-/// ссылка в рамку самой страницы.
+/// ссылкой с `target="_blank"`, потом ссылкой, которой новое окно задал
+/// `<base>`, — и снять, куда она пришла. Между ними — ссылка в рамку самой
+/// страницы.
 ///
 /// Окон, кроме своего, у страницы нет: новое окно обязано увести её саму. А
 /// рамка у страницы есть, и в неё ссылка обязана прийти, не трогая страницу.
@@ -299,6 +300,15 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Valu
         "document.body.append(link); link.click(); }",
     ))?;
     seen.insert("clicked".into(), shot(app, out, "clicked")?);
+
+    // Своей цели у ссылки нет, но новое окно документ задал всем ссылкам.
+    run(concat!(
+        "{ const base = document.createElement('base'); base.target = '_blank';",
+        "document.head.append(base);",
+        "const link = document.createElement('a'); link.href = '/green';",
+        "document.body.append(link); link.click(); }",
+    ))?;
+    seen.insert("based".into(), shot(app, out, "based")?);
     Ok(seen)
 }
 

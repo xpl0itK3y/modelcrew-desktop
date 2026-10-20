@@ -148,7 +148,8 @@ fn the_page_loads_shows_itself_and_closes() {
         ("opened", "green", Colour::Green),
         ("framed", "green", Colour::Green),
         ("clicked", "blue", Colour::Blue),
-        ("back", "green", Colour::Green),
+        ("based", "green", Colour::Green),
+        ("back", "blue", Colour::Blue),
     ] {
         let shot = &report[name];
         page_is(shot, colour, pixels(last));
