@@ -370,10 +370,12 @@ describe("BrowserView", () => {
       expect(screen.getByRole("button", { name: "Назад" })).toBeEnabled(),
     );
 
+    // «Обновить» первым: после любого шага он на время загрузки становится
+    // «Стоп».
     for (const [name, step] of [
+      ["Обновить страницу", "reload"],
       ["Назад", "back"],
       ["Вперёд", "forward"],
-      ["Обновить страницу", "reload"],
     ]) {
       fireEvent.click(screen.getByRole("button", { name }));
       expect(invoke).toHaveBeenCalledWith("browser_step", {
@@ -381,6 +383,53 @@ describe("BrowserView", () => {
         step,
       });
     }
+  });
+
+  it("turns reload into stop while the page loads", async () => {
+    invoke.mockResolvedValue(frame({ running: true, loading: true }));
+    render(<BrowserView workspaceId="w1" />);
+
+    const stop = await screen.findByRole("button", {
+      name: "Остановить загрузку",
+    });
+    expect(
+      screen.getByRole("progressbar", { name: "Страница загружается" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(stop);
+
+    expect(invoke).toHaveBeenCalledWith("browser_step", {
+      workspaceId: "w1",
+      step: "stop",
+    });
+    // Нажатие видно сразу, не дожидаясь кадра.
+    expect(
+      screen.getByRole("button", { name: "Обновить страницу" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("shows the load from the click on, until the page says it is done", async () => {
+    // Кадр приходит раз в секунду, а сразу после нажатия загрузка ещё и не
+    // началась: без этого нажатие выглядело бы так, будто ничего не было.
+    invoke.mockResolvedValue(frame({ running: true }));
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Обновить страницу" }),
+      ).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Обновить страницу" }));
+
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Остановить загрузку" }),
+    ).toBeInTheDocument();
+    await waitFor(
+      () => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument(),
+      { timeout: 3_000 },
+    );
   });
 
   it("keeps the step buttons out of reach while the browser is not up", () => {

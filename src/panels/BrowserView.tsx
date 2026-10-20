@@ -30,7 +30,13 @@ import {
 import { saveAutoReload, useAutoReload } from "../browser/autoReload";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import { localizeBackendError, useI18n } from "../i18n";
-import { AutoReloadIcon, BackIcon, ForwardIcon, ReloadIcon } from "../ui/Icons";
+import {
+  AutoReloadIcon,
+  BackIcon,
+  CloseIcon,
+  ForwardIcon,
+  ReloadIcon,
+} from "../ui/Icons";
 
 // Кнопки над страницей — как у любого браузера, в том же порядке.
 const STEPS = [
@@ -38,6 +44,11 @@ const STEPS = [
   { step: "forward", label: "browser.forward", Icon: ForwardIcon },
   { step: "reload", label: "browser.reload", Icon: ReloadIcon },
 ] as const;
+
+// Сколько после нажатия верить себе, а не кадру. Сразу после шага загрузка
+// ещё не началась, и кадр сказал бы «уже не грузится» — полоса мигнула бы и
+// пропала, а «Стоп» не успел бы появиться.
+const LOAD_START_MS = 600;
 
 /**
  * Ящик со страницей проекта.
@@ -62,6 +73,9 @@ function BrowserProjectView(props: { workspaceId: string }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  // Страницу только что послали куда-то, а кадр об этом ещё не знает.
+  const [awaiting, setAwaiting] = useState(false);
+  const awaitingSince = useRef(0);
   const autoReload = useAutoReload();
   // Поле трогали руками. Пока это так, адрес за страницей не следует: кадр
   // приходит раз в секунду и стирал бы набранное — достаточно было увести
@@ -83,6 +97,12 @@ function BrowserProjectView(props: { workspaceId: string }) {
       (next) => {
         setFrame(next);
         setTrouble(null);
+        if (
+          next.loading ||
+          Date.now() - awaitingSince.current >= LOAD_START_MS
+        ) {
+          setAwaiting(false);
+        }
         // Страницу открыли заново или увели из ящика, пока окно прятали:
         // место надо прислать снова, хоть оно и не сдвинулось.
         if (docked.current && !next.docked) {
@@ -131,6 +151,11 @@ function BrowserProjectView(props: { workspaceId: string }) {
     };
   }, [dockable, props.workspaceId]);
 
+  const expectLoad = () => {
+    awaitingSince.current = Date.now();
+    setAwaiting(true);
+  };
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const url = normalizeAddress(address);
@@ -146,6 +171,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
       // правят и пробуют ещё раз.
       .then(() => {
         typed.current = false;
+        expectLoad();
       })
       .catch((error) => {
         setRefusal(localizeBackendError(error));
@@ -176,11 +202,24 @@ function BrowserProjectView(props: { workspaceId: string }) {
     // Страница уйдёт сама, и адресная строка снова идёт за ней: набранное,
     // но не открытое, к новой странице уже не относится.
     typed.current = false;
-    stepPage(props.workspaceId, next).catch((error) =>
+    expectLoad();
+    stepPage(props.workspaceId, next).catch((error) => {
+      setAwaiting(false);
+      setTrouble(localizeBackendError(error));
+    });
+  };
+
+  // Страница остаётся где была, поэтому набранный адрес не трогаем. Полосу
+  // убираем сразу, не дожидаясь кадра: нажатие «Стоп» должно быть видно.
+  const stop = () => {
+    setAwaiting(false);
+    setFrame((current) => ({ ...current, loading: false }));
+    stepPage(props.workspaceId, "stop").catch((error) =>
       setTrouble(localizeBackendError(error)),
     );
   };
 
+  const loading = frame.running && (awaiting || frame.loading);
   const failure = refusal ?? trouble;
   const picture = frameSource(frame.image);
   // Первый запуск браузера занимает секунды, и без надписи нажатие
@@ -198,19 +237,26 @@ function BrowserProjectView(props: { workspaceId: string }) {
   return (
     <div className="browser-view">
       <form className="browser-address-bar" onSubmit={submit}>
-        {STEPS.map(({ step: kind, label, Icon }) => (
-          <button
-            key={kind}
-            type="button"
-            className={`icon-button ${frame.running ? "" : "is-disabled"}`}
-            title={t(label)}
-            aria-label={t(label)}
-            disabled={!frame.running}
-            onClick={() => step(kind)}
-          >
-            <Icon />
-          </button>
-        ))}
+        {STEPS.map(({ step: kind, label, Icon }) => {
+          // Как в любом браузере: пока страница грузится, «Обновить» на том
+          // же месте становится «Стоп».
+          const stops = kind === "reload" && loading;
+          const name = t(stops ? "browser.stop" : label);
+          const Shown = stops ? CloseIcon : Icon;
+          return (
+            <button
+              key={kind}
+              type="button"
+              className={`icon-button ${frame.running ? "" : "is-disabled"}`}
+              title={name}
+              aria-label={name}
+              disabled={!frame.running}
+              onClick={() => (stops ? stop() : step(kind))}
+            >
+              <Shown />
+            </button>
+          );
+        })}
         <button
           type="button"
           className="icon-button browser-auto-reload"
@@ -244,13 +290,20 @@ function BrowserProjectView(props: { workspaceId: string }) {
         >
           {t("browser.open")}
         </button>
+        {(opening || loading) && (
+          <div
+            className="browser-progress"
+            role="progressbar"
+            aria-label={t("browser.loading")}
+          />
+        )}
       </form>
       {failure && (
         <p className="browser-failure" role="alert">
           {failure}
         </p>
       )}
-      <div className="browser-page" ref={pageRef}>
+      <div className="browser-page" ref={pageRef} aria-busy={loading}>
         {picture ? (
           <img
             className="browser-frame"

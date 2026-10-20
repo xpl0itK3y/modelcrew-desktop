@@ -74,6 +74,8 @@ export const en: Record<MessageKey, string> = {
   "browser.back": "Back",
   "browser.forward": "Forward",
   "browser.reload": "Reload the page",
+  "browser.stop": "Stop loading",
+  "browser.loading": "The page is loading",
   "browser.autoReload": "Reload on edits",
   "browser.autoReloadOn":
     "The local page reloads by itself when project files change. Click to turn it off",

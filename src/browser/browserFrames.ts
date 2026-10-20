@@ -27,6 +27,9 @@ export type BrowserFrame = {
   docked: boolean;
   // Умеет ли система показать страницу живой. Где не умеет — только кадр.
   dockable: boolean;
+  // Грузится ли страница: над ней бежит полоса, а «Обновить» становится
+  // «Стоп».
+  loading: boolean;
 };
 
 export const NO_FRAME: BrowserFrame = {
@@ -36,11 +39,15 @@ export const NO_FRAME: BrowserFrame = {
   running: false,
   docked: false,
   dockable: false,
+  loading: false,
 };
 
 // Раз в секунду: страницу смотрит человек, а не машина. Чаще — впустую
 // греем процессор снимками, реже — заметно отстаёт от того, что делает агент.
 const POLL_INTERVAL_MS = 1_000;
+// Пока страница грузится, чаще: полоса загрузки, пропавшая через секунду
+// после самой загрузки, выглядит как зависание.
+const LOADING_POLL_MS = 300;
 
 /**
  * Адрес из того, что человек набрал руками.
@@ -104,6 +111,7 @@ export function watchBrowserFrame(
   }
   let stopped = false;
   let timer = 0;
+  let loading = false;
 
   const poll = async () => {
     // Окно свёрнуто или перекрыто — смотреть некому, кадр не нужен.
@@ -117,6 +125,7 @@ export function watchBrowserFrame(
           request = { workspaceId, width: size?.width, height: size?.height };
         }
         const frame = await invoke<BrowserFrame>("browser_frame", request);
+        loading = frame.loading;
         if (!stopped) {
           onFrame(frame);
         }
@@ -131,7 +140,10 @@ export function watchBrowserFrame(
       }
     }
     if (!stopped) {
-      timer = window.setTimeout(poll, POLL_INTERVAL_MS);
+      timer = window.setTimeout(
+        poll,
+        loading ? LOADING_POLL_MS : POLL_INTERVAL_MS,
+      );
     }
   };
 
@@ -159,9 +171,9 @@ export async function openOutside(url: string): Promise<void> {
 }
 
 /** Шаг страницы: кнопки над ней. */
-export type PageStep = "back" | "forward" | "reload";
+export type PageStep = "back" | "forward" | "reload" | "stop";
 
-/** Назад, вперёд или заново. Отказ уходит наверх — его показывают. */
+/** Назад, вперёд, заново или стоп. Отказ уходит наверх — его показывают. */
 export function stepPage(workspaceId: string, step: PageStep): Promise<void> {
   return invoke<void>("browser_step", { workspaceId, step });
 }

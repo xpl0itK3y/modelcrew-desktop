@@ -250,6 +250,26 @@ describe("watchBrowserFrame", () => {
     stop();
   });
 
+  it("asks more often while the page is loading", async () => {
+    // Раз в секунду полоса загрузки висела бы ещё секунду после самой
+    // загрузки, и страница казалась бы зависшей.
+    invoke.mockResolvedValue({ ...NO_FRAME, running: true, loading: true });
+
+    const stop = watchBrowserFrame("workspace-1", () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(invoke).toHaveBeenCalledTimes(2);
+
+    invoke.mockResolvedValue({ ...NO_FRAME, running: true, loading: false });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(invoke).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(invoke).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(700);
+    expect(invoke).toHaveBeenCalledTimes(4);
+    stop();
+  });
+
   it("tells the trouble apart from a browser that is simply not running", async () => {
     invoke.mockRejectedValue({ code: "browser_command_failed" });
     const seen: unknown[] = [];

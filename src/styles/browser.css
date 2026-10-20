@@ -14,6 +14,7 @@
 }
 
 .browser-address-bar {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
@@ -69,6 +70,37 @@
 
 .browser-open:disabled {
   color: var(--mc-text-faint);
+}
+
+/* Полоса загрузки лежит на нижней кромке адресной строки, а не отдельной
+   строкой: появляясь и пропадая, та сдвигала бы место страницы, и живая
+   страница дёргалась бы на каждой загрузке. Сколько осталось, webview не
+   говорит, поэтому полоса бежит, а не заполняется. */
+.browser-progress {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.browser-progress::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+  width: 30%;
+  background: var(--mc-accent);
+  content: "";
+  animation: browser-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes browser-progress {
+  to {
+    left: 100%;
+  }
 }
 
 .browser-failure {
@@ -274,6 +306,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Без бега: полоса просто стоит во всю ширину, пока страница грузится. */
+  .browser-progress::before {
+    left: 0;
+    width: 100%;
+    opacity: 0.6;
+    animation: none;
+  }
+
   .browser-titlebar-pulse,
   .page-opened-notice {
     animation: none;
