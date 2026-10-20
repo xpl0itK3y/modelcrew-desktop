@@ -41,13 +41,8 @@ import {
   type PageConsole,
 } from "../browser/pageConsole";
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
-import {
-  DEVICES,
-  DEVICE_SIZES,
-  deviceOf,
-  saveScreen,
-  useScreen,
-} from "../browser/pageDevice";
+import { useScreen } from "../browser/pageDevice";
+import { PageScreenControls } from "../browser/PageScreenControls";
 import { localizeBackendError, useI18n } from "../i18n";
 import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import {
@@ -55,11 +50,8 @@ import {
   BackIcon,
   CloseIcon,
   ConsoleIcon,
-  DesktopIcon,
   ForwardIcon,
-  PhoneIcon,
   ReloadIcon,
-  TabletIcon,
 } from "../ui/Icons";
 
 // Кнопки над страницей — как у любого браузера, в том же порядке.
@@ -68,13 +60,6 @@ const STEPS = [
   { step: "forward", label: "browser.forward", Icon: ForwardIcon },
   { step: "reload", label: "browser.reload", Icon: ReloadIcon },
 ] as const;
-
-// Экраны внизу ящика — от широкого к узкому.
-const DEVICE_BUTTONS = {
-  desktop: { label: "browser.deviceDesktop", Icon: DesktopIcon },
-  tablet: { label: "browser.deviceTablet", Icon: TabletIcon },
-  phone: { label: "browser.devicePhone", Icon: PhoneIcon },
-} as const;
 
 // Сколько после нажатия верить себе, а не кадру. Сразу после шага загрузка
 // ещё не началась, и кадр сказал бы «уже не грузится» — полоса мигнула бы и
@@ -110,7 +95,6 @@ function BrowserProjectView(props: { workspaceId: string }) {
   const autoReload = useAutoReload();
   // Экран страницы: `null` — во весь ящик.
   const deviceSize = useScreen();
-  const device = deviceOf(deviceSize);
   // Сколько странице досталось на деле: экран планшета в узкий ящик не
   // влезает, и подпись должна говорить правду, а не повторять выбор.
   const [viewport, setViewport] = useState<{
@@ -442,33 +426,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
           )}
         </button>
         <div className="browser-status-end">
-          {frame.running && viewport && (
-            <span className="browser-viewport" title={t("browser.viewport")}>
-              {viewport.width} × {viewport.height}
-            </span>
-          )}
-          <div
-            className="browser-devices"
-            role="group"
-            aria-label={t("browser.device")}
-          >
-            {DEVICES.map((kind) => {
-              const { label, Icon } = DEVICE_BUTTONS[kind];
-              return (
-                <button
-                  key={kind}
-                  type="button"
-                  className="icon-button browser-device"
-                  title={t(label)}
-                  aria-label={t(label)}
-                  aria-pressed={device === kind}
-                  onClick={() => saveScreen(DEVICE_SIZES[kind])}
-                >
-                  <Icon />
-                </button>
-              );
-            })}
-          </div>
+          <PageScreenControls viewport={viewport} />
         </div>
       </div>
     </div>

@@ -237,8 +237,46 @@
   margin-left: auto;
 }
 
-.browser-viewport {
+/* Размер страницы: на вид — подпись, а щёлкни — поле. */
+.browser-screen-size {
+  display: flex;
+  align-items: center;
+  gap: 1px;
   font-variant-numeric: tabular-nums;
+}
+
+.browser-screen-side {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.browser-screen-field {
+  width: 4.6ch;
+  box-sizing: content-box;
+  padding: 1px 3px;
+  border: 1px solid transparent;
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+.browser-screen-field:hover {
+  border-color: var(--mc-border);
+}
+
+.browser-screen-field:focus {
+  border-color: var(--mc-accent-border);
+  outline: none;
+  background: var(--mc-bg);
+  color: var(--mc-text-bright);
+}
+
+/* Вписанный экран больше ящика: страница ужата, вёрстка уже не та. */
+.browser-screen-size.is-squeezed {
+  color: var(--mc-git-modified);
 }
 
 .browser-devices {

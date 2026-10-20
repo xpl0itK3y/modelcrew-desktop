@@ -221,6 +221,17 @@ export function DesktopIcon(props: IconProps) {
   );
 }
 
+export function RotateIcon(props: IconProps) {
+  // Экран, лёгший набок, и стрелка поворота над ним.
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="7.5" width="9" height="6" rx="1.2" />
+      <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
+      <path d="M12 6.5l1.5 1.5 1.5-1.5" />
+    </svg>
+  );
+}
+
 export function AutoReloadIcon(props: IconProps) {
   // Та же стрелка «обновить», но с точкой посередине: обновляется сама.
   return (

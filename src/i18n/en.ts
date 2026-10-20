@@ -81,7 +81,12 @@ export const en: Record<MessageKey, string> = {
   "browser.deviceDesktop": "Desktop — fill the drawer",
   "browser.deviceTablet": "Tablet — 768 × 1024",
   "browser.devicePhone": "Phone — 390 × 844",
-  "browser.viewport": "Current page size",
+  "browser.screenSize": "Page size",
+  "browser.screenSizeHint": "Page size. Type your own and the layout follows it",
+  "browser.screenSqueezed": "Does not fit the drawer — the page got {width} × {height}",
+  "browser.screenWidth": "Page width",
+  "browser.screenHeight": "Page height",
+  "browser.screenRotate": "Rotate the screen",
   "browser.console": "Console",
   "browser.consoleCounted": "Console — errors: {errors}, warnings: {warnings}",
   "browser.consoleHint":

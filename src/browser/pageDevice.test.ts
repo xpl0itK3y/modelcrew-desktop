@@ -61,7 +61,7 @@ describe("pageDevice", () => {
 
 describe("screen sizes", () => {
   it("keeps a typed size within what the page can take", () => {
-    expect(fitScreen(100, 100)).toEqual({ width: 320, height: 360 });
+    expect(fitScreen(100, 100)).toEqual({ width: 200, height: 200 });
     expect(fitScreen(99_999, 1_000.4)).toEqual({ width: 3840, height: 1000 });
     expect(fitScreen(Number.NaN, 500)).toBeNull();
   });

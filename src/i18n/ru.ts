@@ -80,7 +80,12 @@ export const ru = {
   "browser.deviceDesktop": "Компьютер — во весь ящик",
   "browser.deviceTablet": "Планшет — 768 × 1024",
   "browser.devicePhone": "Телефон — 390 × 844",
-  "browser.viewport": "Размер страницы сейчас",
+  "browser.screenSize": "Размер страницы",
+  "browser.screenSizeHint": "Размер страницы. Впишите свой — вёрстка перестроится под него",
+  "browser.screenSqueezed": "Не влезает в ящик — странице досталось {width} × {height}",
+  "browser.screenWidth": "Ширина страницы",
+  "browser.screenHeight": "Высота страницы",
+  "browser.screenRotate": "Повернуть экран",
   "browser.console": "Консоль",
   "browser.consoleCounted":
     "Консоль — ошибок: {errors}, предупреждений: {warnings}",
