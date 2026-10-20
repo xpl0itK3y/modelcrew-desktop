@@ -591,6 +591,26 @@ pub fn console(app: &AppHandle, root: &str) -> Result<ConsoleLog, String> {
     console_of(&answer)
 }
 
+/// Выполнить скрипт на странице проекта и получить строку, которую он вернул.
+///
+/// `None` — скрипт не разобрался, бросил или вернул не строку: WebKit отдаёт
+/// тогда пустой ответ, а WebView2 — `null`. Выполняется он в главной рамке, в
+/// мире самой страницы.
+pub fn run(app: &AppHandle, root: &str, script: &str) -> Result<Option<String>, String> {
+    let page = find(app, root)?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    page.eval_with_callback(script, move |answer| {
+        let _ = sender.send(answer);
+    })
+    .map_err(|error| format!("до страницы не достучаться: {error}"))?;
+    let answer = receiver
+        .recv_timeout(SNAPSHOT_WAIT)
+        .map_err(|_| "страница не ответила".to_string())?;
+    Ok(serde_json::from_str::<Option<String>>(&answer)
+        .ok()
+        .flatten())
+}
+
 /// Ответ страницы — JSON того, что вернул читатель: строка с записанным или
 /// пусто, если записи нет. Исключение WebKit отдаёт пустой строкой, а
 /// WebView2 — `null`.

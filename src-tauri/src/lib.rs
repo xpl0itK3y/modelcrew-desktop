@@ -14,6 +14,7 @@ mod agent_hooks;
 mod agent_session_store;
 mod agent_session_watch;
 mod agent_sessions;
+mod browser_actions;
 mod browser_auto_reload;
 mod browser_page;
 #[cfg(debug_assertions)]
@@ -1197,6 +1198,7 @@ mod tests {
             include_str!("agent_session_watch.rs"),
         ),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
+        ("browser_actions.rs", include_str!("browser_actions.rs")),
         (
             "browser_auto_reload.rs",
             include_str!("browser_auto_reload.rs"),
