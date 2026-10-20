@@ -128,6 +128,60 @@ fn the_page_loads_shows_itself_and_closes() {
         report["blue_console"]
     );
 
+    // За страницу говорят её рамки — своя и с другого домена — и потоки, и
+    // каждое такое сообщение подписано, чьё оно. Сама страница сообщений
+    // записи не слышит, хотя слушает postMessage.
+    let talk = &report["talk_console"];
+    for host in ["127.0.0.1", "localhost"] {
+        let frame = format!("http://{host}:");
+        for (level, text) in [("log", "рамка говорит"), ("exception", "рамка упала")]
+        {
+            assert!(
+                said_by(talk, level, text, "frame", (&frame, "/said")),
+                "в консоли нет {level} «{text}» из рамки {host}: {talk:#}"
+            );
+        }
+    }
+    assert!(
+        said_by(
+            talk,
+            "exception",
+            "поток упал",
+            "worker",
+            ("http://127.0.0.1:", "/worker.js")
+        ),
+        "в консоли нет ошибки потока: {talk:#}"
+    );
+    // WebKit отдаёт ту же ошибку и окну страницы — записана она один раз.
+    let fell = talk["messages"].as_array().map_or(0, |messages| {
+        messages
+            .iter()
+            .filter(|message| {
+                message["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("поток упал"))
+            })
+            .count()
+    });
+    assert_eq!(fell, 1, "ошибка потока записана не один раз: {talk:#}");
+    assert!(
+        said(talk, "resource", "worker http://127.0.0.1:") && said(talk, "resource", "/nothing.js"),
+        "в консоли нет потока, который не загрузился: {talk:#}"
+    );
+    let own = talk["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|message| message["text"] == "страница говорит")
+        })
+        .unwrap_or_else(|| panic!("страница сама ничего не сказала: {talk:#}"));
+    assert_eq!(own, &json!({ "level": "log", "text": "страница говорит" }));
+    assert!(
+        !talk.to_string().contains("страница услышала"),
+        "сообщение записи дошло до страницы: {talk:#}"
+    );
+
     // Страница пересаживается в главное окно и обратно, не перезагружаясь:
     // в панели она той величины, что панель, и домой уносит тот же размер.
     // На Linux пересаживать некуда — там страницу показывают кадром.
@@ -388,6 +442,28 @@ fn said(console: &Value, level: &str, text: &str) -> bool {
                 && message["text"]
                     .as_str()
                     .is_some_and(|said| said.contains(text))
+        })
+    })
+}
+
+/// Есть ли в консоли сообщение с этим текстом, подписанное адресом рамки
+/// (`frame`) или потока (`worker`) с этим началом и концом.
+fn said_by(
+    console: &Value,
+    level: &str,
+    text: &str,
+    field: &str,
+    (start, end): (&str, &str),
+) -> bool {
+    console["messages"].as_array().is_some_and(|messages| {
+        messages.iter().any(|message| {
+            message["level"] == level
+                && message["text"]
+                    .as_str()
+                    .is_some_and(|said| said.contains(text))
+                && message[field]
+                    .as_str()
+                    .is_some_and(|address| address.starts_with(start) && address.ends_with(end))
         })
     })
 }

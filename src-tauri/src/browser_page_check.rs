@@ -68,6 +68,39 @@ const GREEN_MESSAGES: usize = 6;
 /// Синяя страница пишет одно: после перехода консоль обязана начаться заново.
 const BLUE_SCRIPT: &str = "<script>console.info(\"синяя\");</script>";
 
+/// Страница, за которую говорят другие: две рамки — своя и с другого домена,
+/// localhost вместо 127.0.0.1, — поток, который падает, и поток, которого
+/// нет. Сама страница слушает postMessage: сообщения записи до неё доходить
+/// не должны.
+const TALK_BODY: &str = concat!(
+    "<script>addEventListener('message', (event) => ",
+    "console.warn('страница услышала: ' + JSON.stringify(event.data)));</script>",
+    "<iframe src=\"/said\" title=\"Своя рамка\"></iframe>",
+    "<iframe id=\"far\" title=\"Чужая рамка\"></iframe>",
+    "<script>far.src = 'http://localhost:' + location.port + '/said';",
+    "new Worker('/worker.js'); new Worker('/nothing.js');",
+    "console.log('страница говорит');</script>",
+);
+
+/// Что пишет рамка: сообщение и исключение, которое никто не поймал.
+const SAID_SCRIPT: &str =
+    "<script>console.log(\"рамка говорит\"); throw new Error(\"рамка упала\");</script>";
+
+/// Поток, который падает сразу.
+const WORKER_SCRIPT: &str = "throw new Error(\"поток упал\");";
+
+/// Что обязано прозвучать в консоли той страницы — каждое столько раз,
+/// сколько оно здесь: у рамок по сообщению от каждой.
+const TALK_HEARD: &[&str] = &[
+    "страница говорит",
+    "рамка говорит",
+    "рамка говорит",
+    "рамка упала",
+    "рамка упала",
+    "поток упал",
+    "/nothing.js",
+];
+
 /// Страница для действий агента: всё, что они умеют, — поле с подписью,
 /// кнопка, форма поиска, список, флажок, прокручиваемый блок, поле файла,
 /// confirm, ответ с задержкой и ссылка. Страница длиннее экрана: прокрутка
@@ -224,6 +257,10 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
     let actions = actions(app, &site)?;
 
+    browser_page::open(app, ROOT, &site.url("talk"))?;
+    shot(app, out, "talk")?;
+    let talk_console = console_saying(app, TALK_HEARD)?;
+
     let scale = app
         .get_webview(&browser_page::label_for(ROOT))
         .and_then(|page| page.window().scale_factor().ok());
@@ -246,6 +283,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "home": home,
         "back": back,
         "actions": actions,
+        "talk_console": talk_console,
         "closed": !browser_page::is_open(app, ROOT),
     });
     if let Value::Object(fields) = &mut report {
@@ -339,7 +377,7 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Valu
 
     // Рамка — крошечная, в углу: середина кадра остаётся страницей. В рамку
     // ведут ссылка, а за ней форма. Что в рамку пришло, страница пишет в
-    // консоль — консоль самой рамки нам не видна.
+    // консоль: рамка сама не знает, откуда пришла.
     run(concat!(
         "{ const frame = document.createElement('iframe'); frame.name = 'side';",
         "frame.style.cssText = 'position:fixed;left:0;top:0;width:8px;height:8px;border:0';",
@@ -631,12 +669,30 @@ fn console(app: &AppHandle, at_least: usize) -> Result<Value, String> {
     loop {
         let log = browser_page::console(app, ROOT)?;
         if log.messages.len() >= at_least || Instant::now() >= deadline {
-            let messages: Vec<Value> = log
+            return Ok(json!({ "messages": log.messages, "dropped": log.dropped }));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Консоль страницы, когда в ней прозвучит каждый из этих текстов — столько
+/// раз, сколько он в списке. Рамки и потоки говорят не в лад со страницей:
+/// одного счёта сообщений тут мало.
+fn console_saying(app: &AppHandle, texts: &[&str]) -> Result<Value, String> {
+    let deadline = Instant::now() + SETTLE_WAIT;
+    loop {
+        let log = browser_page::console(app, ROOT)?;
+        let all = texts.iter().all(|text| {
+            let wanted = texts.iter().filter(|other| *other == text).count();
+            let heard = log
                 .messages
                 .iter()
-                .map(|message| json!({ "level": message.level, "text": message.text }))
-                .collect();
-            return Ok(json!({ "messages": messages, "dropped": log.dropped }));
+                .filter(|message| message.text.contains(text))
+                .count();
+            heard >= wanted
+        });
+        if all || Instant::now() >= deadline {
+            return Ok(json!({ "messages": log.messages, "dropped": log.dropped }));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -698,19 +754,24 @@ fn answer(mut stream: TcpStream) {
     // Формы без полей оставляют в адресе пустой запрос, `/blue?`: страница
     // та же.
     let path = target.split('?').next().unwrap_or(target);
-    let (status, body) = match path {
-        "/green" => ("200 OK", page("green", "#00c000", GREEN_SCRIPT)),
-        "/form" => ("200 OK", page("form", "#ffffff", FORM_BODY)),
-        "/frame" => ("200 OK", page("frame", "#ffeecc", FRAME_BODY)),
+    const HTML: &str = "text/html";
+    let (status, kind, body) = match path {
+        "/green" => ("200 OK", HTML, page("green", "#00c000", GREEN_SCRIPT)),
+        "/form" => ("200 OK", HTML, page("form", "#ffffff", FORM_BODY)),
+        "/frame" => ("200 OK", HTML, page("frame", "#ffeecc", FRAME_BODY)),
+        "/talk" => ("200 OK", HTML, page("talk", "#ffffff", TALK_BODY)),
+        "/said" => ("200 OK", HTML, page("said", "#eeeeee", SAID_SCRIPT)),
+        // Поток браузер запустит, только если сервер назвал его скриптом.
+        "/worker.js" => ("200 OK", "text/javascript", WORKER_SCRIPT.to_string()),
         "/blue" => {
             std::thread::sleep(SLOW_PAGE);
-            ("200 OK", page("blue", "#0000ff", BLUE_SCRIPT))
+            ("200 OK", HTML, page("blue", "#0000ff", BLUE_SCRIPT))
         }
-        _ => ("404 Not Found", String::new()),
+        _ => ("404 Not Found", HTML, String::new()),
     };
     let _ = write!(
         stream,
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}; charset=utf-8\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
