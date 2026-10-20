@@ -1,4 +1,4 @@
-//! Настоящий ввод в страницу проекта: события мыши системы.
+//! Настоящий ввод в страницу проекта: события мыши и клавиатуры системы.
 //!
 //! События из скрипта страницы браузер отличает от настоящих: `isTrusted` у
 //! них ложь, CSS-правило `:hover` от них не включается, а в рамку с другого
@@ -29,17 +29,106 @@ pub enum Button {
     Right,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Клавиша, как её назвал скрипт страницы: `key` и `code` — по DOM,
+/// `key_code` — код клавиши Windows, он же `keyCode` в событии.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Key {
+    pub key: String,
+    pub code: String,
+    pub key_code: u32,
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl Key {
+    /// Какой текст клавиша печатает. Ничего — если она служебная или зажат
+    /// модификатор кроме Shift: тогда это сочетание, а не буква.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn typed(&self) -> Option<String> {
+        if self.control || self.alt || self.meta {
+            return None;
+        }
+        if self.key == "Enter" {
+            return Some("\r".into());
+        }
+        let mut chars = self.key.chars();
+        match (chars.next(), chars.next()) {
+            (Some(_), None) => Some(self.key.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Шаг ввода с клавиатуры — туда, где у страницы фокус.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Stroke {
+    /// Выделить всё в поле: то, что напечатают следом, встанет вместо.
+    SelectAll,
+    /// Напечатать текст так, как его вставляет метод ввода: без клавиш, но
+    /// с настоящими `beforeinput` и `input`.
+    Text(String),
+    /// Нажать и отпустить клавишу.
+    Key(Key),
+}
+
+impl Stroke {
+    fn from_step(step: &Value) -> Result<Self, String> {
+        if step.get("select").and_then(Value::as_str) == Some("all") {
+            return Ok(Stroke::SelectAll);
+        }
+        if let Some(text) = step.get("text").and_then(Value::as_str) {
+            return Ok(Stroke::Text(text.to_string()));
+        }
+        let Some(key) = step.get("key").and_then(Value::as_str) else {
+            return Err("шаг ввода не разобрать".to_string());
+        };
+        let flag = |name: &str| step.get(name).and_then(Value::as_bool).unwrap_or(false);
+        Ok(Stroke::Key(Key {
+            key: key.to_string(),
+            code: step
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            key_code: step
+                .get("keyCode")
+                .and_then(Value::as_u64)
+                .and_then(|code| u32::try_from(code).ok())
+                .unwrap_or(0),
+            shift: flag("shift"),
+            control: flag("control"),
+            alt: flag("alt"),
+            meta: flag("meta"),
+        }))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Input {
     /// Подвести мышь.
     Move(Spot),
     /// Подвести и нажать. `count` — сколько нажатий подряд: два — двойное.
     Click { at: Spot, button: Button, count: u8 },
+    /// Ввод с клавиатуры — по шагам, туда, где фокус.
+    Keys(Vec<Stroke>),
 }
 
 impl Input {
     /// Что ввести — как это расписал скрипт страницы.
     pub fn from_plan(plan: &Value) -> Result<Self, String> {
+        if plan.get("kind").and_then(Value::as_str) == Some("keys") {
+            let steps = plan
+                .get("steps")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "в плане ввода нет шагов".to_string())?;
+            return steps
+                .iter()
+                .map(Stroke::from_step)
+                .collect::<Result<_, _>>()
+                .map(Input::Keys);
+        }
         let number = |key: &str| {
             plan.get(key)
                 .and_then(Value::as_f64)
@@ -98,12 +187,15 @@ fn scale(view: (f64, f64), at: &Spot) -> (f64, f64) {
 #[cfg(target_os = "macos")]
 mod system {
     use objc2::rc::Retained;
-    use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
-    use objc2_foundation::{NSPoint, NSProcessInfo};
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{
+        NSEvent, NSEventModifierFlags, NSEventType, NSStandardKeyBindingResponding,
+    };
+    use objc2_foundation::{NSPoint, NSProcessInfo, NSString};
     use objc2_web_kit::WKWebView;
     use tauri::AppHandle;
 
-    use super::{Button, Input, Spot};
+    use super::{Button, Input, Key, Spot, Stroke};
 
     pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
         crate::browser_page::ask(app, root, move |platform| {
@@ -141,6 +233,7 @@ mod system {
         let (at, press) = match input {
             Input::Move(at) => (at, None),
             Input::Click { at, button, count } => (at, Some((button, count))),
+            Input::Keys(strokes) => return keys(webview, number, &strokes),
         };
         // Простое движение мыши над окном не в фокусе WebKit отдаёт только
         // полосам прокрутки: наведения на странице от него нет. Движение с
@@ -171,6 +264,162 @@ mod system {
         Ok(())
     }
 
+    /// Клавиатура — туда, где у страницы фокус: в какую рамку, WebKit решает
+    /// сам.
+    fn keys(webview: &WKWebView, window: isize, strokes: &[Stroke]) -> Result<(), String> {
+        for stroke in strokes {
+            match stroke {
+                // Та же команда, что у пункта «Выделить всё» в меню «Правка».
+                Stroke::SelectAll => unsafe { webview.selectAll(None) },
+                // Так текст вставляет метод ввода, когда набор закончен.
+                Stroke::Text(text) => {
+                    let text = NSString::from_str(text);
+                    let text: &AnyObject = &text;
+                    unsafe { webview.insertText(text) };
+                }
+                Stroke::Key(key) => {
+                    let time = NSProcessInfo::processInfo().systemUptime();
+                    let (typed, plain) = characters(key);
+                    let (typed, plain) = (NSString::from_str(&typed), NSString::from_str(&plain));
+                    let event = |kind: NSEventType| -> Result<Retained<NSEvent>, String> {
+                        NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+                            kind,
+                            NSPoint::ZERO,
+                            flags(key),
+                            time,
+                            window,
+                            None,
+                            &typed,
+                            &plain,
+                            false,
+                            virtual_code(&key.code),
+                        )
+                        .ok_or_else(|| "событие клавиши не собралось".to_string())
+                    };
+                    let (down, up) = (event(NSEventType::KeyDown)?, event(NSEventType::KeyUp)?);
+                    webview.keyDown(&down);
+                    webview.keyUp(&up);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn flags(key: &Key) -> NSEventModifierFlags {
+        let mut flags = NSEventModifierFlags::empty();
+        for (held, flag) in [
+            (key.shift, NSEventModifierFlags::Shift),
+            (key.control, NSEventModifierFlags::Control),
+            (key.alt, NSEventModifierFlags::Option),
+            (key.meta, NSEventModifierFlags::Command),
+        ] {
+            if held {
+                flags |= flag;
+            }
+        }
+        flags
+    }
+
+    /// Что клавиша печатает — с модификаторами и без. Служебные клавиши AppKit
+    /// пишет своими знаками из области для частного использования.
+    fn characters(key: &Key) -> (String, String) {
+        let special = |code: u32| char::from_u32(code).map(String::from).unwrap_or_default();
+        let plain = match key.key.as_str() {
+            "Enter" => "\r".to_string(),
+            "Tab" => "\t".to_string(),
+            "Backspace" => "\u{7f}".to_string(),
+            "Escape" => "\u{1b}".to_string(),
+            "ArrowUp" => special(0xF700),
+            "ArrowDown" => special(0xF701),
+            "ArrowLeft" => special(0xF702),
+            "ArrowRight" => special(0xF703),
+            "Insert" => special(0xF727),
+            "Delete" => special(0xF728),
+            "Home" => special(0xF729),
+            "End" => special(0xF72B),
+            "PageUp" => special(0xF72C),
+            "PageDown" => special(0xF72D),
+            name => match name.strip_prefix('F').and_then(|n| n.parse::<u32>().ok()) {
+                Some(n @ 1..=12) => special(0xF704 + n - 1),
+                _ if name.chars().count() == 1 => name.to_lowercase(),
+                _ => String::new(),
+            },
+        };
+        let typed = match plain.chars().next() {
+            // Control с буквой печатает управляющий знак — как у настоящей
+            // клавиатуры.
+            Some(letter) if key.control && letter.is_ascii_alphabetic() && plain.len() == 1 => {
+                char::from(letter.to_ascii_uppercase() as u8 & 0x1f).to_string()
+            }
+            Some('\t') if key.shift => "\u{19}".to_string(),
+            _ if key.key.chars().count() == 1 => key.key.clone(),
+            _ => plain.clone(),
+        };
+        (typed, plain)
+    }
+
+    /// Код клавиши на клавиатуре Mac по её `code` из DOM. По нему WebKit
+    /// узнаёт, какая это клавиша, независимо от раскладки.
+    fn virtual_code(code: &str) -> u16 {
+        const LETTERS: [u16; 26] = [
+            0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7,
+            16, 6,
+        ];
+        const DIGITS: [u16; 10] = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25];
+        const F_KEYS: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];
+        let indexed = |rest: Option<&str>, base: u8| {
+            rest.and_then(|rest| rest.bytes().next().filter(|_| rest.len() == 1))
+                .and_then(|byte| byte.checked_sub(base))
+                .map(usize::from)
+        };
+        if let Some(code) = indexed(code.strip_prefix("Key"), b'A').and_then(|i| LETTERS.get(i)) {
+            return *code;
+        }
+        if let Some(code) = indexed(code.strip_prefix("Digit"), b'0').and_then(|i| DIGITS.get(i)) {
+            return *code;
+        }
+        if let Some(n) = code.strip_prefix('F').and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(code) = n.checked_sub(1).and_then(|i| F_KEYS.get(i)) {
+                return *code;
+            }
+        }
+        match code {
+            "Enter" => 36,
+            "Tab" => 48,
+            "Space" => 49,
+            "Backspace" => 51,
+            "Escape" => 53,
+            "MetaLeft" => 55,
+            "ShiftLeft" => 56,
+            "AltLeft" => 58,
+            "ControlLeft" => 59,
+            "Insert" => 114,
+            "Home" => 115,
+            "PageUp" => 116,
+            "Delete" => 117,
+            "End" => 119,
+            "PageDown" => 121,
+            "ArrowLeft" => 123,
+            "ArrowRight" => 124,
+            "ArrowDown" => 125,
+            "ArrowUp" => 126,
+            "Equal" => 24,
+            "Minus" => 27,
+            "BracketRight" => 30,
+            "BracketLeft" => 33,
+            "Quote" => 39,
+            "Semicolon" => 41,
+            "Backslash" => 42,
+            "Comma" => 43,
+            "Slash" => 44,
+            "Period" => 47,
+            "Backquote" => 50,
+            // Буквы других раскладок: своей клавиши у них в US-коде нет, и
+            // WebKit берёт знак из самого события.
+            _ => 0,
+        }
+    }
+
     /// Точка страницы — точка в окне, где стоит webview.
     fn place(webview: &WKWebView, at: &Spot) -> NSPoint {
         let bounds = webview.bounds();
@@ -190,12 +439,14 @@ mod system {
 #[cfg(target_os = "linux")]
 mod system {
     use gtk::gdk;
+    use gtk::gdk::keys::{constants as keys, Key as Keyval};
     use gtk::glib;
     use gtk::glib::translate::{from_glib_full, IntoGlib, ToGlibPtr, ToGlibPtrMut};
     use gtk::prelude::*;
     use tauri::AppHandle;
+    use webkit2gtk::WebViewExt;
 
-    use super::{Button, Input, Spot};
+    use super::{Button, Input, Key, Spot, Stroke};
 
     pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
         crate::browser_page::ask(app, root, move |platform| deliver(&platform.inner(), input))
@@ -215,6 +466,7 @@ mod system {
         let (at, press) = match input {
             Input::Move(at) => (at, None),
             Input::Click { at, button, count } => (at, Some((button, count))),
+            Input::Keys(strokes) => return type_in(webview, &window, &strokes),
         };
         let (x, y) = place(webview, &at);
         let (root_x, root_y) = window.root_coords(x.round() as i32, y.round() as i32);
@@ -270,6 +522,112 @@ mod system {
         Ok(())
     }
 
+    /// Клавиатура — туда, где у страницы фокус: в какую рамку, WebKit решает
+    /// сам.
+    fn type_in(
+        webview: &webkit2gtk::WebView,
+        window: &gdk::Window,
+        strokes: &[Stroke],
+    ) -> Result<(), String> {
+        let display = window.display();
+        let keyboard = display
+            .default_seat()
+            .and_then(|seat| seat.keyboard())
+            .ok_or_else(|| "у системы нет клавиатуры".to_string())?;
+        let keymap = gdk::Keymap::for_display(&display);
+        for stroke in strokes {
+            match stroke {
+                // Те же команды, что у меню «Правка» и метода ввода.
+                Stroke::SelectAll => webview.execute_editing_command("SelectAll"),
+                Stroke::Text(text) => {
+                    webview.execute_editing_command_with_argument("InsertText", text);
+                }
+                Stroke::Key(key) => {
+                    let keyval = keyval(key);
+                    // Код клавиши — из раскладки: по нему WebKit узнаёт
+                    // `code`. Нет её в раскладке — знак берётся из keyval.
+                    let entry = keymap
+                        .as_ref()
+                        .and_then(|keymap| keymap.entries_for_keyval(keyval).into_iter().next());
+                    let time = (glib::monotonic_time() / 1000) as u32;
+                    for kind in [gdk::EventType::KeyPress, gdk::EventType::KeyRelease] {
+                        let mut event: gdk::Event =
+                            unsafe { from_glib_full(gdk::ffi::gdk_event_new(kind.into_glib())) };
+                        event.set_device(Some(&keyboard));
+                        unsafe {
+                            let raw: *mut gdk::ffi::GdkEvent = event.to_glib_none_mut().0;
+                            let pressed = &mut (*raw).key;
+                            pressed.window = window.to_glib_full();
+                            pressed.time = time;
+                            pressed.state = modifiers(key).into_glib();
+                            pressed.keyval = keyval;
+                            if let Some(entry) = &entry {
+                                pressed.hardware_keycode = entry.keycode() as u16;
+                                pressed.group = entry.group() as u8;
+                            }
+                        }
+                        webview.event(&event);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn modifiers(key: &Key) -> gdk::ModifierType {
+        let mut state = gdk::ModifierType::empty();
+        for (held, mask) in [
+            (key.shift, gdk::ModifierType::SHIFT_MASK),
+            (key.control, gdk::ModifierType::CONTROL_MASK),
+            (key.alt, gdk::ModifierType::MOD1_MASK),
+            (
+                key.meta,
+                gdk::ModifierType::SUPER_MASK | gdk::ModifierType::META_MASK,
+            ),
+        ] {
+            if held {
+                state |= mask;
+            }
+        }
+        state
+    }
+
+    /// Клавиша в обозначениях X: служебные — по имени, знаки — по Юникоду.
+    fn keyval(key: &Key) -> u32 {
+        let named = match key.key.as_str() {
+            "Enter" => keys::Return,
+            "Tab" if key.shift => keys::ISO_Left_Tab,
+            "Tab" => keys::Tab,
+            "Escape" => keys::Escape,
+            "Backspace" => keys::BackSpace,
+            "Delete" => keys::Delete,
+            "Insert" => keys::Insert,
+            "Home" => keys::Home,
+            "End" => keys::End,
+            "PageUp" => keys::Page_Up,
+            "PageDown" => keys::Page_Down,
+            "ArrowLeft" => keys::Left,
+            "ArrowUp" => keys::Up,
+            "ArrowRight" => keys::Right,
+            "ArrowDown" => keys::Down,
+            "Shift" => keys::Shift_L,
+            "Control" => keys::Control_L,
+            "Alt" => keys::Alt_L,
+            "Meta" => keys::Super_L,
+            name => {
+                let mut chars = name.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(char), None) => Keyval::from_unicode(char),
+                    _ => match name.strip_prefix('F').and_then(|n| n.parse::<u32>().ok()) {
+                        Some(n @ 1..=12) => Keyval::from(*keys::F1 + n - 1),
+                        _ => keys::VoidSymbol,
+                    },
+                }
+            }
+        };
+        *named
+    }
+
     /// Точка страницы — точка в окне GDK, которому идёт событие.
     fn place(webview: &webkit2gtk::WebView, at: &Spot) -> (f64, f64) {
         let view = (
@@ -288,8 +646,8 @@ mod system {
     }
 }
 
-/// Windows: события мыши через DevTools самого WebView2 — те же, что шлёт
-/// Playwright. Окно и курсор системы они не трогают.
+/// Windows: события мыши и клавиатуры через DevTools самого WebView2 — те же,
+/// что шлёт Playwright. Окно и курсор системы они не трогают.
 #[cfg(windows)]
 mod system {
     use std::collections::VecDeque;
@@ -302,11 +660,18 @@ mod system {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
     use windows::core::HSTRING;
 
-    use super::{Button, Input};
+    use super::{Button, Input, Key, Stroke};
 
     /// Страница отвечает на событие, когда его разошлёт. Дольше этого — уже
     /// не ответит.
     const WAIT: Duration = Duration::from_secs(5);
+
+    const MOUSE: &str = "Input.dispatchMouseEvent";
+    const KEY: &str = "Input.dispatchKeyEvent";
+    const TEXT: &str = "Input.insertText";
+
+    /// Вызов DevTools: метод и его параметры.
+    type Call = (&'static str, Value);
 
     type Done = mpsc::Sender<Result<(), String>>;
 
@@ -326,36 +691,91 @@ mod system {
     }
 
     /// Точки — в CSS-пикселях страницы: так их и ждёт DevTools.
-    fn events(input: Input) -> VecDeque<Value> {
+    fn events(input: Input) -> VecDeque<Call> {
         let (at, press) = match input {
             Input::Move(at) => (at, None),
             Input::Click { at, button, count } => (at, Some((button, count))),
+            Input::Keys(strokes) => return strokes.iter().flat_map(keys).collect(),
         };
-        let mut events = VecDeque::from([json!({
-            "type": "mouseMoved", "x": at.x, "y": at.y, "button": "none", "buttons": 0,
-        })]);
+        let mut events = VecDeque::from([(
+            MOUSE,
+            json!({ "type": "mouseMoved", "x": at.x, "y": at.y, "button": "none", "buttons": 0 }),
+        )]);
         if let Some((button, count)) = press {
             let (name, held) = match button {
                 Button::Left => ("left", 1),
                 Button::Right => ("right", 2),
             };
             for clicks in 1..=count {
-                events.push_back(json!({
-                    "type": "mousePressed", "x": at.x, "y": at.y,
-                    "button": name, "buttons": held, "clickCount": clicks,
-                }));
-                events.push_back(json!({
-                    "type": "mouseReleased", "x": at.x, "y": at.y,
-                    "button": name, "buttons": 0, "clickCount": clicks,
-                }));
+                events.push_back((
+                    MOUSE,
+                    json!({
+                        "type": "mousePressed", "x": at.x, "y": at.y,
+                        "button": name, "buttons": held, "clickCount": clicks,
+                    }),
+                ));
+                events.push_back((
+                    MOUSE,
+                    json!({
+                        "type": "mouseReleased", "x": at.x, "y": at.y,
+                        "button": name, "buttons": 0, "clickCount": clicks,
+                    }),
+                ));
             }
         }
         events
     }
 
+    /// Клавиатура уходит туда, где у страницы фокус, — в какую рамку,
+    /// браузер решает сам.
+    fn keys(stroke: &Stroke) -> Vec<Call> {
+        match stroke {
+            // Control+A выделяет всё в поле и на Windows, и в самом Chromium.
+            Stroke::SelectAll => press(&Key {
+                key: "a".into(),
+                code: "KeyA".into(),
+                key_code: 65,
+                control: true,
+                ..Key::default()
+            }),
+            Stroke::Text(text) => vec![(TEXT, json!({ "text": text }))],
+            Stroke::Key(key) => press(key),
+        }
+    }
+
+    fn press(key: &Key) -> Vec<Call> {
+        let modifiers = [
+            (key.alt, 1),
+            (key.control, 2),
+            (key.meta, 4),
+            (key.shift, 8),
+        ]
+        .into_iter()
+        .filter(|(held, _)| *held)
+        .fold(0, |all, (_, bit)| all | bit);
+        let mut down = json!({
+            "type": "rawKeyDown",
+            "key": key.key,
+            "code": key.code,
+            "windowsVirtualKeyCode": key.key_code,
+            "nativeVirtualKeyCode": key.key_code,
+            "modifiers": modifiers,
+        });
+        let mut up = down.clone();
+        up["type"] = json!("keyUp");
+        // Клавиша, которая печатает, — keyDown с текстом: из него браузер
+        // делает keypress и ввод.
+        if let Some(text) = key.typed() {
+            down["type"] = json!("keyDown");
+            down["text"] = json!(text);
+            down["unmodifiedText"] = json!(text);
+        }
+        vec![(KEY, down), (KEY, up)]
+    }
+
     /// События по одному: следующее — когда страница разослала прошлое.
-    fn next(webview: ICoreWebView2, mut events: VecDeque<Value>, done: Done) {
-        let Some(event) = events.pop_front() else {
+    fn next(webview: ICoreWebView2, mut events: VecDeque<Call>, done: Done) {
+        let Some((method, event)) = events.pop_front() else {
             let _ = done.send(Ok(()));
             return;
         };
@@ -371,7 +791,7 @@ mod system {
                 }
                 Ok(())
             }));
-        let method = HSTRING::from("Input.dispatchMouseEvent");
+        let method = HSTRING::from(method);
         let params = HSTRING::from(event.to_string());
         if let Err(error) =
             unsafe { webview.CallDevToolsProtocolMethod(&method, &params, &handler) }
@@ -400,7 +820,7 @@ mod system {
             });
             let kinds: Vec<_> = events
                 .iter()
-                .map(|event| (event["type"].clone(), event["clickCount"].clone()))
+                .map(|(_, event)| (event["type"].clone(), event["clickCount"].clone()))
                 .collect();
             assert_eq!(
                 kinds,
@@ -412,6 +832,36 @@ mod system {
                     (json!("mouseReleased"), json!(2)),
                 ]
             );
+        }
+
+        #[test]
+        fn typing_selects_inserts_and_presses_enter_with_its_text() {
+            let enter = Key {
+                key: "Enter".into(),
+                code: "Enter".into(),
+                key_code: 13,
+                ..Key::default()
+            };
+            let events = events(Input::Keys(vec![
+                Stroke::SelectAll,
+                Stroke::Text("слово".into()),
+                Stroke::Key(enter),
+            ]));
+            let calls: Vec<_> = events
+                .iter()
+                .map(|(method, event)| (*method, event["type"].clone(), event["text"].clone()))
+                .collect();
+            assert_eq!(
+                calls,
+                [
+                    (KEY, json!("rawKeyDown"), Value::Null),
+                    (KEY, json!("keyUp"), Value::Null),
+                    (TEXT, Value::Null, json!("слово")),
+                    (KEY, json!("keyDown"), json!("\r")),
+                    (KEY, json!("keyUp"), Value::Null),
+                ]
+            );
+            assert_eq!(events[0].1["modifiers"], json!(2));
         }
     }
 }
@@ -462,6 +912,53 @@ mod tests {
         assert_eq!(Input::from_plan(&plan), Err("в плане ввода нет y".into()));
         let plan = json!({ "kind": "drag", "x": 1, "y": 2, "width": 3, "height": 4 });
         assert_eq!(Input::from_plan(&plan), Err("ввод «drag» не знаю".into()));
+    }
+
+    #[test]
+    fn reads_keystrokes_the_page_script_planned() {
+        let plan = json!({
+            "kind": "keys",
+            "steps": [
+                { "select": "all" },
+                { "text": "привет" },
+                { "key": "Tab", "code": "Tab", "keyCode": 9, "shift": true },
+            ],
+        });
+        assert_eq!(
+            Input::from_plan(&plan),
+            Ok(Input::Keys(vec![
+                Stroke::SelectAll,
+                Stroke::Text("привет".into()),
+                Stroke::Key(Key {
+                    key: "Tab".into(),
+                    code: "Tab".into(),
+                    key_code: 9,
+                    shift: true,
+                    ..Key::default()
+                }),
+            ]))
+        );
+        let plan = json!({ "kind": "keys", "steps": [{ "nothing": 1 }] });
+        assert_eq!(
+            Input::from_plan(&plan),
+            Err("шаг ввода не разобрать".into())
+        );
+    }
+
+    #[test]
+    fn a_key_types_its_letter_unless_it_is_a_shortcut() {
+        let key = |name: &str| Key {
+            key: name.into(),
+            ..Key::default()
+        };
+        assert_eq!(key("ж").typed(), Some("ж".into()));
+        assert_eq!(key("Enter").typed(), Some("\r".into()));
+        assert_eq!(key("Tab").typed(), None);
+        let shortcut = Key {
+            control: true,
+            ..key("a")
+        };
+        assert_eq!(shortcut.typed(), None);
     }
 
     #[test]
