@@ -15,6 +15,7 @@ export const en: Record<MessageKey, string> = {
   "titlebar.browser": "Project browser",
   "titlebar.toggleFiles": "Show or hide the project tree",
   "layout.resize": "Width of the {area} area: drag or use arrow keys, double-click restores it",
+  "layout.resizeHeight": "Height of the {area} area: drag or use arrow keys, double-click restores it",
   "files.newFile": "New file",
   "files.newFolder": "New folder",
   "files.rename": "Rename",

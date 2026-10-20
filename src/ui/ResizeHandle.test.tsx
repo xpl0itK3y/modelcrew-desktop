@@ -1,4 +1,4 @@
-// Разделитель колонок: перетаскивание, клавиши и границы.
+// Разделитель областей: перетаскивание, клавиши и границы.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,7 +17,7 @@ function handle(props: Partial<Parameters<typeof ResizeHandle>[0]> = {}) {
   const onReset = vi.fn();
   render(
     <ResizeHandle
-      width={240}
+      size={240}
       min={180}
       max={480}
       label="Файлы"
@@ -147,6 +147,41 @@ describe("ResizeHandle", () => {
     fireEvent.doubleClick(element);
 
     expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("grows the area below when lying and pulled up", () => {
+    const { element, onResize } = handle({ orientation: "horizontal" });
+
+    fireEvent.pointerDown(element, { button: 0, clientY: 400, pointerId: 1 });
+    fireEvent.pointerMove(element, { clientY: 340, pointerId: 1 });
+
+    // Лежачий разделитель стоит над своей областью: вверх — значит выше.
+    expect(onResize).toHaveBeenLastCalledWith(300);
+    expect(element.getAttribute("aria-orientation")).toBe("horizontal");
+    expect(element.getAttribute("aria-label")).toContain("Высота");
+  });
+
+  it("shows a row cursor only while lying and dragged", () => {
+    const { element } = handle({ orientation: "horizontal" });
+
+    fireEvent.pointerDown(element, { button: 0, clientY: 400, pointerId: 1 });
+    expect(document.body.classList.contains("is-resizing-rows")).toBe(true);
+
+    fireEvent.pointerUp(element, { pointerId: 1 });
+    expect(document.body.classList.contains("is-resizing-rows")).toBe(false);
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("moves by the up and down keys when lying", () => {
+    const { element, onResize } = handle({ orientation: "horizontal" });
+
+    fireEvent.keyDown(element, { key: "ArrowUp" });
+    fireEvent.keyDown(element, { key: "ArrowDown" });
+    fireEvent.keyDown(element, { key: "ArrowRight" });
+
+    expect(onResize).toHaveBeenCalledTimes(2);
+    expect(onResize).toHaveBeenNthCalledWith(1, 256);
+    expect(onResize).toHaveBeenNthCalledWith(2, 224);
   });
 });
 

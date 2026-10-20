@@ -895,7 +895,7 @@ export default function App() {
         </div>
         {sidebarVisible && (
           <ResizeHandle
-            width={widths.sidebar}
+            size={widths.sidebar}
             min={widthLimits("sidebar").min}
             max={widthLimitsWithin("sidebar", widths.sidebar, dockWidth).max}
             label={t("sidebar.title")}
@@ -931,7 +931,7 @@ export default function App() {
         )}
         {treePresence && !treePresence.closing && (
           <ResizeHandle
-            width={widths.tree}
+            size={widths.tree}
             min={widthLimits("tree").min}
             max={widthLimitsWithin("tree", widths.tree, dockWidth).max}
             label={t("files.panelTitle")}
@@ -959,7 +959,7 @@ export default function App() {
         )}
         {openFiles.length > 0 && (
           <ResizeHandle
-            width={widths.editor}
+            size={widths.editor}
             min={widthLimits("editor").min}
             max={widthLimitsWithin("editor", widths.editor, dockWidth).max}
             label={t("files.editorTitle")}

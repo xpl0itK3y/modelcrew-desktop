@@ -1,49 +1,66 @@
-// Разделитель между колонками: тянется мышью и стрелками.
+// Разделитель между областями: тянется мышью и стрелками.
 //
-// Ширину считает не он: он лишь сообщает, куда уехал указатель от места
+// Размер считает не он: он лишь сообщает, куда уехал указатель от места
 // захвата. Кто именно меняет размер и в каких границах, решает владелец
-// колонки — иначе разделитель пришлось бы учить всем правилам сразу.
+// области — иначе разделитель пришлось бы учить всем правилам сразу.
 
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { useI18n } from "../i18n";
 
-/// На сколько двигает одно нажатие стрелки. Мышью ширину подбирают на глаз, а
+/// На сколько двигает одно нажатие стрелки. Мышью размер подбирают на глаз, а
 /// клавишами — доводят, поэтому шаг мелкий.
 const STEP = 16;
 
 export function ResizeHandle(props: {
-  /// Ширина колонки слева от разделителя: с неё начинается перетаскивание и
-  /// её же двигают стрелки.
-  width: number;
+  /// Размер области за разделителем: с него начинается перетаскивание и его
+  /// же двигают стрелки.
+  size: number;
   min: number;
   max: number;
   label: string;
-  onResize: (width: number) => void;
+  /// Как стоит сам разделитель. Стоймя (так по умолчанию) он делит колонки и
+  /// двигает ширину той, что слева. Лёжа — отделяет область снизу, как консоль
+  /// под страницей, и двигает её высоту: потянули вверх — стала выше.
+  orientation?: "vertical" | "horizontal";
+  onResize: (size: number) => void;
   /// Перетаскивание закончилось — самое время сохранить.
-  onResizeEnd?: (width: number) => void;
-  /// Двойной щелчок: вернуть колонке ширину, с которой она начиналась.
+  onResizeEnd?: (size: number) => void;
+  /// Двойной щелчок: вернуть области размер, с которого она начиналась.
   onReset?: () => void;
 }) {
   const { t } = useI18n();
-  const start = useRef<{ x: number; width: number } | null>(null);
-  // Колонка может исчезнуть прямо во время перетаскивания — сменили проект,
+  const lying = props.orientation === "horizontal";
+  const start = useRef<{ at: number; size: number } | null>(null);
+  // Область может исчезнуть прямо во время перетаскивания — сменили проект,
   // спрятали дерево. Без уборки окно осталось бы без выделения текста и с
   // курсором изменения размера до самой перезагрузки.
-  useEffect(() => () => document.body.classList.remove("is-resizing"), []);
-  const latest = useRef(props.width);
-  latest.current = props.width;
+  useEffect(
+    () => () =>
+      document.body.classList.remove("is-resizing", "is-resizing-rows"),
+    [],
+  );
+  const latest = useRef(props.size);
+  latest.current = props.size;
+
+  // Где указатель вдоль хода разделителя. У лежачего ось перевёрнута: область
+  // под ним растёт, когда указатель идёт вверх.
+  const along = (event: PointerEvent<HTMLDivElement>) =>
+    lying ? -event.clientY : event.clientX;
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     // Только основная кнопка: правой вызывают меню, средней вставляют.
     if (event.button !== 0) {
       return;
     }
-    start.current = { x: event.clientX, width: props.width };
+    start.current = { at: along(event), size: props.size };
     // Пока тянут, окно не должно ни выделять текст под курсором, ни доигрывать
-    // переходы ширины: и то и другое превращает перетаскивание в резину.
+    // переходы размера: и то и другое превращает перетаскивание в резину.
     document.body.classList.add("is-resizing");
+    if (lying) {
+      document.body.classList.add("is-resizing-rows");
+    }
     // Захват указателя обязателен: без него быстрый рывок уводит курсор за
-    // пределы полоски, события уходят другому элементу и колонка застывает
+    // пределы полоски, события уходят другому элементу и область застывает
     // на полпути.
     event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
@@ -54,7 +71,7 @@ export function ResizeHandle(props: {
     if (!from) {
       return;
     }
-    props.onResize(from.width + (event.clientX - from.x));
+    props.onResize(from.size + (along(event) - from.at));
   };
 
   const finish = (event: PointerEvent<HTMLDivElement>) => {
@@ -62,7 +79,7 @@ export function ResizeHandle(props: {
       return;
     }
     start.current = null;
-    document.body.classList.remove("is-resizing");
+    document.body.classList.remove("is-resizing", "is-resizing-rows");
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -70,13 +87,15 @@ export function ResizeHandle(props: {
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step =
-      event.key === "ArrowLeft" ? -STEP : event.key === "ArrowRight" ? STEP : 0;
+    const [less, more] = lying
+      ? ["ArrowDown", "ArrowUp"]
+      : ["ArrowLeft", "ArrowRight"];
+    const step = event.key === less ? -STEP : event.key === more ? STEP : 0;
     if (step === 0) {
       return;
     }
     event.preventDefault();
-    const next = props.width + step;
+    const next = props.size + step;
     props.onResize(next);
     props.onResizeEnd?.(next);
   };
@@ -85,9 +104,11 @@ export function ResizeHandle(props: {
     <div
       className="resize-handle"
       role="separator"
-      aria-orientation="vertical"
-      aria-label={t("layout.resize", { area: props.label })}
-      aria-valuenow={props.width}
+      aria-orientation={lying ? "horizontal" : "vertical"}
+      aria-label={t(lying ? "layout.resizeHeight" : "layout.resize", {
+        area: props.label,
+      })}
+      aria-valuenow={props.size}
       aria-valuemin={props.min}
       aria-valuemax={props.max}
       tabIndex={0}
@@ -96,8 +117,8 @@ export function ResizeHandle(props: {
       onPointerUp={finish}
       onPointerCancel={finish}
       onKeyDown={onKeyDown}
-      // Двойной щелчок возвращает колонку к тому, с чего она начиналась:
-      // подобрать ширину обратно на глаз заметно дольше.
+      // Двойной щелчок возвращает область к тому, с чего она начиналась:
+      // подобрать размер обратно на глаз заметно дольше.
       onDoubleClick={() => props.onReset?.()}
     />
   );

@@ -14,6 +14,7 @@ export const ru = {
   "titlebar.browser": "Браузер проекта",
   "titlebar.toggleFiles": "Показать или скрыть дерево проекта",
   "layout.resize": "Ширина области «{area}»: тяните или стрелками, двойной щелчок вернёт исходную",
+  "layout.resizeHeight": "Высота области «{area}»: тяните или стрелками, двойной щелчок вернёт исходную",
   "files.newFile": "Создать файл",
   "files.newFolder": "Создать папку",
   "files.rename": "Переименовать",
