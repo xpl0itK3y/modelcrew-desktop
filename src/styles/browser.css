@@ -256,12 +256,23 @@
 /* Под страницей, а не поверх: живую страницу наш HTML не перекрывает, и
    место под неё просто становится ниже. */
 .browser-console {
+  position: relative;
   display: flex;
   flex: none;
   flex-direction: column;
   height: clamp(140px, 36%, 360px);
   border-top: 1px solid var(--mc-border);
   background: var(--mc-panel);
+}
+
+/* Край для перетаскивания — поверх верхней границы и чуть ниже неё, но не
+   выше: выше начинается место страницы. */
+.browser-console > .resize-handle {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  left: 0;
+  margin: 0;
 }
 
 .browser-console-bar {

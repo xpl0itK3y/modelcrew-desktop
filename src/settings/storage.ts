@@ -33,6 +33,7 @@ export const KEYS = {
   browserAutoReload: "modelcrew.browserAutoReload",
   browserDevice: "modelcrew.browserDevice",
   browserConsole: "modelcrew.browserConsole",
+  browserConsoleHeight: "modelcrew.browserConsoleHeight",
 
   notificationSound: "modelcrew.notificationSound",
   notificationVolume: "modelcrew.notificationVolume",

@@ -4,9 +4,16 @@
 // Пишет сюда чужая страница. Поэтому текст только текстом: ни разметки, ни
 // ссылок, ни цветов из `%c` — их запись срезала ещё в самой странице.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n, type MessageKey } from "../i18n";
+import {
+  KEYS,
+  readSetting,
+  removeSetting,
+  writeSetting,
+} from "../settings/storage";
 import { ClearIcon } from "../ui/Icons";
+import { ResizeHandle } from "../ui/ResizeHandle";
 import {
   kindOf,
   matches,
@@ -32,6 +39,31 @@ const TAGS: Partial<Record<string, MessageKey>> = {
 // Насколько можно не дотянуть до низа и всё ещё считаться внизу.
 const BOTTOM_SLACK_PX = 16;
 
+// Ниже строки фильтров и пары сообщений консоль уже ничего не показывает.
+const MIN_HEIGHT_PX = 96;
+// Сколько высоты ящика консоль оставляет странице вместе с адресной строкой
+// и строкой внизу: потянули до упора — страница всё равно видна.
+const PAGE_KEEPS_PX = 200;
+
+/**
+ * Высота, пока её не тянули: та же, что в стилях, — треть ящика, но не
+ * меньше и не больше разумного.
+ */
+function usualHeight(room: number): number {
+  return Math.min(360, Math.max(140, room * 0.36));
+}
+
+/** Высота в границах ящика. Ящик ещё не измерен — верхней границы нет. */
+function fitHeight(wanted: number, room: number): number {
+  const most = room > 0 ? room - PAGE_KEEPS_PX : Number.POSITIVE_INFINITY;
+  return Math.round(Math.max(MIN_HEIGHT_PX, Math.min(wanted, most)));
+}
+
+function loadHeight(): number | null {
+  const stored = Number(readSetting(KEYS.browserConsoleHeight));
+  return Number.isFinite(stored) && stored > 0 ? stored : null;
+}
+
 export function PageConsolePanel(props: {
   entries: readonly NumberedEntry[];
   // Сколько сообщений вытеснено, не дойдя до экрана.
@@ -44,19 +76,39 @@ export function PageConsolePanel(props: {
   const { t } = useI18n();
   const [filter, setFilter] = useState<ConsoleFilter>("all");
   const [search, setSearch] = useState("");
+  const sectionRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   // Человек внизу — новое подтягиваем. Ушёл наверх читать — не дёргаем.
   const atBottom = useRef(true);
+  // Высота, которую человек вытянул сам. Пока не тянул — обычная.
+  const [chosen, setChosen] = useState<number | null>(loadHeight);
+  // Высота ящика: от неё обычная высота и предел, за который не тянут.
+  const [room, setRoom] = useState(0);
+
+  useEffect(() => {
+    const drawer = sectionRef.current?.parentElement;
+    if (!drawer || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => setRoom(drawer.clientHeight));
+    observer.observe(drawer);
+    return () => observer.disconnect();
+  }, []);
+
+  // Пока ящик не измерен, высоту задают стили; выбранная всё равно в силе.
+  const height =
+    room > 0 ? fitHeight(chosen ?? usualHeight(room), room) : chosen;
 
   const shown = props.entries.filter((entry) => matches(entry, filter, search));
   const last = shown.length > 0 ? shown[shown.length - 1].index : -1;
 
+  // Консоль стала ниже — низ списка уехал из виду, а человек был внизу.
   useLayoutEffect(() => {
     const list = listRef.current;
     if (list && atBottom.current) {
       list.scrollTop = list.scrollHeight;
     }
-  }, [last, props.lost, props.trouble]);
+  }, [last, props.lost, props.trouble, height]);
 
   const empty = !props.running
     ? t("browser.consoleNotRunning")
@@ -67,7 +119,29 @@ export function PageConsolePanel(props: {
         : null;
 
   return (
-    <section className="browser-console" aria-label={t("browser.console")}>
+    <section
+      className="browser-console"
+      ref={sectionRef}
+      aria-label={t("browser.console")}
+      style={height === null ? undefined : { height }}
+    >
+      {/* Край целиком внутри консоли: над ним живая страница, и всё, что
+          залезет на её место, она накроет собой. */}
+      <ResizeHandle
+        orientation="horizontal"
+        size={height ?? usualHeight(0)}
+        min={MIN_HEIGHT_PX}
+        max={Math.max(MIN_HEIGHT_PX, room - PAGE_KEEPS_PX)}
+        label={t("browser.console")}
+        onResize={(next) => setChosen(fitHeight(next, room))}
+        onResizeEnd={(next) =>
+          writeSetting(KEYS.browserConsoleHeight, String(fitHeight(next, room)))
+        }
+        onReset={() => {
+          setChosen(null);
+          removeSetting(KEYS.browserConsoleHeight);
+        }}
+      />
       <div className="browser-console-bar">
         <div
           className="browser-console-filters"
