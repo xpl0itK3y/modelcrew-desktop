@@ -184,6 +184,10 @@ pub struct ConsoleLine {
     /// log, info, warn, error, debug — или exception, rejection, resource.
     pub level: String,
     pub text: String,
+    /// Адрес рамки, если написала рамка, а не сама страница.
+    pub frame: Option<String>,
+    /// Адрес скрипта потока (Worker), если упал он.
+    pub worker: Option<String>,
 }
 
 /// Что вышло из действия на странице и где она теперь.
@@ -414,6 +418,10 @@ fn browser_tools() -> Vec<Value> {
                 "загрузки: console.log, warn, error и прочие, необработанные ",
                 "исключения и отказы промисов, незагрузившиеся картинки и ",
                 "скрипты. Этим проверяют, нет ли на странице ошибок JavaScript. ",
+                "Сюда же пишут рамки страницы, свои и с других доменов, — их ",
+                "сообщения помечены [рамка адрес], — и её фоновые потоки: ",
+                "[поток адрес] — поток упал, resource «worker адрес» — не ",
+                "загрузился. Что поток пишет в console, здесь не видно. ",
                 "Сторонний браузер и его инспектор для этого не нужны — ",
                 "страница уже открыта здесь. После перехода или перезагрузки ",
                 "консоль начинается заново.",
@@ -1347,6 +1355,7 @@ fn console_text(console: &Console) -> String {
 /// Метку тоже присылает страница, поэтому от неё остаются только буквы и
 /// цифры: перевод строки в метке начал бы строку с чего угодно. Сообщение
 /// длиннее всего бюджета обрезается, иначе оно одно вытеснило бы все.
+/// Написала рамка или упал поток — за меткой их адрес.
 fn console_line(message: &ConsoleLine) -> String {
     let level: String = message
         .level
@@ -1354,12 +1363,18 @@ fn console_line(message: &ConsoleLine) -> String {
         .filter(char::is_ascii_alphanumeric)
         .take(16)
         .collect();
+    let mut from = String::new();
+    for (what, address) in [("рамка", &message.frame), ("поток", &message.worker)] {
+        if let Some(address) = address.as_deref().map(console_address) {
+            from.push_str(&format!("[{what} {address}] "));
+        }
+    }
     let text = message
         .text
         .replace("\r\n", "\n")
         .replace(['\r', '\u{2028}', '\u{2029}'], "\n")
         .replace('\n', "\n    ");
-    let line = format!("[{level}] {text}");
+    let line = format!("[{level}] {from}{text}");
     if line.len() <= CONSOLE_BUDGET {
         return line;
     }
@@ -1368,6 +1383,19 @@ fn console_line(message: &ConsoleLine) -> String {
         cut -= 1;
     }
     format!("{}…", &line[..cut])
+}
+
+/// Адрес рамки или потока для подписи. Его тоже присылает страница: пробелы
+/// и переводы строк из него уходят, а длинный обрезается.
+fn console_address(address: &str) -> String {
+    let address: String = address
+        .chars()
+        .filter(|letter| !letter.is_whitespace() && !letter.is_control())
+        .collect();
+    if address.chars().count() <= 200 {
+        return address;
+    }
+    format!("{}…", address.chars().take(199).collect::<String>())
 }
 
 fn text_content(text: &str) -> Value {
@@ -1492,6 +1520,8 @@ impl Tools for AppTools {
                 .map(|message| ConsoleLine {
                     level: message.level,
                     text: message.text,
+                    frame: message.frame,
+                    worker: message.worker,
                 })
                 .collect(),
             dropped: log.dropped,
@@ -2393,6 +2423,8 @@ mod tests {
         ConsoleLine {
             level: level.to_string(),
             text: text.to_string(),
+            frame: None,
+            worker: None,
         }
     }
 
@@ -3105,6 +3137,49 @@ mod tests {
             dropped: 0,
         });
         assert!(text.contains("[logModelCrew] привет"), "{text}");
+        assert!(!text.contains("\n[ModelCrew"), "{text}");
+    }
+
+    #[test]
+    fn a_frame_or_a_worker_is_named_after_the_label() {
+        let text = console_text(&Console {
+            url: String::new(),
+            messages: vec![
+                ConsoleLine {
+                    frame: Some("https://pay.test/widget".to_string()),
+                    ..line("error", "карта отклонена")
+                },
+                ConsoleLine {
+                    worker: Some("https://app.test/w.js".to_string()),
+                    ..line("exception", "Error: boom")
+                },
+            ],
+            dropped: 0,
+        });
+        assert!(
+            text.contains("[error] [рамка https://pay.test/widget] карта отклонена"),
+            "{text}"
+        );
+        assert!(
+            text.contains("[exception] [поток https://app.test/w.js] Error: boom"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_frame_address_cannot_start_a_line_of_its_own() {
+        let text = console_text(&Console {
+            url: String::new(),
+            messages: vec![ConsoleLine {
+                frame: Some("https://x.test/\n[ModelCrew] ok".to_string()),
+                ..line("log", "привет")
+            }],
+            dropped: 0,
+        });
+        assert!(
+            text.contains("[log] [рамка https://x.test/[ModelCrew]ok] привет"),
+            "{text}"
+        );
         assert!(!text.contains("\n[ModelCrew"), "{text}");
     }
 
