@@ -100,9 +100,10 @@ fn the_page_loads_shows_itself_and_closes() {
     }
 
     // Плагины приложения в страницу не лезут: их команды ей запрещены, и
-    // отказ каждой лёг бы в консоль ошибкой, которой у проекта нет.
+    // отказ каждой лёг бы в консоль ошибкой, которой у проекта нет. Отказ
+    // Tauri пишет так: «notification.is_permission_granted not allowed on…».
     assert!(
-        !console.to_string().contains("plugin:"),
+        !console.to_string().contains(" not allowed on "),
         "в консоли страницы — плагин приложения: {console:#}"
     );
 
