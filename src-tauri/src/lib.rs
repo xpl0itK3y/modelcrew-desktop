@@ -51,6 +51,7 @@ use agent_session_store::{
 };
 use agent_session_watch::agent_sessions_watch;
 use agent_sessions::{agent_session_locate, agent_session_locate_turn};
+use browser_page::AppOnly;
 use browser_view::{
     browser_auto_reload, browser_console, browser_dock, browser_frame, browser_go, browser_step,
     browser_undock,
@@ -1002,14 +1003,16 @@ pub fn run() {
     }));
 
     let builder = builder
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
+        // Плагины служат окну приложения: в страницу проекта их скрипты не
+        // ставим.
+        .plugin(AppOnly(tauri_plugin_opener::init()))
+        .plugin(AppOnly(tauri_plugin_dialog::init()))
+        .plugin(AppOnly(tauri_plugin_process::init()))
+        .plugin(AppOnly(tauri_plugin_notification::init()))
         .setup(|app| {
             #[cfg(desktop)]
             app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
+                .plugin(AppOnly(tauri_plugin_updater::Builder::new().build()))?;
             spawn_title_watcher(app.handle().clone());
             agent_hooks::install(app.handle());
             mcp::serve(app.handle().clone());

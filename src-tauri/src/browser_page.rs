@@ -92,6 +92,79 @@ fn host_label(label: &str) -> String {
     format!("{HOST_PREFIX}{}", label.trim_start_matches(LABEL_PREFIX))
 }
 
+/// Плагин приложения, чей скрипт не попадает в страницы проекта.
+///
+/// Скрипты плагинов Tauri ставит в каждый webview, и в страницу проекта тоже.
+/// Команд плагина страница не вызовет — права на них только у окна
+/// приложения. Скрипт уведомлений с порога спрашивает разрешение, получает
+/// отказ и пишет его в консоль страницы: человек и агент видят ошибку, которой
+/// у проекта нет. Скрипт ссылок перехватывает ссылку в новое окно раньше
+/// страницы, а открыть её не может — щелчок пропадает.
+///
+/// Метку webview Tauri выставляет раньше скриптов плагинов — по ней скрипт
+/// узнаёт, куда попал. Скрипт идёт только в главную рамку, как и у самих
+/// плагинов приложения: иначе Tauri его не ставит, а тип с этим признаком
+/// наружу он не отдаёт.
+pub struct AppOnly<P>(pub P);
+
+impl<R: tauri::Runtime, P: tauri::plugin::Plugin<R>> tauri::plugin::Plugin<R> for AppOnly<P> {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+
+    fn initialize(
+        &mut self,
+        app: &AppHandle<R>,
+        config: serde_json::Value,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.0.initialize(app, config)
+    }
+
+    fn initialization_script(&self) -> Option<String> {
+        self.0
+            .initialization_script()
+            .map(|script| outside_pages(&script))
+    }
+
+    fn window_created(&mut self, window: tauri::Window<R>) {
+        self.0.window_created(window)
+    }
+
+    fn webview_created(&mut self, webview: Webview<R>) {
+        self.0.webview_created(webview)
+    }
+
+    fn on_navigation(&mut self, webview: &Webview<R>, url: &tauri::Url) -> bool {
+        self.0.on_navigation(webview, url)
+    }
+
+    fn on_page_load(
+        &mut self,
+        webview: &Webview<R>,
+        payload: &tauri::webview::PageLoadPayload<'_>,
+    ) {
+        self.0.on_page_load(webview, payload)
+    }
+
+    fn on_event(&mut self, app: &AppHandle<R>, event: &tauri::RunEvent) {
+        self.0.on_event(app, event)
+    }
+
+    fn extend_api(&mut self, invoke: tauri::ipc::Invoke<R>) -> bool {
+        self.0.extend_api(invoke)
+    }
+}
+
+/// Скрипт, который в странице проекта не делает ничего. Перенос строки перед
+/// скобкой — на случай, если скрипт кончается строчным комментарием.
+fn outside_pages(script: &str) -> String {
+    format!(
+        "if (!String(window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label ?? \"\")\
+         .startsWith({prefix})) {{\n{script}\n}}",
+        prefix = serde_json::to_string(LABEL_PREFIX).expect("строка всегда пишется в JSON"),
+    )
+}
+
 /// Открыть страницу проекта или перевести уже открытую на новый адрес.
 pub fn open(app: &AppHandle, root: &str, url: &str) -> Result<(), String> {
     let target: tauri::Url = url
@@ -1003,6 +1076,23 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_hexdigit()),
             "метка окна должна остаться простой: {label}"
+        );
+    }
+
+    #[test]
+    fn plugin_scripts_step_aside_in_project_pages() {
+        let script = outside_pages("window.ran = true; // конец");
+        assert!(
+            script.starts_with(
+                "if (!String(window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label \
+                 ?? \"\").startsWith(\"page-\")) {\n"
+            ),
+            "{script}"
+        );
+        // Строчный комментарий в конце не съедает закрывающую скобку.
+        assert!(
+            script.ends_with("window.ran = true; // конец\n}"),
+            "{script}"
         );
     }
 
