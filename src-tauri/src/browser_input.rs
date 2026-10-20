@@ -71,7 +71,7 @@ impl Input {
 }
 
 /// Есть ли здесь настоящий ввод. Нет — действует скрипт страницы.
-pub const AVAILABLE: bool = cfg!(target_os = "macos");
+pub const AVAILABLE: bool = cfg!(any(target_os = "macos", target_os = "linux"));
 
 /// Отдать ввод странице проекта.
 pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
@@ -79,7 +79,7 @@ pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
 }
 
 /// Во сколько раз точка webview больше CSS-пикселя страницы — по каждой оси.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
 fn scale(view: (f64, f64), at: &Spot) -> (f64, f64) {
     let across = if at.width > 0.0 && view.0 > 0.0 {
         view.0 / at.width
@@ -185,8 +185,111 @@ mod system {
     }
 }
 
+/// Linux: события GDK прямо в виджет WebKitGTK. Страница живёт в окне без
+/// экрана, и мышь человека до неё не достаёт вовсе.
+#[cfg(target_os = "linux")]
+mod system {
+    use gtk::gdk;
+    use gtk::glib;
+    use gtk::glib::translate::{from_glib_full, IntoGlib, ToGlibPtr, ToGlibPtrMut};
+    use gtk::prelude::*;
+    use tauri::AppHandle;
+
+    use super::{Button, Input, Spot};
+
+    pub fn send(app: &AppHandle, root: &str, input: Input) -> Result<(), String> {
+        crate::browser_page::ask(app, root, move |platform| deliver(&platform.inner(), input))
+    }
+
+    fn deliver(webview: &webkit2gtk::WebView, input: Input) -> Result<(), String> {
+        let window = webview
+            .window()
+            .ok_or_else(|| "у страницы нет окна".to_string())?;
+        // WebKit спрашивает у события, с какого оно устройства: без него
+        // событие для него не мышь.
+        let pointer = window
+            .display()
+            .default_seat()
+            .and_then(|seat| seat.pointer())
+            .ok_or_else(|| "у системы нет мыши".to_string())?;
+        let (at, press) = match input {
+            Input::Move(at) => (at, None),
+            Input::Click { at, button, count } => (at, Some((button, count))),
+        };
+        let (x, y) = place(webview, &at);
+        let (root_x, root_y) = window.root_coords(x.round() as i32, y.round() as i32);
+        // Время — настоящее: по нему WebKit считает, двойное ли нажатие.
+        let time = (glib::monotonic_time() / 1000) as u32;
+        let mouse = |kind: gdk::EventType, button: u32, state: gdk::ModifierType| {
+            let mut event: gdk::Event =
+                unsafe { from_glib_full(gdk::ffi::gdk_event_new(kind.into_glib())) };
+            event.set_device(Some(&pointer));
+            unsafe {
+                let raw: *mut gdk::ffi::GdkEvent = event.to_glib_none_mut().0;
+                // Окно событие отпустит само, когда его освободят.
+                let owner: *mut gdk::ffi::GdkWindow = window.to_glib_full();
+                if kind == gdk::EventType::MotionNotify {
+                    let motion = &mut (*raw).motion;
+                    motion.window = owner;
+                    motion.time = time;
+                    motion.x = x;
+                    motion.y = y;
+                    motion.x_root = f64::from(root_x);
+                    motion.y_root = f64::from(root_y);
+                    motion.state = state.into_glib();
+                } else {
+                    let pressed = &mut (*raw).button;
+                    pressed.window = owner;
+                    pressed.time = time;
+                    pressed.x = x;
+                    pressed.y = y;
+                    pressed.x_root = f64::from(root_x);
+                    pressed.y_root = f64::from(root_y);
+                    pressed.state = state.into_glib();
+                    pressed.button = button;
+                }
+            }
+            webview.event(&event);
+        };
+        mouse(gdk::EventType::MotionNotify, 0, gdk::ModifierType::empty());
+        let Some((button, count)) = press else {
+            return Ok(());
+        };
+        let (number, held) = match button {
+            Button::Left => (1, gdk::ModifierType::BUTTON1_MASK),
+            Button::Right => (3, gdk::ModifierType::BUTTON3_MASK),
+        };
+        for _ in 0..count {
+            mouse(
+                gdk::EventType::ButtonPress,
+                number,
+                gdk::ModifierType::empty(),
+            );
+            mouse(gdk::EventType::ButtonRelease, number, held);
+        }
+        Ok(())
+    }
+
+    /// Точка страницы — точка в окне GDK, которому идёт событие.
+    fn place(webview: &webkit2gtk::WebView, at: &Spot) -> (f64, f64) {
+        let view = (
+            f64::from(webview.allocated_width()),
+            f64::from(webview.allocated_height()),
+        );
+        let (across, down) = super::scale(view, at);
+        let (mut x, mut y) = (at.x * across, at.y * down);
+        // Своего окна у виджета нет — точки считаются от окна родителя.
+        if !webview.has_window() {
+            let allocation = webview.allocation();
+            x += f64::from(allocation.x());
+            y += f64::from(allocation.y());
+        }
+        (x, y)
+    }
+}
+
 /// Остальные системы: настоящего ввода нет, действует скрипт страницы.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 mod system {
     use tauri::AppHandle;
 
