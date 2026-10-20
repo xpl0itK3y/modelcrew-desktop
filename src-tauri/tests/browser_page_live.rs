@@ -99,6 +99,23 @@ fn the_page_loads_shows_itself_and_closes() {
         );
     }
 
+    // У сообщения — место в коде, как справа в инспекторе: кто позвал console,
+    // а не сама запись, которая встала между ними.
+    let warned = heard(console, "warn", &["осторожно"])
+        .unwrap_or_else(|| panic!("в консоли нет предупреждения: {console:#}"));
+    assert!(
+        place_in(warned, "/green:1:"),
+        "предупреждение без места в странице: {warned:#}"
+    );
+    let missing = heard(console, "resource", &["/missing.png"])
+        .unwrap_or_else(|| panic!("в консоли нет картинки: {console:#}"));
+    assert!(
+        missing["at"]
+            .as_str()
+            .is_some_and(|at| at.ends_with("/missing.png")),
+        "у картинки нет адреса: {missing:#}"
+    );
+
     // Плагины приложения в страницу не лезут: их команды ей запрещены, и
     // отказ каждой лёг бы в консоль ошибкой, которой у проекта нет. Отказ
     // Tauri пишет так: «notification.is_permission_granted not allowed on…».
@@ -121,12 +138,16 @@ fn the_page_loads_shows_itself_and_closes() {
         "{blue:#}"
     );
     // У новой страницы консоль своя: от зелёной в ней ничего не осталось.
+    let blue_console = &report["blue_console"];
+    let blue_said = blue_console["messages"].as_array();
+    assert_eq!(blue_said.map(Vec::len), Some(1), "{blue_console:#}");
+    let only = &blue_console["messages"][0];
     assert_eq!(
-        report["blue_console"]["messages"],
-        json!([{ "level": "info", "text": "синяя" }]),
-        "{:#}",
-        report["blue_console"]
+        (&only["level"], &only["text"]),
+        (&json!("info"), &json!("синяя")),
+        "{blue_console:#}"
     );
+    assert!(place_in(only, "/blue:1:"), "{blue_console:#}");
 
     // За страницу говорят её рамки — своя и с другого домена — и потоки, и
     // каждое такое сообщение подписано, чьё оно. Сама страница сообщений
@@ -176,10 +197,49 @@ fn the_page_loads_shows_itself_and_closes() {
                 .find(|message| message["text"] == "страница говорит")
         })
         .unwrap_or_else(|| panic!("страница сама ничего не сказала: {talk:#}"));
-    assert_eq!(own, &json!({ "level": "log", "text": "страница говорит" }));
+    // Своё страница пишет без подписи рамки или потока, но с местом.
+    assert_eq!(own["level"], "log", "{own:#}");
+    assert!(
+        own.get("frame").is_none() && own.get("worker").is_none(),
+        "{own:#}"
+    );
+    assert!(place_in(own, "/talk:1:"), "{own:#}");
     assert!(
         !talk.to_string().contains("страница услышала"),
         "сообщение записи дошло до страницы: {talk:#}"
+    );
+
+    // Всё, что инспектор показывает помимо исключений: повтор подряд — одна
+    // запись со счётом, методы console, запросы, которые не удались, —
+    // каждый со своей причиной, — и запрет политики безопасности.
+    let loud = &report["loud_console"];
+    let again =
+        heard(loud, "log", &["снова"]).unwrap_or_else(|| panic!("в консоли нет повтора: {loud:#}"));
+    assert_eq!(again["count"], 3, "повтор не схлопнут: {loud:#}");
+    assert!(place_in(again, "/loud:1:"), "{again:#}");
+    for (level, parts) in [
+        ("log", &["раз: 1"][..]),
+        ("log", &["раз: 2"]),
+        ("log", &["миг: ", " ms"]),
+        ("debug", &["отладка"]),
+        ("log", &[r#"[{"a":1}]"#]),
+        ("trace", &["след"]),
+        ("resource", &["fetch http://127.0.0.1:", "/gone — 404"]),
+        ("resource", &["fetch http://localhost:", "/gone — "]),
+        ("resource", &["xhr POST http://127.0.0.1:", "/gone — 404"]),
+        ("resource", &["websocket ws://127.0.0.1:", "/socket"]),
+        ("csp", &["Policy (img-src): http://localhost:", "/pic.png"]),
+    ] {
+        let message = heard(loud, level, parts)
+            .unwrap_or_else(|| panic!("в консоли нет {level} {parts:?}: {loud:#}"));
+        // Место у запроса — тот, кто его сделал.
+        if level != "csp" {
+            assert!(place_in(message, "/loud:1:"), "{message:#}");
+        }
+    }
+    assert!(
+        heard(loud, "rejection", &[]).is_none(),
+        "отказ, который страница поймала, записан как непойманный: {loud:#}"
     );
 
     // Страница пересаживается в главное окно и обратно, не перезагружаясь:
@@ -443,6 +503,29 @@ fn said(console: &Value, level: &str, text: &str) -> bool {
                     .as_str()
                     .is_some_and(|said| said.contains(text))
         })
+    })
+}
+
+/// Сообщение этого уровня, в тексте которого есть всё это.
+fn heard<'a>(console: &'a Value, level: &str, parts: &[&str]) -> Option<&'a Value> {
+    console["messages"].as_array()?.iter().find(|message| {
+        message["level"] == level
+            && message["text"]
+                .as_str()
+                .is_some_and(|text| parts.iter().all(|part| text.contains(part)))
+    })
+}
+
+/// Место сообщения в коде — на странице проверки с этим путём и строкой:
+/// `http://127.0.0.1:порт/путь:строка:столбец`.
+fn place_in(message: &Value, page: &str) -> bool {
+    message["at"].as_str().is_some_and(|at| {
+        at.starts_with("http://127.0.0.1:")
+            && at.contains(page)
+            && at
+                .rsplit(':')
+                .next()
+                .is_some_and(|column| column.parse::<u32>().is_ok())
     })
 }
 

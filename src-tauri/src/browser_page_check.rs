@@ -101,6 +101,44 @@ const TALK_HEARD: &[&str] = &[
     "/nothing.js",
 ];
 
+/// Страница со всем, что инспектор показывает помимо исключений (их хватает
+/// на других страницах): повторы подряд, счётчик, таймер, таблица,
+/// трассировка, отладка, fetch с ответом 404 и fetch на другой домен, который
+/// не пускает CORS, XHR с 404, WebSocket, которого нет, и картинка, которую
+/// не пускает политика безопасности страницы (CSP — заголовком ответа).
+const LOUD_BODY: &str = concat!(
+    "<script>",
+    "for (let i = 0; i < 3; i++) console.log('снова');",
+    "console.count('раз'); console.count('раз');",
+    "console.time('миг'); console.timeEnd('миг');",
+    "console.debug('отладка'); console.table([{ a: 1 }]); console.trace('след');",
+    "fetch('/gone');",
+    "fetch('http://localhost:' + location.port + '/gone').catch(() => {});",
+    "const xhr = new XMLHttpRequest(); xhr.open('POST', '/gone'); xhr.send();",
+    "new WebSocket('ws://' + location.host + '/socket');",
+    "const img = new Image(); img.src = 'http://localhost:' + location.port + '/pic.png';",
+    "document.body.append(img);",
+    "</script>",
+);
+
+/// Политика той страницы: картинки только со своего адреса.
+const LOUD_POLICY: &str = "img-src 'self'";
+
+/// Что обязано прозвучать в консоли той страницы.
+const LOUD_HEARD: &[&str] = &[
+    "снова",
+    "раз: 2",
+    "миг: ",
+    "отладка",
+    "[{\"a\":1}]",
+    "след",
+    "fetch http://127.0.0.1:",
+    "fetch http://localhost:",
+    "xhr POST http://127.0.0.1:",
+    "websocket ws://127.0.0.1:",
+    "Content Security Policy (img-src)",
+];
+
 /// Страница для действий агента: всё, что они умеют, — поле с подписью,
 /// кнопка, форма поиска, список, флажок, прокручиваемый блок, поле файла,
 /// confirm, ответ с задержкой и ссылка. Страница длиннее экрана: прокрутка
@@ -261,6 +299,10 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
     shot(app, out, "talk")?;
     let talk_console = console_saying(app, TALK_HEARD)?;
 
+    browser_page::open(app, ROOT, &site.url("loud"))?;
+    shot(app, out, "loud")?;
+    let loud_console = console_saying(app, LOUD_HEARD)?;
+
     let scale = app
         .get_webview(&browser_page::label_for(ROOT))
         .and_then(|page| page.window().scale_factor().ok());
@@ -284,6 +326,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         "back": back,
         "actions": actions,
         "talk_console": talk_console,
+        "loud_console": loud_console,
         "closed": !browser_page::is_open(app, ROOT),
     });
     if let Value::Object(fields) = &mut report {
@@ -761,6 +804,7 @@ fn answer(mut stream: TcpStream) {
         "/frame" => ("200 OK", HTML, page("frame", "#ffeecc", FRAME_BODY)),
         "/talk" => ("200 OK", HTML, page("talk", "#ffffff", TALK_BODY)),
         "/said" => ("200 OK", HTML, page("said", "#eeeeee", SAID_SCRIPT)),
+        "/loud" => ("200 OK", HTML, page("loud", "#ffffff", LOUD_BODY)),
         // Поток браузер запустит, только если сервер назвал его скриптом.
         "/worker.js" => ("200 OK", "text/javascript", WORKER_SCRIPT.to_string()),
         "/blue" => {
@@ -769,9 +813,14 @@ fn answer(mut stream: TcpStream) {
         }
         _ => ("404 Not Found", HTML, String::new()),
     };
+    let policy = if path == "/loud" {
+        format!("Content-Security-Policy: {LOUD_POLICY}\r\n")
+    } else {
+        String::new()
+    };
     let _ = write!(
         stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}; charset=utf-8\r\n\
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}; charset=utf-8\r\n{policy}\
          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
