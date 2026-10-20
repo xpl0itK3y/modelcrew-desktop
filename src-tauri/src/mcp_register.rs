@@ -64,6 +64,35 @@ pub const OPENCODE_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 /// написать его в сам файл нельзя — см. `cmd_body`.
 pub const EXE_ENV: &str = "MODELCREW_EXE";
 
+/// Что codex должен знать о браузере проекта. Говорим это ему в начале
+/// разговора, ключом `developer_instructions`: codex ставит его первым
+/// сообщением разработчика.
+///
+/// Свой рассказ сервер и так отдаёт при подключении (`mcp::INSTRUCTIONS`), но
+/// codex его модели не показывает, а инструменты MCP держит отложенными: пока
+/// их не поищешь, их не видно. Зато его собственная подсказка советует
+/// открывать страницы через `open` — и codex уводил их во внешний браузер, мимо
+/// ящика, где человек их ждёт. Ключ заменяет такой же из конфига человека, но
+/// только здесь, в панели.
+///
+/// По-английски, одной строкой и без кавычек, `%`, `!`, `^` и обратной косой:
+/// тот же текст идёт в обёртку для cmd, а там он строка TOML в одинарных
+/// кавычках внутри двойных кавычек cmd.
+const CODEX_BRIEF: &str = concat!(
+    "This terminal is a ModelCrew panel. ModelCrew has its own project browser, ",
+    "shown to the human right next to this terminal, and the modelcrew-browser ",
+    "MCP server drives it. Whenever you open, check or show a web page, be it a ",
+    "local dev server, a preview or any site, use only its tools: browser_open, ",
+    "browser_navigate, browser_screenshot and browser_console. In code mode they ",
+    "are tools.mcp__modelcrew_browser__browser_open and so on. They may be ",
+    "deferred: look them up with tool search before deciding they are missing. ",
+    "Never open pages with open, xdg-open, start, explorer, osascript, a browser ",
+    "binary, or your own browser tools and plugins: the human follows your work ",
+    "in the ModelCrew browser, and a page opened anywhere else is lost to them. ",
+    "If the ModelCrew browser tools fail, say so instead of falling back to ",
+    "another browser.",
+);
+
 /// Схема конфига opencode. Не проверка, а подсказка редактору, — но раз она
 /// стоит в их собственных примерах, пусть стоит и у нас.
 const OPENCODE_SCHEMA: &str = "https://opencode.ai/config.json";
@@ -209,7 +238,7 @@ exec "$real" {flags} "$@"
 }
 
 /// Чем каждому агенту передаётся сервер. Все трое читают его при запуске, но
-/// каждый по-своему: файлом, строкой или парой ключей настройки.
+/// каждый по-своему: файлом, строкой или ключами настройки.
 fn shim_flags(agent: &str, exe: &Path) -> String {
     match agent {
         // Файлом, и обязательно через «=»: без него claude считает своим
@@ -219,8 +248,10 @@ fn shim_flags(agent: &str, exe: &Path) -> String {
         // Строкой: файла он не принимает, поэтому подаём его же содержимое.
         "copilot" => format!("--additional-mcp-config=\"$(cat \"$self/{CONFIG_FILE}\")\""),
         // Ключами настройки: у codex конфиг в TOML, и значения тоже в TOML.
+        // Третий — не про сервер, а про то, что им и надо пользоваться: см.
+        // `CODEX_BRIEF`.
         "codex" => format!(
-            "-c {} -c {}",
+            "-c {} -c {} -c {}",
             sh_quote(&format!(
                 "mcp_servers.{SERVER}.command={}",
                 toml_string(&exe.to_string_lossy())
@@ -228,6 +259,10 @@ fn shim_flags(agent: &str, exe: &Path) -> String {
             sh_quote(&format!(
                 "mcp_servers.{SERVER}.args=[{}]",
                 toml_string(STDIO_FLAG)
+            )),
+            sh_quote(&format!(
+                "developer_instructions={}",
+                toml_string(CODEX_BRIEF)
             )),
         ),
         _ => String::new(),
@@ -290,7 +325,8 @@ if not defined modelcrew_real (
 ///
 /// Путь к приложению codex получает строкой TOML в тройных одинарных
 /// кавычках: внутри неё обратная косая — просто символ, а одинарная кавычка
-/// из имени папки строку не закроет.
+/// из имени папки строку не закроет. Рассказ о браузере — в одинарных: в нём
+/// нет ни кавычек, ни переводов строки.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn cmd_flags(agent: &str) -> String {
     match agent {
@@ -298,7 +334,7 @@ fn cmd_flags(agent: &str) -> String {
         // Файл copilot тоже берёт — путём после «@».
         "copilot" => format!(r#""--additional-mcp-config=@%~dp0{CONFIG_FILE}""#),
         "codex" => format!(
-            r#"-c "mcp_servers.{SERVER}.command='''%{EXE_ENV}%'''" -c "mcp_servers.{SERVER}.args=['{STDIO_FLAG}']""#
+            r#"-c "mcp_servers.{SERVER}.command='''%{EXE_ENV}%'''" -c "mcp_servers.{SERVER}.args=['{STDIO_FLAG}']" -c "developer_instructions='{CODEX_BRIEF}'""#
         ),
         _ => String::new(),
     }
@@ -495,6 +531,66 @@ mod tests {
         let codex = shim_flags("codex", &exe());
         assert!(codex.contains("mcp_servers.modelcrew-browser.command="));
         assert!(codex.contains("--mcp-stdio"));
+        assert!(codex.contains(&format!(r#"'developer_instructions="{CODEX_BRIEF}"'"#)));
+    }
+
+    #[test]
+    fn codex_is_told_to_use_the_project_browser() {
+        // Инструменты поимённо — как и в рассказе самого сервера: про «браузер
+        // ModelCrew» без имён codex решал, что это его собственный.
+        for tool in [
+            "browser_open",
+            "browser_navigate",
+            "browser_screenshot",
+            "browser_console",
+        ] {
+            assert!(CODEX_BRIEF.contains(tool), "не назван {tool}");
+        }
+        assert!(CODEX_BRIEF.contains("xdg-open"));
+        // Тот же текст уходит в cmd строкой TOML в одинарных кавычках.
+        assert!(CODEX_BRIEF.is_ascii());
+        assert!(
+            !CODEX_BRIEF.contains(['\'', '"', '%', '!', '^', '\\', '\n', '\r']),
+            "{CODEX_BRIEF}"
+        );
+    }
+
+    /// Обёртку запускает sh, а настоящий агент записывает, с чем его позвали, —
+    /// по аргументу в строке.
+    #[cfg(unix)]
+    #[test]
+    fn codex_gets_the_brief_as_one_whole_argument() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe()).unwrap();
+        let real = dir.path().join("real");
+        let agent = write(
+            &real,
+            "codex",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/args.txt\"\n",
+        );
+        std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Системные каталоги — ради `dirname`: без него обёртка не узнала бы
+        // свой каталог.
+        let path = [
+            shims.as_path(),
+            &real,
+            Path::new("/usr/bin"),
+            Path::new("/bin"),
+        ];
+        let status = std::process::Command::new(shims.join("codex"))
+            .arg("hello")
+            .env("PATH", std::env::join_paths(path).unwrap())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let args = std::fs::read_to_string(real.join("args.txt")).unwrap();
+        let args: Vec<&str> = args.lines().collect();
+        let brief = format!(r#"developer_instructions="{CODEX_BRIEF}""#);
+        assert!(args.contains(&brief.as_str()), "{args:#?}");
+        assert_eq!(args.last(), Some(&"hello"));
     }
 
     #[test]
@@ -543,6 +639,7 @@ mod tests {
         let codex = cmd_flags("codex");
         assert!(codex.contains("mcp_servers.modelcrew-browser.command='''%MODELCREW_EXE%'''"));
         assert!(codex.contains("mcp_servers.modelcrew-browser.args=['--mcp-stdio']"));
+        assert!(codex.ends_with(&format!(r#"-c "developer_instructions='{CODEX_BRIEF}'""#)));
     }
 
     #[test]
