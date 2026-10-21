@@ -432,6 +432,104 @@ mod system {
         };
         webview.convertPoint_toView(NSPoint::new(at.x * across, y), None)
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn key(name: &str, code: &str) -> Key {
+            Key {
+                key: name.into(),
+                code: code.into(),
+                ..Key::default()
+            }
+        }
+
+        fn both(typed: &str, plain: &str) -> (String, String) {
+            (typed.into(), plain.into())
+        }
+
+        #[test]
+        fn a_key_types_what_a_mac_keyboard_would() {
+            // Без модификаторов буква — строчная, с Shift — какой её назвали.
+            let upper = Key {
+                shift: true,
+                ..key("A", "KeyA")
+            };
+            assert_eq!(characters(&upper), both("A", "a"));
+            assert_eq!(characters(&key("ж", "")), both("ж", "ж"));
+            let control = Key {
+                control: true,
+                ..key("a", "KeyA")
+            };
+            assert_eq!(characters(&control), both("\u{1}", "a"));
+            assert_eq!(characters(&key("Enter", "Enter")), both("\r", "\r"));
+            assert_eq!(
+                characters(&key("Backspace", "Backspace")),
+                both("\u{7f}", "\u{7f}")
+            );
+            assert_eq!(
+                characters(&key("ArrowLeft", "ArrowLeft")),
+                both("\u{f702}", "\u{f702}")
+            );
+            assert_eq!(characters(&key("F5", "F5")), both("\u{f708}", "\u{f708}"));
+            let back = Key {
+                shift: true,
+                ..key("Tab", "Tab")
+            };
+            assert_eq!(characters(&back), both("\u{19}", "\t"));
+            // Клавиши, которой у Mac нет, нечем и напечатать.
+            assert_eq!(characters(&key("F13", "F13")), both("", ""));
+        }
+
+        #[test]
+        fn a_key_finds_its_place_on_a_mac_keyboard() {
+            for (code, expected) in [
+                ("KeyA", 0),
+                ("KeyQ", 12),
+                ("KeyZ", 6),
+                ("Digit0", 29),
+                ("Digit9", 25),
+                ("F1", 122),
+                ("F12", 111),
+                ("Enter", 36),
+                ("Backspace", 51),
+                ("MetaLeft", 55),
+                ("ArrowLeft", 123),
+                ("ArrowUp", 126),
+                ("Slash", 44),
+            ] {
+                assert_eq!(virtual_code(code), expected, "{code}");
+            }
+            for code in ["", "Keya", "KeyAB", "Digit10", "F0", "F13", "IntlRo"] {
+                assert_eq!(virtual_code(code), 0, "{code}");
+            }
+        }
+
+        #[test]
+        fn held_modifiers_become_appkit_flags() {
+            assert_eq!(flags(&Key::default()), NSEventModifierFlags::empty());
+            let command = Key {
+                meta: true,
+                ..Key::default()
+            };
+            assert_eq!(flags(&command), NSEventModifierFlags::Command);
+            let all = Key {
+                shift: true,
+                control: true,
+                alt: true,
+                meta: true,
+                ..Key::default()
+            };
+            assert_eq!(
+                flags(&all),
+                NSEventModifierFlags::Shift
+                    | NSEventModifierFlags::Control
+                    | NSEventModifierFlags::Option
+                    | NSEventModifierFlags::Command
+            );
+        }
+    }
 }
 
 /// Linux: события GDK прямо в виджет WebKitGTK. Страница живёт в окне без
@@ -643,6 +741,70 @@ mod system {
             y += f64::from(allocation.y());
         }
         (x, y)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn key(name: &str) -> Key {
+            Key {
+                key: name.into(),
+                ..Key::default()
+            }
+        }
+
+        #[test]
+        fn a_key_becomes_its_x_keyval() {
+            for (name, expected) in [
+                ("Enter", keys::Return),
+                ("Tab", keys::Tab),
+                ("Backspace", keys::BackSpace),
+                ("ArrowLeft", keys::Left),
+                ("PageDown", keys::Page_Down),
+                ("Meta", keys::Super_L),
+                ("F1", keys::F1),
+                ("F12", keys::F12),
+                ("a", keys::a),
+                ("A", keys::A),
+                ("ж", keys::Cyrillic_zhe),
+                ("F13", keys::VoidSymbol),
+                ("Nonsense", keys::VoidSymbol),
+            ] {
+                assert_eq!(keyval(&key(name)), *expected, "{name}");
+            }
+            // Shift+Tab у X — своя клавиша: по ней фокус и идёт назад.
+            let back = Key {
+                shift: true,
+                ..key("Tab")
+            };
+            assert_eq!(keyval(&back), *keys::ISO_Left_Tab);
+        }
+
+        #[test]
+        fn held_modifiers_become_gdk_state() {
+            assert_eq!(modifiers(&key("a")), gdk::ModifierType::empty());
+            let meta = Key {
+                meta: true,
+                ..key("a")
+            };
+            assert_eq!(
+                modifiers(&meta),
+                gdk::ModifierType::SUPER_MASK | gdk::ModifierType::META_MASK
+            );
+            let rest = Key {
+                shift: true,
+                control: true,
+                alt: true,
+                ..key("a")
+            };
+            assert_eq!(
+                modifiers(&rest),
+                gdk::ModifierType::SHIFT_MASK
+                    | gdk::ModifierType::CONTROL_MASK
+                    | gdk::ModifierType::MOD1_MASK
+            );
+        }
     }
 }
 
@@ -862,6 +1024,67 @@ mod system {
                 ]
             );
             assert_eq!(events[0].1["modifiers"], json!(2));
+        }
+
+        #[test]
+        fn a_shortcut_carries_its_modifiers_and_types_nothing() {
+            let all = Key {
+                key: "a".into(),
+                code: "KeyA".into(),
+                key_code: 65,
+                shift: true,
+                control: true,
+                alt: true,
+                meta: true,
+            };
+            let calls = press(&all);
+            assert_eq!(calls[0].1["type"], json!("rawKeyDown"));
+            assert_eq!(calls[0].1["modifiers"], json!(15));
+            assert_eq!(calls[0].1["windowsVirtualKeyCode"], json!(65));
+            assert!(calls[0].1.get("text").is_none(), "{calls:?}");
+            assert_eq!(calls[1].1["type"], json!("keyUp"));
+
+            let letter = Key {
+                key: "ж".into(),
+                ..Key::default()
+            };
+            let calls = press(&letter);
+            assert_eq!(
+                (
+                    &calls[0].1["type"],
+                    &calls[0].1["text"],
+                    &calls[0].1["unmodifiedText"]
+                ),
+                (&json!("keyDown"), &json!("ж"), &json!("ж"))
+            );
+            assert_eq!(calls[0].1["modifiers"], json!(0));
+        }
+
+        #[test]
+        fn a_right_click_holds_the_right_button_and_a_move_presses_nothing() {
+            let at = Spot {
+                x: 5.0,
+                y: 6.0,
+                width: 100.0,
+                height: 100.0,
+            };
+            let clicked = events(Input::Click {
+                at,
+                button: Button::Right,
+                count: 1,
+            });
+            assert_eq!(clicked.len(), 3);
+            assert_eq!(
+                (&clicked[1].1["button"], &clicked[1].1["buttons"]),
+                (&json!("right"), &json!(2))
+            );
+            assert_eq!(clicked[2].1["buttons"], json!(0));
+            let moved = events(Input::Move(at));
+            assert_eq!(moved.len(), 1);
+            assert_eq!(
+                (&moved[0].1["type"], &moved[0].1["x"], &moved[0].1["y"]),
+                (&json!("mouseMoved"), &json!(5.0), &json!(6.0))
+            );
         }
     }
 }
