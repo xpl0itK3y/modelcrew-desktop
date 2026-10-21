@@ -271,6 +271,9 @@ mod system {
             match stroke {
                 // Та же команда, что у пункта «Выделить всё» в меню «Правка».
                 Stroke::SelectAll => unsafe { webview.selectAll(None) },
+                // Command+A клавишей WebKit не выделяет: на Mac это пункт
+                // меню «Правка», и делаем то же, что он.
+                Stroke::Key(key) if selects_all(key) => unsafe { webview.selectAll(None) },
                 // Так текст вставляет метод ввода, когда набор закончен.
                 Stroke::Text(text) => {
                     let text = NSString::from_str(text);
@@ -303,6 +306,11 @@ mod system {
             }
         }
         Ok(())
+    }
+
+    /// Command+A и ничего больше. Клавиша — по `code`: в любой раскладке.
+    fn selects_all(key: &Key) -> bool {
+        key.meta && !key.control && !key.alt && !key.shift && key.code == "KeyA"
     }
 
     fn flags(key: &Key) -> NSEventModifierFlags {
@@ -504,6 +512,25 @@ mod system {
             for code in ["", "Keya", "KeyAB", "Digit10", "F0", "F13", "IntlRo"] {
                 assert_eq!(virtual_code(code), 0, "{code}");
             }
+        }
+
+        #[test]
+        fn only_command_a_selects_all() {
+            let command = |name: &str, code: &str| Key {
+                meta: true,
+                ..key(name, code)
+            };
+            assert!(selects_all(&command("a", "KeyA")));
+            assert!(selects_all(&command("A", "KeyA")));
+            // Другая раскладка: буква своя, клавиша та же.
+            assert!(selects_all(&command("ф", "KeyA")));
+            assert!(!selects_all(&key("a", "KeyA")));
+            assert!(!selects_all(&command("c", "KeyC")));
+            let shifted = Key {
+                shift: true,
+                ..command("A", "KeyA")
+            };
+            assert!(!selects_all(&shifted));
         }
 
         #[test]
