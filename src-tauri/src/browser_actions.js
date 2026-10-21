@@ -1592,6 +1592,9 @@
       aimed: aimed ? hold(aimed) : null,
       hover: plan.kind === "move",
       felt: false,
+      // Сколько раз кнопку отпустят: это последнее событие нажатия.
+      presses: plan.kind === "click" ? plan.count : 0,
+      released: 0,
       pressed: false,
       wrong: null,
       listener: null,
@@ -1602,6 +1605,9 @@
         return;
       }
       watch.felt = true;
+      if (event.type === "pointerup") {
+        watch.released += 1;
+      }
       // Контекстное меню системы встало бы посреди экрана человека и, как
       // список, остановило бы приложение. Страница своё меню всё равно
       // покажет: её обработчики событие получат.
@@ -3324,6 +3330,15 @@
     return answer;
   };
 
+  // Дошло ли настоящее нажатие целиком. Система отдаёт события по одному, и
+  // на медленной машине кнопку отпускают позже, чем страницу уже спросили,
+  // что с ней стало.
+  const pressed = () => {
+    const watch = state.watch;
+    const waiting = watch && !watch.wrong && (watch.hover ? !watch.felt : watch.released < watch.presses);
+    return { pending: !!waiting };
+  };
+
   // --- Разбор запроса --------------------------------------------------------
 
   const notes = [];
@@ -3340,7 +3355,11 @@
     evaluate,
     settled,
     after,
+    pressed,
   };
+  // Этот только подглядывает, пока сервер ждёт: что страница сделала сама,
+  // достанется ответу на действие.
+  const PEEKS = new Set(["pressed"]);
 
   try {
     const op = OPS[request.op];
@@ -3348,7 +3367,7 @@
       refuse(`Действие «${request.op}» не знаю.`);
     }
     const answer = op();
-    const said = drain();
+    const said = PEEKS.has(request.op) ? [] : drain();
     if (said.length || notes.length) {
       answer.notes = [...(answer.notes || []), ...notes, ...said];
     }

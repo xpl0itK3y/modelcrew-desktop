@@ -26,6 +26,11 @@ const LOAD_WAIT: Duration = Duration::from_secs(15);
 /// до того, как она успела измениться.
 const SETTLE: Duration = Duration::from_millis(250);
 
+/// Сколько ждать, пока настоящее нажатие дойдёт до страницы целиком. Не
+/// дошло — значит, и не дойдёт: тогда нажмёт скрипт.
+const PRESS_WAIT: Duration = Duration::from_secs(2);
+const PRESS_POLL: Duration = Duration::from_millis(50);
+
 /// Сколько ждать промис, который вернуло выражение.
 const PROMISE_WAIT: Duration = Duration::from_secs(10);
 const PROMISE_POLL: Duration = Duration::from_millis(100);
@@ -156,6 +161,20 @@ fn settle(app: &AppHandle, root: &str) {
     std::thread::sleep(SETTLE);
 }
 
+/// Настоящий ввод система отдаёт странице по событию, и на медленной машине
+/// кнопку отпускают позже, чем мы спросили бы, что стало со страницей.
+/// Дождаться, пока нажатие дойдёт целиком.
+fn wait_pressed(app: &AppHandle, root: &str) {
+    let deadline = Instant::now() + PRESS_WAIT;
+    while Instant::now() < deadline {
+        match ask(app, root, &json!({ "op": "pressed" }), None) {
+            Ok(answer) if answer["pending"] == true => std::thread::sleep(PRESS_POLL),
+            // Не ответила — значит, уже уходит, и дальше её ждёт загрузка.
+            _ => return,
+        }
+    }
+}
+
 /// Действие нацелил скрипт, а нажимает система. Страница сдвинулась под мышью
 /// — целимся заново; ввод до неё не дошёл — то же действие делает скрипт.
 fn by_system(
@@ -170,6 +189,7 @@ fn by_system(
         if sent.is_err() {
             break;
         }
+        wait_pressed(app, root);
         settle(app, root);
         let (followed, missed) = follow(app, root, answer);
         match missed {
