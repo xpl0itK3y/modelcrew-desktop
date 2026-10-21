@@ -31,6 +31,11 @@ const SETTLE: Duration = Duration::from_millis(250);
 const PRESS_WAIT: Duration = Duration::from_secs(2);
 const PRESS_POLL: Duration = Duration::from_millis(50);
 
+/// Сколько ждать, пока ссылка или форма начнёт уводить страницу. Дальше
+/// переход ждёт уже загрузка — как и любой другой.
+const LEAVE_WAIT: Duration = Duration::from_secs(5);
+const LEAVE_POLL: Duration = Duration::from_millis(100);
+
 /// Сколько ждать промис, который вернуло выражение.
 const PROMISE_WAIT: Duration = Duration::from_secs(10);
 const PROMISE_POLL: Duration = Duration::from_millis(100);
@@ -98,6 +103,10 @@ pub fn perform(app: &AppHandle, root: &str, mut request: Value) -> Result<Acted,
             }
         }
     };
+    // Ссылка или форма уводит страницу — отвечать надо уже про новую.
+    if answer.get("leaving").is_some_and(|to| !to.is_null()) {
+        wait_gone(app, root);
+    }
     let (url, title) = browser_page::info(app, root).unwrap_or_default();
     let (text, notes) = split(&answer);
     let left = (!before.is_empty() && !url.is_empty() && before != url).then_some(before);
@@ -173,6 +182,23 @@ fn wait_pressed(app: &AppHandle, root: &str) {
             _ => return,
         }
     }
+}
+
+/// Ссылка или форма уводит страницу, но переход браузер начинает не сразу, и
+/// до тех пор страница отвечает про себя прежнюю. Дождаться, пока он
+/// начнётся: страница загружается или на её месте уже новая — той уходить
+/// некуда.
+fn wait_gone(app: &AppHandle, root: &str) {
+    let deadline = Instant::now() + LEAVE_WAIT;
+    while Instant::now() < deadline && !browser_page::is_loading(app, root) {
+        if let Ok(answer) = ask(app, root, &json!({ "op": "leaving" }), None) {
+            if answer["leaving"].is_null() {
+                break;
+            }
+        }
+        std::thread::sleep(LEAVE_POLL);
+    }
+    settle(app, root);
 }
 
 /// Действие нацелил скрипт, а нажимает система. Страница сдвинулась под мышью
@@ -265,6 +291,9 @@ fn follow(app: &AppHandle, root: &str, mut answer: Value) -> (Value, Missed) {
                 .unwrap_or_default();
             all.extend(notes.into_iter().map(Value::String));
             fields.insert("notes".into(), Value::Array(all));
+        }
+        if let Some(to) = after.get("leaving").filter(|to| !to.is_null()) {
+            fields.insert("leaving".into(), to.clone());
         }
     }
     (answer, missed)

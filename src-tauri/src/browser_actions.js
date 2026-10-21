@@ -49,6 +49,8 @@
         guard: null,
         watch: null,
         events: [],
+        leaving: null,
+        listening: false,
       };
       Object.defineProperty(window, KEY, { value: fresh, configurable: true });
       return fresh;
@@ -1157,6 +1159,93 @@
     return el;
   };
 
+  // --- Уход со страницы ------------------------------------------------------
+
+  // Ссылка и форма уводят страницу не сразу: переход начнётся, когда браузер
+  // до него доберётся, а до тех пор страница отвечает про себя прежнюю. Куда
+  // она уходит, запоминаем в миг щелчка или отправки — и сервер ждёт, пока на
+  // её месте не окажется новая.
+  const HERE = new Set(["", "_self", "_parent", "_top"]);
+  // У формы поле с именем `getAttribute` заслонило бы одноимённый метод.
+  const { getAttribute } = Element.prototype;
+  const attributeOf = (el, name) => (el ? getAttribute.call(el, name) : null);
+
+  // Куда уведёт страницу щелчок или отправка. `null` — никуда: ссылка ведёт
+  // в рамку или в новое окно, к якорю на этой же странице или вовсе не в веб.
+  const destinationOf = (event) => {
+    let address;
+    let target;
+    if (event.type === "submit") {
+      const form = event.target;
+      if (form?.localName !== "form") {
+        return null;
+      }
+      // Кнопка отправки может задать форме свои способ, адрес и цель.
+      const pick = (own, shared) => attributeOf(event.submitter, own) ?? attributeOf(form, shared);
+      if (pick("formmethod", "method")?.toLowerCase() === "dialog") {
+        return null;
+      }
+      address = pick("formaction", "action") || document.URL;
+      target = pick("formtarget", "target");
+    } else {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return null;
+      }
+      const link = event
+        .composedPath()
+        .find((node) => (node.localName === "a" || node.localName === "area") && node.hasAttribute("href"));
+      if (!link || link.hasAttribute("download")) {
+        return null;
+      }
+      address = attributeOf(link, "href");
+      target = attributeOf(link, "target");
+    }
+    target ??= attributeOf(document.querySelector("base[target]"), "target") ?? "";
+    if (!HERE.has(target.toLowerCase()) && target !== window.name) {
+      return null;
+    }
+    let to;
+    try {
+      to = new URL(address, document.baseURI);
+    } catch {
+      return null;
+    }
+    if (to.protocol !== "http:" && to.protocol !== "https:") {
+      return null;
+    }
+    const bare = (url) => url.href.slice(0, url.href.length - url.hash.length);
+    if (event.type === "click" && to.hash && bare(to) === bare(location)) {
+      return null;
+    }
+    return to.href;
+  };
+
+  const noteLeaving = (event) => {
+    const to = destinationOf(event);
+    if (to) {
+      state.leaving = { to, event };
+    }
+  };
+
+  // Слушаем на всплытии, после самой страницы, и всё время, а не одно
+  // действие: настоящее нажатие на медленной машине приходит позже, чем живёт
+  // защита от окон. Каждое действие начинает с чистого листа.
+  const watchLeaving = () => {
+    state.leaving = null;
+    if (!state.listening) {
+      window.addEventListener("click", noteLeaving);
+      window.addEventListener("submit", noteLeaving);
+      state.listening = true;
+    }
+  };
+
+  // Куда уходит страница, если переход ещё в силе: отменить событие она
+  // могла и после нас.
+  const leavingTo = () => {
+    const seen = state.leaving;
+    return seen && !seen.event.defaultPrevented ? seen.to : null;
+  };
+
   // --- Защита от системных окон ----------------------------------------------
 
   // Пока идёт действие, страница не должна показать человеку системное окно:
@@ -1188,6 +1277,7 @@
   };
 
   const guard = () => {
+    watchLeaving();
     if (!state.guard) {
       const inputs = HTMLInputElement.prototype;
       // Как было — дескриптором: своего свойства могло и не быть, тогда его
@@ -3327,6 +3417,10 @@
         answer.text = "Элемента после действия на странице больше нет.";
       }
     }
+    const to = leavingTo();
+    if (to) {
+      answer.leaving = to;
+    }
     return answer;
   };
 
@@ -3338,6 +3432,8 @@
     const waiting = watch && !watch.wrong && (watch.hover ? !watch.felt : watch.released < watch.presses);
     return { pending: !!waiting };
   };
+
+  const leaving = () => ({ leaving: leavingTo() });
 
   // --- Разбор запроса --------------------------------------------------------
 
@@ -3356,10 +3452,11 @@
     settled,
     after,
     pressed,
+    leaving,
   };
-  // Этот только подглядывает, пока сервер ждёт: что страница сделала сама,
+  // Эти только подглядывают, пока сервер ждёт: что страница сделала сама,
   // достанется ответу на действие.
-  const PEEKS = new Set(["pressed"]);
+  const PEEKS = new Set(["pressed", "leaving"]);
 
   try {
     const op = OPS[request.op];
