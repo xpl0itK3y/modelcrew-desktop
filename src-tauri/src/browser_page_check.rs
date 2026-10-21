@@ -12,6 +12,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -196,6 +197,17 @@ const FRAME_BODY: &str = concat!(
 /// везде — на Linux он теряется, и проваленная проверка выходила бы нулём.
 static OUTCOME: AtomicI32 = AtomicI32::new(1);
 
+/// Когда проверка началась: от этой точки журнал считает время шагов.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// Записать в журнал, за какой шаг проверка берётся. Повисшую проверку тест
+/// убивает молча, и без журнала в CI виден только таймаут, а не место, где
+/// она встала.
+fn mark(what: &str) {
+    let started = STARTED.get_or_init(Instant::now);
+    eprintln!("{FLAG}: {:>5.1}s {what}", started.elapsed().as_secs_f64());
+}
+
 /// Запуск проверкой. `None` — запуск обычный.
 pub fn run_if_check() -> Option<i32> {
     let mut args = std::env::args().skip(1);
@@ -210,6 +222,7 @@ pub fn run_if_check() -> Option<i32> {
 }
 
 fn run(out: PathBuf) -> i32 {
+    mark("запуск");
     #[cfg(target_os = "linux")]
     crate::disable_dmabuf_renderer_by_default();
 
@@ -224,7 +237,9 @@ fn run(out: PathBuf) -> i32 {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
+                mark("приложение поднялось");
                 let code = report(&handle, &out);
+                mark(&format!("конец, код {code}"));
                 OUTCOME.store(code, Ordering::SeqCst);
                 browser_page::close_all(&handle);
                 handle.exit(code);
@@ -307,6 +322,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
         .get_webview(&browser_page::label_for(ROOT))
         .and_then(|page| page.window().scale_factor().ok());
 
+    mark("закрыть страницу");
     browser_page::close(app, ROOT);
     let deadline = Instant::now() + SETTLE_WAIT;
     while browser_page::is_open(app, ROOT) && Instant::now() < deadline {
@@ -337,6 +353,7 @@ fn check(app: &AppHandle, out: &Path) -> Result<Value, String> {
 
 /// Дождаться страницы, снять её и записать, что о ней известно.
 fn shot(app: &AppHandle, out: &Path, name: &str) -> Result<Value, String> {
+    mark(&format!("кадр {name}"));
     let ready = browser_page::wait_ready(app, ROOT, LOAD_WAIT);
     let (url, title) = browser_page::info(app, ROOT)?;
     let png = browser_page::snapshot(app, ROOT)?;
@@ -382,6 +399,7 @@ fn dock_and_back(app: &AppHandle, out: &Path, before: &Value) -> Result<(Value, 
         .focused(false)
         .build()
         .map_err(|error| format!("главное окно проверки: {error}"))?;
+    mark("в главное окно");
     let result = (|| {
         browser_page::dock(app, ROOT, DOCK)?;
         if !browser_page::is_docked(app, ROOT) {
@@ -478,6 +496,7 @@ fn same_page(app: &AppHandle, out: &Path) -> Result<serde_json::Map<String, Valu
 /// Действия агента на странице с формой — так, как их зовёт сервер MCP. Что
 /// вышло из каждого, разбирает тест.
 fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
+    mark("страница с формой");
     browser_page::open(app, ROOT, &site.url("form"))?;
     browser_page::wait_ready(app, ROOT, LOAD_WAIT);
     let value = |expression: &str| json!({ "op": "evaluate", "expression": expression });
@@ -619,6 +638,7 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
     // В рамку с другого домена скрипт страницы не попадёт — только мышь, в
     // точку на экране, и клавиатура туда, где в рамке фокус. Кнопка — в
     // верхней половине рамки, поле — в нижней.
+    mark("где рамка");
     let points = browser_page::run(
         app,
         ROOT,
@@ -701,6 +721,7 @@ fn perform_all(
     steps: impl IntoIterator<Item = (&'static str, Value)>,
 ) {
     for (name, request) in steps {
+        mark(&format!("шаг {name}"));
         let outcome = match crate::browser_actions::perform(app, ROOT, request) {
             Ok(acted) => json!({
                 "text": acted.text,
@@ -716,6 +737,7 @@ fn perform_all(
 
 /// Дождаться в консоли страницы сообщения с этим текстом.
 fn heard(app: &AppHandle, text: &str) -> Result<bool, String> {
+    mark(&format!("ждём в консоли «{text}»"));
     let deadline = Instant::now() + SETTLE_WAIT;
     loop {
         let log = browser_page::console(app, ROOT)?;
@@ -738,6 +760,7 @@ fn heard(app: &AppHandle, text: &str) -> Result<bool, String> {
 /// Не всё приходит к концу загрузки: отказ промиса и незагрузившаяся картинка
 /// бывают и после. Не дождались — отдаём что есть, и разберётся тест.
 fn console(app: &AppHandle, at_least: usize) -> Result<Value, String> {
+    mark(&format!("ждём в консоли {at_least} сообщ."));
     let deadline = Instant::now() + SETTLE_WAIT;
     loop {
         let log = browser_page::console(app, ROOT)?;
@@ -752,6 +775,7 @@ fn console(app: &AppHandle, at_least: usize) -> Result<Value, String> {
 /// раз, сколько он в списке. Рамки и потоки говорят не в лад со страницей:
 /// одного счёта сообщений тут мало.
 fn console_saying(app: &AppHandle, texts: &[&str]) -> Result<Value, String> {
+    mark(&format!("ждём в консоли {} текстов", texts.len()));
     let deadline = Instant::now() + SETTLE_WAIT;
     loop {
         let log = browser_page::console(app, ROOT)?;
