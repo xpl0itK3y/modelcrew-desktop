@@ -38,6 +38,10 @@ const SLOW_PAGE: Duration = Duration::from_millis(800);
 /// Сколько ждать, пока страница перерисуется в новом размере или закроется.
 const SETTLE_WAIT: Duration = Duration::from_secs(5);
 
+/// Сколько ждать, пока приложение выйдет само, когда проверка кончилась. Дома
+/// оно выходит меньше чем за секунду.
+const EXIT_WAIT: Duration = Duration::from_secs(10);
+
 /// Размер, под который проверка подгоняет страницу.
 const FIT: (f64, f64) = (800.0, 600.0);
 
@@ -241,7 +245,18 @@ fn run(out: PathBuf) -> i32 {
                 let code = report(&handle, &out);
                 mark(&format!("конец, код {code}"));
                 OUTCOME.store(code, Ordering::SeqCst);
+                // На macOS в CI процесс после проверки не завершался: отчёт
+                // записан, а тест ждал выхода, пока не убил его по таймауту и
+                // не счёл проверку проваленной. Сверх отчёта ждать от
+                // приложения нечего — не вышло само, выходим без него.
+                std::thread::spawn(move || {
+                    std::thread::sleep(EXIT_WAIT);
+                    mark("приложение не вышло само — выходим без него");
+                    std::process::exit(code);
+                });
+                mark("закрыть окна");
                 browser_page::close_all(&handle);
+                mark("просим приложение выйти");
                 handle.exit(code);
             });
             Ok(())
@@ -254,15 +269,14 @@ fn run(out: PathBuf) -> i32 {
             return 1;
         }
     };
-    app.run_return(|_, event| {
+    app.run_return(|_, event| match event {
         // Окон, кроме страницы, нет, и её закрытие Tauri понял бы как «всё
         // закрыто — выходим». Выходит здесь только сама проверка, с кодом.
-        if let RunEvent::ExitRequested {
+        RunEvent::ExitRequested {
             code: None, api, ..
-        } = event
-        {
-            api.prevent_exit();
-        }
+        } => api.prevent_exit(),
+        RunEvent::Exit => mark("цикл событий вышел"),
+        _ => {}
     });
     OUTCOME.load(Ordering::SeqCst)
 }
