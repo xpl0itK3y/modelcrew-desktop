@@ -373,6 +373,15 @@ fn the_page_loads_shows_itself_and_closes() {
             "frame_type",
             "frame_press",
             "frame_more",
+            "frame_erase",
+            "frame_left",
+            "frame_cut",
+            "frame_send",
+            "frame_all",
+            "frame_new",
+            "frame_mark",
+            "frame_mark_more",
+            "frame_fix",
         ] {
             let notes = actions[name]["notes"].to_string();
             assert!(
@@ -388,6 +397,11 @@ fn the_page_loads_shows_itself_and_closes() {
             ("frame_how", "рамка: настоящее"),
             ("frame_typed", "ввод: Привет, рамка"),
             ("frame_appended", "ввод: Привет, рамка!"),
+            // Backspace, стрелка и Enter правят поле, как у человека.
+            ("frame_edited", "ввод: Привет, рама"),
+            // Command+A на Mac и Control+A на других системах выделяют всё, а
+            // Shift со стрелкой — часть.
+            ("frame_replaced", "ввод: новый"),
         ] {
             let text = done(actions, name);
             assert!(text.ends_with(&format!("\n{expected}")), "{name}: {text}");

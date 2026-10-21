@@ -654,6 +654,36 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
                 json!({ "op": "type", "text": "!", "append": true, "submit": true }),
             ),
             ("frame_appended", inside()),
+            // Клавиши правки — тоже системой: стереть «!», шагнуть влево и
+            // стереть «к» — выходит «Привет, рама».
+            ("frame_erase", json!({ "op": "press", "key": "Backspace" })),
+            ("frame_left", json!({ "op": "press", "key": "ArrowLeft" })),
+            ("frame_cut", json!({ "op": "press", "key": "Backspace" })),
+            ("frame_send", json!({ "op": "press", "key": "Enter" })),
+            ("frame_edited", inside()),
+            // Выделить всё сочетанием этой системы, а потом с Shift — две
+            // последние буквы: «новое» становится «новый».
+            (
+                "frame_all",
+                json!({ "op": "press", "key": "ControlOrMeta+A" }),
+            ),
+            (
+                "frame_new",
+                json!({ "op": "type", "text": "новое", "append": true }),
+            ),
+            (
+                "frame_mark",
+                json!({ "op": "press", "key": "Shift+ArrowLeft" }),
+            ),
+            (
+                "frame_mark_more",
+                json!({ "op": "press", "key": "Shift+ArrowLeft" }),
+            ),
+            (
+                "frame_fix",
+                json!({ "op": "type", "text": "ый", "append": true, "submit": true }),
+            ),
+            ("frame_replaced", inside()),
             (
                 "link",
                 json!({ "op": "click", "target": { "text": "На зелёную" } }),
