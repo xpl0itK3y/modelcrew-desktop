@@ -52,6 +52,11 @@ beforeEach(() => {
     value: {},
   });
   invokeMock.mockReset();
+  // На macOS и Linux вкладка сразу спрашивает, есть ли git. Есть — строка
+  // «Git» не нужна; тесты про Git Bash подменяют ответы своими.
+  invokeMock.mockImplementation(async (command: string) =>
+    command === "git_available" ? true : undefined,
+  );
   openUrlMock.mockClear();
 });
 
