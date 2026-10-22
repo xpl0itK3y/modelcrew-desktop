@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.0.23
+
+### Русский
+
+Агенты открывают страницу проекта прямо в ModelCrew, читают её, кликают и печатают настоящими мышью и клавиатурой. Папка без git становится репозиторием одной кнопкой.
+
+- У каждого проекта свой браузер: страница показывается в ящике рядом с терминалами, без отдельного окна
+- Глобус в шапке открывает ящик и подсвечивается, пока открытая агентом страница ждёт, чтобы на неё посмотрели
+- Когда агент открывает страницу, под глобусом появляется уведомление с кнопкой, которая переключает и на нужный проект
+- Назад, вперёд и обновление; пока страница грузится, видна полоса загрузки, а обновление становится остановкой
+- Кнопка «Открыть» отдаёт адрес браузеру по умолчанию, где ваши закладки, входы и инструменты разработчика
+- Страницу можно смотреть в размере телефона, планшета или компьютера, выбрать экран из списка, задать и запомнить свой размер, повернуть экран
+- Консоль под браузером: счётчики, фильтры, очистка, место сообщения как файл:строка, повторы, упавшие запросы, нарушения CSP, сообщения рамок и воркеров; высота меняется перетаскиванием
+- Локальная страница обновляется сама через полсекунды после правок в проекте; зависимости, сборка, скрытые папки и то, что игнорирует git, не в счёт, а выключатель живёт в ящике
+- Файлы можно перетащить на страницу, а ссылки и формы, открывающие новое окно, остаются в самой странице
+- ModelCrew сам прописывается сервером modelcrew-browser в конфиги установленных агентов, и Claude, Codex, Copilot и OpenCode получают инструменты страницы без настройки
+- Агент читает страницу с метками на каждом элементе управления, кликает, наводит, печатает, выбирает, жмёт клавиши, прокручивает, загружает файлы из проекта, ждёт, выполняет скрипт, ходит назад и вперёд, снимает экран и читает консоль
+- Клики и наведение идут настоящей мышью, так что меню на CSS-наведении открываются; клик по точке снимка достаёт до рамок с чужого домена и canvas, а ввод в такую рамку идёт настоящей клавиатурой — на macOS, Linux и Windows
+- Codex в панелях открывает страницы только в браузере ModelCrew, а не во внешнем
+- Выключатель плагина в Настройки → Плагины действует сразу, и в уже открытых терминалах, без перезапуска агента; рядом видно, сколько агентов подключено
+- На Windows связь с агентом идёт через именованный канал, а агенты обёрнуты для cmd, PowerShell и Git Bash
+- Панель доказывает, кто она, случайным пропуском, а не своим id, и сокет доступен только владельцу; текст страницы агент получает помеченным как слова страницы
+- В папке без репозитория кнопка изменений остаётся в шапке, а панель предлагает создать репозиторий — на ветке main, если в git не задано другое
+- Без git панель так и говорит и открывает настройки на разделе «Терминал»: на macOS там ставятся Command Line Tools, на Linux открывается инструкция
+- На Mac без Command Line Tools панель больше не вызывает системное окно установки при каждой проверке
+- На Windows git, поставленный из настроек, находится без перезапуска приложения
+- Коммит без имени и почты объясняет, что сделать: войти через GitHub или задать user.name и user.email
+- Конец хода у codex и opencode теперь отпускает занятые файлы и делает снимок проекта, как у claude и copilot
+
+### English
+
+Agents open the project page inside ModelCrew, read it, click and type with the real mouse and keyboard. A folder without git becomes a repository with one button.
+
+- Every project has a browser of its own: the page shows in a drawer next to the terminals, with no separate window
+- The globe in the title bar opens the drawer and lights up while a page an agent opened waits to be looked at
+- When an agent opens a page, a notice under the globe offers a button that also switches to the right project
+- Back, forward and reload; while the page loads a bar shows progress and reload turns into stop
+- The Open button hands the address to your default browser, with your bookmarks, logins and developer tools
+- The page can be shown at phone, tablet or desktop size, at a screen picked from a list, at a size of your own that is remembered, and turned on its side
+- A console under the browser: counts, filters, clear, each message's place as file:line, repeats, failed requests, CSP violations, frame and worker messages; drag its top edge to resize it
+- A local page reloads by itself half a second after the project's files settle; dependencies, build output, hidden folders and whatever git ignores do not count, and the switch lives in the drawer
+- Files can be dropped onto the page, and links and forms aimed at a new window stay in the page itself
+- ModelCrew writes the modelcrew-browser server into the configs of installed agents, so Claude, Codex, Copilot and OpenCode get page tools with nothing to set up
+- An agent reads the page with a label on every control, clicks, hovers, types, selects, presses keys, scrolls, uploads files from the project, waits, runs a script, goes back and forward, takes screenshots and reads the console
+- Clicks and hovers use the real mouse, so CSS hover menus open; a click at a point on the screenshot reaches cross-origin frames and canvas, and typing into such a frame uses the real keyboard — on macOS, Linux and Windows
+- Codex in panels opens pages only in the ModelCrew browser, not in an outside one
+- The plugin switch in Settings → Plugins takes effect at once, in terminals already open too, without restarting the agent; it also shows how many agents are connected
+- On Windows the agent reaches the app over a named pipe, and agents are wrapped for cmd, PowerShell and Git Bash
+- A panel proves who it is with a random pass rather than its id, and the socket is reachable by its owner only; page text reaches the agent marked as the page's own words
+- In a folder without a repository the changes button stays in the title bar, and the panel offers to create one — on main unless git is told otherwise
+- Without git the panel says so and opens Settings on the Terminal section: on macOS it installs the Command Line Tools there, on Linux it opens the instructions
+- On a Mac without the Command Line Tools the panel no longer raises the system installer on every check
+- On Windows a git installed from Settings is found without restarting the app
+- A commit without a name and email explains what to do: sign in with GitHub or set user.name and user.email
+- The end of a turn in codex and opencode now frees the files they claimed and snapshots the project, as in claude and copilot
+
 ## 0.0.22
 
 ### Русский

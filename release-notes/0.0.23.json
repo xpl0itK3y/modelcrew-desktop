@@ -1,0 +1,25 @@
+{
+  "version": "0.0.23",
+  "ru": {
+    "title": "Браузер проекта для агентов и git, который начинается с пустой папки",
+    "summary": "Агенты открывают страницу проекта прямо в ModelCrew, читают её, кликают и печатают настоящими мышью и клавиатурой. Папка без git становится репозиторием одной кнопкой.",
+    "highlights": [
+      "Браузер проекта внутри ModelCrew: адресная строка, назад и вперёд, экраны телефона и планшета",
+      "Claude, Codex, Copilot и OpenCode получают инструменты страницы по MCP сами, без настройки",
+      "Консоль страницы показывает, откуда пришло сообщение, складывает повторы и ловит упавшие запросы",
+      "Страница обновляется сама, когда агент меняет файлы проекта",
+      "Папка без git становится репозиторием одной кнопкой, а без git панель подскажет, где его поставить"
+    ]
+  },
+  "en": {
+    "title": "A project browser for agents, and git that starts from an empty folder",
+    "summary": "Agents open the project page inside ModelCrew, read it, click and type with the real mouse and keyboard. A folder without git becomes a repository with one button.",
+    "highlights": [
+      "A project browser inside ModelCrew: address bar, back and forward, and phone and tablet screens",
+      "Claude, Codex, Copilot and OpenCode get page tools over MCP on their own, with nothing to set up",
+      "The page console shows where each message came from, folds repeats and catches failed requests",
+      "The page reloads by itself when an agent changes the project files",
+      "A folder without git becomes a repository with one button, and a missing git points to Settings"
+    ]
+  }
+}
