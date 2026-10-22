@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   summaries: new Map<string, GitChangesSummary>(),
   listeners: new Map<string, Set<(summary: GitChangesSummary) => void>>(),
   commitAll: vi.fn(async () => {}),
+  initRepository: vi.fn(async () => {}),
   continueOperation: vi.fn(async () => {}),
   abortOperation: vi.fn(async () => {}),
   createBranch: vi.fn(async () => {}),
@@ -57,6 +58,7 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
       },
     ),
     commitAll: mocks.commitAll,
+    initRepository: mocks.initRepository,
     continueOperation: mocks.continueOperation,
     abortOperation: mocks.abortOperation,
     refreshGitChanges: mocks.refreshGitChanges,
@@ -107,6 +109,7 @@ vi.mock("../git/githubAvatars", () => ({
 }));
 
 import { GitChangesView } from "./GitChangesPanel";
+import { AppActionsProvider, type AppActions } from "../ui/AppActions";
 
 function summary(branch: string, path: string): GitChangesSummary {
   return {
@@ -687,20 +690,96 @@ describe("GitChangesView workspace lifecycle", () => {
     expect(top).toBeLessThanOrEqual(392);
   });
 
-  it("explains a missing git instead of showing an empty panel", async () => {
+  it("explains a missing git and leads to the settings that install it", async () => {
     mocks.summaries.set("project-a", {
       isRepo: false,
       gitMissing: true,
       files: [],
     });
-    render(<GitChangesView workspaceId="project-a" />);
+    const requestOpenSettings = vi.fn();
+    const actions: AppActions = {
+      hasActiveWorkspace: () => true,
+      requestCreateWorkspace: vi.fn(),
+      requestNewTerminal: vi.fn(),
+      requestCloseGroup: vi.fn(),
+      requestOpenSettings,
+    };
+    render(
+      <AppActionsProvider actions={actions}>
+        <GitChangesView workspaceId="project-a" />
+      </AppActionsProvider>,
+    );
 
     // Без объяснения пользователь видел бы просто исчезнувшую панель и не знал
     // бы, что чинить.
-    expect(await screen.findByText(/git не найден/i)).toBeInTheDocument();
+    expect(await screen.findByText("Git не установлен")).toBeInTheDocument();
     expect(
-      screen.queryByText("Папка не является git-репозиторием"),
+      screen.queryByRole("button", { name: "Создать репозиторий" }),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    expect(requestOpenSettings).toHaveBeenCalledWith("terminal");
+
+    fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
+    await waitFor(() =>
+      expect(mocks.refreshGitChanges).toHaveBeenCalledWith("project-a"),
+    );
+  });
+
+  it("offers to create a repository in a folder without one", async () => {
+    mocks.summaries.set("project-a", { isRepo: false, files: [] });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Создать репозиторий" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.initRepository).toHaveBeenCalledWith("project-a"),
+    );
+    // Новый репозиторий виден сразу, без ожидания вотчера.
+    await waitFor(() =>
+      expect(mocks.refreshGitChanges).toHaveBeenCalledWith("project-a"),
+    );
+  });
+
+  it("keeps the folder as it was when git refuses to create a repository", async () => {
+    mocks.summaries.set("project-a", { isRepo: false, files: [] });
+    mocks.initRepository.mockRejectedValueOnce({
+      code: "git_command_failed",
+      debug: "fatal: cannot mkdir .git: Permission denied",
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Создать репозиторий" }),
+    );
+
+    // Слова самого git показывает окно: причина в них, а не в заголовке.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText(/Permission denied/),
+    ).toBeInTheDocument();
+    expect(mocks.refreshGitChanges).not.toHaveBeenCalled();
+  });
+
+  it("names a missing commit identity instead of a bare git failure", async () => {
+    mocks.commitAll.mockRejectedValueOnce({
+      code: "git_command_failed",
+      context: { reason: "identity" },
+      debug: "*** Please tell me who you are.",
+    });
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.change(await screen.findByPlaceholderText("Заголовок коммита"), {
+      target: { value: "first" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Коммит" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText(/Git не знает, от чьего имени коммитить/),
+    ).toBeInTheDocument();
   });
 
   it("draws one divider where a published commit has nothing to rewrite", async () => {

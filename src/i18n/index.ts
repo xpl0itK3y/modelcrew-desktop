@@ -123,6 +123,8 @@ function parseBackendError(error: unknown): BackendError | null {
 
 const backendErrorKeys: Record<string, MessageKey> = {
   git_unavailable: "error.gitUnavailable",
+  git_install_unsupported: "error.gitInstallUnsupported",
+  git_install_failed: "error.gitInstallFailed",
   git_not_a_repository: "error.gitNotARepository",
   git_command_failed: "error.gitCommandFailed",
   main_window_only: "error.mainWindowOnly",
@@ -183,6 +185,7 @@ const gitReasonKeys: Record<string, MessageKey> = {
   "tag-missing": "error.gitTagMissing",
   "replay-conflict": "error.gitReplayConflict",
   "git-too-old": "error.gitTooOld",
+  identity: "error.gitIdentityMissing",
   "not-head": "error.gitCommitNotHead",
   "parent-count": "error.gitCommitCannotUncommit",
   pushed: "error.gitCommitPushed",

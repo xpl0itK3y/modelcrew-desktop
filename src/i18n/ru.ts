@@ -292,7 +292,17 @@ export const ru = {
   "git.revert": "Откатить изменения файла",
   "git.revertConfirm": "Откатить?",
   "git.loading": "Читаем изменения…",
-  "git.notARepo": "Эта папка не под управлением git",
+  "git.initTitle": "Здесь пока нет git",
+  "git.initText":
+    "Создайте репозиторий — панель начнёт показывать изменения, а первый коммит можно будет сделать прямо отсюда.",
+  "git.initButton": "Создать репозиторий",
+  "git.initBusy": "Создаём…",
+  "git.missingTitle": "Git не установлен",
+  "git.missingText":
+    "Без него панель не видит изменений. Установить git можно в настройках, в разделе «Терминал».",
+  "git.missingOpenSettings": "Открыть настройки",
+  "git.missingCheckAgain": "Проверить снова",
+  "git.missingChecking": "Проверяем…",
   "git.clean": "Нет незакоммиченных изменений",
   "git.branch": "Ветка",
   "git.detachedHead": "без ветки",
@@ -426,7 +436,7 @@ export const ru = {
     "Не удалось перезапустить {failed} из {total} терминалов — они продолжают работать в прежней оболочке",
   "settings.gitBash": "Git Bash",
   "settings.gitBashInstallNote":
-    "Добавляет Bash и Git для Windows. Установка откроется в отдельном системном окне и потребует вашего подтверждения.",
+    "Добавляет Bash и Git для Windows — git нужен и панели изменений. Установка откроется в отдельном системном окне и потребует вашего подтверждения.",
   "settings.gitBashManualNote":
     "Windows Package Manager недоступен. Установите Git for Windows с официального сайта, затем проверьте оболочки снова.",
   "settings.gitBashInstall": "Установить",
@@ -442,6 +452,21 @@ export const ru = {
     "Git Bash установлен. Выберите его в списке оболочек.",
   "settings.gitBashOpenFailed":
     "Не удалось открыть сайт Git for Windows.",
+  "settings.git": "Git",
+  "settings.gitMacNote":
+    "Нужен панели изменений. macOS ставит git вместе с инструментами разработчика (Command Line Tools) — установка откроется в системном окне.",
+  "settings.gitLinuxNote":
+    "Нужен панели изменений. Поставьте пакет git менеджером пакетов — например, sudo apt install git или sudo dnf install git — и проверьте снова.",
+  "settings.gitInstall": "Установить",
+  "settings.gitInstallOpening": "Открываем…",
+  "settings.gitInstallStarted":
+    "Окно установки открыто. Когда оно закончит, нажмите «Проверить снова».",
+  "settings.gitOpenGuide": "Открыть инструкцию",
+  "settings.gitOpenGuideFailed": "Не удалось открыть страницу с инструкцией.",
+  "settings.gitCheckAgain": "Проверить снова",
+  "settings.gitChecking": "Проверка…",
+  "settings.gitFound": "Git найден — панель изменений уже его видит.",
+  "settings.gitStillMissing": "Git пока не найден.",
   "settings.agentResume": "Возобновление агентов",
   "settings.agentResumeNote":
     "После перезапуска приложения восстановленный терминал сам продолжит диалог агента — каждая панель свой чат.",
@@ -671,6 +696,12 @@ export const ru = {
     "Такой адрес открывать нельзя — годятся только http и https",
   "error.unknown": "Произошла неизвестная ошибка",
   "error.gitUnavailable": "git не найден — установите его, чтобы видеть изменения",
+  "error.gitInstallUnsupported":
+    "Здесь git ставится менеджером пакетов системы, а не из приложения",
+  "error.gitInstallFailed":
+    "Не удалось открыть установку инструментов разработчика",
+  "error.gitIdentityMissing":
+    "Git не знает, от чьего имени коммитить. Войдите через GitHub или задайте user.name и user.email в git config",
   "error.gitNotARepository": "Папка не является git-репозиторием",
   "error.gitCommandFailed": "Команда git завершилась с ошибкой",
   "error.gitBranchExists": "Ветка «{branch}» уже существует",

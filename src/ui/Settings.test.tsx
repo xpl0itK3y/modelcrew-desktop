@@ -492,3 +492,23 @@ describe("Settings search", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(8);
   });
 });
+
+describe("Settings opened for a hint", () => {
+  afterEach(() => setLocale("ru"));
+
+  it("starts on the section the hint pointed to", () => {
+    setLocale("ru");
+    render(<Settings {...settingsProps} initialSection="terminal" />);
+
+    // Подсказка панели изменений ведёт к установке git — туда и открываемся,
+    // а не на «Внешний вид», где искать её пришлось бы самому.
+    expect(screen.getByRole("tab", { name: "Терминал" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Внешний вид" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+});

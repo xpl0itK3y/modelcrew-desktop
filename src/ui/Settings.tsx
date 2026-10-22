@@ -96,6 +96,8 @@ type SettingsProps = {
   onSelectAccent: (color: string) => void;
   onSelectShell: (command: string | null, label: string) => void;
   onSelectTerminalFontSize: (size: number) => void;
+  // Раздел, открытый первым; без него — «Оформление».
+  initialSection?: SettingsSectionId;
   // Диалог доигрывает exit-анимацию перед размонтированием.
   closing?: boolean;
   onClose: () => void;
@@ -161,7 +163,9 @@ type ShellProps = SettingsProps & {
 function SettingsShell(props: ShellProps) {
   const { t } = useI18n();
   const search = useSettingsSearch();
-  const [tab, setTab] = useState<SettingsTab>("appearance");
+  const [tab, setTab] = useState<SettingsTab>(
+    () => props.initialSection ?? "appearance",
+  );
   const contentRef = useRef<HTMLDivElement>(null);
   const searching = props.query.trim().length > 0;
 

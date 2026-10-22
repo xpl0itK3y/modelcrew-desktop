@@ -292,7 +292,17 @@ export const en: Record<MessageKey, string> = {
   "git.revert": "Revert file changes",
   "git.revertConfirm": "Revert?",
   "git.loading": "Reading changes…",
-  "git.notARepo": "This folder is not a git repository",
+  "git.initTitle": "No git here yet",
+  "git.initText":
+    "Create a repository and this panel starts showing changes; the first commit can be made right here.",
+  "git.initButton": "Create repository",
+  "git.initBusy": "Creating…",
+  "git.missingTitle": "Git is not installed",
+  "git.missingText":
+    "Without it this panel cannot see changes. You can install git in Settings, under Terminal.",
+  "git.missingOpenSettings": "Open Settings",
+  "git.missingCheckAgain": "Check again",
+  "git.missingChecking": "Checking…",
   "git.clean": "No uncommitted changes",
   "git.branch": "Branch",
   "git.detachedHead": "detached",
@@ -426,7 +436,7 @@ export const en: Record<MessageKey, string> = {
     "Could not restart {failed} of {total} terminals — they are still running in the previous shell",
   "settings.gitBash": "Git Bash",
   "settings.gitBashInstallNote":
-    "Adds Bash and Git for Windows. Installation opens in a separate system window and waits for your confirmation.",
+    "Adds Bash and Git for Windows; the Changes panel needs git too. Installation opens in a separate system window and waits for your confirmation.",
   "settings.gitBashManualNote":
     "Windows Package Manager is unavailable. Install Git for Windows from the official website, then check for shells again.",
   "settings.gitBashInstall": "Install",
@@ -442,6 +452,21 @@ export const en: Record<MessageKey, string> = {
     "Git Bash is installed. Select it from the shell list.",
   "settings.gitBashOpenFailed":
     "Could not open the Git for Windows website.",
+  "settings.git": "Git",
+  "settings.gitMacNote":
+    "The Changes panel needs it. macOS installs git with its developer tools (Command Line Tools); the installer opens in a system window.",
+  "settings.gitLinuxNote":
+    "The Changes panel needs it. Install the git package with your package manager, for example sudo apt install git or sudo dnf install git, then check again.",
+  "settings.gitInstall": "Install",
+  "settings.gitInstallOpening": "Opening…",
+  "settings.gitInstallStarted":
+    "The installer is open. When it finishes, press Check again.",
+  "settings.gitOpenGuide": "Open instructions",
+  "settings.gitOpenGuideFailed": "Could not open the instructions page.",
+  "settings.gitCheckAgain": "Check again",
+  "settings.gitChecking": "Checking…",
+  "settings.gitFound": "Git was found; the Changes panel can use it now.",
+  "settings.gitStillMissing": "Git is still not found.",
   "settings.agentResume": "Agent session resume",
   "settings.agentResumeNote":
     "After the app restarts, a restored terminal resumes the agent's conversation on its own — each panel gets its own chat.",
@@ -676,6 +701,11 @@ export const en: Record<MessageKey, string> = {
     "That address cannot be opened — only http and https work",
   "error.unknown": "An unknown error occurred",
   "error.gitUnavailable": "git was not found — install it to see changes",
+  "error.gitInstallUnsupported":
+    "On this system git is installed with the package manager, not from the app",
+  "error.gitInstallFailed": "Could not start the developer tools installer",
+  "error.gitIdentityMissing":
+    "Git does not know who is committing. Sign in with GitHub or set user.name and user.email in git config",
   "error.gitNotARepository": "The folder is not a git repository",
   "error.gitCommandFailed": "A git command failed",
   "error.gitBranchExists": "Branch “{branch}” already exists",

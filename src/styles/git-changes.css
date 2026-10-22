@@ -809,6 +809,70 @@
   text-align: center;
 }
 
+/* Подсказка вместо пустой панели: что не так и что с этим сделать. */
+.git-onboarding {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.git-onboarding-title {
+  color: var(--mc-text-bright);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.git-onboarding-text {
+  max-width: 340px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.git-onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.git-onboarding-primary,
+.git-onboarding-secondary {
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--mc-radius-sm);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.git-onboarding-primary {
+  background: var(--mc-accent);
+  color: #fff;
+}
+
+.git-onboarding-secondary {
+  border: 1px solid var(--mc-border);
+  background: transparent;
+  color: var(--mc-text);
+}
+
+.git-onboarding-secondary:hover:not(:disabled) {
+  background: var(--mc-hover);
+}
+
+.git-onboarding-primary:disabled,
+.git-onboarding-secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.git-onboarding .git-commit-error {
+  margin: 0;
+  padding: 0;
+}
+
 .git-file-list {
   display: flex;
   flex-direction: column;

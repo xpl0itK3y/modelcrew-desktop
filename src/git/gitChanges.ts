@@ -259,6 +259,11 @@ export function commitAll(
   return invoke("git_commit", { workspaceId, message });
 }
 
+// `git init` в корне проекта; первая ветка — main, если в git не выбрана своя.
+export function initRepository(workspaceId: string): Promise<void> {
+  return invoke("git_init_repository", { workspaceId });
+}
+
 // Продолжение доступно у переноса, cherry-pick и отката: у них нет своего
 // поля сообщения. Слияние завершается обычным коммитом из панели.
 export function continueOperation(workspaceId: string): Promise<void> {

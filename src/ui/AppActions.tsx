@@ -1,10 +1,11 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { DockviewGroupPanel } from "dockview";
+import type { SettingsSectionId } from "./settings/SettingsSearch";
 
-// Действия приложения для панелей, которые рисует dockview: ватермарк и шапка
-// группы. Раньше это был изменяемый модульный объект, куда состояние
-// дописывало функции из шестнадцати мест, и кто в итоге обработает нажатие,
-// из кода было не видно.
+// Действия приложения для частей, которые живут не в самом App: ватермарк и
+// шапка группы dockview, ящик изменений. Раньше это был изменяемый модульный
+// объект, куда состояние дописывало функции из шестнадцати мест, и кто в итоге
+// обработает нажатие, из кода было не видно.
 //
 // Контекст здесь работает: dockview рендерит части через ReactDOM.createPortal,
 // то есть они остаются детьми того же дерева и провайдер до них доходит.
@@ -17,6 +18,8 @@ export type AppActions = {
   requestNewTerminal: () => void;
   // Закрытие группы спрашивает подтверждение — диалог живёт в App.
   requestCloseGroup: (group: DockviewGroupPanel) => void;
+  // Настройки сразу на нужном разделе: панель советует там что-то сделать.
+  requestOpenSettings: (section: SettingsSectionId) => void;
 };
 
 const NOOP: AppActions = {
@@ -24,6 +27,7 @@ const NOOP: AppActions = {
   requestCreateWorkspace: () => {},
   requestNewTerminal: () => {},
   requestCloseGroup: () => {},
+  requestOpenSettings: () => {},
 };
 
 const AppActionsContext = createContext<AppActions>(NOOP);

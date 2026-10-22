@@ -30,6 +30,7 @@ import {
 import { HistoryView } from "./git/HistoryView";
 import { OperationBanner } from "./git/OperationBanner";
 import { GitErrorDialog } from "./git/GitErrorDialog";
+import { GitMissingNotice, NotARepoNotice } from "./git/GitOnboarding";
 import { loadGithubCommitAvatars } from "../git/githubAvatars";
 
 const STATUS_LETTER: Record<GitChangedFile["status"], string> = {
@@ -506,9 +507,9 @@ function GitChangesWorkspaceView(props: {
       {summary === null ? (
         <div className="git-empty">{t("git.loading")}</div>
       ) : summary.gitMissing ? (
-        <div className="git-empty">{t("error.gitUnavailable")}</div>
+        <GitMissingNotice workspaceId={workspaceId} />
       ) : !summary.isRepo ? (
-        <div className="git-empty">{t("git.notARepo")}</div>
+        <NotARepoNotice workspaceId={workspaceId} />
       ) : (
         <>
           <div className="git-toolbar">

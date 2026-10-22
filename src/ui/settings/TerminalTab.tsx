@@ -19,6 +19,7 @@ import {
 } from "../../terminal/preferences";
 import { hasTauri } from "../../platform";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { GitToolRow } from "./GitToolRow";
 import {
   SettingRow,
   SettingsButton,
@@ -270,6 +271,8 @@ export function TerminalTab(props: TerminalTabProps) {
           }
         />
       )}
+
+      <GitToolRow />
 
       <SettingRow
         title={t("settings.terminalFontSize")}

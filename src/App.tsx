@@ -61,6 +61,7 @@ import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { SettingsLazy } from "./ui/SettingsLazy";
+import type { SettingsSectionId } from "./ui/settings/SettingsSearch";
 import { CloseIcon, MaximizeIcon } from "./ui/Icons";
 import { useAnimatedPresence } from "./ui/useAnimatedPresence";
 import { AppActionsProvider, type AppActions } from "./ui/AppActions";
@@ -161,6 +162,14 @@ export default function App() {
   const [closeGroupRequest, setCloseGroupRequest] =
     useState<DockviewGroupPanel | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Раздел, с которого откроются настройки: подсказка из панели ведёт прямо
+  // туда, где её совет выполняют.
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSectionId>("appearance");
+  const openSettings = useCallback((section: SettingsSectionId) => {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  }, []);
   // Панель развёрнута на всё окно (⌘↩ / кнопка) — показываем индикатор.
   const [zoomed, setZoomed] = useState(false);
   const [accent, setAccent] = useState(loadAccent);
@@ -417,8 +426,9 @@ export default function App() {
       },
       requestNewTerminal: newTerminal,
       requestCloseGroup: setCloseGroupRequest,
+      requestOpenSettings: openSettings,
     }),
-    [createWorkspace, hasActiveWorkspace, newTerminal],
+    [createWorkspace, hasActiveWorkspace, newTerminal, openSettings],
   );
 
   // Оверлеи (настройки, диалоги, тост) доигрывают exit-анимацию после
@@ -819,8 +829,9 @@ export default function App() {
         gitCounts={
           gitSummary?.isRepo
             ? aggregateCounts(gitSummary)
-            : // git не найден: кнопку оставляем, чтобы панель объяснила причину.
-              gitSummary?.gitMissing
+            : // Нет git или репозитория: кнопку оставляем — панель объяснит
+              // причину и предложит, что с этим сделать.
+              gitSummary
               ? { files: 0, additions: 0, deletions: 0 }
               : null
         }
@@ -828,7 +839,7 @@ export default function App() {
         filesVisible={filesVisible}
         onToggleFiles={() => setFilesVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettings("appearance")}
         // Ящик один за раз: они лежат в одном углу, и второй просто накрыл бы
         // первый — с виду тот бы пропал, хотя остался бы открытым.
         onOpenGitChanges={() => {
@@ -1052,7 +1063,13 @@ export default function App() {
                   <CloseIcon />
                 </button>
               </div>
-              <GitChangesViewLazy workspaceId={renderedGitDrawerWorkspaceId} />
+              {/* Ящик лежит вне dockview, а подсказкам панели нужны действия
+                  приложения — например, открыть настройки. */}
+              <AppActionsProvider actions={appActions}>
+                <GitChangesViewLazy
+                  workspaceId={renderedGitDrawerWorkspaceId}
+                />
+              </AppActionsProvider>
             </aside>
           )}
           {renderedBrowserWorkspaceId && (
@@ -1217,6 +1234,7 @@ export default function App() {
       {settingsPresence && (
         <SettingsLazy
           closing={settingsPresence.closing}
+          initialSection={settingsSection}
           themeId={themeId}
           accent={accent}
           shell={shell}

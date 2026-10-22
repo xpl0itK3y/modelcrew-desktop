@@ -12,6 +12,7 @@ function renderWatermark(overrides: Partial<AppActions> = {}) {
     requestCreateWorkspace: vi.fn(),
     requestNewTerminal: vi.fn(),
     requestCloseGroup: vi.fn(),
+    requestOpenSettings: vi.fn(),
     ...overrides,
   };
   render(
