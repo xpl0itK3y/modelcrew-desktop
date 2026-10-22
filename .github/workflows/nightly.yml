@@ -47,6 +47,15 @@ jobs:
             arch: x64
             artifact: windows-x64
             bundles: nsis,msi
+          # Только NSIS: установщику не нужен WiX, а ставит он те же
+          # ARM64-бинарники. Раннер свой, ARM64 — без кросс-компиляции.
+          - label: Windows ARM64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            platform: windows
+            arch: aarch64
+            artifact: windows-aarch64
+            bundles: nsis
           - label: macOS Apple Silicon
             os: macos-15
             target: aarch64-apple-darwin
