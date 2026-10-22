@@ -283,12 +283,8 @@ fn spawn_event_watcher(app: tauri::AppHandle, dir: PathBuf) {
                 continue;
             }
             if let Some(payload) = parse_event(&raw) {
-                // Конец хода — панель отпускает всё, что держала: держать
-                // файл между ходами значит запирать его, пока агент ждёт
-                // следующего задания.
-                if payload.event.eq_ignore_ascii_case("stop") {
-                    app.state::<crate::crew::CrewRegistry>()
-                        .release_panel(&payload.panel_id);
+                let crew = app.state::<crate::crew::CrewRegistry>();
+                if release_if_turn_ended(&crew, &payload) {
                     // Снимок дерева ровно в этот момент: заявки держатся на
                     // хуках, а они есть не у всех агентов, и запись через
                     // оболочку проходит мимо них у всех. Снимок делает
@@ -457,6 +453,39 @@ fn claim_decision(app: &tauri::AppHandle, request: &ClaimRequest) -> ClaimVerdic
             ClaimVerdict::Allow
         }
     }
+}
+
+/// Конец хода — панель отпускает всё, что держала: держать файл между ходами
+/// значит запирать его, пока агент ждёт следующего задания. Возвращает, был
+/// ли это конец хода.
+fn release_if_turn_ended(crew: &crate::crew::CrewRegistry, payload: &AgentEventPayload) -> bool {
+    if !ends_turn(&payload.event) {
+        return false;
+    }
+    crew.release_panel(&payload.panel_id);
+    true
+}
+
+/// Конец хода приходит у каждого агента под своим именем: «Stop» у claude,
+/// «agentStop» у copilot, «agent-turn-complete» у codex, «session.idle» у
+/// opencode. Пока здесь слушали один «Stop», заявки codex и opencode в конце
+/// хода не снимались и держали файл до TTL: сосед получал отказ ещё пять
+/// минут после того, как агент закончил.
+///
+/// Имя сравниваем, как `eventKey` в `src/terminal/agentHookEvent.ts`: без
+/// регистра и разделителей. Список — те события, что фронт считает
+/// «completed», кроме «SubagentStop»: подагент закончил, а ход основного
+/// агента ещё идёт, и его файлы открылись бы соседу посреди правки.
+fn ends_turn(event: &str) -> bool {
+    let key: String = event
+        .chars()
+        .filter(char::is_ascii_alphabetic)
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect();
+    matches!(
+        key.as_str(),
+        "stop" | "agentstop" | "agentturncomplete" | "sessionidle"
+    )
 }
 
 /// Снимок панели после хода. Ошибку глушим: снимок — страховка, и её сбой не
@@ -1994,6 +2023,60 @@ mod tests {
         assert_eq!(event.panel_id, "panel-1");
         assert_eq!(event.event, "agent-turn-complete");
         assert_eq!(event.message, "Готово: обновил три файла");
+    }
+
+    #[test]
+    fn a_codex_turn_end_lets_go_of_the_panel_files() {
+        let crew = crate::crew::CrewRegistry::default();
+        assert_eq!(
+            crew.claim("ws-1", "panel-1", "src/app.ts", None, 1_000),
+            crate::crew::ClaimOutcome::Granted
+        );
+        let event = parse_event(
+            r#"{"agent":"codex","panelId":"panel-1","payload":{
+                "type":"agent-turn-complete",
+                "last-assistant-message":"Готово"
+            }}"#,
+        )
+        .expect("событие codex должно разбираться");
+
+        assert!(release_if_turn_ended(&crew, &event));
+        assert!(crew.list("ws-1", 2_000).is_empty());
+    }
+
+    #[test]
+    fn a_question_mid_turn_keeps_the_panel_files() {
+        // Агент спросил разрешения и стоит посреди хода: правка ещё впереди,
+        // и файл должен остаться за ним.
+        let crew = crate::crew::CrewRegistry::default();
+        crew.claim("ws-1", "panel-1", "src/app.ts", None, 1_000);
+        let event = parse_event(
+            r#"{"agent":"codex","panelId":"panel-1","payload":{
+                "type":"approval-requested"
+            }}"#,
+        )
+        .expect("событие codex должно разбираться");
+
+        assert!(!release_if_turn_ended(&crew, &event));
+        assert_eq!(crew.list("ws-1", 2_000).len(), 1);
+    }
+
+    #[test]
+    fn hears_the_end_of_a_turn_under_every_agent_name() {
+        for event in ["Stop", "agentStop", "agent-turn-complete", "session.idle"] {
+            assert!(ends_turn(event), "{event}");
+        }
+        for event in [
+            "SubagentStop",
+            "Notification",
+            "permission_prompt",
+            "approval-requested",
+            "permission.asked",
+            "question.asked",
+            "",
+        ] {
+            assert!(!ends_turn(event), "{event}");
+        }
     }
 
     #[test]

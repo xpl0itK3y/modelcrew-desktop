@@ -19,7 +19,9 @@ export type AgentHookEvent = {
 
 // Имена событий у агентов свои, смысл общий. Ключи в нижнем регистре без
 // разделителей: «agent-turn-complete», «Stop» и «session.idle» приходят
-// каждый в своём написании.
+// каждый в своём написании. Конец хода бэкенд распознаёт сам, чтобы отпустить
+// заявки панели (`ends_turn` в agent_hooks.rs): новое «completed» здесь
+// добавляй и туда — кроме «subagentstop», ход там ещё идёт.
 const EVENT_KINDS: Record<string, PreciseAgentAlertKind> = {
   agentturncomplete: "completed", // codex
   approvalrequested: "permission", // codex
