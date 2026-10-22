@@ -273,7 +273,7 @@ pub fn reset_to_upstream(
 
 #[tauri::command]
 pub async fn git_fetch_upstream(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<()> {
@@ -286,7 +286,7 @@ pub async fn git_fetch_upstream(
 
 #[tauri::command]
 pub async fn git_pull(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     expected_branch: String,
@@ -303,7 +303,7 @@ pub async fn git_pull(
 
 #[tauri::command]
 pub async fn git_push(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     expected_branch: String,
@@ -320,7 +320,7 @@ pub async fn git_push(
 
 #[tauri::command]
 pub async fn git_pull_rebase(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     expected_branch: String,
@@ -337,7 +337,7 @@ pub async fn git_pull_rebase(
 
 #[tauri::command]
 pub async fn git_reset_to_upstream(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     expected_branch: String,
@@ -404,7 +404,7 @@ pub fn publish_branch(
 }
 #[tauri::command]
 pub async fn git_publish_branch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     expected_branch: String,

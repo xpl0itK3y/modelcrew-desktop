@@ -149,6 +149,130 @@ export function UndoIcon(props: IconProps) {
   );
 }
 
+/// Шаги страницы в браузере проекта: назад, вперёд и заново.
+export function BackIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12.5 8h-9M7.5 4 3.5 8l4 4" />
+    </svg>
+  );
+}
+
+export function ForwardIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 8h9M8.5 4l4 4-4 4" />
+    </svg>
+  );
+}
+
+export function ReloadIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12.8 6.5A5 5 0 1 0 13 9.5" />
+      <path d="M13 3v3.5H9.5" />
+    </svg>
+  );
+}
+
+export function ConsoleIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M4.5 6l2 2-2 2M8.5 10.5h3" />
+    </svg>
+  );
+}
+
+export function ClearIcon(props: IconProps) {
+  // Перечёркнутый круг — «очистить» в любой консоли разработчика.
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M4.1 11.9l7.8-7.8" />
+    </svg>
+  );
+}
+
+export function ErrorIcon(props: IconProps) {
+  // Круг с крестом — ошибка в консоли разработчика.
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2" />
+    </svg>
+  );
+}
+
+export function WarningIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 2.2l6.1 10.8H1.9z" />
+      <path d="M8 6.6v2.8M8 11.3v.05" />
+    </svg>
+  );
+}
+
+export function PhoneIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="4.5" y="1.5" width="7" height="13" rx="1.5" />
+      <path d="M7.25 12.25h1.5" />
+    </svg>
+  );
+}
+
+export function TabletIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" />
+      <path d="M7.25 12.25h1.5" />
+    </svg>
+  );
+}
+
+export function DesktopIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="2.5" width="13" height="8.5" rx="1" />
+      <path d="M5.5 14h5M8 11v3" />
+    </svg>
+  );
+}
+
+export function RotateIcon(props: IconProps) {
+  // Экран, лёгший набок, и стрелка поворота над ним.
+  return (
+    <svg {...base(props)}>
+      <rect x="1.5" y="7.5" width="9" height="6" rx="1.2" />
+      <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
+      <path d="M12 6.5l1.5 1.5 1.5-1.5" />
+    </svg>
+  );
+}
+
+export function AutoReloadIcon(props: IconProps) {
+  // Та же стрелка «обновить», но с точкой посередине: обновляется сама.
+  return (
+    <svg {...base(props)}>
+      <path d="M12.8 6.5A5 5 0 1 0 13 9.5" />
+      <path d="M13 3v3.5H9.5" />
+      <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function GlobeIcon(props: IconProps) {
+  // Меридиан и экватор: шар без них читается как пустой кружок.
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M2.5 8h11" />
+      <path d="M8 2.5a8.5 8.5 0 0 1 0 11a8.5 8.5 0 0 1 0-11z" />
+    </svg>
+  );
+}
+
 export function DiffIcon(props: IconProps) {
   // «±» как у счётчика изменений в Warp: плюс сверху, минус снизу.
   return (

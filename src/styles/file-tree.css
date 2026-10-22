@@ -1021,9 +1021,21 @@ h6.md-heading {
   box-shadow: inset 0 0 0 1px var(--mc-accent-border);
 }
 
+/* Лежачий разделитель — над областью снизу, как консоль под страницей. */
+.resize-handle[aria-orientation="horizontal"] {
+  width: auto;
+  height: 5px;
+  margin: -2px 0;
+  cursor: row-resize;
+}
+
 body.is-resizing {
   cursor: col-resize;
   user-select: none;
+}
+
+body.is-resizing-rows {
+  cursor: row-resize;
 }
 
 body.is-resizing .sidebar-rail {

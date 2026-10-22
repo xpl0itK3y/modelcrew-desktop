@@ -11,7 +11,16 @@ import { Settings } from "./Settings";
 import { SettingsLazy } from "./SettingsLazy";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async () => []),
+  invoke: vi.fn(async (command: string) =>
+    command.startsWith("mcp_")
+      ? {
+          enabled: true,
+          listening: true,
+          socket: "/tmp/mcp.sock",
+          tools: ["crew_ping", "browser_open", "browser_navigate"],
+        }
+      : [],
+  ),
 }));
 
 const { soundSuppressed } = vi.hoisted(() => ({
@@ -378,11 +387,9 @@ describe("Settings search", () => {
   it("keeps a place for the tooling that is not there yet", () => {
     renderSettings();
 
-    for (const name of ["MCP", "Плагины"]) {
-      fireEvent.click(screen.getByRole("tab", { name }));
-      const panel = screen.getByRole("tabpanel", { name });
-      expect(within(panel).getByText("Скоро")).toBeVisible();
-    }
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
+    const panel = screen.getByRole("tabpanel", { name: "MCP" });
+    expect(within(panel).getByText("Скоро")).toBeVisible();
 
     // Разделы ищутся по именам инструментов, которых в интерфейсе пока нет.
     fireEvent.change(searchBox(), { target: { value: "codegraph" } });

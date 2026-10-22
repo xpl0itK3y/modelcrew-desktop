@@ -6,7 +6,9 @@
 @import "./notification-bell.css";
 @import "./update-popover.css";
 @import "./update-cards.css";
+@import "./drawer.css";
 @import "./git-changes.css";
+@import "./browser.css";
 @import "./github-auth.css";
 @import "./sidebar.css";
 @import "./file-tree.css";

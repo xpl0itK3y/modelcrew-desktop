@@ -24,6 +24,24 @@ pub fn set_agent_events_dir(dir: PathBuf) {
     let _ = AGENT_EVENTS_DIR.set(dir);
 }
 
+/// Сокет MCP: тем же путём, что и каталог событий. Пусто там, где слушателя
+/// нет (Windows или выключенный в настройках MCP) — тогда панель не получает
+/// переменной вовсе, и агент не видит инструмента вместо того, чтобы видеть
+/// его и упираться в мёртвый сокет.
+///
+/// Не `OnceLock`, как каталог событий: выключатель в настройках снимает
+/// слушателя посреди работы, и адрес обязан уметь исчезать.
+static MCP_SOCKET: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_mcp_socket(path: PathBuf) {
+    *MCP_SOCKET.lock().unwrap() = Some(path);
+}
+
+/// Слушателя сняли: новые панели не должны получить адрес, которого нет.
+pub fn clear_mcp_socket() {
+    *MCP_SOCKET.lock().unwrap() = None;
+}
+
 pub struct SpawnOptions {
     pub id: String,
     pub shell: Option<String>,
@@ -33,15 +51,20 @@ pub struct SpawnOptions {
     // Папка изолированной истории команд панели (ZDOTDIR/HISTFILE);
     // None — общесистемная история.
     pub history_dir: Option<PathBuf>,
+    // Каталог обёрток агентов, которые подключают им наш MCP. На unix его
+    // ставит в PATH rc-файл панели (см. terminal_snapshots), здесь — только
+    // на Windows.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub agent_shims: Option<PathBuf>,
 }
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
-    // PID корневого процесса (шелла): Windows ищет foreground обходом дерева
-    // потомков; unix берёт лидера группы напрямую у PTY.
-    #[allow(dead_code)]
+    // PID корневого процесса (шелла). По нему MCP узнаёт, из какой панели
+    // вырос агент, а Windows ещё и ищет foreground обходом дерева потомков
+    // (unix берёт лидера группы напрямую у PTY).
     child_pid: Option<u32>,
     // child.wait() подтверждает через этот канал, что процесс уже завершился.
     // Одного успешного killer.kill() недостаточно перед установкой обновления.
@@ -53,6 +76,9 @@ struct PtySession {
     // считаются от корня — иначе один и тот же файл выглядел бы разными
     // путями из разных панелей.
     root: PathBuf,
+    // Пропуск этой панели на сокет MCP. Пусто, когда сокета нет вовсе:
+    // тогда и предъявлять его некому.
+    mcp_token: String,
 }
 
 #[derive(Default)]
@@ -133,6 +159,50 @@ impl PtyManager {
         if let Some(events) = AGENT_EVENTS_DIR.get() {
             cmd.env("MODELCREW_EVENTS_DIR", events);
         }
+        // Тем же путём — адрес сокета MCP и пропуск панели на него. Шим
+        // наследует то и другое, поэтому приложение знает, кто позвал, и берёт
+        // корень проекта у себя, а не из аргументов вызова. Пропуск случайный:
+        // id панели виден любому процессу пользователя, и по нему агент одной
+        // панели представился бы другой.
+        #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
+        let mut mcp_token = String::new();
+        #[cfg(any(unix, windows))]
+        if let Some(socket) = MCP_SOCKET.lock().unwrap().clone() {
+            if let Some(token) = crate::mcp::new_token() {
+                cmd.env(crate::mcp::SOCK_ENV, socket);
+                cmd.env(crate::mcp::TOKEN_ENV, &token);
+                mcp_token = token;
+            }
+            // opencode обёртки не читает — он читает конфиг из окружения.
+            // Здесь же, вместе с адресом: условие одно и то же — плагин в этой
+            // панели доступен.
+            if let Ok(exe) = std::env::current_exe() {
+                let inherited = std::env::var(crate::mcp_register::OPENCODE_ENV).ok();
+                cmd.env(
+                    crate::mcp_register::OPENCODE_ENV,
+                    crate::mcp_register::opencode_config(&exe, inherited.as_deref()),
+                );
+            }
+        }
+        // Обёртки агентов — в начало PATH. На unix это делает rc-файл панели,
+        // и обязательно после файла пользователя: тот пересобирает PATH. Ни
+        // cmd, ни PowerShell PATH из своих файлов не пересобирают, а Git Bash
+        // дописывает унаследованный следом за своими каталогами, где агентов
+        // нет. Поэтому на Windows хватает окружения.
+        #[cfg(windows)]
+        if let Some(shims) = &opts.agent_shims {
+            let inherited = cmd.get_env("PATH").map(std::ffi::OsStr::to_os_string);
+            let paths = std::iter::once(shims.clone())
+                .chain(inherited.iter().flat_map(std::env::split_paths));
+            if let Ok(joined) = std::env::join_paths(paths) {
+                cmd.env("PATH", joined);
+            }
+            // Путь к приложению — для обёртки codex под cmd: в текст `.cmd`
+            // его не впишешь (см. mcp_register::cmd_body).
+            if let Ok(exe) = std::env::current_exe() {
+                cmd.env(crate::mcp_register::EXE_ENV, exe);
+            }
+        }
         // cwd обязателен и уже разрешён backend-реестром по workspace_id.
         // Повторная проверка закрывает гонку между resolve и spawn.
         if !opts.cwd.is_dir() {
@@ -169,6 +239,7 @@ impl PtyManager {
                 exit_rx: process_exit_rx,
                 epoch,
                 root: opts.cwd.clone(),
+                mcp_token,
             },
         );
         // Свежая сессия уже в карте — гасим прежний процесс того же id.
@@ -298,6 +369,38 @@ impl PtyManager {
         }
     }
 
+    /// Панель по её пропуску на сокет MCP: id — чтобы назвать её агенту,
+    /// корень — чтобы работать в её проекте.
+    ///
+    /// Пустой пропуск не считается ни за чью: он стоит у панелей, поднятых до
+    /// сокета, и совпал бы с любым таким же пустым.
+    pub fn panel_of_token(&self, token: &str) -> Option<(String, PathBuf)> {
+        if token.is_empty() {
+            return None;
+        }
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, session)| session.mcp_token == token)
+            .map(|(id, session)| (id.clone(), session.root.clone()))
+    }
+
+    /// Панель, из терминала которой вырос процесс с такой роднёй.
+    ///
+    /// Цепочка идёт от звонящего вверх, поэтому первое совпадение — ближайшая
+    /// панель. Ближе шелла панели предков быть не может: сама панель и есть
+    /// его корень.
+    pub fn panel_of_ancestry(&self, ancestry: &[u32]) -> Option<(String, PathBuf)> {
+        let sessions = self.sessions.lock().unwrap();
+        ancestry.iter().find_map(|pid| {
+            sessions
+                .iter()
+                .find(|(_, session)| session.child_pid == Some(*pid))
+                .map(|(id, session)| (id.clone(), session.root.clone()))
+        })
+    }
+
     /// Корень проекта панели: от него отсчитываются заявки на файлы.
     pub fn session_root(&self, id: &str) -> Option<PathBuf> {
         self.sessions
@@ -337,7 +440,14 @@ impl PtyManager {
             return Vec::new();
         }
         let procs = crate::win_proc::snapshot();
-        let edges: Vec<(u32, u32)> = procs.iter().map(|p| (p.pid, p.parent)).collect();
+        let own = std::env::current_exe().ok().and_then(|exe| {
+            exe.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        });
+        let edges = edges_without(
+            procs.iter().map(|p| (p.pid, p.parent, p.name.as_str())),
+            own.as_deref(),
+        );
         roots
             .into_iter()
             .map(|(id, root)| {
@@ -415,6 +525,24 @@ impl PtyManager {
                 .with_debug(failures.join("; ")))
         }
     }
+}
+
+/// Рёбра дерева процессов без наших мостов MCP. Мост — ребёнок агента, свежее
+/// его и без своих детей, то есть тот самый лист, который выбрал бы
+/// `pick_foreground`: панель видела бы вместо claude само приложение и
+/// теряла агента. На unix такого нет — там передний план даёт группа
+/// процессов, и лидер её агент. Поддерево моста уходит вместе с ним: от
+/// корня до него больше не дойти.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn edges_without<'a>(
+    procs: impl IntoIterator<Item = (u32, u32, &'a str)>,
+    own: Option<&str>,
+) -> Vec<(u32, u32)> {
+    procs
+        .into_iter()
+        .filter(|(_, _, name)| own.is_none_or(|own| !name.eq_ignore_ascii_case(own)))
+        .map(|(pid, parent, _)| (pid, parent))
+        .collect()
 }
 
 /// Листья поддерева процессов: потомки root (включая его самого, если
@@ -981,6 +1109,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1022,6 +1151,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 move |code| {
@@ -1059,6 +1189,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = stale_out_tx.send(bytes);
@@ -1080,6 +1211,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = fresh_out_tx.send(bytes);
@@ -1136,6 +1268,22 @@ mod tests {
     }
 
     #[test]
+    fn our_mcp_bridge_does_not_pass_for_the_agent() {
+        // pwsh(1) → обёртка cmd(2) → claude(3) → наш мост(4) → его conhost(5).
+        let procs = [
+            (1, 0, "pwsh.exe"),
+            (2, 1, "cmd.exe"),
+            (3, 2, "claude.exe"),
+            (4, 3, "ModelCrew.exe"),
+            (5, 4, "conhost.exe"),
+        ];
+        let edges = edges_without(procs, Some("modelcrew.exe"));
+        assert_eq!(descendant_leaves(1, &edges), vec![3]);
+        // Своего имени не узнали — дерево как есть.
+        assert_eq!(descendant_leaves(1, &edges_without(procs, None)), vec![5]);
+    }
+
+    #[test]
     fn pick_foreground_prefers_the_newest_leaf() {
         let times = |pid: u32| match pid {
             3 => Some(100),
@@ -1165,6 +1313,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1219,6 +1368,7 @@ mod tests {
                     cols: 120,
                     rows: 40,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1300,6 +1450,7 @@ mod tests {
                         cols: 80,
                         rows: 24,
                         history_dir: None,
+                        agent_shims: None,
                     },
                     move |bytes| {
                         let _ = out_tx.send(bytes);
@@ -1348,6 +1499,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1387,6 +1539,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1430,6 +1583,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 |_| {},
@@ -1467,6 +1621,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1493,6 +1648,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 |_| {},
                 |_| {},
@@ -1529,6 +1685,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 history_dir: None,
+                agent_shims: None,
             },
             |_| {},
             |_| {},
@@ -1612,6 +1769,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1651,6 +1809,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1714,6 +1873,7 @@ mod tests {
                     cols: 0,
                     rows: 0,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1760,6 +1920,7 @@ mod tests {
                     cols: 120,
                     rows: 40,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1818,6 +1979,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: None,
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1851,6 +2013,212 @@ mod tests {
         let _ = manager.kill("t-env2");
     }
 
+    /// Панель узнаётся по тому, из кого вырос процесс агента, — без всякого
+    /// пропуска. Это и есть путь для cursor, который вычищает окружение, и
+    /// для постоянной регистрации, где конфиг один на проект, а панелей много.
+    #[test]
+    fn a_panel_is_found_by_the_processes_the_agent_grew_out_of() {
+        let manager = PtyManager::default();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-pid".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                    agent_shims: None,
+                },
+                |_| {},
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+        let shell = manager
+            .sessions
+            .lock()
+            .unwrap()
+            .get("t-pid")
+            .and_then(|session| session.child_pid)
+            .expect("у живой панели есть процесс");
+
+        // Агент сидит не прямо в шелле панели, а под ним: своя оболочка, свой
+        // шим. Поэтому совпасть должен предок, а не первый же в цепочке.
+        let found = manager.panel_of_ancestry(&[u32::MAX, shell]);
+        assert_eq!(found, Some(("t-pid".to_string(), test_cwd())));
+
+        // Спросить систему не вышло или процесс уже чужой — не наш случай, и
+        // выдумывать панель нельзя: дальше в дело идёт пропуск.
+        assert_eq!(manager.panel_of_ancestry(&[]), None);
+        assert_eq!(manager.panel_of_ancestry(&[u32::MAX]), None);
+
+        let _ = manager.kill("t-pid");
+    }
+
+    /// Агент видит MCP только через окружение своей панели: адрес сокета и
+    /// пропуск. Ни того, ни другого в окружении — и инструментов у агента нет,
+    /// причём молча, ровно как если бы он решил ими не пользоваться.
+    #[cfg(unix)]
+    #[test]
+    fn the_panel_environment_carries_the_mcp_socket_and_its_own_pass() {
+        let socket = std::env::temp_dir().join("mc-pty-mcp-test.sock");
+        set_mcp_socket(socket.clone());
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-mcp".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                    agent_shims: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        for line in Shell::evaluated_env_probe(&[crate::mcp::SOCK_ENV, crate::mcp::TOKEN_ENV]) {
+            manager.write("t-mcp", &line).expect("запись в PTY");
+        }
+        let output = wait_for_output(
+            &manager,
+            "t-mcp",
+            &out_rx,
+            Shell::EVALUATED_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+
+        assert!(
+            output.contains(&socket.display().to_string()),
+            "адрес сокета не дошёл до панели: {output}"
+        );
+        // Пропуск в окружении — тот самый, по которому приложение узнаёт эту
+        // панель: иначе агент стучался бы с бумажкой, которой никто не ждёт.
+        let (_, root) = manager
+            .panel_of_token(token_from(&output))
+            .expect("пропуск из окружения не сошёлся ни с одной панелью");
+        assert_eq!(root, test_cwd());
+        // Третья переменная — конфиг для opencode: обёрток он не читает, и
+        // кроме окружения панели узнать о нас ему неоткуда. В общую пробу его
+        // не вставить — это JSON, и шелл разобрал бы его на слова, — поэтому
+        // спрашиваем не значение, а ответ на вопрос.
+        manager
+            .write("t-mcp", &Shell::line(&opencode_probe()))
+            .expect("запись в PTY");
+        let output = wait_for_output(
+            &manager,
+            "t-mcp",
+            &out_rx,
+            OPENCODE_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+        assert!(
+            output.contains(&format!("{OPENCODE_PROBE}yes")),
+            "opencode не узнает о сервере: конфига нет в окружении панели: {output}"
+        );
+        let _ = manager.kill("t-mcp");
+
+        // Вторая половина той же истории: выключатель в настройках снимает
+        // слушателя, и панель, открытая после этого, не получает ни адреса,
+        // ни пропуска. Для агента это не «сервер сломался», а «сервера нет».
+        //
+        // Тем же тестом намеренно: обе половины трогают один глобальный
+        // адрес, и порознь они гонялись бы друг с другом.
+        clear_mcp_socket();
+        let (off_tx, off_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "t-mcp-off".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    history_dir: None,
+                    agent_shims: None,
+                },
+                move |bytes| {
+                    let _ = off_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        for line in Shell::evaluated_env_probe(&[crate::mcp::SOCK_ENV, crate::mcp::TOKEN_ENV]) {
+            manager.write("t-mcp-off", &line).expect("запись в PTY");
+        }
+        let output = wait_for_output(
+            &manager,
+            "t-mcp-off",
+            &off_rx,
+            Shell::EVALUATED_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+
+        assert!(
+            output.contains("PROBE_OK_clean_clean"),
+            "после выключения обе переменные обязаны быть пустыми: {output}"
+        );
+
+        manager
+            .write("t-mcp-off", &Shell::line(&opencode_probe()))
+            .expect("запись в PTY");
+        let output = wait_for_output(
+            &manager,
+            "t-mcp-off",
+            &off_rx,
+            OPENCODE_PROBE,
+            Duration::from_secs(20),
+        )
+        .expect("эхо из шелла");
+        assert!(
+            output.contains(&format!("{OPENCODE_PROBE}no")),
+            "выключенный плагин остался в окружении для opencode: {output}"
+        );
+
+        let _ = manager.kill("t-mcp-off");
+    }
+
+    /// Маркер пробы для opencode.
+    ///
+    /// Нарочно не похож на имя самой переменной: имя видно в эхе набранной
+    /// строки, и маркер вроде «OPENCODE_» нашёлся бы в нём раньше, чем шелл
+    /// успеет ответить. Тест тогда проходил бы через раз, по расторопности
+    /// шелла. В самой строке маркер разорван кавычками — по той же причине.
+    #[cfg(unix)]
+    const OPENCODE_PROBE: &str = "OCPROBE_";
+
+    /// Спрашиваем не значение переменной, а есть ли в нём наш сервер: значение
+    /// — JSON, и в `echo` без кавычек оно рассыпалось бы на слова.
+    #[cfg(unix)]
+    fn opencode_probe() -> String {
+        format!(
+            "case \"${{{}}}\" in *{}*) echo OC\"PROBE\"_yes;; *) echo OC\"PROBE\"_no;; esac",
+            crate::mcp_register::OPENCODE_ENV,
+            crate::mcp::STDIO_FLAG,
+        )
+    }
+
+    /// Пропуск из вывода пробы: он идёт последним словом после адреса сокета.
+    #[cfg(unix)]
+    fn token_from(output: &str) -> &str {
+        output
+            .split(Shell::EVALUATED_PROBE)
+            .nth(1)
+            .and_then(|tail| tail.split_whitespace().next())
+            .and_then(|probe| probe.rsplit('_').next())
+            .expect("в выводе пробы нет пропуска")
+    }
+
     /// id панели приходит из webview и попадает в значение переменной
     /// fish_history. В окружение он обязан уходить только алфавитно-цифровым:
     /// иначе туда уезжают метасимволы и подстановки.
@@ -1868,6 +2236,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     history_dir: Some(history.path().to_path_buf()),
+                    agent_shims: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);

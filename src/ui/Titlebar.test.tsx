@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import {
   fireEvent,
   render,
@@ -53,7 +54,10 @@ function controller(center: NotificationCenterState): AppUpdaterController {
   };
 }
 
-function titlebar(updater: AppUpdaterController) {
+function titlebar(
+  updater: AppUpdaterController,
+  overrides: Partial<ComponentProps<typeof Titlebar>> = {},
+) {
   return (
     <Titlebar
       workspaceName="modelcrew"
@@ -68,7 +72,12 @@ function titlebar(updater: AppUpdaterController) {
       onNewTerminal={vi.fn()}
       onOpenSettings={vi.fn()}
       onOpenGitChanges={vi.fn()}
+      browserOpen={false}
+      browserAvailable
+      browserUnseen={0}
+      onOpenBrowser={vi.fn()}
       updater={updater}
+      {...overrides}
     />
   );
 }
@@ -78,6 +87,65 @@ afterEach(() => {
   for (const id of getWaitingPanelIds()) {
     clearAgentAttention(id);
   }
+});
+
+describe("Titlebar browser button", () => {
+  it("shows how many pages an agent opened while nobody was looking", () => {
+    // У страницы проекта нет своего окна: она не выскочит и о себе не скажет.
+    // Значок на глобусе — единственное, что об этом говорит.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 2,
+      }),
+    );
+
+    expect(
+      document.querySelector(".browser-titlebar-badge"),
+    ).toHaveTextContent("2");
+  });
+
+  it("keeps the badge narrow when the agent went on a spree", () => {
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 42,
+      }),
+    );
+
+    expect(
+      document.querySelector(".browser-titlebar-badge"),
+    ).toHaveTextContent("9+");
+  });
+
+  it("says nothing when there is nothing new to look at", () => {
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 0,
+      }),
+    );
+
+    expect(
+      document.querySelector(".browser-titlebar-badge"),
+    ).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".browser-titlebar-button"),
+    ).not.toHaveClass("has-news");
+  });
+
+  it("lights the globe up, not only its corner", () => {
+    // Цифру в углу не видно, пока смотришь в терминал.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserUnseen: 1,
+      }),
+    );
+
+    expect(document.querySelector(".browser-titlebar-button")).toHaveClass(
+      "has-news",
+    );
+    expect(
+      document.querySelector(".browser-titlebar-pulse"),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("Titlebar notification center", () => {
@@ -285,5 +353,46 @@ describe("Titlebar notification center", () => {
     expect(
       document.querySelector(".update-live-region"),
     ).toHaveTextContent("Ожидаем системное подтверждение");
+  });
+});
+
+describe("Titlebar browser button", () => {
+  it("opens the browser from the top bar", () => {
+    const onOpenBrowser = vi.fn();
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), { onOpenBrowser }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Браузер проекта" }));
+
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+  });
+
+  it("stays available with no repository in the folder", () => {
+    // Кнопка изменений появляется только у репозитория; браузер от гита не
+    // зависит, и прятать его вместе с ней было бы неверно.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        gitCounts: null,
+      }),
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Браузер проекта" }),
+    ).toBeInTheDocument();
+  });
+
+  it("is gone entirely until a project folder is chosen", () => {
+    // Без папки браузеру нечего показывать, и нажатие не делало ничего —
+    // при этом кнопка отжималась-нажималась, то есть врала о состоянии.
+    render(
+      titlebar(controller({ sync: "settled", items: [] }), {
+        browserAvailable: false,
+      }),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Браузер проекта" }),
+    ).not.toBeInTheDocument();
   });
 });

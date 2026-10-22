@@ -3,6 +3,7 @@ import { isMac, isTauri } from "../platform";
 import {
   BellIcon,
   DiffIcon,
+  GlobeIcon,
   PlusIcon,
   FolderIcon,
   SidebarIcon,
@@ -40,6 +41,14 @@ type TitlebarProps = {
   onNewTerminal: () => void;
   onOpenSettings: () => void;
   onOpenGitChanges: () => void;
+  onOpenBrowser: () => void;
+  browserOpen: boolean;
+  // Есть ли проект, чей браузер можно показать. Без папки показывать нечего,
+  // и кнопки тоже быть не должно: нажатие в пустоту читается как поломка.
+  browserAvailable: boolean;
+  // Сколько страниц агент открыл, пока ящик был закрыт. Ноль — значка нет:
+  // у страницы нет своего окна, и это единственный её способ окликнуть.
+  browserUnseen: number;
   updater: AppUpdaterController;
   // Панели, где агент ждёт ответа, и переход к одной из них.
   waiting: readonly WaitingPanel[];
@@ -268,6 +277,42 @@ export function Titlebar(props: TitlebarProps) {
         >
           <PlusIcon />
         </button>
+        {props.browserAvailable && (
+          <button
+            type="button"
+            className={`icon-button browser-titlebar-button ${
+              props.browserUnseen > 0 ? "has-news" : ""
+            }`}
+            title={
+              props.browserUnseen > 0
+                ? t("titlebar.browserOpened", { count: props.browserUnseen })
+                : t("titlebar.browser")
+            }
+            aria-label={
+              props.browserUnseen > 0
+                ? t("titlebar.browserOpened", { count: props.browserUnseen })
+                : t("titlebar.browser")
+            }
+            aria-pressed={props.browserOpen}
+            onClick={props.onOpenBrowser}
+          >
+            <GlobeIcon />
+            {props.browserUnseen > 0 && (
+              <>
+                {/* key по счётчику: волна расходится заново на каждую новую
+                    страницу, а не только на первую. */}
+                <span
+                  key={props.browserUnseen}
+                  className="browser-titlebar-pulse"
+                  aria-hidden="true"
+                />
+                <span className="browser-titlebar-badge" aria-hidden="true">
+                  {props.browserUnseen > 9 ? "9+" : props.browserUnseen}
+                </span>
+              </>
+            )}
+          </button>
+        )}
         {props.gitCounts && (
           <button
             type="button"

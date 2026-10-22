@@ -152,6 +152,9 @@ const backendErrorKeys: Record<string, MessageKey> = {
   git_bash_install_unsupported: "error.gitBashInstallUnsupported",
   git_bash_installer_unavailable: "error.gitBashInstallerUnavailable",
   git_bash_install_failed: "error.gitBashInstallFailed",
+  browser_command_failed: "error.browserCommandFailed",
+  browser_url_unsupported: "error.browserUrlUnsupported",
+  mcp_settings_write_failed: "error.mcpSettingsWriteFailed",
 };
 
 const gitReasonKeys: Record<string, MessageKey> = {
@@ -226,7 +229,12 @@ export function describeBackendError(error: unknown): BackendFailure {
   const key =
     parsed.code === "git_command_failed" && typeof reason === "string"
       ? (gitReasonKeys[reason] ?? "error.gitCommandFailed")
-      : (backendErrorKeys[parsed.code] ?? "error.unknown");
+      : // Причина отказа браузера — это ответ самой страницы
+        // (`net::ERR_CONNECTION_REFUSED` у не поднятого дев-сервера), и без
+        // неё человеку остаётся «браузер не смог» без единой зацепки.
+        parsed.code === "browser_command_failed" && typeof reason === "string"
+        ? "error.browserCommandFailedReason"
+        : (backendErrorKeys[parsed.code] ?? "error.unknown");
   if (parsed.debug) {
     console.error("Backend error", parsed);
   }

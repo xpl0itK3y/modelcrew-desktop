@@ -254,7 +254,7 @@ fn store_dir(app: &tauri::AppHandle) -> CommandResult<PathBuf> {
 
 #[tauri::command]
 pub fn agent_sessions_all(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
 ) -> CommandResult<Vec<StoredSession>> {
     super::ensure_main_window(&window)?;
@@ -263,7 +263,7 @@ pub fn agent_sessions_all(
 
 #[tauri::command]
 pub fn agent_sessions_remember(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     panel_id: String,
     agent_id: String,
@@ -282,7 +282,7 @@ pub fn agent_sessions_remember(
 
 #[tauri::command]
 pub fn agent_sessions_forget(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     panel_id: String,
 ) -> CommandResult<()> {
@@ -292,7 +292,7 @@ pub fn agent_sessions_forget(
 
 #[tauri::command]
 pub fn agent_sessions_keep(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     keep: Vec<String>,
 ) -> CommandResult<()> {

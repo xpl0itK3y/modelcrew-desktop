@@ -29,6 +29,7 @@ dist-ssr
 .secrets/
 AGENTS.md
 .agents/
+docs/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 

@@ -592,7 +592,7 @@ pub fn commit_file_diff(root: &Path, hash: &str, path: &str) -> CommandResult<Gi
 
 #[tauri::command]
 pub async fn git_commit_file_diff(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     hash: String,
@@ -607,7 +607,7 @@ pub async fn git_commit_file_diff(
 
 #[tauri::command]
 pub async fn git_commit_files(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     hash: String,
@@ -621,7 +621,7 @@ pub async fn git_commit_files(
 
 #[tauri::command]
 pub async fn git_log(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     limit: u32,

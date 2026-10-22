@@ -18,7 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# `unstable` — несколько webview в одном окне: страница браузера плагина живёт
+# в своём webview, отдельном от окна, которое его держит.
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -43,12 +45,44 @@ reqwest = { version = "0.13", default-features = false, features = [
   "form",
   "rustls",
 ] }
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+
+[target.'cfg(unix)'.dependencies]
+# Опознание звонящего по сокету: pid у ядра и цепочка его родителей. Всё это
+# системные вызовы, обёртки над ними в std нет. Крейт и так в дереве —
+# новых зависимостей не добавляется.
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Кадр страницы снимает сам webview: WKWebView умеет отдать снимок, а больше
+# его взять неоткуда — окна у страницы нет. Крейты уже в дереве через wry,
+# новых зависимостей не добавляется.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration"] }
+objc2-app-kit = { version = "0.3", features = ["NSImage", "NSBitmapImageRep", "NSGraphics", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", features = ["NSError", "NSData", "NSDictionary", "NSString", "NSURL", "NSValue", "NSProcessInfo"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
   "Win32_System_Threading",
+] }
+# Страница плагина на Windows — это WebView2: снимок, адрес и заголовок даёт
+# он сам. Крейты уже в дереве через wry, и версии те же, что у него, —
+# новых зависимостей не добавляется.
+webview2-com = "0.38"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -58,6 +92,17 @@ windows-sys = { version = "0.59", features = [
 # Версия совпадает с той, что уже в дереве (через single-instance), — второй
 # экземпляр не тянется.
 zbus = "5"
+# Страница плагина на Linux — это WebKitGTK: снимок он отдаёт поверхностью
+# cairo, а в PNG её переводит сам cairo. Живёт страница в окне GTK без экрана.
+# Крейты уже в дереве через wry.
+webkit2gtk = "2.0"
+cairo-rs = { version = "0.18", features = ["png"] }
+gtk = "0.18"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+[dev-dependencies]
+# Живая проверка страницы смотрит в снятые кадры: размер и цвет посередине.
+# Крейт уже в дереве через tauri.
+png = "0.18"

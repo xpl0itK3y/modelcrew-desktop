@@ -33,6 +33,16 @@ import {
   GitChangesPanelLazy,
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
+import { BrowserView } from "./panels/BrowserView";
+import {
+  createBannerGate,
+  pageLabel,
+  watchPagesOpened,
+  type OpenedPage,
+} from "./browser/pagesOpened";
+import { PageOpenedNotice } from "./browser/PageOpenedNotice";
+import { syncAutoReload } from "./browser/autoReload";
+import { sendSystemNotification } from "./notifications";
 import { subscribeGitChanges, type GitChangesSummary } from "./git/gitChanges";
 import { aggregateCounts } from "./git/unifiedDiff";
 import { TerminalTab } from "./panels/TerminalTab";
@@ -66,6 +76,7 @@ import {
 import { closeGroupAnimated, togglePanelMaximized } from "./animations";
 import { defaultTerminalTitles } from "./layoutOps";
 import { watchPanelClaims } from "./crew/claimPolling";
+import { refreshMcpStatus, useBrowserPluginEnabled } from "./mcp";
 import {
   setPanelSessionResolver,
   setWorkspaceNameResolver,
@@ -124,6 +135,18 @@ const modelcrewTheme: DockviewTheme = {
   dndPanelOverlay: "group",
   tabGroupIndicator: "none",
 };
+
+/// Имя проекта, которому принадлежит корень. Без него баннер сказал бы
+/// «агент открыл страницу», не сказав, в каком проекте.
+function workspaceNameOfRoot(
+  list: { displayName: string; folder?: { selectedPath: string } | null }[],
+  root: string,
+): string | null {
+  return (
+    list.find((workspace) => workspace.folder?.selectedPath === root)
+      ?.displayName ?? null
+  );
+}
 
 export default function App() {
   const { locale, t } = useI18n();
@@ -231,6 +254,12 @@ export default function App() {
   useEffect(() => {
     applyTerminalTheme(themeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // За файлами следит бэкенд, а выбор человека хранится здесь. Говорим его
+  // сразу, а не когда откроют ящик: агент правит код и при закрытом.
+  useEffect(() => {
+    void syncAutoReload();
   }, []);
 
   // Сироты-снимки терминалов (панели/сессии удалены в прошлых запусках)
@@ -450,28 +479,30 @@ export default function App() {
     workspaceId: string;
     summary: GitChangesSummary;
   } | null>(null);
-  const activeGitWorkspaceId =
+  // Проект, с которым уже можно работать: папка выбрана и реестр её признал.
+  // Гитом дело не ограничивается — по нему же живут заявки панелей и браузер.
+  const activeProjectId =
     rootRegistryReady && activeWorkspace?.folder ? activeWorkspace.id : null;
   // Кто из панелей проекта какие файлы держит — для подписи в шапке панели.
   useEffect(
-    () => watchPanelClaims(activeGitWorkspaceId),
-    [activeGitWorkspaceId],
+    () => watchPanelClaims(activeProjectId),
+    [activeProjectId],
   );
 
   // Эффект подписки выполняется после render: сводку предыдущего проекта
   // нельзя показывать даже на этот промежуточный кадр.
   const gitSummary =
-    gitSummaryState?.workspaceId === activeGitWorkspaceId
+    gitSummaryState?.workspaceId === activeProjectId
       ? gitSummaryState.summary
       : null;
   useEffect(() => {
-    if (!activeGitWorkspaceId) {
+    if (!activeProjectId) {
       return;
     }
-    return subscribeGitChanges(activeGitWorkspaceId, (summary) => {
-      setGitSummaryState({ workspaceId: activeGitWorkspaceId, summary });
+    return subscribeGitChanges(activeProjectId, (summary) => {
+      setGitSummaryState({ workspaceId: activeProjectId, summary });
     });
-  }, [activeGitWorkspaceId]);
+  }, [activeProjectId]);
 
   // Дерево проекта: колонка, а не оверлей. По нему ходят подолгу, и
   // всплывающая панель, которая закрывается от щелчка мимо, тут мешала бы.
@@ -611,7 +642,7 @@ export default function App() {
   const [gitDrawerOpen, setGitDrawerOpen] = useState(false);
   const [gitDrawerMaximized, setGitDrawerMaximized] = useState(false);
   const liveGitDrawerWorkspaceId = gitDrawerOpen
-    ? activeGitWorkspaceId
+    ? activeProjectId
     : null;
   const gitDrawerPresence = useAnimatedPresence(liveGitDrawerWorkspaceId, 160);
   // При A -> B presence ещё один render хранит A. Пока drawer открыт,
@@ -626,13 +657,140 @@ export default function App() {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // Один нажим — один слой. Escape, уже разобранный тем, что лежит выше
+      // (поповер уведомлений, окно поверх ящика), сюда доходит помеченным:
+      // иначе вместе с верхним слоем закрывался бы и ящик под ним.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         setGitDrawerOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [gitDrawerOpen]);
+  // Браузер проекта — такой же оверлей: страница видна прямо в приложении,
+  // и терминалы под ней остаются на своих местах. Живёт он, пока включён
+  // плагин: выключенный плагин убирает браузер целиком, а не только у агентов.
+  const browserPluginEnabled = useBrowserPluginEnabled();
+  // Один раз при запуске: положение выключателя лежит на диске, до ответа
+  // глобус показан по умолчанию.
+  useEffect(() => {
+    refreshMcpStatus().catch(() => {});
+  }, []);
+  const [browserDrawerOpen, setBrowserDrawerOpen] = useState(false);
+  const [browserDrawerMaximized, setBrowserDrawerMaximized] = useState(false);
+  // Сколько страниц агент открыл, пока на них никто не смотрел, — по корню
+  // проекта. Корень, а не id: страница принадлежит браузеру проекта, и
+  // событие приходит с бэкенда, который про id воркспейсов не знает.
+  const [pagesUnseen, setPagesUnseen] = useState<Record<string, number>>({});
+  const activeRoot = activeWorkspace?.folder?.selectedPath ?? null;
+  // Ящик открыт — значит, на страницу смотрят: считать её непросмотренной
+  // и звонить о ней незачем.
+  const watchedRoot = browserDrawerOpen ? activeRoot : null;
+  const watchedRootRef = useRef(watchedRoot);
+  watchedRootRef.current = watchedRoot;
+  const liveBrowserWorkspaceId = browserDrawerOpen ? activeProjectId : null;
+  const browserPresence = useAnimatedPresence(liveBrowserWorkspaceId, 160);
+  const renderedBrowserWorkspaceId =
+    liveBrowserWorkspaceId ?? browserPresence?.item ?? null;
+  const browserDrawerClosing =
+    liveBrowserWorkspaceId === null || Boolean(browserPresence?.closing);
+  // Последняя страница, которую агент открыл мимо глаз человека, — для
+  // плашки у глобуса.
+  const [pageNotice, setPageNotice] = useState<OpenedPage | null>(null);
+  // Агент открыл страницу. У неё нет своего окна, поэтому о ней говорим сами:
+  // числом на глобусе и плашкой под ним, а когда окно не впереди — ещё и
+  // баннером системы.
+  const bannerGate = useRef(createBannerGate());
+  useEffect(() => {
+    const back = () => bannerGate.current.reset();
+    window.addEventListener("focus", back);
+    return () => window.removeEventListener("focus", back);
+  }, []);
+  useEffect(() => {
+    return watchPagesOpened((page) => {
+      // Ящик этого проекта открыт — страница уже перед глазами, стоит только
+      // вернуться в окно.
+      if (page.root !== watchedRootRef.current) {
+        setPagesUnseen((counts) => ({
+          ...counts,
+          [page.root]: (counts[page.root] ?? 0) + 1,
+        }));
+        setPageNotice(page);
+      }
+      // Пока окно впереди, баннер повторил бы плашку, а macOS его и не
+      // покажет. Пока человек не вернулся — один баннер на проект: страницы
+      // агент открывает сериями.
+      if (!document.hasFocus() && bannerGate.current.claim(page.root)) {
+        const project = workspaceNameOfRoot(
+          workspacesRef.current.list,
+          page.root,
+        );
+        void sendSystemNotification(
+          project
+            ? t("browser.pageOpenedIn", { project })
+            : t("browser.pageOpened"),
+          pageLabel(page),
+        );
+      }
+    });
+    // Подписка одна на всё время: пересобирая её, мы теряли бы события.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Открыли ящик — страницы этого проекта просмотрены, и плашка о них больше
+  // не нужна.
+  useEffect(() => {
+    if (!browserDrawerOpen || !activeRoot) {
+      return;
+    }
+    setPagesUnseen((counts) =>
+      counts[activeRoot] ? { ...counts, [activeRoot]: 0 } : counts,
+    );
+    setPageNotice((notice) => (notice?.root === activeRoot ? null : notice));
+  }, [browserDrawerOpen, activeRoot]);
+
+  // Кнопка плашки: показать страницу — в её проекте, если открыт другой.
+  const showNoticedPage = () => {
+    const root = pageNotice?.root;
+    if (!root) {
+      return;
+    }
+    if (root !== activeRoot) {
+      const owner = workspaces.list.find(
+        (workspace) => workspace.folder?.selectedPath === root,
+      );
+      if (!owner) {
+        setPageNotice(null);
+        return;
+      }
+      selectWorkspace(owner.id);
+    }
+    setGitDrawerOpen(false);
+    setBrowserDrawerOpen(true);
+    setPageNotice(null);
+  };
+
+  useEffect(() => {
+    if (!browserDrawerOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Как и у ящика изменений: закрываем только верхний слой.
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        setBrowserDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [browserDrawerOpen]);
+  // Проект пропал (папку отвязали, переключились на непривязанный) или плагин
+  // выключили — ящик закрываем сами. Иначе он остаётся «открытым» невидимо и
+  // всплывает потом, стоит появиться папке.
+  useEffect(() => {
+    if (!activeProjectId || !browserPluginEnabled) {
+      setBrowserDrawerOpen(false);
+    }
+  }, [activeProjectId, browserPluginEnabled]);
   const sidebarWorkspaces = workspaces.list.map((workspace) => {
     const sessions = workspace.sessions.map((session) => ({
       id: session.id,
@@ -671,7 +829,23 @@ export default function App() {
         onToggleFiles={() => setFilesVisible((visible) => !visible)}
         onNewTerminal={newTerminal}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenGitChanges={() => setGitDrawerOpen((open) => !open)}
+        // Ящик один за раз: они лежат в одном углу, и второй просто накрыл бы
+        // первый — с виду тот бы пропал, хотя остался бы открытым.
+        onOpenGitChanges={() => {
+          setGitDrawerOpen(!gitDrawerOpen);
+          if (!gitDrawerOpen) {
+            setBrowserDrawerOpen(false);
+          }
+        }}
+        browserOpen={browserDrawerOpen}
+        browserAvailable={activeProjectId !== null && browserPluginEnabled}
+        browserUnseen={activeRoot ? (pagesUnseen[activeRoot] ?? 0) : 0}
+        onOpenBrowser={() => {
+          setBrowserDrawerOpen(!browserDrawerOpen);
+          if (!browserDrawerOpen) {
+            setGitDrawerOpen(false);
+          }
+        }}
         updater={updater}
         waiting={waitingPanels}
         onRevealPanel={revealPanel}
@@ -721,7 +895,7 @@ export default function App() {
         </div>
         {sidebarVisible && (
           <ResizeHandle
-            width={widths.sidebar}
+            size={widths.sidebar}
             min={widthLimits("sidebar").min}
             max={widthLimitsWithin("sidebar", widths.sidebar, dockWidth).max}
             label={t("sidebar.title")}
@@ -757,7 +931,7 @@ export default function App() {
         )}
         {treePresence && !treePresence.closing && (
           <ResizeHandle
-            width={widths.tree}
+            size={widths.tree}
             min={widthLimits("tree").min}
             max={widthLimitsWithin("tree", widths.tree, dockWidth).max}
             label={t("files.panelTitle")}
@@ -785,7 +959,7 @@ export default function App() {
         )}
         {openFiles.length > 0 && (
           <ResizeHandle
-            width={widths.editor}
+            size={widths.editor}
             min={widthLimits("editor").min}
             max={widthLimitsWithin("editor", widths.editor, dockWidth).max}
             label={t("files.editorTitle")}
@@ -828,13 +1002,13 @@ export default function App() {
           )}
           {renderedGitDrawerWorkspaceId && (
             <aside
-              className={`git-drawer ${
+              className={`drawer git-drawer ${
                 gitDrawerMaximized ? "is-maximized" : ""
               } ${gitDrawerClosing ? "is-closing" : ""}`}
               aria-label={t("git.panelTitle")}
             >
-              <div className="git-drawer-header">
-                <span className="git-drawer-title">{t("git.panelTitle")}</span>
+              <div className="drawer-header">
+                <span className="drawer-title">{t("git.panelTitle")}</span>
                 {gitSummary?.isRepo && (
                   <span className="git-drawer-branch" title={t("git.branch")}>
                     {gitSummary.branch ?? t("git.detachedHead")}
@@ -842,7 +1016,7 @@ export default function App() {
                     {gitSummary.behind ? ` ↓${gitSummary.behind}` : ""}
                   </span>
                 )}
-                <span className="git-drawer-spacer" />
+                <span className="drawer-spacer" />
                 {gitSummary?.isRepo &&
                   aggregateCounts(gitSummary).files > 0 && (
                     <span className="git-file-counts">
@@ -881,8 +1055,64 @@ export default function App() {
               <GitChangesViewLazy workspaceId={renderedGitDrawerWorkspaceId} />
             </aside>
           )}
+          {renderedBrowserWorkspaceId && (
+            <aside
+              className={`drawer browser-drawer ${
+                browserDrawerMaximized ? "is-maximized" : ""
+              } ${browserDrawerClosing ? "is-closing" : ""}`}
+              aria-label={t("browser.panelTitle")}
+            >
+              <div className="drawer-header">
+                <span className="drawer-title">
+                  {t("browser.panelTitle")}
+                </span>
+                <span className="drawer-spacer" />
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={t(
+                    browserDrawerMaximized
+                      ? "browser.restore"
+                      : "browser.maximize",
+                  )}
+                  aria-label={t(
+                    browserDrawerMaximized
+                      ? "browser.restore"
+                      : "browser.maximize",
+                  )}
+                  aria-pressed={browserDrawerMaximized}
+                  onClick={() => setBrowserDrawerMaximized((value) => !value)}
+                >
+                  <MaximizeIcon />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={t("browser.close")}
+                  aria-label={t("browser.close")}
+                  onClick={() => setBrowserDrawerOpen(false)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <BrowserView workspaceId={renderedBrowserWorkspaceId} />
+            </aside>
+          )}
         </main>
       </div>
+      <PageOpenedNotice
+        page={pageNotice}
+        more={
+          pageNotice ? Math.max(0, (pagesUnseen[pageNotice.root] ?? 0) - 1) : 0
+        }
+        otherProject={
+          pageNotice && pageNotice.root !== activeRoot
+            ? workspaceNameOfRoot(workspaces.list, pageNotice.root)
+            : null
+        }
+        onOpen={showNoticedPage}
+        onDismiss={() => setPageNotice(null)}
+      />
       {toastPresence && (
         <div
           className={`toast ${toastPresence.closing ? "is-closing" : ""}`}

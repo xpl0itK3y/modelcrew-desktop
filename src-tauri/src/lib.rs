@@ -14,6 +14,13 @@ mod agent_hooks;
 mod agent_session_store;
 mod agent_session_watch;
 mod agent_sessions;
+mod browser_actions;
+mod browser_auto_reload;
+mod browser_input;
+mod browser_page;
+#[cfg(debug_assertions)]
+mod browser_page_check;
+mod browser_view;
 mod clipboard_images;
 mod command_error;
 mod crew;
@@ -26,7 +33,14 @@ mod git_sync;
 mod github_auth;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 mod linux_updater;
+mod mcp;
+mod mcp_register;
+mod mcp_settings;
+mod mcp_stdio;
 mod panel_snapshots;
+mod peer;
+#[cfg(windows)]
+mod pipe;
 mod pty;
 mod terminal_snapshots;
 mod update_cache;
@@ -39,14 +53,18 @@ use agent_session_store::{
 };
 use agent_session_watch::agent_sessions_watch;
 use agent_sessions::{agent_session_locate, agent_session_locate_turn};
+use browser_page::AppOnly;
+use browser_view::{
+    browser_auto_reload, browser_console, browser_dock, browser_frame, browser_go, browser_step,
+    browser_undock,
+};
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
 use crew::crew_claims;
 use file_tree::{
     workspace_create_entry, workspace_delete_entry, workspace_read_dir, workspace_read_file,
-    workspace_read_media,
-    workspace_rename_entry, workspace_reveal_entry, workspace_search_tree, workspace_tree_unwatch,
-    workspace_tree_watch, workspace_write_file, TreeWatchState,
+    workspace_read_media, workspace_rename_entry, workspace_reveal_entry, workspace_search_tree,
+    workspace_tree_unwatch, workspace_tree_watch, workspace_write_file, TreeWatchState,
 };
 use git_branches::{
     git_branches, git_create_branch, git_delete_branch, git_merge_ref, git_rebase_onto,
@@ -55,8 +73,7 @@ use git_branches::{
 use git_changes::{
     git_abort_operation, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
     git_continue_operation, git_file_diff, git_head_file, git_read_file, git_revert_file,
-    git_write_file,
-    GitWatchState,
+    git_write_file, GitWatchState,
 };
 use git_history::{git_commit_action, git_delete_tag, git_drop_commit, git_reword_commit};
 use git_log::{git_commit_file_diff, git_commit_files, git_log};
@@ -72,6 +89,7 @@ use linux_updater::{
     updater_install_linux_package, updater_install_target, updater_prepare_linux_package,
     LinuxUpdaterState,
 };
+use mcp_settings::{mcp_set_enabled, mcp_status};
 use panel_snapshots::{panel_snapshot_restore, panel_snapshots};
 use pty::{GitBashAvailability, PtyManager, ShellInfo, SpawnOptions};
 use serde::Serialize;
@@ -182,7 +200,7 @@ impl From<BindOutcome> for WorkspaceRootResult {
     }
 }
 
-fn ensure_main_window(window: &tauri::WebviewWindow) -> CommandResult<()> {
+fn ensure_main_window(window: &tauri::Webview) -> CommandResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
@@ -202,28 +220,36 @@ fn process_names(pids: &[i32]) -> std::collections::HashMap<i32, String> {
         .map(|pid| pid.to_string())
         .collect::<Vec<_>>()
         .join(",");
+    // Без `comm=`: рядом с другими колонками ps подгоняет её под шестнадцать
+    // символов и молча режет. Агент, запущенный обёрткой по полному пути,
+    // превращался в «/Users/denis/.lo», а панель подписывалась «.lo».
+    // В `command=` argv приходит целиком — там же и первый токен.
     let Ok(output) = std::process::Command::new("ps")
-        .args(["-ww", "-o", "pid=,comm=,command=", "-p", &list])
+        .args(["-ww", "-o", "pid=,command=", "-p", &list])
         .output()
     else {
         return names;
     };
     for line in String::from_utf8_lossy(&output.stdout).lines() {
-        // Колонки: pid, comm (один токен), затем argv процесса.
-        let mut tokens = line.split_whitespace();
-        let (Some(pid_str), Some(comm)) = (tokens.next(), tokens.next()) else {
-            continue;
-        };
-        let Ok(pid) = pid_str.parse::<i32>() else {
-            continue;
-        };
-        let argv: Vec<&str> = tokens.collect();
-        let name = friendly_name(comm, &argv);
-        if !name.is_empty() {
+        if let Some((pid, name)) = name_of_ps_line(line) {
             names.insert(pid, name);
         }
     }
     names
+}
+
+/// Разбор строки `ps -o pid=,command=`: номер процесса и подпись для панели.
+///
+/// Отдельно от вызова ps, чтобы проверять разбор без живых процессов: беда
+/// была именно здесь, а воспроизвести её живьём можно только на машине, где
+/// нужный агент лежит по достаточно длинному пути.
+#[cfg(unix)]
+fn name_of_ps_line(line: &str) -> Option<(i32, String)> {
+    let mut tokens = line.split_whitespace();
+    let pid = tokens.next()?.parse::<i32>().ok()?;
+    let argv: Vec<&str> = tokens.collect();
+    let name = friendly_name(argv.first()?, &argv);
+    (!name.is_empty()).then_some((pid, name))
 }
 
 /// Имя для подписи панели. Обычно это basename исполняемого файла, но для
@@ -344,7 +370,7 @@ fn spawn_title_watcher(app: tauri::AppHandle) {
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn pty_create(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyManager>,
     roots: tauri::State<'_, WorkspaceRoots>,
@@ -358,6 +384,9 @@ fn pty_create(
 ) -> CommandResult<PtyCreateResult> {
     ensure_main_window(&window)?;
     let cwd = roots.resolve(&workspace_id)?;
+    // Обёртки агентов: они нужны только панели, и путь к ним видит только её
+    // оболочка.
+    let shims = mcp_register::shims(&app, mcp_settings::enabled(&app));
     // Своя история команд у каждой панели (по умолчанию включено).
     let history_dir = if isolated_history.unwrap_or(true) {
         let home = app.path().home_dir().map_err(|error| {
@@ -367,6 +396,7 @@ fn pty_create(
             &terminal_snapshots::history_base(&app)?,
             &id,
             &home,
+            shims.as_deref(),
         )?)
     } else {
         None
@@ -382,6 +412,7 @@ fn pty_create(
             cols,
             rows,
             history_dir,
+            agent_shims: shims,
         },
         move |bytes| {
             let _ = on_output.send(InvokeResponseBody::Raw(bytes));
@@ -403,13 +434,13 @@ fn list_shells() -> Vec<ShellInfo> {
 }
 
 #[tauri::command]
-fn git_bash_status(window: tauri::WebviewWindow) -> CommandResult<GitBashAvailability> {
+fn git_bash_status(window: tauri::Webview) -> CommandResult<GitBashAvailability> {
     ensure_main_window(&window)?;
     Ok(pty::git_bash_availability())
 }
 
 #[tauri::command]
-async fn git_bash_install(window: tauri::WebviewWindow) -> CommandResult<ShellInfo> {
+async fn git_bash_install(window: tauri::Webview) -> CommandResult<ShellInfo> {
     ensure_main_window(&window)?;
     tauri::async_runtime::spawn_blocking(pty::install_git_bash)
         .await
@@ -418,7 +449,7 @@ async fn git_bash_install(window: tauri::WebviewWindow) -> CommandResult<ShellIn
 
 #[tauri::command]
 fn pty_write(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, PtyManager>,
     id: String,
     data: String,
@@ -429,7 +460,7 @@ fn pty_write(
 
 #[tauri::command]
 fn pty_resize(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, PtyManager>,
     id: String,
     cols: u16,
@@ -441,7 +472,7 @@ fn pty_resize(
 
 #[tauri::command]
 fn pty_kill(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, PtyManager>,
     id: String,
 ) -> CommandResult<()> {
@@ -454,16 +485,20 @@ fn pty_kill(
 /// updater мог завершить установку и контролируемый relaunch.
 #[tauri::command]
 fn pty_kill_all(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
+    app: tauri::AppHandle,
     state: tauri::State<'_, PtyManager>,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
+    // Вместе с шеллами закрываем и страницы: команда зовётся перед
+    // обновлением, и пережившее его окно осталось бы висеть без хозяина.
+    browser_page::close_all(&app);
     state.kill_all()
 }
 
 #[tauri::command]
 fn workspace_register_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -476,7 +511,7 @@ fn workspace_register_root(
 
 #[tauri::command]
 fn workspace_reconcile_roots(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_ids: Vec<String>,
 ) -> CommandResult<()> {
@@ -486,7 +521,7 @@ fn workspace_reconcile_roots(
 
 #[tauri::command]
 fn workspace_validate_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<String> {
@@ -501,7 +536,7 @@ fn workspace_validate_root(
 
 #[tauri::command]
 async fn workspace_pick_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     locale: String,
@@ -526,11 +561,17 @@ async fn workspace_pick_root(
 
 #[tauri::command]
 fn workspace_unregister_root(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
+    app: tauri::AppHandle,
     state: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
+    // Страница живёт при проекте: папку отвязали — её держать не для кого.
+    // Корень берём до отвязки, после неё он уже не разрешится.
+    if let Ok(root) = state.resolve(&workspace_id) {
+        browser_page::close(&app, &root.to_string_lossy());
+    }
     state.unbind(&workspace_id)
 }
 
@@ -544,7 +585,7 @@ fn workspace_unregister_root(
 // и на холодном или сетевом домашнем каталоге это ожидание видно глазом.
 #[tauri::command]
 async fn agent_hook_channels(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
 ) -> CommandResult<agent_hooks::AgentHookChannels> {
     ensure_main_window(&window)?;
@@ -555,7 +596,7 @@ async fn agent_hook_channels(
 // иконках доков Linux (KDE, GNOME с доком, Cinnamon, Unity); на Windows
 // числовых бейджей нет — красная точка поверх иконки в панели задач.
 #[tauri::command]
-fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandResult<()> {
+fn app_set_badge(window: tauri::Webview, count: Option<i64>) -> CommandResult<()> {
     ensure_main_window(&window)?;
     let count = count.filter(|value| *value > 0);
 
@@ -565,14 +606,14 @@ fn app_set_badge(window: tauri::WebviewWindow, count: Option<i64>) -> CommandRes
             let rgba = draw_badge_overlay(&badge_text(value));
             tauri::image::Image::new_owned(rgba, BADGE_SIZE as u32, BADGE_SIZE as u32)
         });
-        window.set_overlay_icon(icon).map_err(|error| {
+        window.window().set_overlay_icon(icon).map_err(|error| {
             CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
         })?;
     }
 
     #[cfg(target_os = "macos")]
     {
-        window.set_badge_count(count).map_err(|error| {
+        window.window().set_badge_count(count).map_err(|error| {
             CommandError::new(ErrorCode::AppBadgeUpdateFailed).with_debug(error)
         })?;
     }
@@ -760,7 +801,7 @@ fn send_unity_badge(count: Option<i64>, app_uri: &str) -> Result<(), zbus::Error
 
 #[tauri::command]
 fn app_set_locale(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     locale: String,
 ) -> CommandResult<()> {
@@ -820,7 +861,9 @@ fn build_macos_menu<R: tauri::Runtime>(
 
 #[cfg(desktop)]
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
+    // Окно, а не webview-окно: в главном окне может оказаться не один webview,
+    // и тогда Tauri не признаёт его webview-окном.
+    if let Some(window) = app.get_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -923,6 +966,40 @@ pub fn run_agent_hook() -> Option<i32> {
     agent_hook_cli::run_if_hook()
 }
 
+/// Запуск шимом MCP: тем же приёмом, что и хук, но разговор длинный —
+/// процесс живёт, пока агент держит сессию. `None` — запуск обычный.
+pub fn run_mcp_shim() -> Option<i32> {
+    mcp_stdio::run_if_shim()
+}
+
+/// Запуск живой проверкой страницы плагина — его делает тест
+/// `browser_page_live`. В выпуске такого запуска нет. `None` — запуск обычный.
+pub fn run_browser_page_check() -> Option<i32> {
+    #[cfg(debug_assertions)]
+    return browser_page_check::run_if_check();
+    #[cfg(not(debug_assertions))]
+    None
+}
+
+/// Плагины приложения. Они служат его окну, и в страницу проекта их скрипты
+/// не ставим. Живая проверка страницы поднимается с ними же: иначе она не
+/// увидела бы, что они делают со страницей.
+fn with_app_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
+        .plugin(AppOnly(tauri_plugin_opener::init()))
+        .plugin(AppOnly(tauri_plugin_dialog::init()))
+        .plugin(AppOnly(tauri_plugin_process::init()))
+        .plugin(AppOnly(tauri_plugin_notification::init()))
+}
+
+/// Сборка приложения: настройки, иконки и интерфейс.
+///
+/// Одна на все запуски: макрос встраивает интерфейс в программу, и второй его
+/// вызов встроил бы его второй раз.
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer_by_default();
@@ -938,21 +1015,20 @@ pub fn run() {
         show_main_window(app);
     }));
 
-    let builder = builder
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
-            #[cfg(desktop)]
-            app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
-            spawn_title_watcher(app.handle().clone());
-            agent_hooks::install(app.handle());
-            #[cfg(desktop)]
-            setup_tray(app)?;
-            Ok(())
-        });
+    let builder = with_app_plugins(builder).setup(|app| {
+        #[cfg(desktop)]
+        app.handle()
+            .plugin(AppOnly(tauri_plugin_updater::Builder::new().build()))?;
+        spawn_title_watcher(app.handle().clone());
+        agent_hooks::install(app.handle());
+        mcp::serve(app.handle().clone());
+        // Наружу, в общие конфиги агентов, мы не пишем: плагин внутренний.
+        // Записи прежних версий снимаем.
+        mcp_register::clean_shared_configs(app.handle());
+        #[cfg(desktop)]
+        setup_tray(app)?;
+        Ok(())
+    });
 
     // На macOS Tauri ставит дефолтное меню, чей пункт Close Window съедает
     // Cmd+W раньше веб-вью. Собираем своё меню без Close/New, оставляя
@@ -966,6 +1042,9 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
+                    // Страница, стоявшая в панели, уходит к себе: в спрятанном
+                    // окне она перестала бы рисоваться для агента.
+                    browser_page::undock_all(window.app_handle());
                     let _ = window.hide();
                 }
             }
@@ -1001,6 +1080,15 @@ pub fn run() {
             agent_sessions_keep,
             agent_sessions_watch,
             crew_claims,
+            browser_frame,
+            browser_go,
+            browser_step,
+            browser_auto_reload,
+            browser_console,
+            browser_dock,
+            browser_undock,
+            mcp_status,
+            mcp_set_enabled,
             panel_snapshots,
             panel_snapshot_restore,
             git_changes_summary,
@@ -1065,12 +1153,19 @@ pub fn run() {
             updater_prepare_self_update,
             updater_install_self_update
         ])
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("error while building tauri application")
         .run(|app, event| match event {
             // Гарантированная уборка шеллов при любом пути выхода — иначе зомби.
             RunEvent::Exit => {
                 let _ = app.state::<PtyManager>().kill_all();
+                // Окно страницы стоит за краем экрана: не закрыв его, мы
+                // оставили бы приложению повод не завершаться.
+                browser_page::close_all(app);
+                // Дверь уходит вместе с приложением. Оставленный файл сокета —
+                // вход, за которым никого нет: агент стучится и получает отказ
+                // соединения вместо честного «сервера тут сейчас не бывает».
+                mcp::stop();
             }
             // Клик по иконке в доке (macOS) при спрятанном окне — вернуть его.
             #[cfg(target_os = "macos")]
@@ -1095,9 +1190,27 @@ mod tests {
         ("lib.rs", LIB_RS),
         ("agent_hook_cli.rs", include_str!("agent_hook_cli.rs")),
         ("agent_hooks.rs", include_str!("agent_hooks.rs")),
-        ("agent_session_store.rs", include_str!("agent_session_store.rs")),
-        ("agent_session_watch.rs", include_str!("agent_session_watch.rs")),
+        (
+            "agent_session_store.rs",
+            include_str!("agent_session_store.rs"),
+        ),
+        (
+            "agent_session_watch.rs",
+            include_str!("agent_session_watch.rs"),
+        ),
         ("agent_sessions.rs", include_str!("agent_sessions.rs")),
+        ("browser_actions.rs", include_str!("browser_actions.rs")),
+        (
+            "browser_auto_reload.rs",
+            include_str!("browser_auto_reload.rs"),
+        ),
+        ("browser_input.rs", include_str!("browser_input.rs")),
+        ("browser_page.rs", include_str!("browser_page.rs")),
+        (
+            "browser_page_check.rs",
+            include_str!("browser_page_check.rs"),
+        ),
+        ("browser_view.rs", include_str!("browser_view.rs")),
         ("clipboard_images.rs", include_str!("clipboard_images.rs")),
         ("command_error.rs", include_str!("command_error.rs")),
         ("crew.rs", include_str!("crew.rs")),
@@ -1109,7 +1222,13 @@ mod tests {
         ("git_sync.rs", include_str!("git_sync.rs")),
         ("github_auth.rs", include_str!("github_auth.rs")),
         ("linux_updater.rs", include_str!("linux_updater.rs")),
+        ("mcp.rs", include_str!("mcp.rs")),
+        ("mcp_register.rs", include_str!("mcp_register.rs")),
+        ("mcp_settings.rs", include_str!("mcp_settings.rs")),
+        ("mcp_stdio.rs", include_str!("mcp_stdio.rs")),
         ("panel_snapshots.rs", include_str!("panel_snapshots.rs")),
+        ("peer.rs", include_str!("peer.rs")),
+        ("pipe.rs", include_str!("pipe.rs")),
         ("pty.rs", include_str!("pty.rs")),
         (
             "terminal_snapshots.rs",
@@ -1133,6 +1252,13 @@ mod tests {
         "agent_sessions_watch",
         "app_set_badge",
         "app_set_locale",
+        "browser_auto_reload",
+        "browser_console",
+        "browser_dock",
+        "browser_frame",
+        "browser_go",
+        "browser_step",
+        "browser_undock",
         "crew_claims",
         "git_abort_operation",
         "git_bash_install",
@@ -1175,6 +1301,8 @@ mod tests {
         "github_device_start",
         "github_logout",
         "list_shells",
+        "mcp_set_enabled",
+        "mcp_status",
         "panel_snapshot_restore",
         "panel_snapshots",
         "pty_create",
@@ -1586,6 +1714,31 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn the_panel_takes_its_name_from_argv_not_from_a_cut_off_column() {
+        // Рядом с другими колонками ps подгоняет comm под шестнадцать символов.
+        // Обёртка запускает агента полным путём, и подпись панели
+        // превращалась в «.lo» — обрезок от /Users/denis/.local/bin/claude.
+        assert_eq!(
+            name_of_ps_line(
+                "4242 /Users/denis/.local/bin/claude --mcp-config=/Users/denis/Library/Application Support/com.modelcrew.desktop/agent-shims/mcp.json"
+            ),
+            Some((4242, "claude".to_string())),
+            "полный путь до агента обязан читаться как имя агента"
+        );
+        // Интерпретатор по длинному пути разворачивается так же, как короткий.
+        assert_eq!(
+            name_of_ps_line("77 /opt/homebrew/bin/node /Users/denis/.local/bin/codex.js --resume"),
+            Some((77, "codex".to_string()))
+        );
+        // Строки не про процесс — например, продолжение argv с переводом
+        // строки — не должны становиться панелями.
+        assert_eq!(name_of_ps_line("не число и не процесс"), None);
+        assert_eq!(name_of_ps_line("4242"), None);
+        assert_eq!(name_of_ps_line(""), None);
+    }
+
+    #[test]
     fn friendly_name_never_leaks_a_path_or_a_flag_into_the_panel_title() {
         // comm и argv приходят из чужого процесса — его мог запустить код из
         // открытого репозитория, а имя становится подписью панели.
@@ -1653,7 +1806,10 @@ mod tests {
     fn the_capability_allowlist_stays_minimal() {
         let capability: serde_json::Value = serde_json::from_str(CAPABILITY_JSON).unwrap();
 
-        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        // Права — webview интерфейса, а не окну: права окна достаются каждому
+        // webview в нём, а страница проекта живёт в главном окне.
+        assert_eq!(capability["webviews"], serde_json::json!(["main"]));
+        assert!(capability.get("windows").is_none(), "{capability}");
 
         // Точный список: любая новая привилегия должна пройти через правку
         // теста, потому что capability обходит охрану #[tauri::command].

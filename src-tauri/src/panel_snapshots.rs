@@ -207,7 +207,7 @@ pub fn restore_from_snapshot(root: &Path, panel_id: &str, path: &str) -> Command
 
 #[tauri::command]
 pub async fn panel_snapshots(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
 ) -> CommandResult<Vec<PanelSnapshotView>> {
@@ -220,7 +220,7 @@ pub async fn panel_snapshots(
 
 #[tauri::command]
 pub async fn panel_snapshot_restore(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     panel_id: String,

@@ -1,0 +1,684 @@
+/* ---------- Страница браузера внутри приложения ---------- */
+
+/* Шире ящика изменений: страница свёрстана под ширину окна браузера, и в
+   колонке под diff она читалась бы полоской. */
+.browser-drawer {
+  width: min(860px, calc(100% - 68px));
+}
+
+.browser-view {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.browser-address-bar {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--mc-border);
+}
+
+/* Кнопки шага — под рост адресной строки, а не заголовка ящика. */
+.browser-address-bar .icon-button {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+.browser-address {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-panel);
+  color: var(--mc-text);
+  font-size: 12px;
+  /* Адрес читают по началу, а не по хвосту: пусть обрезается справа. */
+  text-overflow: ellipsis;
+}
+
+.browser-address:focus {
+  border-color: var(--mc-accent-border);
+  outline: none;
+}
+
+/* Выключатель горит, пока включён: по нему видно, обновится ли страница
+   сама, ещё до первой правки. */
+.browser-auto-reload[aria-pressed="true"] {
+  color: var(--mc-accent);
+}
+
+.browser-open {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font-size: 12px;
+}
+
+.browser-open:hover:not(:disabled) {
+  background: var(--mc-button-hover);
+}
+
+.browser-open:disabled {
+  color: var(--mc-text-faint);
+}
+
+/* Полоса загрузки лежит на нижней кромке адресной строки, а не отдельной
+   строкой: появляясь и пропадая, та сдвигала бы место страницы, и живая
+   страница дёргалась бы на каждой загрузке. Сколько осталось, webview не
+   говорит, поэтому полоса бежит, а не заполняется. */
+.browser-progress {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.browser-progress::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+  width: 30%;
+  background: var(--mc-accent);
+  content: "";
+  animation: browser-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes browser-progress {
+  to {
+    left: 100%;
+  }
+}
+
+.browser-failure {
+  flex: none;
+  margin: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--mc-danger-border);
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+  font-size: 11.5px;
+}
+
+/* Сцена вокруг страницы. Компьютер — страница во всю сцену; планшет и
+   телефон — место их размера сверху посередине, а что вокруг, видно как
+   рамку, не как страницу. */
+.browser-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--mc-bg);
+}
+
+.browser-stage.is-device {
+  align-items: flex-start;
+  padding: 12px;
+  background: var(--mc-panel-header);
+}
+
+.browser-page {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  background: var(--mc-bg);
+}
+
+/* Размер экрана приходит из разметки. Не влезает — ужимается до сцены:
+   место, вылезшее за край, страница заняла бы целиком, поверх соседей. */
+.browser-page.is-device {
+  flex: none;
+  max-width: 100%;
+  max-height: 100%;
+  outline: 1px solid var(--mc-border);
+  box-shadow: 0 6px 20px var(--mc-shadow);
+}
+
+/* Кадр снят в своём размере (1280×800) и здесь только ужимается по ширине:
+   растянутый до высоты ящика, он потерял бы пропорции страницы. */
+.browser-frame {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ---------- Строка под страницей ---------- */
+
+.browser-status-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border-top: 1px solid var(--mc-border);
+  color: var(--mc-text-muted);
+  font-size: 11px;
+}
+
+.browser-status-bar .icon-button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+/* Кнопка консоли со счётчиками: ошибку видно, даже пока консоль закрыта. */
+.browser-console-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: var(--mc-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.browser-console-toggle:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}
+
+.browser-console-toggle[aria-pressed="true"] {
+  background: var(--mc-hover-strong);
+  color: var(--mc-text-bright);
+}
+
+.browser-console-count {
+  min-width: 14px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.browser-console-count.is-error {
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+}
+
+.browser-console-count.is-warning {
+  background: color-mix(in srgb, var(--mc-git-modified) 18%, transparent);
+  color: var(--mc-git-modified);
+}
+
+.browser-status-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Размер страницы: на вид — подпись, а щёлкни — поле. */
+.browser-screen-size {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.browser-screen-side {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.browser-screen-field {
+  width: 4.6ch;
+  box-sizing: content-box;
+  padding: 1px 3px;
+  border: 1px solid transparent;
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+.browser-screen-field:hover {
+  border-color: var(--mc-border);
+}
+
+.browser-screen-field:focus {
+  border-color: var(--mc-accent-border);
+  outline: none;
+  background: var(--mc-bg);
+  color: var(--mc-text-bright);
+}
+
+/* Вписанный экран больше ящика: страница ужата, вёрстка уже не та. */
+.browser-screen-size.is-squeezed {
+  color: var(--mc-git-modified);
+}
+
+.browser-devices {
+  display: flex;
+  gap: 2px;
+}
+
+.browser-device[aria-pressed="true"] {
+  background: var(--mc-hover-strong);
+  color: var(--mc-text-bright);
+}
+
+/* Другие экраны: на вид — кнопка со стрелкой, а под ней прозрачный родной
+   список, который и ловит щелчок. */
+.browser-screens {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--mc-radius-xs);
+  color: var(--mc-text-muted);
+}
+
+.browser-screens:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}
+
+.browser-screens:focus-within {
+  box-shadow: inset 0 0 0 1px var(--mc-accent-border);
+}
+
+.browser-screens-list {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ---------- Консоль страницы ---------- */
+
+/* Под страницей, а не поверх: живую страницу наш HTML не перекрывает, и
+   место под неё просто становится ниже. */
+.browser-console {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  height: clamp(140px, 36%, 360px);
+  border-top: 1px solid var(--mc-border);
+  background: var(--mc-panel);
+}
+
+/* Край для перетаскивания — поверх верхней границы и чуть ниже неё, но не
+   выше: выше начинается место страницы. */
+.browser-console > .resize-handle {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  left: 0;
+  margin: 0;
+}
+
+.browser-console-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.browser-console-bar .icon-button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.browser-console-filters {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.browser-console-filter {
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: var(--mc-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.browser-console-filter:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text-bright);
+}
+
+.browser-console-filter[aria-pressed="true"] {
+  background: var(--mc-hover-strong);
+  color: var(--mc-text-bright);
+}
+
+.browser-console-search {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-bg);
+  color: var(--mc-text);
+  font-size: 11px;
+}
+
+.browser-console-search:focus {
+  border-color: var(--mc-accent-border);
+  outline: none;
+}
+
+/* Текст сообщений выделяется и копируется: его вставляют в вопрос агенту. */
+.browser-console-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.browser-console-entry {
+  display: flex;
+  gap: 8px;
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--mc-panel-border);
+  color: var(--mc-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.browser-console-entry.is-error {
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+}
+
+.browser-console-entry.is-warning {
+  background: color-mix(in srgb, var(--mc-git-modified) 10%, transparent);
+  color: var(--mc-git-modified);
+}
+
+/* Значок и число повторов — в первой строке сообщения, какой бы длины оно ни
+   было, и одной ширины: текст у всех строк начинается ровно. */
+.browser-console-icon {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 2.5px;
+}
+
+.browser-console-repeat {
+  flex: none;
+  align-self: flex-start;
+  min-width: 12px;
+  height: 14px;
+  margin-top: 1.5px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.browser-console-entry.is-log .browser-console-repeat {
+  color: var(--mc-text-muted);
+}
+
+.browser-console-tag {
+  flex: none;
+  font-weight: 600;
+}
+
+.browser-console-text {
+  min-width: 0;
+}
+
+/* Откуда сообщение — справа, как место в инспекторе. Длинный адрес не
+   теснит текст: обрезан, а целиком — в подсказке. */
+.browser-console-source {
+  flex: 0 1 auto;
+  max-width: 40%;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--mc-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-console-note,
+.browser-console-empty {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--mc-text-muted);
+}
+
+.browser-empty {
+  margin: auto;
+  padding: 24px;
+  color: var(--mc-text-muted);
+  font-size: 12px;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* ---------- Значок на глобусе ---------- */
+
+/* Страницу открывает агент, а у страницы нет своего окна: значок на кнопке —
+   единственный способ сказать человеку, что там появилось новое. Считается
+   от последнего раза, когда ящик открывали. */
+.browser-titlebar-button {
+  position: relative;
+  overflow: visible;
+}
+
+.browser-titlebar-badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: inline-flex;
+  min-width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border: 1px solid var(--mc-panel);
+  border-radius: 999px;
+  background: var(--mc-accent);
+  /* Цифра на акценте: тёмная на светлом кружке, а не текстом интерфейса —
+     тот на акцентном фоне теряется в половине тем. */
+  color: var(--mc-bg);
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Цифру в углу легко не заметить, пока смотришь в терминал. Сам глобус
+   загорается акцентом, а от него пару раз расходится волна — на каждую новую
+   страницу заново. */
+.browser-titlebar-button.has-news {
+  color: var(--mc-accent);
+}
+
+.browser-titlebar-pulse {
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  pointer-events: none;
+  animation: browser-titlebar-pulse 1.2s ease-out 3;
+  opacity: 0;
+}
+
+@keyframes browser-titlebar-pulse {
+  from {
+    box-shadow: 0 0 0 0 var(--mc-accent);
+    opacity: 0.7;
+  }
+  to {
+    box-shadow: 0 0 0 9px var(--mc-accent);
+    opacity: 0;
+  }
+}
+
+/* ---------- Плашка «агент открыл страницу» ---------- */
+
+/* Под глобусом, в правом углу: туда человек и посмотрит, а кнопка рядом
+   показывает саму страницу. Ящик в это время закрыт — открытый плашку не
+   вызывает, — так что страницу она не заслоняет. */
+.page-opened-notice {
+  position: fixed;
+  top: calc(var(--mc-titlebar-height) + 8px);
+  right: 12px;
+  z-index: 100;
+  display: flex;
+  max-width: min(440px, calc(100vw - 24px));
+  box-sizing: border-box;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--mc-accent) 45%, var(--mc-border));
+  border-radius: var(--mc-radius-sm);
+  background: color-mix(in srgb, var(--mc-accent) 8%, var(--mc-surface-raised));
+  color: var(--mc-text);
+  font-size: 12.5px;
+  box-shadow: 0 8px 24px var(--mc-shadow);
+  animation: page-opened-notice-in 180ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.page-opened-notice.is-closing {
+  animation: page-opened-notice-out 160ms ease-in forwards;
+  pointer-events: none;
+}
+
+.page-opened-notice-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--mc-accent);
+}
+
+.page-opened-notice-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.page-opened-notice-title {
+  color: var(--mc-text-bright);
+  font-weight: 600;
+}
+
+.page-opened-notice-page {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  color: var(--mc-text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* Длинный заголовок режется, а «и ещё N» остаётся видно целиком. */
+.page-opened-notice-label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.page-opened-notice-more {
+  flex: none;
+}
+
+.page-opened-notice-open {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font-size: 12px;
+}
+
+.page-opened-notice-open:hover:not(:disabled) {
+  background: var(--mc-button-hover);
+}
+
+.page-opened-notice-close {
+  flex: none;
+}
+
+@keyframes page-opened-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-opened-notice-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Без бега: полоса просто стоит во всю ширину, пока страница грузится. */
+  .browser-progress::before {
+    left: 0;
+    width: 100%;
+    opacity: 0.6;
+    animation: none;
+  }
+
+  .browser-titlebar-pulse,
+  .page-opened-notice {
+    animation: none;
+  }
+
+  .page-opened-notice.is-closing {
+    animation: none;
+    opacity: 0;
+  }
+}

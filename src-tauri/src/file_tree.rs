@@ -467,7 +467,7 @@ pub fn absolute_path(root: &Path, path: &str) -> CommandResult<String> {
 
 #[tauri::command]
 pub async fn workspace_create_entry(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -482,7 +482,7 @@ pub async fn workspace_create_entry(
 
 #[tauri::command]
 pub async fn workspace_rename_entry(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     from: String,
@@ -497,7 +497,7 @@ pub async fn workspace_rename_entry(
 
 #[tauri::command]
 pub async fn workspace_delete_entry(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -513,7 +513,7 @@ pub async fn workspace_delete_entry(
 /// собирается здесь и здесь же уходит в системный вызов.
 #[tauri::command]
 pub async fn workspace_reveal_entry(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -617,7 +617,7 @@ pub fn search(root: &Path, query: &str) -> CommandResult<TreeListing> {
 
 #[tauri::command]
 pub async fn workspace_search_tree(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     query: String,
@@ -795,7 +795,7 @@ fn spawn_tree_watch(
 /// нового, и дерево тихо переставало обновляться.
 #[tauri::command]
 pub fn workspace_tree_watch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     roots: tauri::State<'_, WorkspaceRoots>,
     state: tauri::State<'_, TreeWatchState>,
@@ -822,7 +822,7 @@ pub fn workspace_tree_watch(
 
 #[tauri::command]
 pub fn workspace_tree_unwatch(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, TreeWatchState>,
     workspace_id: String,
 ) -> CommandResult<()> {
@@ -837,7 +837,7 @@ pub fn workspace_tree_unwatch(
 
 #[tauri::command]
 pub async fn workspace_read_file(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -851,7 +851,7 @@ pub async fn workspace_read_file(
 
 #[tauri::command]
 pub async fn workspace_read_media(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -865,7 +865,7 @@ pub async fn workspace_read_media(
 
 #[tauri::command]
 pub async fn workspace_write_file(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
@@ -880,7 +880,7 @@ pub async fn workspace_write_file(
 
 #[tauri::command]
 pub async fn workspace_read_dir(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     roots: tauri::State<'_, WorkspaceRoots>,
     workspace_id: String,
     path: String,
