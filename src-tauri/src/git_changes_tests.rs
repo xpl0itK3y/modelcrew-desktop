@@ -1535,3 +1535,103 @@ fn a_file_deleted_on_one_side_has_no_markers_to_clear() {
     commit_all(root, "оставили файл").unwrap();
     assert_eq!(repository_operation(root).unwrap(), None);
 }
+
+// Ветку, которую человек выбрал сам в `init.defaultBranch`, уважаем; без неё
+// новый репозиторий начинается с main.
+fn expected_first_branch(root: &Path) -> String {
+    let output = Command::new("git")
+        .args(["config", "--get", "init.defaultBranch"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let chosen = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if chosen.is_empty() {
+        "main".to_owned()
+    } else {
+        chosen
+    }
+}
+
+#[test]
+fn init_turns_a_plain_folder_into_a_repository_on_main() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.md"), "first\n").unwrap();
+    assert!(!collect_summary(dir.path()).unwrap().is_repo);
+
+    init_repository(dir.path()).unwrap();
+
+    let summary = collect_summary(dir.path()).unwrap();
+    assert!(summary.is_repo);
+    assert_eq!(summary.branch, Some(expected_first_branch(dir.path())));
+    // Коммитов ещё нет — и сводка от этого не падает.
+    assert_eq!(summary.head_hash, None);
+    assert_eq!(by_path_in(&summary, "notes.md").status, "untracked");
+}
+
+#[test]
+fn init_does_not_nest_a_repository_inside_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let _git = history_repo(dir.path());
+    let inner = dir.path().join("packages").join("app");
+    std::fs::create_dir_all(&inner).unwrap();
+
+    init_repository(&inner).unwrap();
+
+    assert!(!inner.join(".git").exists());
+    assert!(collect_summary(&inner).unwrap().is_repo);
+}
+
+#[test]
+fn a_commit_without_a_name_says_so() {
+    let unknown = CommandError::new(ErrorCode::GitCommandFailed).with_debug(
+        "Author identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n  git config --global user.email",
+    );
+    assert_eq!(
+        name_missing_identity(unknown).context.get("reason").map(String::as_str),
+        Some("identity")
+    );
+    let empty = CommandError::new(ErrorCode::GitCommandFailed)
+        .with_debug("fatal: empty ident name (for <me@t>) not allowed");
+    assert_eq!(
+        name_missing_identity(empty).context.get("reason").map(String::as_str),
+        Some("identity")
+    );
+    let other = CommandError::new(ErrorCode::GitCommandFailed).with_debug("nothing to commit");
+    assert!(name_missing_identity(other).context.is_empty());
+}
+
+#[test]
+fn git_is_looked_up_along_the_given_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("empty");
+    let tools = dir.path().join("tools");
+    std::fs::create_dir_all(&empty).unwrap();
+    std::fs::create_dir_all(&tools).unwrap();
+    std::fs::write(tools.join(GIT_FILE_NAME), "").unwrap();
+
+    assert_eq!(find_git([empty.clone()], || true), None);
+    assert_eq!(
+        find_git([empty, tools.clone()], || true),
+        Some(tools.join(GIT_FILE_NAME))
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_macos_git_stub_does_not_count_without_developer_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("git"), "").unwrap();
+    let system = PathBuf::from("/usr/bin");
+
+    // Заглушку не запускаем: без инструментов она открыла бы окно установки.
+    assert_eq!(find_git([system.clone()], || false), None);
+    // Настоящий git дальше по PATH (Homebrew) находится и без них.
+    assert_eq!(
+        find_git([system.clone(), dir.path().to_path_buf()], || false),
+        Some(dir.path().join("git"))
+    );
+    assert_eq!(
+        find_git([system], || true),
+        Some(PathBuf::from("/usr/bin/git"))
+    );
+}

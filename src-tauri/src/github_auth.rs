@@ -7,7 +7,6 @@ use crate::command_error::{CommandError, CommandResult, ErrorCode};
 use crate::workspace_roots::WorkspaceRoots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tauri::Manager;
 
 // Client ID зарегистрированного OAuth App (публичный, не секрет). Заведи
@@ -357,15 +356,16 @@ fn parse_github_slug(url: &str) -> Option<(String, String)> {
     Some((owner.to_owned(), repo.to_owned()))
 }
 
-// Обёртка над git без консольного окна на Windows; None, если git упал.
+// Тот же git, что у панели изменений: без консольного окна на Windows и без
+// заглушки macOS, которая вместо ответа выводит окно установки. None — git
+// нет или он упал.
 fn git_capture(root: &Path, args: &[&str]) -> Option<String> {
-    let mut command = Command::new("git");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let output = command.args(args).current_dir(root).output().ok()?;
+    let output = crate::git_changes::git_command()
+        .ok()?
+        .args(args)
+        .current_dir(root)
+        .output()
+        .ok()?;
     output
         .status
         .success()
@@ -538,6 +538,7 @@ pub async fn github_commit_avatars(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     // Регрессия: reqwest в нашем дереве идёт с rustls, но feature-unification
     // может дать его без криптопровайдера — тогда build() Client паникует.

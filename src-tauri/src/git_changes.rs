@@ -95,9 +95,11 @@ pub struct GitFileDiff {
 
 // Команда git без консольного окна: на Windows каждый дочерний процесс с
 // консолью мигает окном, а статус мы гоняем постоянно.
-pub(crate) fn git_command() -> Command {
+pub(crate) fn git_command() -> CommandResult<Command> {
+    let program =
+        git_program().ok_or_else(|| CommandError::new(ErrorCode::GitUnavailable))?;
     #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut command = Command::new("git");
+    let mut command = Command::new(program);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -107,7 +109,101 @@ pub(crate) fn git_command() -> Command {
     // Машиночитаемые парсеры ниже не должны зависеть от языка ОС. Это также
     // стабилизирует диагностику Git на Windows/macOS/Linux.
     command.env("LC_ALL", "C").env("LANG", "C");
-    command
+    Ok(command)
+}
+
+const GIT_FILE_NAME: &str = if cfg!(windows) { "git.exe" } else { "git" };
+
+/// Git, который действительно ответит. None — git нет, и запускать нечего:
+/// панель скажет об этом прямо, а не пересказом ошибки запуска.
+pub(crate) fn git_program() -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(git) = find_git(std::env::split_paths(&paths), apple_developer_tools_ready) {
+        return Some(git);
+    }
+    // Git for Windows, поставленный из настроек, попадает в PATH только новых
+    // процессов: уже запущенное приложение не увидело бы его до перезапуска.
+    // Корни установки те же, по которым находится Git Bash.
+    #[cfg(windows)]
+    {
+        crate::pty::windows_git_roots()
+            .into_iter()
+            .map(|root| root.join("cmd").join(GIT_FILE_NAME))
+            .find(|candidate| candidate.is_file())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+fn find_git(
+    dirs: impl IntoIterator<Item = PathBuf>,
+    developer_tools_ready: impl Fn() -> bool,
+) -> Option<PathBuf> {
+    dirs.into_iter()
+        .map(|dir| dir.join(GIT_FILE_NAME))
+        .filter(|candidate| candidate.is_file())
+        .find(|candidate| !is_apple_git_stub(candidate) || developer_tools_ready())
+}
+
+// /usr/bin/git на macOS есть всегда, но без Command Line Tools это заглушка:
+// вместо ответа она выводит системное окно с предложением их поставить. Опрос
+// панели раз в несколько секунд показывал бы это окно снова и снова.
+fn is_apple_git_stub(path: &Path) -> bool {
+    cfg!(target_os = "macos") && path == Path::new("/usr/bin/git")
+}
+
+#[cfg(target_os = "macos")]
+fn apple_developer_tools_ready() -> bool {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // Поставленные инструменты сами не пропадают: найдя их однажды, больше не
+    // спрашиваем. Отказ не запоминаем — их могут ставить прямо сейчас.
+    static READY: AtomicBool = AtomicBool::new(false);
+    if READY.load(Ordering::Relaxed) {
+        return true;
+    }
+    // `xcode-select -p` только называет папку и окна не показывает.
+    let ready = Command::new("/usr/bin/xcode-select")
+        .arg("-p")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
+        .is_some_and(|dir| dir.join("usr/bin").join(GIT_FILE_NAME).is_file());
+    if ready {
+        READY.store(true, Ordering::Relaxed);
+    }
+    ready
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apple_developer_tools_ready() -> bool {
+    true
+}
+
+/// Запускает установку Command Line Tools — так git ставит сам macOS. Окно
+/// установки системное: соглашение и ход установки показывает оно, мы только
+/// открываем его по нажатию.
+pub fn install_command_line_tools() -> CommandResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("/usr/bin/xcode-select")
+            .arg("--install")
+            .output()
+            .map_err(|error| CommandError::new(ErrorCode::GitInstallFailed).with_debug(error))?;
+        // Отказ «уже установлены» — не ошибка: git появится, как только панель
+        // спросит снова.
+        if output.status.success() || apple_developer_tools_ready() {
+            return Ok(());
+        }
+        Err(CommandError::new(ErrorCode::GitInstallFailed)
+            .with_debug(String::from_utf8_lossy(&output.stderr).into_owned()))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(CommandError::new(ErrorCode::GitInstallUnsupported))
+    }
 }
 
 pub(crate) fn run_git(root: &Path, args: &[&str]) -> CommandResult<Vec<u8>> {
@@ -119,7 +215,7 @@ pub(crate) fn run_git_with_env(
     args: &[&str],
     environment: &[(&str, &str)],
 ) -> CommandResult<Vec<u8>> {
-    let mut command = git_command();
+    let mut command = git_command()?;
     for (name, value) in environment {
         command.env(name, value);
     }
@@ -851,16 +947,52 @@ fn commit_all_with_identity(
     // операцию не запрещаем. Отказываем только пока конфликты не сведены.
     ensure_conflicts_resolved(&toplevel)?;
     run_git(&toplevel, &["add", "-A"])?;
-    if let Some(identity) = identity {
+    let committed = if let Some(identity) = identity {
         let environment = [
             ("GIT_AUTHOR_NAME", identity.name.as_str()),
             ("GIT_AUTHOR_EMAIL", identity.email.as_str()),
             ("GIT_COMMITTER_NAME", identity.name.as_str()),
             ("GIT_COMMITTER_EMAIL", identity.email.as_str()),
         ];
-        run_git_with_env(&toplevel, &["commit", "-m", message], &environment)?;
+        run_git_with_env(&toplevel, &["commit", "-m", message], &environment)
     } else {
-        run_git(&toplevel, &["commit", "-m", message])?;
+        run_git(&toplevel, &["commit", "-m", message])
+    };
+    committed.map_err(name_missing_identity)?;
+    Ok(())
+}
+
+// Без имени и почты git коммитить отказывается — обычно это первый коммит в
+// только что созданном репозитории. Его объяснение остаётся в подробностях, а
+// заголовок говорит, что сделать здесь: войти через GitHub или назвать себя.
+fn name_missing_identity(error: CommandError) -> CommandError {
+    let unknown = error.debug.as_deref().is_some_and(|stderr| {
+        stderr.contains("Please tell me who you are") || stderr.contains("empty ident name")
+    });
+    if unknown {
+        error.with_context("reason", "identity")
+    } else {
+        error
+    }
+}
+
+// ---------- Новый репозиторий ----------
+
+/// `git init` в корне проекта. Первая ветка — main, если человек не выбрал
+/// свою в `init.defaultBranch`. Флаг `--initial-branch` старый git не знает, а
+/// назвал бы ветку master, поэтому её переименовываем сами: коммитов в ней ещё
+/// нет, и переименование — это одна запись в HEAD.
+pub fn init_repository(root: &Path) -> CommandResult<()> {
+    // Папка уже внутри репозитория, хотя бы родительского: вложенный создавать
+    // не будем — её файлы пропали бы из внешнего.
+    if repo_toplevel(root)?.is_some() {
+        return Ok(());
+    }
+    let branch_chosen = run_git(root, &["config", "--get", "init.defaultBranch"])
+        .is_ok_and(|stdout| !String::from_utf8_lossy(&stdout).trim().is_empty());
+    run_git(root, &["init", "--quiet"])?;
+    if !branch_chosen {
+        run_git(root, &["symbolic-ref", "HEAD", "refs/heads/main"])?;
     }
     Ok(())
 }
@@ -968,6 +1100,36 @@ pub async fn git_commit(
     })
     .await
     .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+#[tauri::command]
+pub async fn git_init_repository(
+    window: tauri::Webview,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    tauri::async_runtime::spawn_blocking(move || init_repository(&root))
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitCommandFailed).with_debug(error))?
+}
+
+/// Есть ли git вообще — настройки предлагают поставить его, если нет.
+#[tauri::command]
+pub async fn git_available(window: tauri::Webview) -> CommandResult<bool> {
+    super::ensure_main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(|| git_program().is_some())
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitInstallFailed).with_debug(error))
+}
+
+#[tauri::command]
+pub async fn git_install_tools(window: tauri::Webview) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(install_command_line_tools)
+        .await
+        .map_err(|error| CommandError::new(ErrorCode::GitInstallFailed).with_debug(error))?
 }
 
 #[tauri::command]

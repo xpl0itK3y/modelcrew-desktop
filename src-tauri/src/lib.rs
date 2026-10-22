@@ -71,9 +71,10 @@ use git_branches::{
     git_rename_branch, git_switch_branch,
 };
 use git_changes::{
-    git_abort_operation, git_changes_summary, git_changes_unwatch, git_changes_watch, git_commit,
-    git_continue_operation, git_file_diff, git_head_file, git_read_file, git_revert_file,
-    git_write_file, GitWatchState,
+    git_abort_operation, git_available, git_changes_summary, git_changes_unwatch,
+    git_changes_watch, git_commit, git_continue_operation, git_file_diff, git_head_file,
+    git_init_repository, git_install_tools, git_read_file, git_revert_file, git_write_file,
+    GitWatchState,
 };
 use git_history::{git_commit_action, git_delete_tag, git_drop_commit, git_reword_commit};
 use git_log::{git_commit_file_diff, git_commit_files, git_log};
@@ -1062,6 +1063,9 @@ pub fn run() {
             list_shells,
             git_bash_status,
             git_bash_install,
+            git_available,
+            git_install_tools,
+            git_init_repository,
             pty_write,
             pty_resize,
             pty_kill,
@@ -1261,6 +1265,7 @@ mod tests {
         "browser_undock",
         "crew_claims",
         "git_abort_operation",
+        "git_available",
         "git_bash_install",
         "git_bash_status",
         "git_branches",
@@ -1279,6 +1284,8 @@ mod tests {
         "git_fetch_upstream",
         "git_file_diff",
         "git_head_file",
+        "git_init_repository",
+        "git_install_tools",
         "git_log",
         "git_merge_ref",
         "git_publish_branch",

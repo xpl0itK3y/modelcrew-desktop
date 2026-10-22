@@ -21,7 +21,7 @@ use crate::workspace_roots::WorkspaceRoots;
 // пароль, а http.lowSpeed* — зависший HTTP. Лучше тихо/быстро упасть с
 // ошибкой, чем повиснуть навсегда.
 fn run_git_network(toplevel: &Path, args: &[&str]) -> CommandResult<()> {
-    let output = git_command()
+    let output = git_command()?
         .args([
             "-c",
             "http.lowSpeedLimit=1000",

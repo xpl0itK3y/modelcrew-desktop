@@ -641,7 +641,7 @@ fn bash_in_git_root(roots: &[PathBuf]) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn windows_git_roots() -> Vec<PathBuf> {
+pub(crate) fn windows_git_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     // Git мог быть поставлен куда угодно — хоть на другой диск. Его корень
     // вычисляется от самого git.exe: тот лежит в <корень>\cmd, а bash — в

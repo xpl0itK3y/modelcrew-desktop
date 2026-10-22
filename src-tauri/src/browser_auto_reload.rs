@@ -273,7 +273,9 @@ fn unignored(root: &Path, mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     if paths.is_empty() {
         return paths;
     }
-    let mut command = crate::git_changes::git_command();
+    let Ok(mut command) = crate::git_changes::git_command() else {
+        return paths;
+    };
     command
         .args(["check-ignore", "--stdin", "-z"])
         .current_dir(root)
@@ -434,10 +436,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mc-auto-reload-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
-        let init = crate::git_changes::git_command()
-            .args(["init", "-q"])
-            .current_dir(&dir)
-            .status();
+        let Ok(mut git) = crate::git_changes::git_command() else {
+            return; // git нет — проверять нечем
+        };
+        let init = git.args(["init", "-q"]).current_dir(&dir).status();
         if !init.is_ok_and(|status| status.success()) {
             return; // git нет — проверять нечем
         }

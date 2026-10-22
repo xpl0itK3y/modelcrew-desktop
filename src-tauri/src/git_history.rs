@@ -73,7 +73,7 @@ fn create_commit(
 ) -> CommandResult<String> {
     use std::io::Write;
     use std::process::Stdio;
-    let mut command = git_command();
+    let mut command = git_command()?;
     command.arg("commit-tree").arg(tree);
     for parent in parents {
         command.arg("-p").arg(parent);
@@ -314,7 +314,7 @@ pub(crate) fn validated_message(message: &str) -> CommandResult<&str> {
 // theirs относительно base». Это семантика cherry-pick, но ни индекс, ни файлы
 // на диске не затрагиваются, поэтому параллельная работа в терминале цела.
 fn merge_tree(root: &Path, base: &str, ours: &str, theirs: &str) -> CommandResult<String> {
-    let output = git_command()
+    let output = git_command()?
         .args([
             "merge-tree",
             "--write-tree",

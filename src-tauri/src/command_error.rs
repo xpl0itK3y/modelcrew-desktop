@@ -62,6 +62,8 @@ pub enum ErrorCode {
     UpdaterAuthorizationCancelled,
     UpdaterInstallFailed,
     GitUnavailable,
+    GitInstallUnsupported,
+    GitInstallFailed,
     GitNotARepository,
     GitCommandFailed,
     GithubNotConfigured,
