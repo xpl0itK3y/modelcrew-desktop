@@ -5,7 +5,8 @@ import { GIT_BASH_DOWNLOAD_URL } from "../../gitBash";
 import { TerminalTab } from "./TerminalTab";
 
 const { invokeMock, openUrlMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
+  // Настоящий invoke всегда возвращает промис, и вкладка на это рассчитывает.
+  invokeMock: vi.fn<(command: string) => Promise<unknown>>(async () => undefined),
   openUrlMock: vi.fn(async () => {}),
 }));
 
@@ -15,6 +16,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: openUrlMock,
+}));
+
+// У строки «Git» свои тесты — GitToolRow.test.tsx. Здесь она только мешает:
+// ходит в бэкенд при открытии и подписывает кнопки так же, как Git Bash.
+vi.mock("./GitToolRow", () => ({
+  GitToolRow: () => null,
 }));
 
 const powershell = {
@@ -52,11 +59,6 @@ beforeEach(() => {
     value: {},
   });
   invokeMock.mockReset();
-  // На macOS и Linux вкладка сразу спрашивает, есть ли git. Есть — строка
-  // «Git» не нужна; тесты про Git Bash подменяют ответы своими.
-  invokeMock.mockImplementation(async (command: string) =>
-    command === "git_available" ? true : undefined,
-  );
   openUrlMock.mockClear();
 });
 
