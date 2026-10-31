@@ -25,7 +25,9 @@ export function detectPlatform(userAgent: string): Platform {
   if (/Mac|iPhone|iPad/i.test(userAgent)) {
     return "mac";
   }
-  return /Win/i.test(userAgent) ? "windows" : "linux";
+  // Граница слова: в «darwin», который jsdom пишет на маке, тоже есть «win».
+  // Без неё тесты на маке шли по ветке Windows, а на CI — по ветке Linux.
+  return /\bWin/i.test(userAgent) ? "windows" : "linux";
 }
 
 // Какая клавиатура перед пользователем: от этого зависят подписи сочетаний.

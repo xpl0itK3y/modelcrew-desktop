@@ -40,6 +40,16 @@ describe("определение платформы", () => {
     expect(detectPlatform("")).toBe("linux");
   });
 
+  it("читает jsdom одинаково на маке и на CI", () => {
+    // jsdom пишет в user agent process.platform. Мак здесь — linux, как на CI:
+    // иначе тест, зелёный локально, падал бы только после push.
+    const jsdom = (os: string) =>
+      `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) jsdom/27.4.0`;
+    expect(detectPlatform(jsdom("darwin"))).toBe("linux");
+    expect(detectPlatform(jsdom("linux"))).toBe("linux");
+    expect(detectPlatform(jsdom("win32"))).toBe("windows");
+  });
+
   it("согласован сам с собой", () => {
     expect(isMac).toBe(platform === "mac");
     expect(typeof isTauri).toBe("boolean");
