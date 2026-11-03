@@ -266,57 +266,8 @@ fn is_local(url: &str) -> bool {
 /// `.gitignore`, и обновлять по ним страницу незачем. Не репозиторий или
 /// git нет — вычёркивать нечем, правками считается всё.
 fn unignored(root: &Path, mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    use std::io::Write;
-    use std::process::Stdio;
-
     paths.truncate(ASK_GIT_AT_MOST);
-    if paths.is_empty() {
-        return paths;
-    }
-    let Ok(mut command) = crate::git_changes::git_command() else {
-        return paths;
-    };
-    command
-        .args(["check-ignore", "--stdin", "-z"])
-        .current_dir(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let Ok(mut child) = command.spawn() else {
-        return paths;
-    };
-    let mut input = Vec::new();
-    for path in &paths {
-        input.extend_from_slice(path.as_os_str().as_encoded_bytes());
-        input.push(0);
-    }
-    // Пишем из своего потока: git отвечает, пока читает, и, упрись его ответ
-    // в полную трубу, мы бы ждали друг друга вечно.
-    let writer = child.stdin.take().map(|mut stdin| {
-        std::thread::spawn(move || {
-            let _ = stdin.write_all(&input);
-        })
-    });
-    let output = child.wait_with_output();
-    if let Some(writer) = writer {
-        let _ = writer.join();
-    }
-    let Ok(output) = output else {
-        return paths;
-    };
-    // 0 — что-то вычеркнуто, 1 — ничего; прочее — не репозиторий или сбой.
-    if output.status.code() != Some(0) {
-        return paths;
-    }
-    let ignored: HashSet<&[u8]> = output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .collect();
-    paths
-        .into_iter()
-        .filter(|path| !ignored.contains(path.as_os_str().as_encoded_bytes()))
-        .collect()
+    crate::git_changes::unignored_paths(root, paths)
 }
 
 #[cfg(test)]

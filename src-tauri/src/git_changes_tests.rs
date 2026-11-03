@@ -111,6 +111,56 @@ fn filters_git_internals_from_watch_events() {
     ));
 }
 
+// Сборка пишет тысячи файлов в вычеркнутый каталог — сводка от этого не
+// меняется, и пересобирать её на каждое тихое окно незачем. Но всё, что
+// git видит, по-прежнему будит вотчер.
+#[test]
+fn the_watcher_lets_ignored_output_pass_quietly() {
+    let dir = tempfile::tempdir().unwrap();
+    // Корень проекта приходит канонизированным, как из WorkspaceRoots.
+    let root = dir.path().canonicalize().unwrap();
+    let git = history_repo(&root);
+    std::fs::write(root.join(".gitignore"), "target/\n*.log\n").unwrap();
+    std::fs::write(root.join("pinned.log"), "kept on purpose\n").unwrap();
+    git(&["add", "-f", ".gitignore", "pinned.log"]);
+    git(&["commit", "--quiet", "-m", "init"]);
+    std::fs::create_dir_all(root.join("target/debug")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    for name in ["target/debug/app", "trace.log", "src/app.ts", "pinned.log"] {
+        std::fs::write(root.join(name), "x\n").unwrap();
+    }
+    let window = |paths: &[&str]| {
+        let mut window = ChangeWindow::default();
+        window.add(&root, paths.iter().map(|path| root.join(path)).collect());
+        window
+    };
+
+    assert!(!window(&["target/debug/app", "trace.log"]).needs_summary(&root));
+    assert!(window(&["target/debug/app", "src/app.ts"]).needs_summary(&root));
+    // Отслеживаемый файл git не вычёркивает, даже подходящий под шаблон.
+    assert!(window(&["pinned.log"]).needs_summary(&root));
+    assert!(window(&["trace.log", ".git/index"]).certain);
+    assert!(window(&[".gitignore"]).needs_summary(&root));
+
+    let mut outside = ChangeWindow::default();
+    outside.add(&root, vec![PathBuf::from("/elsewhere/file")]);
+    assert!(outside.certain);
+
+    let mut flood = ChangeWindow::default();
+    flood.add(
+        &root,
+        (0..=WATCH_ASK_GIT_AT_MOST)
+            .map(|index| root.join(format!("target/{index}")))
+            .collect(),
+    );
+    assert!(flood.certain);
+    assert!(flood.worktree.is_empty());
+
+    // Без репозитория вычёркивать нечем: любая правка будит вотчер.
+    std::fs::remove_dir_all(root.join(".git")).unwrap();
+    assert!(window(&["trace.log"]).needs_summary(&root));
+}
+
 #[test]
 fn rejects_unsafe_diff_paths() {
     assert!(is_safe_repo_path("src/app.ts"));

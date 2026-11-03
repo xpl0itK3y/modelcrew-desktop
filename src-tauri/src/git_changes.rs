@@ -1196,6 +1196,111 @@ pub fn is_relevant_event_path(repo_root: &Path, path: &Path) -> bool {
     )
 }
 
+/// Пути, которых git не вычеркнул через `.gitignore` и исключения. Не
+/// репозиторий, git нет или сбой — вычёркивать нечем, остаётся всё.
+/// Отслеживаемый файл git не вычёркивает, даже если он подходит под шаблон.
+pub(crate) fn unignored_paths(root: &Path, paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    if paths.is_empty() {
+        return paths;
+    }
+    let Ok(mut command) = git_command() else {
+        return paths;
+    };
+    command
+        .args(["check-ignore", "--stdin", "-z"])
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let Ok(mut child) = command.spawn() else {
+        return paths;
+    };
+    let mut input = Vec::new();
+    for path in &paths {
+        input.extend_from_slice(path.as_os_str().as_encoded_bytes());
+        input.push(0);
+    }
+    // Пишем из своего потока: git отвечает, пока читает, и, упрись его ответ
+    // в полную трубу, мы бы ждали друг друга вечно.
+    let writer = child.stdin.take().map(|mut stdin| {
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        })
+    });
+    let output = child.wait_with_output();
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
+    let Ok(output) = output else {
+        return paths;
+    };
+    // 0 — что-то вычеркнуто, 1 — ничего; прочее — не репозиторий или сбой.
+    if output.status.code() != Some(0) {
+        return paths;
+    }
+    let ignored: std::collections::HashSet<&[u8]> = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .collect();
+    paths
+        .into_iter()
+        .filter(|path| !ignored.contains(path.as_os_str().as_encoded_bytes()))
+        .collect()
+}
+
+/// Больше путей за одно тихое окно git не спрашиваем: столько меняет смена
+/// ветки или сборка, и сводку проще пересобрать, чем перебирать список.
+const WATCH_ASK_GIT_AT_MOST: usize = 2_000;
+
+/// Что поменялось за одно тихое окно вотчера. Правки только в том, что git
+/// вычеркнул (сборка, `node_modules`, журналы), сводку не меняют: ни
+/// `status`, ни `diff` их не видят, и гонять их незачем.
+#[derive(Debug, Default)]
+struct ChangeWindow {
+    /// Сводку пересобрать в любом случае: менялись индекс, HEAD или ветки,
+    /// путь пришёл вне корня или их слишком много, чтобы спрашивать git.
+    certain: bool,
+    /// Пути рабочего дерева относительно корня: их судьбу решает git.
+    worktree: std::collections::HashSet<PathBuf>,
+}
+
+impl ChangeWindow {
+    fn add(&mut self, root: &Path, paths: Vec<PathBuf>) {
+        for path in paths {
+            if self.certain {
+                return;
+            }
+            match path.strip_prefix(root) {
+                Ok(relative)
+                    if !relative.as_os_str().is_empty() && !relative.starts_with(".git") =>
+                {
+                    self.worktree.insert(relative.to_path_buf());
+                    if self.worktree.len() > WATCH_ASK_GIT_AT_MOST {
+                        self.settle();
+                    }
+                }
+                _ => self.settle(),
+            }
+        }
+    }
+
+    fn settle(&mut self) {
+        self.certain = true;
+        self.worktree = Default::default();
+    }
+
+    /// Стоит ли пересобирать сводку после этого окна. Пути уходят git
+    /// относительными: корень и так текущий каталог, а абсолютный путь на
+    /// Windows пришёл бы с префиксом `\\?\`, которого git не понимает.
+    fn needs_summary(self, root: &Path) -> bool {
+        self.certain || !unignored_paths(root, self.worktree.into_iter().collect()).is_empty()
+    }
+}
+
 struct GitWatchHandle {
     // Drop наблюдателя закрывает канал — поток дебаунса завершается сам.
     _watcher: notify::RecommendedWatcher,
@@ -1222,19 +1327,20 @@ fn spawn_watch(
 ) -> Result<GitWatchHandle, notify::Error> {
     use notify::Watcher;
 
-    let (event_sender, event_receiver) = std::sync::mpsc::channel::<()>();
+    let (event_sender, event_receiver) = std::sync::mpsc::channel::<Vec<PathBuf>>();
     let filter_root = root.clone();
     let mut watcher =
         notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
             let Ok(event) = event else {
                 return;
             };
-            if event
+            let paths: Vec<PathBuf> = event
                 .paths
-                .iter()
-                .any(|path| is_relevant_event_path(&filter_root, path))
-            {
-                let _ = event_sender.send(());
+                .into_iter()
+                .filter(|path| is_relevant_event_path(&filter_root, path))
+                .collect();
+            if !paths.is_empty() {
+                let _ = event_sender.send(paths);
             }
         })?;
     watcher.watch(&root, notify::RecursiveMode::Recursive)?;
@@ -1243,13 +1349,19 @@ fn spawn_watch(
         let mut last_key: Option<String> = None;
         // Ошибка приёма означает, что вотчер удалён (unwatch/выход) и
         // отправитель закрыт: поток заканчивается вместе с ним.
-        while event_receiver.recv().is_ok() {
+        while let Ok(first) = event_receiver.recv() {
             // Тихое окно: серия событий (npm install, генерация кода)
             // схлопывается в один прогон git status.
-            while event_receiver
-                .recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
-                .is_ok()
-            {}
+            let mut window = ChangeWindow::default();
+            window.add(&root, first);
+            while let Ok(paths) =
+                event_receiver.recv_timeout(std::time::Duration::from_millis(DEBOUNCE_MS))
+            {
+                window.add(&root, paths);
+            }
+            if !window.needs_summary(&root) {
+                continue;
+            }
             let Ok(summary) = collect_summary(&root) else {
                 continue;
             };
