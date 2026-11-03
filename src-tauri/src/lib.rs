@@ -209,48 +209,30 @@ fn ensure_main_window(window: &tauri::Webview) -> CommandResult<()> {
     }
 }
 
-/// Имена процессов по PID одним вызовом ps (macOS/Linux).
+/// Имена процессов по PID (macOS/Linux). argv читаем у ядра, а не у ps:
+/// запуск ps раз в полторы секунды стоил заметно больше, чем сам ответ.
 #[cfg(unix)]
 fn process_names(pids: &[i32]) -> std::collections::HashMap<i32, String> {
-    let mut names = std::collections::HashMap::new();
-    if pids.is_empty() {
-        return names;
-    }
-    let list = pids
-        .iter()
-        .map(|pid| pid.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    // Без `comm=`: рядом с другими колонками ps подгоняет её под шестнадцать
-    // символов и молча режет. Агент, запущенный обёрткой по полному пути,
-    // превращался в «/Users/denis/.lo», а панель подписывалась «.lo».
-    // В `command=` argv приходит целиком — там же и первый токен.
-    let Ok(output) = std::process::Command::new("ps")
-        .args(["-ww", "-o", "pid=,command=", "-p", &list])
-        .output()
-    else {
-        return names;
-    };
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if let Some((pid, name)) = name_of_ps_line(line) {
-            names.insert(pid, name);
-        }
-    }
-    names
+    pids.iter()
+        .filter_map(|&pid| {
+            let pid_u32 = u32::try_from(pid).ok()?;
+            let name = match peer::command_line(pid_u32) {
+                Some(argv) => name_of_argv(&argv),
+                // argv не прочесть (чужой процесс, зомби) — хватит и имени.
+                None => name_of_argv(&[peer::short_name(pid_u32)?]),
+            }?;
+            Some((pid, name))
+        })
+        .collect()
 }
 
-/// Разбор строки `ps -o pid=,command=`: номер процесса и подпись для панели.
-///
-/// Отдельно от вызова ps, чтобы проверять разбор без живых процессов: беда
-/// была именно здесь, а воспроизвести её живьём можно только на машине, где
-/// нужный агент лежит по достаточно длинному пути.
+/// Подпись для панели по argv процесса. Пути с пробелами (Application
+/// Support) остаются одним аргументом: ядро отдаёт argv по элементам.
 #[cfg(unix)]
-fn name_of_ps_line(line: &str) -> Option<(i32, String)> {
-    let mut tokens = line.split_whitespace();
-    let pid = tokens.next()?.parse::<i32>().ok()?;
-    let argv: Vec<&str> = tokens.collect();
+fn name_of_argv(argv: &[String]) -> Option<String> {
+    let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
     let name = friendly_name(argv.first()?, &argv);
-    (!name.is_empty()).then_some((pid, name))
+    (!name.is_empty()).then_some(name)
 }
 
 /// Имя для подписи панели. Обычно это basename исполняемого файла, но для
@@ -1797,26 +1779,29 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn the_panel_takes_its_name_from_argv_not_from_a_cut_off_column() {
-        // Рядом с другими колонками ps подгоняет comm под шестнадцать символов.
-        // Обёртка запускает агента полным путём, и подпись панели
-        // превращалась в «.lo» — обрезок от /Users/denis/.local/bin/claude.
+        let argv = |items: &[&str]| items.iter().map(|item| item.to_string()).collect::<Vec<_>>();
+        // Обёртка запускает агента полным путём; раньше колонка ps резала его
+        // до «.lo», а путь с пробелом рвался на части.
         assert_eq!(
-            name_of_ps_line(
-                "4242 /Users/denis/.local/bin/claude --mcp-config=/Users/denis/Library/Application Support/com.modelcrew.desktop/agent-shims/mcp.json"
-            ),
-            Some((4242, "claude".to_string())),
+            name_of_argv(&argv(&[
+                "/Users/denis/.local/bin/claude",
+                "--mcp-config=/Users/denis/Library/Application Support/com.modelcrew.desktop/agent-shims/mcp.json",
+            ])),
+            Some("claude".to_string()),
             "полный путь до агента обязан читаться как имя агента"
+        );
+        assert_eq!(
+            name_of_argv(&argv(&["/Users/me/Application Support/bin/codex"])),
+            Some("codex".to_string())
         );
         // Интерпретатор по длинному пути разворачивается так же, как короткий.
         assert_eq!(
-            name_of_ps_line("77 /opt/homebrew/bin/node /Users/denis/.local/bin/codex.js --resume"),
-            Some((77, "codex".to_string()))
+            name_of_argv(&argv(&["/opt/homebrew/bin/node", "/Users/denis/.local/bin/codex.js", "--resume"])),
+            Some("codex".to_string())
         );
-        // Строки не про процесс — например, продолжение argv с переводом
-        // строки — не должны становиться панелями.
-        assert_eq!(name_of_ps_line("не число и не процесс"), None);
-        assert_eq!(name_of_ps_line("4242"), None);
-        assert_eq!(name_of_ps_line(""), None);
+        assert_eq!(name_of_argv(&argv(&["-zsh"])), Some("zsh".to_string()));
+        assert_eq!(name_of_argv(&[]), None);
+        assert_eq!(name_of_argv(&argv(&[""])), None);
     }
 
     #[test]

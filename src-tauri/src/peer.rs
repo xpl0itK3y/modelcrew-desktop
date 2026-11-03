@@ -149,6 +149,125 @@ fn parent_of(_pid: u32) -> Option<u32> {
     None
 }
 
+/// Командная строка процесса, как её запустили: argv по элементам.
+///
+/// Нужна подписи панели (имя программы на переднем плане). Раньше её давал
+/// ps, но это запуск процесса раз в полторы секунды, пока открыт хоть один
+/// терминал. Ядро отдаёт то же самое одним системным вызовом.
+#[cfg(target_os = "macos")]
+pub fn command_line(pid: u32) -> Option<Vec<String>> {
+    let mut argmax: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    // SAFETY: буфер наш, размер его типа передан вместе с ним.
+    let got = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            &mut argmax as *mut _ as *mut libc::c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if got != 0 || argmax <= 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; argmax as usize];
+    let mut size = buffer.len();
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+    // SAFETY: буфер наш; ядро пишет не больше size байт и возвращает, сколько
+    // записало.
+    let got = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buffer.as_mut_ptr() as *mut libc::c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if got != 0 {
+        return None;
+    }
+    argv_in_procargs(&buffer[..size.min(buffer.len())])
+}
+
+/// Командная строка процесса, как её запустили: argv по элементам.
+#[cfg(target_os = "linux")]
+pub fn command_line(pid: u32) -> Option<Vec<String>> {
+    argv_in_cmdline(&std::fs::read(format!("/proc/{pid}/cmdline")).ok()?)
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+pub fn command_line(_pid: u32) -> Option<Vec<String>> {
+    None
+}
+
+/// Короткое имя процесса — когда argv не прочесть: процесс чужой (sudo) или
+/// уже зомби. ps в таком случае тоже показывал только его.
+#[cfg(target_os = "macos")]
+pub fn short_name(pid: u32) -> Option<String> {
+    let mut buffer = [0u8; 256];
+    // SAFETY: буфер наш, его длина передана вместе с ним.
+    let got = unsafe {
+        libc::proc_name(
+            pid as libc::c_int,
+            buffer.as_mut_ptr() as *mut libc::c_void,
+            buffer.len() as u32,
+        )
+    };
+    let length = usize::try_from(got).ok().filter(|&length| length > 0)?;
+    Some(String::from_utf8_lossy(&buffer[..length.min(buffer.len())]).into_owned())
+}
+
+/// Короткое имя процесса — когда argv не прочесть.
+#[cfg(target_os = "linux")]
+pub fn short_name(pid: u32) -> Option<String> {
+    let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    let name = name.trim_end_matches('\n');
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+pub fn short_name(_pid: u32) -> Option<String> {
+    None
+}
+
+/// Разбор ответа KERN_PROCARGS2: argc, путь к исполняемому файлу, нули
+/// выравнивания, затем argc строк argv (за ними окружение — его не трогаем).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn argv_in_procargs(buffer: &[u8]) -> Option<Vec<String>> {
+    let argc = i32::from_ne_bytes(buffer.get(..4)?.try_into().ok()?);
+    let argc = usize::try_from(argc).ok().filter(|&argc| argc > 0)?;
+    let rest = &buffer[4..];
+    let after_path = &rest[rest.iter().position(|&byte| byte == 0)?..];
+    let args = &after_path[after_path.iter().position(|&byte| byte != 0)?..];
+    let argv: Vec<String> = args
+        .split(|&byte| byte == 0)
+        .take(argc)
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect();
+    (argv.len() == argc).then_some(argv)
+}
+
+/// Разбор `/proc/<pid>/cmdline`: argv через нули, с нулём в конце. Пустой
+/// файл — у зомби и потоков ядра.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn argv_in_cmdline(bytes: &[u8]) -> Option<Vec<String>> {
+    let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(
+        bytes
+            .split(|&byte| byte == 0)
+            .map(|arg| String::from_utf8_lossy(arg).into_owned())
+            .collect(),
+    )
+}
+
 /// Разбор `/proc/<pid>/status` отдельно от чтения файла: так он проверяется
 /// и там, где такого файла нет.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -163,6 +282,58 @@ fn ppid_in_status(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn the_command_line_comes_from_the_kernel_whole() {
+        // Свой процесс: argv, с которым нас запустили, известен и так.
+        let expected: Vec<String> = std::env::args().collect();
+        assert_eq!(command_line(std::process::id()), Some(expected));
+        let name = short_name(std::process::id()).expect("имя своего процесса");
+        assert!(!name.is_empty());
+        // Процесса нет — нет и ответа, а не мусор из буфера.
+        assert_eq!(command_line(0x7fff_fff0), None);
+        assert_eq!(short_name(0x7fff_fff0), None);
+    }
+
+    #[test]
+    fn procargs_yield_argv_without_the_exec_path_or_the_environment() {
+        let mut buffer = 3i32.to_ne_bytes().to_vec();
+        buffer.extend_from_slice(b"/usr/local/bin/node\0\0\0\0");
+        buffer.extend_from_slice(b"node\0/Users/me/Application Support/codex.js\0--resume\0");
+        buffer.extend_from_slice(b"HOME=/Users/me\0");
+        assert_eq!(
+            argv_in_procargs(&buffer),
+            Some(vec![
+                "node".to_string(),
+                "/Users/me/Application Support/codex.js".to_string(),
+                "--resume".to_string(),
+            ])
+        );
+        // Обрезанный ответ не выдаём за полный.
+        let mut short = 3i32.to_ne_bytes().to_vec();
+        short.extend_from_slice(b"/bin/zsh\0zsh\0");
+        assert_eq!(argv_in_procargs(&short), None);
+        assert_eq!(argv_in_procargs(&[]), None);
+        assert_eq!(argv_in_procargs(&0i32.to_ne_bytes()), None);
+    }
+
+    #[test]
+    fn cmdline_splits_on_nuls_and_keeps_spaces_inside_an_argument() {
+        assert_eq!(
+            argv_in_cmdline(b"-zsh\0"),
+            Some(vec!["-zsh".to_string()])
+        );
+        assert_eq!(
+            argv_in_cmdline(b"/opt/my tools/claude\0--model\0opus\0"),
+            Some(vec![
+                "/opt/my tools/claude".to_string(),
+                "--model".to_string(),
+                "opus".to_string(),
+            ])
+        );
+        assert_eq!(argv_in_cmdline(b""), None);
+    }
 
     #[test]
     #[cfg(unix)]
