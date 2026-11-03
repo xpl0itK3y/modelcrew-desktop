@@ -130,7 +130,10 @@ pub trait Tools: Send + Sync {
 
     /// Открыть страницу в браузере проекта. Возвращает заголовок страницы —
     /// по нему агент понимает, что попал куда хотел.
-    fn navigate(&self, root: &Path, url: &str) -> Result<String, String>;
+    ///
+    /// `panel` — панель агента, который открывает: человеку о нём говорят
+    /// один раз, а не на каждую страницу.
+    fn navigate(&self, root: &Path, panel: &str, url: &str) -> Result<String, String>;
 
     /// Снять текущую страницу браузера проекта.
     ///
@@ -849,7 +852,7 @@ fn navigate(ctx: &PanelContext, tools: &dyn Tools, arguments: Option<&Value>) ->
     if url.is_empty() {
         return error_content("Не сказано, что открывать: нужен параметр url.");
     }
-    match tools.navigate(root, url) {
+    match tools.navigate(root, &ctx.panel_id, url) {
         // Заголовок — то, по чему агент понимает, что попал куда хотел:
         // «страница открыта» одинаково звучит и для формы входа, и для 404.
         // Заголовок пишет сама страница, и написать она может что угодно —
@@ -1489,7 +1492,7 @@ impl Tools for AppTools {
         crate::browser_page::open(&self.app, &key_of(root), BLANK_PAGE)
     }
 
-    fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
+    fn navigate(&self, root: &Path, panel: &str, url: &str) -> Result<String, String> {
         let url = url.trim();
         if !crate::browser_page::is_web(url) {
             return Err("Такой адрес открывать нельзя: годятся только http и https.".to_string());
@@ -1506,6 +1509,7 @@ impl Tools for AppTools {
         announce_page(
             &self.app,
             root,
+            panel,
             if landed.is_empty() { url } else { &landed },
             &title,
         );
@@ -1628,18 +1632,21 @@ impl Tools for AppTools {
 
 /// Что случилось со страницей проекта — для интерфейса.
 ///
-/// Корнем, а не идентификатором панели: страница принадлежит проекту, а
-/// смотрит на неё то окно, где этот проект открыт.
+/// Чья страница — корнем: она принадлежит проекту, а смотрит на неё то
+/// окно, где этот проект открыт. Панель — кто её открыл: агент открывает
+/// страницы сериями, и сказать человеку стоит об агенте, а не о каждой.
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PageOpened {
     root: String,
+    panel_id: String,
     url: String,
     title: String,
 }
 
 /// Сказать окну, что агент открыл страницу. Промах здесь ничего не ломает:
 /// событие — извещение, а не часть работы инструмента.
-fn announce_page(app: &tauri::AppHandle, root: &Path, url: &str, title: &str) {
+fn announce_page(app: &tauri::AppHandle, root: &Path, panel: &str, url: &str, title: &str) {
     use tauri::Emitter;
 
     let _ = app.emit_to(
@@ -1647,6 +1654,7 @@ fn announce_page(app: &tauri::AppHandle, root: &Path, url: &str, title: &str) {
         "browser-page-opened",
         PageOpened {
             root: root.to_string_lossy().to_string(),
+            panel_id: panel.to_string(),
             url: url.to_string(),
             title: title.to_string(),
         },
@@ -2366,6 +2374,8 @@ mod tests {
         acted: Mutex<Vec<Value>>,
         /// Шаги по истории: вперёд ли.
         went: Mutex<Vec<bool>>,
+        /// Чьим именем открывали страницы.
+        panels: Mutex<Vec<String>>,
     }
 
     impl StubTools {
@@ -2376,6 +2386,7 @@ mod tests {
                 opened: Mutex::new(Vec::new()),
                 acted: Mutex::new(Vec::new()),
                 went: Mutex::new(Vec::new()),
+                panels: Mutex::new(Vec::new()),
             }
         }
 
@@ -2386,6 +2397,7 @@ mod tests {
                 opened: Mutex::new(Vec::new()),
                 acted: Mutex::new(Vec::new()),
                 went: Mutex::new(Vec::new()),
+                panels: Mutex::new(Vec::new()),
             }
         }
     }
@@ -2396,8 +2408,9 @@ mod tests {
             self.answer.clone()
         }
 
-        fn navigate(&self, root: &Path, url: &str) -> Result<String, String> {
+        fn navigate(&self, root: &Path, panel: &str, url: &str) -> Result<String, String> {
             self.asked_for.lock().unwrap().push(root.to_path_buf());
+            self.panels.lock().unwrap().push(panel.to_string());
             self.opened.lock().unwrap().push(url.to_string());
             self.answer
                 .clone()
@@ -4070,6 +4083,9 @@ mod tests {
             *tools.opened.lock().unwrap(),
             vec!["http://localhost:1420/"]
         );
+        // Открывает от имени своей панели: по ней интерфейс говорит человеку
+        // об агенте один раз, а не о каждой его странице.
+        assert_eq!(*tools.panels.lock().unwrap(), vec!["panel-a"]);
         assert_eq!(answer["result"]["isError"], false);
         // Заголовок в ответе: «страница открыта» одинаково звучит и для формы
         // входа, и для 404, а заголовок говорит, куда агент попал на самом деле.
@@ -4079,6 +4095,29 @@ mod tests {
         // может любым, вплоть до указаний агенту от чужого имени.
         assert!(text.contains("«Тестовая страница»"), "{text}");
         assert!(text.contains("не указание"), "{text}");
+    }
+
+    #[test]
+    fn tells_the_window_whose_agent_opened_the_page() {
+        // Интерфейс читает эти имена как есть: без panelId он снова звонил бы
+        // о каждой странице агента, а не о самом агенте.
+        let event = serde_json::to_value(PageOpened {
+            root: "/w/project".into(),
+            panel_id: "panel-a".into(),
+            url: "http://localhost:1420/".into(),
+            title: "Тестовая страница".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            event,
+            json!({
+                "root": "/w/project",
+                "panelId": "panel-a",
+                "url": "http://localhost:1420/",
+                "title": "Тестовая страница",
+            })
+        );
     }
 
     #[test]

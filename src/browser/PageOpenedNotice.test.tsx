@@ -8,6 +8,7 @@ import type { OpenedPage } from "./pagesOpened";
 
 const page: OpenedPage = {
   root: "/w/project",
+  panelId: "panel-a",
   url: "http://127.0.0.1:8501/",
   title: "Streamlit",
 };

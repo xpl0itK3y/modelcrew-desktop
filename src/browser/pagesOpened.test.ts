@@ -1,34 +1,93 @@
 // Подпись страницы, которую открыл агент.
 
 import { describe, expect, it } from "vitest";
-import { createBannerGate, pageLabel, type OpenedPage } from "./pagesOpened";
+import { createPageNews, pageLabel, type OpenedPage } from "./pagesOpened";
 
 const page = (over: Partial<OpenedPage> = {}): OpenedPage => ({
   root: "/w/project",
+  panelId: "panel-a",
   url: "https://example.com/",
   title: "Example Domain",
   ...over,
 });
 
-describe("createBannerGate", () => {
-  it("lets one banner through per project while the person is away", () => {
-    // Агент открывает страницы сериями; баннер на каждую — это спам.
-    const gate = createBannerGate();
+const away = { watchedRoot: null, focused: false };
+const here = { watchedRoot: null, focused: true };
 
-    expect(gate.claim("/w/shop")).toBe(true);
-    expect(gate.claim("/w/shop")).toBe(false);
-    expect(gate.claim("/w/shop")).toBe(false);
-    // Другой проект — другая новость.
-    expect(gate.claim("/w/blog")).toBe(true);
+describe("createPageNews", () => {
+  it("tells about an agent once, however many pages it opens", () => {
+    // Агент открывает страницы сериями; плашка и баннер на каждую — это спам.
+    const news = createPageNews();
+
+    expect(news(page(), away)).toEqual({
+      count: true,
+      notice: true,
+      banner: true,
+    });
+    for (const url of ["https://example.com/a", "https://example.com/b"]) {
+      // Страницы считаются на глобусе, но молча.
+      expect(news(page({ url }), away)).toEqual({
+        count: true,
+        notice: false,
+        banner: false,
+      });
+    }
   });
 
-  it("opens up again once the person is back", () => {
-    const gate = createBannerGate();
-    gate.claim("/w/shop");
+  it("keeps quiet about the agent after the person comes back", () => {
+    // Раньше возвращение в окно открывало дорогу новому баннеру, и агент,
+    // открывавший страницы, пока человек отходил, звонил снова.
+    const news = createPageNews();
+    news(page(), here);
 
-    gate.reset();
+    expect(news(page({ url: "https://example.com/a" }), away).banner).toBe(
+      false,
+    );
+    expect(news(page({ url: "https://example.com/b" }), here).notice).toBe(
+      false,
+    );
+  });
 
-    expect(gate.claim("/w/shop")).toBe(true);
+  it("tells about each agent of its own", () => {
+    const news = createPageNews();
+    news(page(), away);
+
+    // Другой агент того же проекта — другая новость.
+    expect(news(page({ panelId: "panel-b" }), away)).toEqual({
+      count: true,
+      notice: true,
+      banner: true,
+    });
+    expect(news(page({ panelId: "panel-c", root: "/w/blog" }), here)).toEqual({
+      count: true,
+      notice: true,
+      banner: false,
+    });
+  });
+
+  it("does not ring about a page already in front of the person", () => {
+    const news = createPageNews();
+    const watching = { watchedRoot: "/w/project", focused: true };
+
+    // Ящик этого проекта открыт: страница перед глазами, а с ней и агент.
+    expect(news(page(), watching)).toEqual({
+      count: false,
+      notice: false,
+      banner: false,
+    });
+    expect(news(page({ url: "https://example.com/a" }), here)).toEqual({
+      count: true,
+      notice: false,
+      banner: false,
+    });
+  });
+
+  it("calls the person back when the open drawer is in a window behind", () => {
+    const news = createPageNews();
+
+    expect(news(page(), { watchedRoot: "/w/project", focused: false })).toEqual(
+      { count: false, notice: false, banner: true },
+    );
   });
 });
 

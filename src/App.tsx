@@ -40,7 +40,7 @@ import {
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
 import {
-  createBannerGate,
+  createPageNews,
   pageLabel,
   watchPagesOpened,
   type OpenedPage,
@@ -773,33 +773,29 @@ export default function App() {
     liveBrowserWorkspaceId ?? browserPresence?.item ?? null;
   const browserDrawerClosing =
     liveBrowserWorkspaceId === null || Boolean(browserPresence?.closing);
-  // Последняя страница, которую агент открыл мимо глаз человека, — для
-  // плашки у глобуса.
+  // Первая страница агента, открытая мимо глаз человека, — для плашки у
+  // глобуса.
   const [pageNotice, setPageNotice] = useState<OpenedPage | null>(null);
   // Агент открыл страницу. У неё нет своего окна, поэтому о ней говорим сами:
-  // числом на глобусе и плашкой под ним, а когда окно не впереди — ещё и
-  // баннером системы.
-  const bannerGate = useRef(createBannerGate());
-  useEffect(() => {
-    const back = () => bannerGate.current.reset();
-    window.addEventListener("focus", back);
-    return () => window.removeEventListener("focus", back);
-  }, []);
+  // числом на глобусе, а о самом агенте — один раз: плашкой под глобусом и,
+  // когда окно не впереди, баннером системы.
+  const pageNews = useRef(createPageNews());
   useEffect(() => {
     return watchPagesOpened((page) => {
-      // Ящик этого проекта открыт — страница уже перед глазами, стоит только
-      // вернуться в окно.
-      if (page.root !== watchedRootRef.current) {
+      const news = pageNews.current(page, {
+        watchedRoot: watchedRootRef.current,
+        focused: document.hasFocus(),
+      });
+      if (news.count) {
         setPagesUnseen((counts) => ({
           ...counts,
           [page.root]: (counts[page.root] ?? 0) + 1,
         }));
+      }
+      if (news.notice) {
         setPageNotice(page);
       }
-      // Пока окно впереди, баннер повторил бы плашку, а macOS его и не
-      // покажет. Пока человек не вернулся — один баннер на проект: страницы
-      // агент открывает сериями.
-      if (!document.hasFocus() && bannerGate.current.claim(page.root)) {
+      if (news.banner) {
         const project = workspaceNameOfRoot(
           workspacesRef.current.list,
           page.root,
