@@ -42,6 +42,10 @@ describe("agentHookAlert", () => {
     ).toBe("question");
   });
 
+  it("keeps quiet about an event that only names the session", () => {
+    expect(agentHookAlert(hook("modelcrew.session", "", "opencode"))).toBeNull();
+  });
+
   it("understands the opencode and copilot event names", () => {
     expect(agentHookAlert(hook("session.idle", "", "opencode"))?.kind).toBe(
       "completed",

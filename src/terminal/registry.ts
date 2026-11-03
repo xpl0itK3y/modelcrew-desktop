@@ -202,8 +202,24 @@ if (isTauri) {
   // события, и текст пришли от него, а не выужены из вывода.
   void listen<AgentHookEvent>("agent-event", (event) => {
     const entry = registry.get(event.payload.panelId);
-    const alert = entry ? agentHookAlert(event.payload) : null;
-    if (!entry || !alert) {
+    if (!entry) {
+      return;
+    }
+    // Агент назвал свой диалог сам. Это лучше всего, что может дать поиск по
+    // каталогу сессий: без окна времени, без гонки соседних панелей и без
+    // догадки о том, чей файл появился первым. Панель запоминает его сразу,
+    // и следующий запуск возобновляет её точно — даже когда одинаковых
+    // агентов в проекте несколько. Сразу — и тогда, когда событие только
+    // этим и занято и баннера за ним нет.
+    if (event.payload.sessionId) {
+      bindAgentSessionFromHook(
+        entry.id,
+        event.payload.sessionId,
+        entry.workspaceId ?? undefined,
+      );
+    }
+    const alert = agentHookAlert(event.payload);
+    if (!alert) {
       return;
     }
     // Имя из события — это имя того конфига, где нашёлся хук, а не того, кто
@@ -219,18 +235,6 @@ if (isTauri) {
     // приложение, и одна неверная запись заглушила бы звонки у всех панелей
     // агента, у которого хука нет и не будет.
     noteHookChannel(event.payload.agent, alert.kind);
-    // Агент назвал свой диалог сам. Это лучше всего, что может дать поиск по
-    // каталогу сессий: без окна времени, без гонки соседних панелей и без
-    // догадки о том, чей файл появился первым. Панель запоминает его сразу,
-    // и следующий запуск возобновляет её точно — даже когда одинаковых
-    // агентов в проекте несколько.
-    if (event.payload.sessionId) {
-      bindAgentSessionFromHook(
-        entry.id,
-        event.payload.sessionId,
-        entry.workspaceId ?? undefined,
-      );
-    }
     void raiseAgentHookAlert(
       entry.id,
       agentId,

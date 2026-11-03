@@ -658,46 +658,41 @@ fn own_file_body(agent: &str, helper: &Helper) -> Option<String> {
     }
 }
 
-/// Плагин opencode. Форма обработчика — `event`, а не документированный ключ
-/// `"session.idle"`: тот не вызывается ни разу, проверено на живой сессии.
-/// Хелпер здесь не нужен — плагин уже внутри процесса панели и видит её
-/// окружение, поэтому кладёт событие сам.
+/// Плагин opencode. Один файл на обе линии: v1 зовёт `server()`, v2 —
+/// `setup()`, а чужой ключ каждая пропускает. Так это описано у самого
+/// opencode («Support V1» в документации плагинов v2); объектная форма у v1
+/// есть с 1.18.29. Прежний плагин был только в форме v1, и v2 его не грузил
+/// вовсе: ни баннеров, ни заявок, ни id сессии.
+///
+/// У v1 обработчик — `event`, а не документированный ключ `"session.idle"`:
+/// тот не вызывается ни разу, проверено на живой сессии. Хелпер здесь не
+/// нужен — плагин уже внутри процесса панели и видит её окружение, поэтому
+/// кладёт событие сам.
 fn opencode_plugin() -> String {
     // Тело — обычная строка с одной подстановкой: JS здесь полон `${...}`, и
     // отдавать его форматтеру Rust значит драться с ним за каждую скобку.
     OPENCODE_PLUGIN.replace("__AGENT__", "opencode")
 }
 
-const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew: заявки на файлы и сообщение о том, что агент затих или
-// ждёт ответа.
+const OPENCODE_PLUGIN: &str = r#"// Создан ModelCrew: заявки на файлы, id диалога панели и сообщение о том,
+// что агент затих или ждёт ответа.
 import { mkdirSync, renameSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = () => process.env.MODELCREW_EVENTS_DIR;
 const panel = () => process.env.MODELCREW_PANEL_ID;
+const inPanel = () => Boolean(dir() && panel());
 
-// Конец хода и всё, на чём агент встал и ждёт человека. Запрос разрешения
-// opencode не сопровождает ни звонком, ни выводом: без этих событий он
-// доходил только догадкой по тишине — на полминуты позже и без слова о том,
-// что просят разрешения.
-const REPORTED = new Set(["session.idle", "permission.asked", "question.asked"]);
+// Тихое событие: панель запоминает диалог в начале хода. Раньше id приходил
+// только с концом хода, и панель, закрытая посреди первого ответа, теряла
+// свой разговор.
+const BOUND = "modelcrew.session";
 
-// Строка для баннера: о чём агент просит. Форма свойств у шины менялась,
-// поэтому читаем осторожно; не разобрали — пусто, баннер назовёт сам вид.
-function describe(type, props) {
-  if (type === "permission.asked") {
-    const patterns = Array.isArray(props?.patterns) ? props.patterns.join(" ") : "";
-    return [props?.permission, patterns]
-      .filter((part) => typeof part === "string" && part)
-      .join(": ");
-  }
-  if (type === "question.asked") {
-    const first = Array.isArray(props?.questions) ? props.questions[0] : undefined;
-    const text = first?.question ?? first?.header;
-    return typeof text === "string" ? text : "";
-  }
-  return "";
-}
+// Только то, что похоже на id сессии opencode: чужое значение хуже
+// отсутствия.
+const sessionOf = (raw) => (typeof raw === "string" && /^ses[A-Za-z0-9_-]*$/.test(raw) ? raw : "");
+
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 
 function put(body) {
   // Сначала временный файл, потом переименование: вотчер не должен прочитать
@@ -708,76 +703,213 @@ function put(body) {
   return base;
 }
 
-const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+function report(type, message, sessionId) {
+  try {
+    mkdirSync(dir(), { recursive: true });
+    put({ agent: "__AGENT__", panelId: panel(), payload: { type, message, session_id: sessionId } });
+  } catch {
+    // Уведомление — дополнение; его сбой не должен мешать сессии.
+  }
+}
 
-export const ModelCrewNotify = async () => ({
-  // Заявка на файл. Всё, что пошло не так — нет каталога, молчание в ответ —
-  // трактуем как «можно»: слой согласования не должен останавливать работу
-  // из-за собственной поломки.
-  "tool.execute.before": async (input, output) => {
-    if (!dir() || !panel()) return; // запущен не из панели ModelCrew
-    const file = output?.args?.filePath;
-    if (typeof file !== "string" || !file) return;
-    let base;
+// Заявка на файл. Всё, что пошло не так — нет каталога, молчание в ответ —
+// трактуем как «можно»: слой согласования не должен останавливать работу
+// из-за собственной поломки. Отказ выражается броском: opencode показывает
+// его текст агенту, и тот берётся за другой файл.
+async function claim(tool, file) {
+  if (typeof file !== "string" || !file) return;
+  let base;
+  try {
+    mkdirSync(dir(), { recursive: true });
+    base = put({ kind: "claim", panelId: panel(), file, tool: typeof tool === "string" ? tool : "" });
+  } catch {
+    return;
+  }
+  for (let i = 0; i < 20; i++) {
+    let answer;
     try {
-      mkdirSync(dir(), { recursive: true });
-      base = put({ kind: "claim", panelId: panel(), file, tool: input?.tool ?? "" });
+      if (!existsSync(`${base}.res`)) {
+        await pause(100);
+        continue;
+      }
+      answer = readFileSync(`${base}.res`, "utf8");
+      rmSync(`${base}.res`, { force: true });
     } catch {
       return;
     }
-    for (let i = 0; i < 20; i++) {
-      let answer;
+    if (answer.includes('"stale"')) {
+      throw new Error(
+        "Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.",
+      );
+    }
+    if (answer.includes('"deny"')) {
+      throw new Error(
+        "Файл сейчас правит другой агент этого проекта. Возьмись за другой файл и вернись к этому позже; переписывать его через оболочку тоже не нужно.",
+      );
+    }
+    return;
+  }
+}
+
+// Подагент у opencode — отдельная сессия с родителем, и шлёт она то же, что
+// основная. Её конец хода — не конец хода панели: баннер «закончил» вставал
+// посреди работы, заявки снимались раньше времени, а панель привязывалась к
+// диалогу подагента и возобновляла потом его вместо своего.
+function sessionTree(lookup) {
+  const parents = new Map();
+  const parentOf = async (id) => {
+    if (!parents.has(id)) {
+      // Не дождались или не спросили — считаем корнем: так было до этой
+      // проверки. Отказ ловим на самом вопросе, а не после гонки: опоздавший
+      // и неперехваченный, он уронил бы процесс opencode.
+      const asked = Promise.resolve()
+        .then(() => lookup(id))
+        .catch(() => undefined);
+      parents.set(id, sessionOf(await Promise.race([asked, pause(1000)])));
+    }
+    return parents.get(id);
+  };
+  return {
+    note(id, parent) {
+      if (sessionOf(id)) parents.set(id, sessionOf(parent));
+    },
+    // Диалог, которому принадлежит сессия: свой для основной, родительский
+    // для подагента.
+    async root(raw) {
+      let id = sessionOf(raw);
+      for (let hop = 0; id && hop < 8; hop++) {
+        const parent = await parentOf(id);
+        if (!parent) return id;
+        id = parent;
+      }
+      return "";
+    },
+    async isChild(raw) {
+      const id = sessionOf(raw);
+      return Boolean(id) && Boolean(await parentOf(id));
+    },
+  };
+}
+
+// Строка для баннера: о чём агент просит. Не разобрали — пусто, баннер
+// назовёт сам вид.
+const joined = (parts) => parts.filter((part) => typeof part === "string" && part).join(": ");
+const listed = (items) => (Array.isArray(items) ? items.filter((item) => typeof item === "string").join(" ") : "");
+
+function formText(form) {
+  const field = Array.isArray(form?.fields) ? form.fields[0] : undefined;
+  const text = form?.title ?? field?.label ?? field?.title ?? field?.description;
+  return typeof text === "string" ? text : "";
+}
+
+// Отличает «тот же диалог снова» от смены диалога: в панели их можно
+// переключать, и привязка обязана идти следом за ним.
+function binder() {
+  let last = "";
+  return (id) => {
+    if (!id || id === last) return;
+    last = id;
+    report(BOUND, "", id);
+  };
+}
+
+// v1: события `{ type, properties }`.
+async function server(input) {
+  if (!inPanel()) return {}; // запущен не из панели ModelCrew
+  const tree = sessionTree(async (id) => {
+    const answer = await input?.client?.session?.get?.({ path: { id } });
+    return answer?.data?.parentID ?? answer?.parentID;
+  });
+  const bind = binder();
+  return {
+    // Проверено на живом opencode: блокирующий обработчик называется так, а
+    // путь лежит в args.filePath.
+    "tool.execute.before": async (call, output) => claim(call?.tool, output?.args?.filePath),
+    event: async (arg) => {
+      const type = arg?.event?.type;
+      const props = arg?.event?.properties;
       try {
-        if (!existsSync(`${base}.res`)) {
-          await pause(100);
-          continue;
+        if (type === "session.created" || type === "session.updated") {
+          tree.note(props?.info?.id, props?.info?.parentID);
+        } else if (type === "session.status") {
+          if (props?.status?.type === "busy" && !(await tree.isChild(props.sessionID))) {
+            bind(sessionOf(props.sessionID));
+          }
+        } else if (type === "session.idle") {
+          if (!(await tree.isChild(props?.sessionID))) {
+            report(type, "", sessionOf(props?.sessionID));
+          }
+        } else if (type === "permission.asked") {
+          // Запрос разрешения opencode не сопровождает ни звонком, ни
+          // выводом: без этого события он доходил только догадкой по тишине.
+          report(type, joined([props?.permission, listed(props?.patterns)]), await tree.root(props?.sessionID));
+        } else if (type === "question.asked") {
+          const first = Array.isArray(props?.questions) ? props.questions[0] : undefined;
+          const text = first?.question ?? first?.header;
+          report(type, typeof text === "string" ? text : "", await tree.root(props?.sessionID));
         }
-        answer = readFileSync(`${base}.res`, "utf8");
-        rmSync(`${base}.res`, { force: true });
       } catch {
-        return;
+        // Уведомление — дополнение; его сбой не должен мешать сессии.
       }
-      // Отказ выражается броском: opencode показывает его текст агенту, и тот
-      // берётся за другой файл.
-      if (answer.includes('"stale"')) {
-        throw new Error(
-          "Файл изменился с тех пор, как ты его прочитал: в нём успел поработать другой агент. Перечитай файл и примени правку заново, иначе его работа будет затёрта.",
-        );
+    },
+  };
+}
+
+// v2: события `{ type, data }`, вопросы приходят формами, а путь у правки
+// лежит в `input.path`.
+async function setup(ctx) {
+  if (!inPanel()) return;
+  // Общий фоновый сервер v2 живёт дольше панели, что его подняла, и
+  // окружение у него её: события ушли бы в чужую или закрытую панель. Панель
+  // запускает opencode со своим сервером, а этот молчит.
+  if (process.argv.includes("--service")) return;
+  const tree = sessionTree(async (id) => (await ctx.session.get({ sessionID: id }))?.parentID);
+  const bind = binder();
+  // Конец хода — только после начала: иначе «закончил» пришёл бы и от
+  // диалога, который просто открыли.
+  const busy = new Set();
+  await ctx.tool.hook("execute.before", (event) =>
+    claim(event?.tool, event?.input?.path ?? event?.input?.filePath),
+  );
+  const onEvent = async (event) => {
+    const data = event?.data ?? {};
+    if (event?.type === "session.created") {
+      tree.note(data.sessionID, data.parentID);
+    } else if (event?.type === "session.status") {
+      const id = sessionOf(data.sessionID);
+      if (!id || (await tree.isChild(id))) return;
+      if (data.status?.type === "busy") {
+        busy.add(id);
+        bind(id);
+      } else if (data.status?.type === "idle" && busy.delete(id)) {
+        report("session.idle", "", id);
       }
-      if (answer.includes('"deny"')) {
-        throw new Error(
-          "Файл сейчас правит другой агент этого проекта. Возьмись за другой файл и вернись к этому позже; переписывать его через оболочку тоже не нужно.",
-        );
-      }
-      return;
+    } else if (event?.type === "permission.asked") {
+      const message = typeof data.message === "string" && data.message ? data.message : joined([data.action, listed(data.resources)]);
+      report("permission.asked", message, await tree.root(data.sessionID));
+    } else if (event?.type === "form.created") {
+      report("question.asked", formText(data.form), await tree.root(data.form?.sessionID));
     }
-  },
-  event: async (arg) => {
-    const type = arg?.event?.type;
-    if (!REPORTED.has(type)) return;
-    if (!dir() || !panel()) return;
+  };
+  const controller = new AbortController();
+  void (async () => {
     try {
-      mkdirSync(dir(), { recursive: true });
-      // Диалог, если он в событии есть: с ним панель возобновится точно, а
-      // без него останется поиск по базе. Форма поля у шины менялась,
-      // поэтому читаем осторожно и отдаём только то, что похоже на id
-      // сессии opencode; чужое значение хуже отсутствия.
-      const raw =
-        arg.event.properties?.sessionID ??
-        arg.event.properties?.sessionId ??
-        arg.event.properties?.info?.id;
-      const sessionId =
-        typeof raw === "string" && /^ses[A-Za-z0-9_-]*$/.test(raw) ? raw : "";
-      put({
-        agent: "__AGENT__",
-        panelId: panel(),
-        payload: { type, message: describe(type, arg.event.properties), session_id: sessionId },
-      });
+      const types = ["session.created", "session.status", "permission.asked", "form.created"];
+      for await (const event of ctx.event.subscribe({ types, signal: controller.signal })) {
+        try {
+          await onEvent(event);
+        } catch {
+          // Уведомление — дополнение; его сбой не должен мешать сессии.
+        }
+      }
     } catch {
-      // Уведомление — дополнение; его сбой не должен мешать сессии.
+      // Поток закрылся вместе с сервером.
     }
-  },
-});
+  })();
+  return () => controller.abort();
+}
+
+export default { id: "modelcrew-notify", server, setup };
 "#;
 
 /// Чем именно агент нас позовёт.
@@ -1923,13 +2055,36 @@ mod tests {
     }
 
     #[test]
-    fn the_opencode_plugin_uses_the_shape_that_actually_fires() {
+    fn the_opencode_plugin_speaks_to_both_lines() {
+        // Как плагин ведёт себя на деле, проверяет scripts/opencode-plugin.test.mjs:
+        // он запускает это тело против поддельных хозяев v1 и v2. Здесь — то,
+        // что видно по тексту.
         let body = opencode_plugin();
 
-        // Документированный ключ "session.idle" не вызывается ни разу —
-        // проверено на живой сессии, поэтому обработчик именно `event`.
+        // Один объект на обе линии: v1 зовёт `server`, v2 — `setup`.
+        // Именованный экспорт рядом v1 загрузил бы вторым плагином.
+        assert!(
+            body.contains(r#"export default { id: "modelcrew-notify", server, setup };"#),
+            "{body}"
+        );
+        assert!(!body.contains("export const"), "{body}");
+        // v1: документированный ключ "session.idle" не вызывается ни разу —
+        // проверено на живой сессии, поэтому обработчик именно `event`. Путь
+        // у заявки — в args.filePath, отказ — бросок, текст которого доходит
+        // до агента дословно.
         assert!(body.contains("event: async (arg)"), "{body}");
         assert!(!body.contains(r#""session.idle": async"#), "{body}");
+        assert!(body.contains(r#""tool.execute.before": async"#), "{body}");
+        assert!(body.contains("output?.args?.filePath"), "{body}");
+        assert!(body.contains("throw new Error"), "{body}");
+        // v2: события подпиской, заявка хуком инструмента, путь в input.path,
+        // вопросы — формами.
+        assert!(body.contains(r#"ctx.tool.hook("execute.before""#), "{body}");
+        assert!(body.contains("event?.input?.path"), "{body}");
+        assert!(body.contains("ctx.event.subscribe("), "{body}");
+        assert!(body.contains(r#""form.created""#), "{body}");
+        // Общий фоновый сервер v2 несёт окружение чужой панели.
+        assert!(body.contains(r#"process.argv.includes("--service")"#), "{body}");
         // Кроме конца хода — запрос разрешения и вопрос: проверено на живом
         // opencode 1.19, ни звонка, ни вывода при них нет, и без этих
         // событий запрос доходил только догадкой по тишине.
@@ -1937,17 +2092,15 @@ mod tests {
             assert!(body.contains(&format!(r#""{event}""#)), "{event}");
         }
         assert!(PROMPT_CHANNEL_AGENTS.contains(&"opencode"));
+        // Привязка диалога в начале хода — тихим событием, которое фронт
+        // знает по имени (`SESSION_ONLY_EVENTS` в agentHookEvent.ts).
+        assert!(body.contains(r#"const BOUND = "modelcrew.session";"#), "{body}");
+        assert!(!ends_turn("modelcrew.session"));
         // Без окружения панели событие некуда привязать — молча выходим.
         assert!(body.contains("MODELCREW_PANEL_ID"));
         assert!(body.contains("MODELCREW_EVENTS_DIR"));
         // Запись через временный файл: вотчер не должен прочитать половину.
         assert!(body.contains(".tmp"));
-        // Заявка на файл: проверено на живом opencode — блокирующий обработчик
-        // называется так, путь лежит в args.filePath, а отказ выражается
-        // броском, текст которого доходит до агента дословно.
-        assert!(body.contains(r#""tool.execute.before": async"#), "{body}");
-        assert!(body.contains("output?.args?.filePath"), "{body}");
-        assert!(body.contains("throw new Error"), "{body}");
     }
 
     #[test]

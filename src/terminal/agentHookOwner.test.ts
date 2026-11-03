@@ -35,7 +35,7 @@ vi.mock("../notifications", () => ({
   sendSystemNotification: mocks.systemNotification,
 }));
 
-import { rememberAgentProcess } from "../agents";
+import { getAgentRecord, rememberAgentProcess } from "../agents";
 import { resetAgentAlertBurst } from "./alertDelivery";
 import { clearAgentAttention } from "./attentionStore";
 import { destroyTerminal, getOrCreateTerminal } from "./registry";
@@ -43,10 +43,18 @@ import { setLocale } from "../i18n";
 
 // Панель у каждой проверки своя: повтор той же попал бы в окно тишины
 // предыдущей и второго сигнала не дал.
-const PANELS = ["hook-owner-codex", "hook-owner-unknown"];
+const PANELS = ["hook-owner-codex", "hook-owner-unknown", "hook-owner-bound"];
 
 // Событие приходит из Rust; в тесте дёргаем зарегистрированный слушатель.
-async function deliver(panel: string, agent: string) {
+async function deliver(
+  panel: string,
+  agent: string,
+  {
+    event = "Stop",
+    message = "готово",
+    sessionId,
+  }: { event?: string; message?: string; sessionId?: string } = {},
+) {
   const handler = mocks.listeners.get("agent-event");
   if (!handler) {
     throw new Error("registry не подписался на agent-event");
@@ -55,8 +63,9 @@ async function deliver(panel: string, agent: string) {
     payload: {
       panelId: panel,
       agent,
-      event: "Stop",
-      message: "готово",
+      event,
+      message,
+      ...(sessionId ? { sessionId } : {}),
     },
   });
   // raiseAgentHookAlert асинхронно спрашивает фокус окна.
@@ -107,5 +116,24 @@ describe("who a hook event is attributed to", () => {
     // Watcher ещё не опознал агента — единственное имя, какое есть, из события.
     const [title] = mocks.systemNotification.mock.calls[0] ?? [""];
     expect(title).toContain("Claude");
+  });
+
+  it("remembers the session from a silent event and raises nothing", async () => {
+    const panel = PANELS[2];
+    getOrCreateTerminal(panel);
+    rememberAgentProcess(panel, "opencode");
+
+    // Плагин opencode называет диалог в начале хода: агент работает, звать
+    // человека не за чем, а запомнить разговор надо уже сейчас.
+    await deliver(panel, "opencode", {
+      event: "modelcrew.session",
+      message: "",
+      sessionId: "ses_ec6e46e45ffekVer8M92xHZ1NS",
+    });
+
+    expect(getAgentRecord(panel)?.sessionId).toBe(
+      "ses_ec6e46e45ffekVer8M92xHZ1NS",
+    );
+    expect(mocks.systemNotification).not.toHaveBeenCalled();
   });
 });

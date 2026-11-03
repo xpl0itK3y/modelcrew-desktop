@@ -37,6 +37,11 @@ const EVENT_KINDS: Record<string, PreciseAgentAlertKind> = {
   notification: "waiting",
 };
 
+// События, которые только называют диалог панели. Баннера по ним нет: агент
+// не закончил и ничего не ждёт — плагин opencode сообщает так начало хода,
+// чтобы панель запомнила свой разговор сразу, а не с его концом.
+const SESSION_ONLY_EVENTS: ReadonlySet<string> = new Set(["modelcrewsession"]);
+
 function eventKey(event: string): string {
   return event.toLowerCase().replace(/[^a-z]/g, "");
 }
@@ -45,7 +50,7 @@ export function agentHookAlert(event: AgentHookEvent): {
   kind: PreciseAgentAlertKind;
   notification: TerminalAttentionNotification;
 } | null {
-  if (!event.panelId) {
+  if (!event.panelId || SESSION_ONLY_EVENTS.has(eventKey(event.event))) {
     return null;
   }
   const notification: TerminalAttentionNotification = {
