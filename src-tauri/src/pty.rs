@@ -197,8 +197,17 @@ impl PtyManager {
         // корень проекта у себя, а не из аргументов вызова. Пропуск случайный:
         // id панели виден любому процессу пользователя, и по нему агент одной
         // панели представился бы другой.
+        //
+        // Унаследованные адрес и пропуск снимаются всегда: ModelCrew,
+        // запущенный из панели ModelCrew, получил бы их от той панели, и агент
+        // этой стучался бы в чужое приложение от чужого имени.
         #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
         let mut mcp_token = String::new();
+        #[cfg(any(unix, windows))]
+        {
+            cmd.env_remove(crate::mcp::SOCK_ENV);
+            cmd.env_remove(crate::mcp::TOKEN_ENV);
+        }
         #[cfg(any(unix, windows))]
         if let Some(socket) = MCP_SOCKET.lock().unwrap().clone() {
             if let Some(token) = crate::mcp::new_token() {
@@ -215,6 +224,12 @@ impl PtyManager {
                     crate::mcp_register::OPENCODE_ENV,
                     crate::mcp_register::opencode_config(&exe, inherited.as_deref()),
                 );
+            }
+        } else if let Ok(inherited) = std::env::var(crate::mcp_register::OPENCODE_ENV) {
+            // Сервера нет — нет и записи о нём, даже пришедшей по наследству.
+            match crate::mcp_register::opencode_config_without_ours(&inherited) {
+                Some(config) => cmd.env(crate::mcp_register::OPENCODE_ENV, config),
+                None => cmd.env_remove(crate::mcp_register::OPENCODE_ENV),
             }
         }
         // Обёртки агентов — в начало PATH, и обязательно после файлов

@@ -170,6 +170,36 @@ pub fn opencode_config(exe: &Path, inherited: Option<&str>) -> String {
     Value::Object(document).to_string()
 }
 
+/// Конфиг opencode без нашего сервера — для панели, где плагин выключен.
+///
+/// Своего значения у такой панели нет, а унаследованное могло прийти от
+/// панели другого ModelCrew — того, из которого запустили этот. Наш сервер в
+/// нём ведёт в чужое приложение; остальное — человека, и оно остаётся как
+/// было. `None` — кроме нашего, в значении ничего и не было.
+pub fn opencode_config_without_ours(inherited: &str) -> Option<String> {
+    let Ok(Value::Object(mut document)) = serde_json::from_str::<Value>(inherited) else {
+        // Не разобрали — значит, и не наше: мы кладём только объект.
+        return Some(inherited.to_string());
+    };
+    let Some(servers) = document.get_mut("mcp").and_then(Value::as_object_mut) else {
+        return Some(inherited.to_string());
+    };
+    let before = servers.len();
+    for name in std::iter::once(SERVER).chain(FORMER_NAMES) {
+        servers.remove(name);
+    }
+    if servers.len() == before {
+        return Some(inherited.to_string());
+    }
+    if servers.is_empty() {
+        document.remove("mcp");
+    }
+    if document.get("$schema") == Some(&json!(OPENCODE_SCHEMA)) && document.len() == 1 {
+        return None;
+    }
+    Some(Value::Object(document).to_string())
+}
+
 #[cfg(unix)]
 fn write_shims(dir: &Path, exe: &Path, enabled: bool) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -980,6 +1010,32 @@ mod tests {
             // Версию не спрашивали: лишние полсекунды на каждый вызов ни к чему.
             assert!(!asked, "{args:?}");
         }
+    }
+
+    #[test]
+    fn a_panel_without_the_plugin_drops_only_our_server_for_opencode() {
+        let theirs = r#"{"mcp":{"mine":{"type":"local","command":["x"]}},"model":"m"}"#;
+        // Нашего нет — значение человека остаётся байт в байт.
+        assert_eq!(
+            opencode_config_without_ours(theirs).as_deref(),
+            Some(theirs)
+        );
+        assert_eq!(
+            opencode_config_without_ours("{oops").as_deref(),
+            Some("{oops")
+        );
+        // Наш поверх его — уходит только наш.
+        let both = opencode_config(&exe(), Some(theirs));
+        let left: Value =
+            serde_json::from_str(&opencode_config_without_ours(&both).unwrap()).unwrap();
+        assert!(left["mcp"].get(SERVER).is_none(), "{left}");
+        assert!(left["mcp"]["mine"].is_object(), "{left}");
+        assert_eq!(left["model"], "m");
+        // Только наш — переменной не остаётся вовсе.
+        assert_eq!(
+            opencode_config_without_ours(&opencode_config(&exe(), None)),
+            None
+        );
     }
 
     #[test]
