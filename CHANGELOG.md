@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.0.24
+
+### Русский
+
+Терминалы выдерживают огромный вывод, и Ctrl+C срабатывает сразу. Приложение стало легче, OpenCode 2 работает в панелях полностью, а в терминал можно поставить свой шрифт.
+
+- В Настройки → Терминал появилось поле «Шрифт терминала»: свои шрифты через запятую встают перед стандартными, и значки Nerd Font и статус-строки теперь рисуются
+- Список шрифтов применяется к открытым терминалам сразу, а программы в панели узнают его из MODELCREW_TERMINAL_FONTS
+- Вывод панели идёт с обратным давлением: cat огромного файла больше не раздувает окно на сотни мегабайт, и Ctrl+C не ждёт, пока дорисуется очередь
+- Спиннеры и строки прогресса доходят до экрана ровно, а не рывками
+- Снимки терминалов пишутся по одному, а при выходе — только изменившиеся: окно не замирает, и история не теряется при выходе с множеством панелей
+- WebGL достаётся только терминалам на экране, не больше двенадцати сразу: видимая панель больше не застревает на медленной отрисовке
+- Перетаскивание краёв окна и колонок больше не перерисовывает всё приложение на каждом кадре, а терминалы подгоняются не чаще раза в 100 мс
+- Дерево файлов, редактор и браузер загружаются по требованию: первый экран разбирает почти на четверть меньше кода
+- Релизная сборка оптимизирована целиком: на macOS приложение похудело с 22,9 до 16,5 МБ
+- Имена программ в панелях читаются у ядра, а не запуском ps каждые полторы секунды; путь с пробелом больше не рвётся на части
+- Сборка, пишущая в игнорируемые папки вроде target и node_modules, больше не будит git-панель
+- Пока окно свёрнуто или спрятано в трей, приложение не опрашивает метки занятых файлов
+- В Настройки → Плагины инструменты браузера раскрываются списком, и у каждого есть короткое описание
+- О странице, которую открыл агент, теперь одно уведомление на агента, а не на каждую страницу; остальные только прибавляются к числу на глобусе
+- OpenCode 2 теперь загружает плагин ModelCrew: уведомления, заявки на файлы и id диалога
+- Подагенты OpenCode больше не завершают ход панели и не подменяют её диалог: вопросы подагента приходят от основного диалога
+- Диалог OpenCode запоминается в начале хода, а не в конце, и панель, закрытая посреди первого ответа, его больше не теряет
+- OpenCode 2 в каждой панели получает свой сервер, который закрывается вместе с ней: больше нет «панель не найдена» и фонового сервера после выхода
+- Версия OpenCode запоминается, и панель не спрашивает её при каждом запуске
+- На Linux крестик закрывает приложение, а перед выходом раскладка и история терминалов сохраняются
+- В bash-панелях, оболочке по умолчанию на Linux, агенты получают браузер проекта, а OpenCode — свой сервер
+- ModelCrew, запущенный из панели ModelCrew, больше не ходит в браузер внешнего приложения от имени чужой панели
+
+### English
+
+Terminals keep up with huge output, and Ctrl+C works at once. The app got lighter, OpenCode 2 works fully in panels, and the terminal can use a font of your own.
+
+- Settings → Terminal has a Terminal font field: your fonts, comma separated, go in front of the built-in ones, so Nerd Font and status line icons now render
+- The font list applies to open terminals at once, and programs in a panel learn it from MODELCREW_TERMINAL_FONTS
+- Panel output now has backpressure: cat of a huge file no longer swells the window by hundreds of megabytes, and Ctrl+C does not wait for a drawing queue
+- Spinners and progress lines reach the screen smoothly instead of in lurches
+- Terminal snapshots are written one at a time, and on quit only the changed ones: the window does not freeze, and history is not lost when quitting with many panels
+- Only terminals on screen get WebGL, twelve at most: a visible panel no longer gets stuck on the slow renderer
+- Dragging window and column edges no longer re-renders the whole app every frame, and terminals refit at most every 100 ms
+- The file tree, editor and browser load on demand: the first screen parses nearly a quarter less code
+- The release build is optimized as a whole: on macOS the app shrank from 22.9 MB to 16.5 MB
+- Program names in panels are read from the kernel instead of running ps every second and a half; a path with a space is no longer split apart
+- A build writing into ignored folders such as target and node_modules no longer wakes the git panel
+- While the window is minimized or tucked into the tray, the app does not poll file claim labels
+- In Settings → Plugins the browser tools unfold into a list with a short description for each
+- A page an agent opens now raises one notice per agent, not one per page; the rest only add to the count on the globe
+- OpenCode 2 now loads the ModelCrew plugin: alerts, file claims and the conversation id
+- OpenCode subagents no longer end the panel's turn or take over its conversation: their questions arrive under the main conversation
+- The OpenCode conversation is remembered when a turn starts rather than when it ends, so a panel closed during the first answer keeps it
+- OpenCode 2 gets a server of its own in each panel that closes with it: no more "panel not found" and no background server after quitting
+- The OpenCode version is remembered, so the panel does not ask for it on every launch
+- On Linux the close button quits the app, and the layout and terminal history are saved before it exits
+- In bash panels, the default shell on Linux, agents get the project browser, and OpenCode its own server
+- A ModelCrew started from a ModelCrew panel no longer reaches the outer app's browser under another panel's name
+
 ## 0.0.23
 
 ### Русский

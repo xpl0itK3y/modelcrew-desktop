@@ -1,0 +1,25 @@
+{
+  "version": "0.0.24",
+  "ru": {
+    "title": "Быстрые терминалы, OpenCode 2 и свой шрифт терминала",
+    "summary": "Терминалы выдерживают огромный вывод, и Ctrl+C срабатывает сразу. Приложение стало легче, OpenCode 2 работает в панелях полностью, а в терминал можно поставить свой шрифт.",
+    "highlights": [
+      "Свой шрифт терминала в настройках: значки Nerd Font и других своих шрифтов теперь видны",
+      "Огромный вывод больше не раздувает окно, и Ctrl+C срабатывает сразу",
+      "Запуск, перетаскивание краёв и выход с десятками терминалов стали легче, а само приложение — меньше",
+      "OpenCode 2 в панелях: уведомления, заявки на файлы и возобновление своего диалога",
+      "На Linux крестик закрывает приложение, а агенты в bash-панелях получают браузер проекта"
+    ]
+  },
+  "en": {
+    "title": "Fast terminals, OpenCode 2 and a terminal font of your own",
+    "summary": "Terminals keep up with huge output, and Ctrl+C works at once. The app got lighter, OpenCode 2 works fully in panels, and the terminal can use a font of your own.",
+    "highlights": [
+      "A terminal font of your own in Settings, so Nerd Font icons and other glyphs of your fonts now show",
+      "Huge output no longer swells the window, and Ctrl+C works at once",
+      "Starting, dragging edges and quitting with dozens of terminals got lighter, and the app itself smaller",
+      "OpenCode 2 in panels: alerts, file claims and resuming the panel's own conversation",
+      "On Linux the close button quits the app, and agents in bash panels get the project browser"
+    ]
+  }
+}
