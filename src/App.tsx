@@ -22,6 +22,7 @@ import {
   clampWithin,
   fitColumns,
   loadWidth,
+  MIN_DOCK_WIDTH,
   saveWidth,
   widthLimits,
   widthLimitsWithin,
@@ -122,6 +123,9 @@ const tabComponents = { terminal: TerminalTab };
 /// Сколько уезжает колонка. Дерево и редактор съезжаются одной и той же
 /// анимацией `column-out` из file-tree.css: разойдись эти числа — и соседние
 /// колонки снимаются в разный момент, одну обрезает на середине кадра.
+// Через сколько после последнего изменения ширины сетки она доходит до
+// состояния (подписи разделителей). Ужатие колонок ждать не заставляем.
+const DOCK_WIDTH_SETTLE_MS = 150;
 const COLUMN_EXIT_MS = 200;
 
 type SessionDeleteRequest = {
@@ -565,6 +569,14 @@ export default function App() {
   // и любая из них может выдавить сетку за правый край. Считает её ResizeObserver
   // по живому элементу — так не нужно знать ни про разделители, ни про то, какие
   // колонки сейчас видны.
+  //
+  // Пока тянут край окна или колонки, сетка меняет ширину каждый кадр, и
+  // состояние на каждый кадр перерисовывало бы всё приложение. Поэтому живая
+  // ширина идёт мимо React: в ref — для зажима колонок при перетаскивании, в
+  // CSS-переменную --dock-width — развёрнутому редактору. Состояние нужно
+  // только ужатию колонок под окно (сразу, когда сетке уже тесно) и подписям
+  // разделителей (им хватит и устоявшейся ширины).
+  const appBodyRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLElement | null>(null);
   const dockWidthRef = useRef(0);
   const [dockWidth, setDockWidth] = useState(0);
@@ -573,13 +585,26 @@ export default function App() {
     if (!element) {
       return;
     }
+    let settle: number | undefined;
     const observer = new ResizeObserver(() => {
       const width = element.clientWidth;
       dockWidthRef.current = width;
-      setDockWidth(width);
+      appBodyRef.current?.style.setProperty("--dock-width", `${width}px`);
+      window.clearTimeout(settle);
+      if (width < MIN_DOCK_WIDTH) {
+        setDockWidth(width);
+      } else {
+        settle = window.setTimeout(
+          () => setDockWidth(dockWidthRef.current),
+          DOCK_WIDTH_SETTLE_MS,
+        );
+      }
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(settle);
+    };
   }, []);
   const resizeColumn = useCallback((column: Column, width: number) => {
     setWidths((current) => ({
@@ -898,7 +923,7 @@ export default function App() {
         waiting={waitingPanels}
         onRevealPanel={revealPanel}
       />
-      <div className="app-body">
+      <div className="app-body" ref={appBodyRef}>
         <div
           className="sidebar-rail"
           aria-hidden={!sidebarVisible}
@@ -998,10 +1023,6 @@ export default function App() {
             onSelect={setActiveFilePath}
             onClose={dropFiles}
             width={widths.editor}
-            // Развёрнутый редактор накрывает свою колонку и сетку, но не
-            // дерево с боковой панелью — а для этого ему нужно знать, сколько
-            // сейчас занимает сетка.
-            dockWidth={dockWidth}
             leaving={editorPresence.closing}
           />
         )}

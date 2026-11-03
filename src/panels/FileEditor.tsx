@@ -29,8 +29,6 @@ export function FileEditor(props: {
   onClose: (path: string) => void;
   /// Ширину задаёт раскладка: колонку тянут за разделитель справа.
   width: number;
-  /// Ширина сетки терминалов: её редактор и накрывает, когда развёрнут.
-  dockWidth: number;
   /// Колонка уезжает: последний файл закрыт, но кадр исчезания ещё идёт.
   leaving?: boolean;
 }) {
@@ -131,13 +129,13 @@ export function FileEditor(props: {
             // Своя колонка плюс сетка плюс зазор между ними: правым краем
             // развёрнутый редактор встаёт туда же, где кончалась сетка, и
             // дальше влево не заходит — дерево и список проектов на месте.
-            "--maximized-width": `calc(${
-              props.width + props.dockWidth
-            }px + var(--mc-gap))`,
+            // Ширину сетки (--dock-width) ставит раскладка прямо в стиль,
+            // мимо React: она меняется каждый кадр, пока тянут край окна.
+            "--maximized-width": `calc(${props.width}px + var(--dock-width, 0px) + var(--mc-gap))`,
             // Правый край колонки на своём месте, считая от правого края
             // сетки: из этой точки разворот растёт и в неё же возвращается,
             // так что левый край не дёргается ни туда, ни обратно.
-            "--collapsed-right": `calc(var(--mc-gap) * 2 + ${props.dockWidth}px)`,
+            "--collapsed-right": "calc(var(--mc-gap) * 2 + var(--dock-width, 0px))",
             ...(overlay ? {} : { width: "var(--column-width)" }),
           } as CSSProperties
         }

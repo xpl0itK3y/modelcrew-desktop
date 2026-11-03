@@ -126,7 +126,6 @@ function open(path = "a.txt") {
       onSelect={() => {}}
       onClose={() => {}}
       width={520}
-      dockWidth={800}
     />,
   );
 }
@@ -141,7 +140,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -158,7 +156,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -185,7 +182,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -205,7 +201,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -224,7 +219,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={closed}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -245,7 +239,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -263,7 +256,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() => expect(visibleField()).toHaveValue("внутри b.txt"));
@@ -275,7 +267,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -294,7 +285,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={closed}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -326,7 +316,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={closed}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -350,7 +339,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -375,7 +363,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -397,7 +384,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
         leaving
       />,
     );
@@ -417,7 +403,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -444,7 +429,6 @@ describe("FileEditor", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -665,7 +649,6 @@ describe("FileView and the disk under it", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -694,7 +677,6 @@ describe("FileView and the disk under it", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
     await waitFor(() =>
@@ -711,7 +693,6 @@ describe("FileView and the disk under it", () => {
         onSelect={() => {}}
         onClose={() => {}}
         width={520}
-        dockWidth={800}
       />,
     );
 
@@ -756,9 +737,10 @@ describe("FileView and the disk under it", () => {
     expect(editor.className).toContain("is-maximized");
     // Накрывает свою колонку и сетку — и ровно столько. Дерево и список
     // проектов остаются на виду: по ним переключаются, и прятать их значит
-    // заставить свернуть редактор ради соседнего файла.
+    // заставить свернуть редактор ради соседнего файла. Ширину сетки
+    // раскладка кладёт в --dock-width сама, без перерисовки редактора.
     expect((editor as HTMLElement).style.getPropertyValue("--maximized-width")).toBe(
-      "calc(1320px + var(--mc-gap))",
+      "calc(520px + var(--dock-width, 0px) + var(--mc-gap))",
     );
     // Место колонки в ряду занимает подставка: иначе сетка разъехалась бы на
     // него, а на возврате схлопнулась обратно.
