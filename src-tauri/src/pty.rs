@@ -4,17 +4,127 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// Вывод копится и уходит во фронт пачками: либо раз в BATCH_WINDOW,
-/// либо при достижении MAX_BATCH_BYTES. Побайтовая отправка через IPC —
-/// главный источник лагов.
+/// Вывод копится и уходит во фронт пачками: не позже BATCH_WINDOW после
+/// первого байта пачки либо при достижении MAX_BATCH_BYTES. Побайтовая
+/// отправка через IPC — главный источник лагов.
 const BATCH_WINDOW: Duration = Duration::from_millis(8);
 const MAX_BATCH_BYTES: usize = 32 * 1024;
 const READ_BUF_BYTES: usize = 8 * 1024;
 const KILL_ALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Обратное давление на вывод. Сколько отправленного, но ещё не разобранного
+/// терминалом вывода терпим, прежде чем перестать читать PTY. Пока ридер
+/// стоит, ядро копит вывод в буфере PTY, а когда и тот полон — программа
+/// засыпает на записи. Так `cat` огромного файла не раздувает память webview
+/// и не держит Ctrl+C за мегабайтами, которые ещё предстоит нарисовать.
+const FLOW_HIGH_WATERMARK: usize = 2 * 1024 * 1024;
+/// До скольких должен сойти долг, чтобы ридер продолжил. Фронт подтверждает
+/// вывод кусками (см. PTY_ACK_BYTES в registry.ts) — кусок обязан быть меньше,
+/// иначе неподтверждённый хвост держал бы ридер вечно.
+const FLOW_LOW_WATERMARK: usize = 512 * 1024;
+/// Как часто стоящий ридер проверяет, не закрыли ли сессию.
+const FLOW_WAIT_SLICE: Duration = Duration::from_millis(250);
+
+/// Счёт вывода, отправленного во фронт и ещё не подтверждённого им.
+#[derive(Default)]
+struct OutputFlow {
+    unacked: Mutex<usize>,
+    drained: Condvar,
+    // Сессию сняли: подтверждать больше некому, ридер дочитывает без пауз.
+    closed: AtomicBool,
+}
+
+impl OutputFlow {
+    fn sent(&self, bytes: usize) {
+        *self.unacked.lock().unwrap() += bytes;
+    }
+
+    fn ack(&self, bytes: usize) {
+        let mut unacked = self.unacked.lock().unwrap();
+        *unacked = unacked.saturating_sub(bytes);
+        if *unacked <= FLOW_LOW_WATERMARK {
+            self.drained.notify_all();
+        }
+    }
+
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let _unacked = self.unacked.lock().unwrap();
+        self.drained.notify_all();
+    }
+
+    /// Пауза перед чтением, пока фронт не разберёт накопленное. Встаём выше
+    /// верхней отметки, продолжаем ниже нижней: без зазора ридер дёргался бы
+    /// на каждом подтверждении.
+    fn wait_for_room(&self) {
+        let mut unacked = self.unacked.lock().unwrap();
+        if *unacked <= FLOW_HIGH_WATERMARK {
+            return;
+        }
+        while *unacked > FLOW_LOW_WATERMARK && !self.closed.load(Ordering::SeqCst) {
+            unacked = self
+                .drained
+                .wait_timeout(unacked, FLOW_WAIT_SLICE)
+                .unwrap()
+                .0;
+        }
+    }
+}
+
+/// Склейка вывода ридера в пачки для IPC. Срок пачки отсчитывается от её
+/// первого байта, а не от последнего: иначе частый мелкий вывод — прогресс,
+/// спиннер, строка состояния агента — продлевал бы ожидание с каждым куском и
+/// уходил во фронт рывками по 32 КБ вместо ровного потока.
+fn forward_batches(
+    chunks: mpsc::Receiver<Vec<u8>>,
+    flow: Option<&OutputFlow>,
+    on_output: impl Fn(Vec<u8>),
+) {
+    let send = |pending: &mut Vec<u8>| {
+        let batch = std::mem::take(pending);
+        if let Some(flow) = flow {
+            flow.sent(batch.len());
+        }
+        on_output(batch);
+    };
+    let mut pending: Vec<u8> = Vec::new();
+    let mut deadline: Option<Instant> = None;
+    loop {
+        let received = match deadline {
+            Some(at) => chunks.recv_timeout(at.saturating_duration_since(Instant::now())),
+            None => chunks.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        match received {
+            Ok(chunk) => {
+                if pending.is_empty() {
+                    deadline = Some(Instant::now() + BATCH_WINDOW);
+                }
+                pending.extend_from_slice(&chunk);
+                if pending.len() >= MAX_BATCH_BYTES {
+                    send(&mut pending);
+                    deadline = None;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if !pending.is_empty() {
+                    send(&mut pending);
+                }
+                deadline = None;
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                if !pending.is_empty() {
+                    send(&mut pending);
+                }
+                break;
+            }
+        }
+    }
+}
 
 /// Каталог событий агентов: один на процесс, задаётся при старте приложения.
 /// Хук агента запускается внутри панели и берёт путь из окружения.
@@ -100,6 +210,19 @@ struct PtySession {
     // Пропуск этой панели на сокет MCP. Пусто, когда сокета нет вовсе:
     // тогда и предъявлять его некому.
     mcp_token: String,
+    // Счёт неподтверждённого вывода. Нет — фронт не подтверждает, и ридер
+    // читает без пауз (так работают тесты и любые иные потребители).
+    flow: Option<Arc<OutputFlow>>,
+}
+
+impl Drop for PtySession {
+    // Сессию сняли — kill, замена тем же id, выход шелла, kill_all. Стоящий
+    // ридер больше не дождётся подтверждений: отпускаем его дочитать до EOF.
+    fn drop(&mut self) {
+        if let Some(flow) = &self.flow {
+            flow.close();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -109,9 +232,38 @@ pub struct PtyManager {
 }
 
 impl PtyManager {
+    /// Терминал без обратного давления: вывод читается так быстро, как его
+    /// отдаёт программа.
     pub fn spawn(
         &self,
         opts: SpawnOptions,
+        on_output: impl Fn(Vec<u8>) + Send + 'static,
+        on_exit: impl FnOnce(Option<i32>) + Send + 'static,
+    ) -> CommandResult<String> {
+        self.spawn_session(opts, None, on_output, on_exit)
+    }
+
+    /// Терминал панели: чтение встаёт, когда фронт отстал на
+    /// FLOW_HIGH_WATERMARK байт, и продолжается после его подтверждений
+    /// (`ack`).
+    pub fn spawn_paced(
+        &self,
+        opts: SpawnOptions,
+        on_output: impl Fn(Vec<u8>) + Send + 'static,
+        on_exit: impl FnOnce(Option<i32>) + Send + 'static,
+    ) -> CommandResult<String> {
+        self.spawn_session(
+            opts,
+            Some(Arc::new(OutputFlow::default())),
+            on_output,
+            on_exit,
+        )
+    }
+
+    fn spawn_session(
+        &self,
+        opts: SpawnOptions,
+        flow: Option<Arc<OutputFlow>>,
         on_output: impl Fn(Vec<u8>) + Send + 'static,
         on_exit: impl FnOnce(Option<i32>) + Send + 'static,
     ) -> CommandResult<String> {
@@ -298,6 +450,7 @@ impl PtyManager {
                 epoch,
                 root: opts.cwd.clone(),
                 mcp_token,
+                flow: flow.clone(),
             },
         );
         // Свежая сессия уже в карте — гасим прежний процесс того же id.
@@ -308,9 +461,13 @@ impl PtyManager {
 
         let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
 
+        let reader_flow = flow.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; READ_BUF_BYTES];
             loop {
+                if let Some(flow) = &reader_flow {
+                    flow.wait_for_room();
+                }
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
@@ -322,30 +479,7 @@ impl PtyManager {
             }
         });
 
-        std::thread::spawn(move || {
-            let mut pending: Vec<u8> = Vec::new();
-            loop {
-                match chunk_rx.recv_timeout(BATCH_WINDOW) {
-                    Ok(chunk) => {
-                        pending.extend_from_slice(&chunk);
-                        if pending.len() >= MAX_BATCH_BYTES {
-                            on_output(std::mem::take(&mut pending));
-                        }
-                    }
-                    Err(RecvTimeoutError::Timeout) => {
-                        if !pending.is_empty() {
-                            on_output(std::mem::take(&mut pending));
-                        }
-                    }
-                    Err(RecvTimeoutError::Disconnected) => {
-                        if !pending.is_empty() {
-                            on_output(pending);
-                        }
-                        break;
-                    }
-                }
-            }
-        });
+        std::thread::spawn(move || forward_batches(chunk_rx, flow.as_deref(), on_output));
 
         let exit_sessions = Arc::clone(&self.sessions);
         let exit_id = opts.id.clone();
@@ -413,6 +547,19 @@ impl PtyManager {
                 pixel_height: 0,
             })
             .map_err(|error| terminal_error(ErrorCode::TerminalResizeFailed, id).with_debug(error))
+    }
+
+    /// Фронт разобрал столько байт вывода панели. У терминала без обратного
+    /// давления подтверждать нечего — это не ошибка.
+    pub fn ack(&self, id: &str, bytes: usize) -> CommandResult<()> {
+        let sessions = self.sessions.lock().unwrap();
+        let session = sessions
+            .get(id)
+            .ok_or_else(|| terminal_error(ErrorCode::TerminalNotFound, id))?;
+        if let Some(flow) = &session.flow {
+            flow.ack(bytes);
+        }
+        Ok(())
     }
 
     /// Убивает процесс и снимает сессию. Закрытие мастера обрывает ридер.
@@ -1491,6 +1638,160 @@ mod tests {
         );
 
         manager.kill("stress").expect("kill после стресса");
+    }
+
+    /// Частый мелкий вывод (прогресс, спиннер) уходит ровным потоком, а не
+    /// одной пачкой после того, как наберётся 32 КБ: срок пачки считается от её
+    /// первого байта, и новые куски его не продлевают.
+    #[test]
+    fn a_steady_trickle_is_not_held_back() {
+        let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        let forwarder = std::thread::spawn(move || {
+            forward_batches(chunk_rx, None, move |batch| {
+                let _ = out_tx.send(batch);
+            });
+        });
+        // Куски каждые 2 мс — чаще окна пачки — общим объёмом много меньше
+        // 32 КБ. Прежняя склейка не отдала бы ничего до самого конца.
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(300) {
+            chunk_tx.send(vec![b'.'; 16]).unwrap();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let during = out_rx.try_iter().count();
+        drop(chunk_tx);
+        forwarder.join().unwrap();
+        assert!(
+            during >= 5,
+            "за 300 мс сплошного вывода ушло пачек: {during}"
+        );
+    }
+
+    /// Ридер встаёт, когда долг фронта выше верхней отметки, и идёт дальше,
+    /// только когда тот сошёл ниже нижней. Снятая сессия отпускает его сразу.
+    #[test]
+    fn output_flow_pauses_between_the_watermarks() {
+        let flow = Arc::new(OutputFlow::default());
+        flow.sent(FLOW_HIGH_WATERMARK + 1);
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let waiter = {
+            let flow = Arc::clone(&flow);
+            std::thread::spawn(move || {
+                flow.wait_for_room();
+                let _ = done_tx.send(());
+            })
+        };
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "ридер не встал выше верхней отметки"
+        );
+        // Ниже верхней, но выше нижней — всё ещё стоим.
+        flow.ack(FLOW_HIGH_WATERMARK - FLOW_LOW_WATERMARK);
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "ридер пошёл, не дождавшись нижней отметки"
+        );
+        flow.ack(FLOW_LOW_WATERMARK);
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("ридер не пошёл после подтверждения");
+        waiter.join().unwrap();
+
+        // Закрытие отпускает и без подтверждений.
+        flow.sent(FLOW_HIGH_WATERMARK + 1);
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let waiter = {
+            let flow = Arc::clone(&flow);
+            std::thread::spawn(move || {
+                flow.wait_for_room();
+                let _ = done_tx.send(());
+            })
+        };
+        assert!(done_rx.recv_timeout(Duration::from_millis(300)).is_err());
+        flow.close();
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("закрытая сессия держит ридер");
+        waiter.join().unwrap();
+    }
+
+    /// Живой PTY с обратным давлением: пока фронт молчит, вывод упирается в
+    /// верхнюю отметку, а после подтверждений доходит целиком.
+    #[test]
+    fn paced_output_waits_for_the_frontend() {
+        const PAYLOAD: usize = 8 * 1024 * 1024;
+
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn_paced(
+                SpawnOptions {
+                    id: "paced".into(),
+                    shell: Some(Shell::path()),
+                    cwd: test_cwd(),
+                    cols: 120,
+                    rows: 40,
+                    history_dir: None,
+                    agent_shims: None,
+                    terminal_fonts: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        let payload_dir = tempfile::tempdir().expect("временная папка");
+        let payload_path = payload_dir.path().join("payload.bin");
+        std::fs::write(&payload_path, vec![b'.'; PAYLOAD]).expect("подготовка данных");
+        for line in Shell::dump_file(&payload_path) {
+            manager.write("paced", &line).expect("запись команды");
+        }
+
+        // Фронт молчит: читаем, пока поток не встанет.
+        let mut cursor = CursorResponder::new();
+        let mut total = 0usize;
+        while let Ok(chunk) = out_rx.recv_timeout(Duration::from_secs(2)) {
+            cursor.feed(&manager, "paced", &chunk);
+            total += chunk.len();
+            assert!(
+                total <= FLOW_HIGH_WATERMARK + 512 * 1024,
+                "вывод не встал: дошло {total} байт без единого подтверждения"
+            );
+        }
+        assert!(
+            total >= FLOW_HIGH_WATERMARK,
+            "поток встал раньше отметки: {total} байт"
+        );
+
+        // Фронт разбирает всё, что пришло, — вывод доходит до конца.
+        manager.ack("paced", total).expect("подтверждение");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let mut tail: Vec<u8> = Vec::new();
+        loop {
+            assert!(Instant::now() < deadline, "вывод не дошёл после подтверждений");
+            let Ok(chunk) = out_rx.recv_timeout(Duration::from_secs(5)) else {
+                panic!("поток не пошёл после подтверждения (всего {total} байт)");
+            };
+            cursor.feed(&manager, "paced", &chunk);
+            total += chunk.len();
+            manager.ack("paced", chunk.len()).expect("подтверждение");
+            tail.extend_from_slice(&chunk);
+            if String::from_utf8_lossy(&tail).contains("STRESS_1337") {
+                break;
+            }
+            let keep = tail.len().min(64);
+            tail = tail.split_off(tail.len() - keep);
+        }
+        assert!(total >= PAYLOAD, "дошло только {total} байт");
+
+        manager.kill("paced").expect("kill после проверки");
+        assert_eq!(
+            manager.ack("paced", 1).unwrap_err().code,
+            ErrorCode::TerminalNotFound
+        );
     }
 
     /// Дюжина живых сессий одновременно: все отвечают, kill_all всех убирает.

@@ -107,6 +107,8 @@ export type TerminalEntry = {
   pasteListener: (event: ClipboardEvent) => void;
   workspaceId: string | null;
   outputGeneration: number;
+  // Разобранный терминалом вывод, ещё не подтверждённый бэкенду (pty_ack).
+  unackedBytes: number;
   resizeTimer: number | undefined;
   // Панель переименована руками — автоимя от процесса больше не трогаем.
   manualTitle: boolean;
@@ -402,6 +404,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     pasteListener: () => {},
     workspaceId: null,
     outputGeneration: 0,
+    unackedBytes: 0,
     resizeTimer: undefined,
     manualTitle: false,
     everAttached: false,
@@ -538,8 +541,38 @@ function scheduleResumeInjection(entry: TerminalEntry, quietMs: number): void {
   }, quietMs);
 }
 
+// Подтверждаем разобранный вывод не на каждую пачку, а кусками: вызов IPC на
+// каждые 32 КБ при сплошном выводе стоил бы заметно. Кусок обязан быть меньше
+// нижней отметки бэкенда (FLOW_LOW_WATERMARK в pty.rs, 512 КБ): неподтверждённый
+// остаток иначе держал бы его ридер вечно.
+const PTY_ACK_BYTES = 128 * 1024;
+
+// Бэкенд считает байты. Строкой вывод сюда не приходит (канал шлёт сырые
+// байты), но если придёт — лучше переподтвердить, чем недоподтвердить: в UTF-8
+// одна единица UTF-16 занимает не больше трёх байт.
+function outputSize(data: PtyOutput): number {
+  return typeof data === "string" ? data.length * 3 : data.byteLength;
+}
+
+// Бэкенд перестаёт читать PTY, пока терминал не разберёт уже отправленное.
+// Поэтому подтверждать надо всё, что пришло, — и то, что выброшено как вывод
+// прежнего поколения: иначе долг рос бы, а панель однажды замолчала бы.
+function acknowledgeOutput(entry: TerminalEntry, bytes: number): void {
+  entry.unackedBytes += bytes;
+  if (entry.unackedBytes < PTY_ACK_BYTES) {
+    return;
+  }
+  const acked = entry.unackedBytes;
+  entry.unackedBytes = 0;
+  void invoke("pty_ack", { id: entry.id, bytes: acked }).catch(() => {});
+}
+
 function writePtyOutput(entry: TerminalEntry, data: PtyOutput): void {
-  entry.term.write(typeof data === "string" ? data : new Uint8Array(data));
+  const size = outputSize(data);
+  // Колбэк xterm зовёт, когда кусок разобран, — это и есть «фронт успел».
+  entry.term.write(typeof data === "string" ? data : new Uint8Array(data), () =>
+    acknowledgeOutput(entry, size),
+  );
   markSnapshotDirty(entry.id);
   if (entry.pendingResume !== null) {
     scheduleResumeInjection(entry, RESUME_QUIET_MS);
@@ -561,6 +594,8 @@ function createLiveOutputChannel(
   output.onmessage = (data) => {
     if (entry.outputGeneration === generation) {
       writePtyOutput(entry, data);
+    } else {
+      acknowledgeOutput(entry, outputSize(data));
     }
   };
   return output;
@@ -608,6 +643,8 @@ async function restartTerminal(
       pending.push(data);
     } else if (entry.outputGeneration === generation) {
       writePtyOutput(entry, data);
+    } else {
+      acknowledgeOutput(entry, outputSize(data));
     }
   };
 
@@ -625,6 +662,8 @@ async function restartTerminal(
   // С этого момента старый канал игнорируется. reset очищает и viewport, и
   // scrollback, после чего стартовый вывод нового PTY воспроизводится по порядку.
   entry.outputGeneration = generation;
+  // Долг прежнего PTY к новому отношения не имеет.
+  entry.unackedBytes = 0;
   entry.term.reset();
   committed = true;
   for (const data of pending) {

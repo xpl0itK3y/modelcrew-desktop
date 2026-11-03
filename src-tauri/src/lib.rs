@@ -405,7 +405,9 @@ fn pty_create(
     };
     let exit_app = app.clone();
     let exit_id = id.clone();
-    let shell = state.spawn(
+    // Вывод панели идёт с обратным давлением: фронт подтверждает разобранное
+    // через pty_ack, и отставший webview притормаживает чтение PTY.
+    let shell = state.spawn_paced(
         SpawnOptions {
             id,
             // Пусто/None — оболочка по умолчанию для ОС (см. default_shell).
@@ -471,6 +473,18 @@ fn pty_resize(
 ) -> CommandResult<()> {
     ensure_main_window(&window)?;
     state.resize(&id, cols, rows)
+}
+
+/// Терминал панели разобрал столько байт вывода (см. PtyManager::spawn_paced).
+#[tauri::command]
+fn pty_ack(
+    window: tauri::Webview,
+    state: tauri::State<'_, PtyManager>,
+    id: String,
+    bytes: usize,
+) -> CommandResult<()> {
+    ensure_main_window(&window)?;
+    state.ack(&id, bytes)
 }
 
 #[tauri::command]
@@ -1126,6 +1140,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_kill_all,
+            pty_ack,
             terminal_snapshot_save,
             terminal_snapshot_load,
             terminal_snapshot_delete,
@@ -1370,6 +1385,7 @@ mod tests {
         "mcp_status",
         "panel_snapshot_restore",
         "panel_snapshots",
+        "pty_ack",
         "pty_create",
         "pty_kill",
         "pty_kill_all",
