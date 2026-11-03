@@ -27,16 +27,20 @@ test -n "$scanner" || { echo "gst-plugin-scanner not found" >&2; exit 1; }
 # кеш; нынешняя собирает AppImage через linuxdeploy, и отдельного appimagetool
 # в кеше уже нет — тогда достаём его из плагина linuxdeploy, который tauri
 # скачал сам, а в последнюю очередь берём официальную сборку.
+#
+# Ищем сам бинарь: по одному `appimagetool*` находилась и иконка
+# appimagetool.png из того же плагина, а с ней скрипт уходил за официальной
+# сборкой, хотя рабочий инструмент лежал рядом.
 tool=""
 if [ -d "$HOME/.cache/tauri" ]; then
-  tool="$(find "$HOME/.cache/tauri" -name 'appimagetool*' -type f -print -quit)"
+  tool="$(find "$HOME/.cache/tauri" -type f \( -name appimagetool -o -name 'appimagetool-*.AppImage' \) -print -quit)"
   if [ -z "$tool" ]; then
     plugin="$(find "$HOME/.cache/tauri" -name 'linuxdeploy-plugin-appimage*' -type f -print -quit)"
     if [ -n "$plugin" ]; then
       chmod +x "$plugin"
       toolwork="$(mktemp -d)"
       (cd "$toolwork" && "$plugin" --appimage-extract >/dev/null)
-      tool="$(find "$toolwork/squashfs-root" -name 'appimagetool*' -type f -print -quit)"
+      tool="$(find "$toolwork/squashfs-root" -type f \( -name appimagetool -o -name 'appimagetool-*.AppImage' \) -print -quit)"
     fi
   fi
 fi
@@ -166,6 +170,10 @@ export GTK_MODULES=""
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/modelcrew"
 export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-$HOME/.cache}/modelcrew/gstreamer-registry.bin"
 HOOK
+# Образ запускают не те, кто его собрал, поэтому всё внутри должно читаться
+# всеми, а каталоги и программы — открываться всеми. mktemp -d и распаковка
+# дают 0700, и appimagetool с ноября 2026 года такой образ не собирает вовсе.
+chmod -R a+rX "$root"
 # appimagetool сам является AppImage; extract-and-run избавляет от FUSE.
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$(uname -m)" "$tool" --no-appstream "$root" "$appimage"
 chmod +x "$appimage"
