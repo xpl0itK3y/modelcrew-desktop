@@ -1311,6 +1311,7 @@ mod tests {
         "agent_sessions_keep",
         "agent_sessions_remember",
         "agent_sessions_watch",
+        "app_quit",
         "app_set_badge",
         "app_set_locale",
         "browser_auto_reload",
