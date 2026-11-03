@@ -3,7 +3,17 @@ import { fireEvent } from "@testing-library/dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
 import { forgetMcpStatus } from "../../mcp";
-import { PluginsTab } from "./PluginsTab";
+import { PluginsTab, TOOL_DESCRIPTIONS } from "./PluginsTab";
+
+// Исходник сервера — тем же путём, что и в i18n/keys.test.ts: node:fs здесь
+// недоступен, а Vite отдаёт содержимое файла и в тестах.
+const mcpSource = Object.values(
+  import.meta.glob("../../../src-tauri/src/mcp.rs", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>,
+)[0];
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -44,16 +54,62 @@ describe("PluginsTab", () => {
     render(<PluginsTab />);
 
     // Имена инструментов — те же, что уходят агенту: по ним человек и
-    // сверяет, то ли он видит в /mcp у себя.
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          "Инструменты: crew_ping · browser_open · browser_navigate",
-        ),
-      ).toBeVisible(),
-    );
+    // сверяет, то ли он видит в /mcp у себя. Список свёрнут, пока не
+    // попросят.
+    const toggle = await screen.findByRole("button", {
+      name: "Инструменты (3)",
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("browser_open")).toBeNull();
     expect(screen.getByText(RUNNING.socket)).toBeVisible();
     expect(theSwitch()).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const list = document.getElementById(toggle.getAttribute("aria-controls")!);
+    expect(list).not.toBeNull();
+    expect(
+      Array.from(list!.querySelectorAll("dt")).map((term) => term.textContent),
+    ).toEqual(RUNNING.tools);
+    expect(screen.getByText("browser_navigate").closest("div")).toHaveTextContent(
+      "Открывает адрес (http или https) и ждёт, пока страница загрузится.",
+    );
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText("browser_open")).toBeNull();
+  });
+
+  it("shows a tool the settings know nothing about by its name alone", async () => {
+    invoke.mockResolvedValue({ ...RUNNING, tools: ["crew_ping", "crew_new"] });
+    render(<PluginsTab />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Инструменты (2)" }),
+    );
+
+    expect(screen.getByText("crew_new")).toBeVisible();
+    expect(screen.getByText("crew_new").closest("div")).toHaveTextContent(
+      /^crew_new$/,
+    );
+  });
+
+  it("describes every tool the server hands out", () => {
+    // Новый инструмент в mcp.rs без строки здесь показался бы в настройках
+    // одним именем — ловим это тестом, а не глазами.
+    const served = [
+      ...new Set(
+        Array.from(
+          mcpSource.matchAll(/"name": "((?:crew|browser)_[a-z_]+)"/g),
+          (match) => match[1],
+        ),
+      ),
+    ];
+    expect(served.length).toBeGreaterThan(10);
+    expect(served.filter((name) => !(name in TOOL_DESCRIPTIONS))).toEqual([]);
+    expect(
+      Object.keys(TOOL_DESCRIPTIONS).filter((name) => !served.includes(name)),
+    ).toEqual([]);
   });
 
   it("takes the whole server down, not just the tools", async () => {

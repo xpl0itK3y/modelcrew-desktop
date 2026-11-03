@@ -514,7 +514,39 @@ export const en: Record<MessageKey, string> = {
   "settings.pluginBrowser": "Browser",
   "settings.pluginBrowserNote":
     "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. The switch takes effect at once; no need to restart the agent.",
-  "settings.pluginTools": "Tools: {tools}",
+  "settings.pluginTools": "Tools ({count})",
+  "settings.pluginToolCrewPing":
+    "Connection check: the agent learns which panel and project it was started from.",
+  "settings.pluginToolOpen":
+    "Starts the project browser if it isn't running yet. All agents of the project share it.",
+  "settings.pluginToolNavigate":
+    "Opens an http or https address and waits for the page to load.",
+  "settings.pluginToolScreenshot":
+    "Captures the visible part of the page, exactly as it looks in ModelCrew.",
+  "settings.pluginToolConsole":
+    "The page console: errors, warnings and requests that failed.",
+  "settings.pluginToolReload":
+    "Reloads the page, for instance to see a fresh change.",
+  "settings.pluginToolBack": "Goes one step back in history, like the Back button.",
+  "settings.pluginToolForward": "Goes one step forward in history.",
+  "settings.pluginToolRead":
+    "Reads the page as text: headings, lists, tables and the elements it can act on.",
+  "settings.pluginToolClick":
+    "Clicks a button, link or point on the page. Your own cursor doesn't move.",
+  "settings.pluginToolHover":
+    "Hovers over an element so tooltips and dropdown menus open.",
+  "settings.pluginToolType": "Types text into a field on the page, or clears it.",
+  "settings.pluginToolSelect": "Picks an option in a dropdown list.",
+  "settings.pluginToolPress":
+    "Presses a key or a shortcut: Enter, Tab, Escape and others.",
+  "settings.pluginToolScroll":
+    "Scrolls the page or brings an element into view.",
+  "settings.pluginToolUpload":
+    "Attaches files from the project folder to an upload field, up to 10 MB in all.",
+  "settings.pluginToolWait":
+    "Waits up to 30 seconds for text or an element to appear or disappear.",
+  "settings.pluginToolEvaluate":
+    "Runs JavaScript on the page and returns the result, like the developer console.",
   "settings.pluginAgents": "Agents on the line: {agents}",
   "settings.pluginOff":
     "The plugin is off: the agent sees neither the server nor the tools.",

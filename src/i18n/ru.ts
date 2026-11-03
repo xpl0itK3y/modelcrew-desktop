@@ -514,7 +514,39 @@ export const ru = {
   "settings.pluginBrowser": "Браузер",
   "settings.pluginBrowserNote":
     "Агент открывает страницы в браузере проекта и ходит по ним. Своего окна у браузера нет — страницу видно в самом ModelCrew. Выключатель действует сразу, перезапускать агента не нужно.",
-  "settings.pluginTools": "Инструменты: {tools}",
+  "settings.pluginTools": "Инструменты ({count})",
+  "settings.pluginToolCrewPing":
+    "Проверка связи: агент узнаёт, из какой панели и какого проекта он запущен.",
+  "settings.pluginToolOpen":
+    "Запускает браузер проекта, если он ещё не открыт. Браузер общий для всех агентов проекта.",
+  "settings.pluginToolNavigate":
+    "Открывает адрес (http или https) и ждёт, пока страница загрузится.",
+  "settings.pluginToolScreenshot":
+    "Снимок видимой части страницы, ровно то, что видно в окне ModelCrew.",
+  "settings.pluginToolConsole":
+    "Консоль страницы: ошибки, предупреждения и запросы, которые не прошли.",
+  "settings.pluginToolReload":
+    "Перезагружает страницу, например чтобы увидеть свежую правку.",
+  "settings.pluginToolBack": "Шаг назад по истории, как кнопкой «Назад».",
+  "settings.pluginToolForward": "Шаг вперёд по истории.",
+  "settings.pluginToolRead":
+    "Читает страницу текстом: заголовки, списки, таблицы и элементы, на которые можно нажать.",
+  "settings.pluginToolClick":
+    "Нажимает на кнопку, ссылку или точку на странице. Ваш курсор при этом не двигается.",
+  "settings.pluginToolHover":
+    "Наводит мышь на элемент, чтобы открылись подсказки и выпадающие меню.",
+  "settings.pluginToolType": "Вводит текст в поле на странице или очищает его.",
+  "settings.pluginToolSelect": "Выбирает пункт в выпадающем списке.",
+  "settings.pluginToolPress":
+    "Нажимает клавишу или сочетание: Enter, Tab, Escape и другие.",
+  "settings.pluginToolScroll":
+    "Прокручивает страницу или подводит к нужному элементу.",
+  "settings.pluginToolUpload":
+    "Прикладывает файлы из папки проекта к полю загрузки, всего до 10 МБ.",
+  "settings.pluginToolWait":
+    "Ждёт до 30 секунд, пока на странице появится или пропадёт текст или элемент.",
+  "settings.pluginToolEvaluate":
+    "Выполняет JavaScript на странице и возвращает результат, как консоль разработчика.",
   "settings.pluginAgents": "Агентов на связи: {agents}",
   "settings.pluginOff": "Плагин выключен: агент не видит ни сервера, ни инструментов.",
   "settings.pluginUnavailable":

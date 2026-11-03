@@ -1,17 +1,44 @@
-import { useEffect, useState } from "react";
-import { localizeBackendError, useI18n } from "../../i18n";
+import { useEffect, useId, useState } from "react";
+import { localizeBackendError, useI18n, type MessageKey } from "../../i18n";
 import {
   refreshMcpStatus,
   setMcpEnabled,
   useMcpStatus,
   type McpStatus,
 } from "../../mcp";
+import { ChevronRightIcon } from "../Icons";
 import { SettingRow, SettingsPage, SettingsSwitch } from "./SettingsControls";
 
 /// Как часто переспрашивать состояние плагина, пока страница открыта. Реже —
 /// и человек успевает решить, что число не живое; чаще — и это опрос ради
 /// опроса: агент подключается раз за сессию.
 const WATCH_EVERY = 2000;
+
+/// Что делает каждый инструмент — словами для человека. Описания, которые
+/// получает агент, написаны для агента: длинные, с параметрами и запретами.
+/// Имена по-прежнему приходят от сервера; инструмент без строки здесь
+/// показывается одним именем, а PluginsTab.test.tsx сверяет этот список с
+/// mcp.rs, чтобы такое не осталось незамеченным.
+export const TOOL_DESCRIPTIONS: Record<string, MessageKey> = {
+  crew_ping: "settings.pluginToolCrewPing",
+  browser_open: "settings.pluginToolOpen",
+  browser_navigate: "settings.pluginToolNavigate",
+  browser_screenshot: "settings.pluginToolScreenshot",
+  browser_console: "settings.pluginToolConsole",
+  browser_reload: "settings.pluginToolReload",
+  browser_back: "settings.pluginToolBack",
+  browser_forward: "settings.pluginToolForward",
+  browser_read: "settings.pluginToolRead",
+  browser_click: "settings.pluginToolClick",
+  browser_hover: "settings.pluginToolHover",
+  browser_type: "settings.pluginToolType",
+  browser_select: "settings.pluginToolSelect",
+  browser_press: "settings.pluginToolPress",
+  browser_scroll: "settings.pluginToolScroll",
+  browser_upload: "settings.pluginToolUpload",
+  browser_wait: "settings.pluginToolWait",
+  browser_evaluate: "settings.pluginToolEvaluate",
+};
 
 export function PluginsTab() {
   const { t } = useI18n();
@@ -58,9 +85,15 @@ export function PluginsTab() {
       <SettingRow
         title={t("settings.pluginBrowser")}
         description={t("settings.pluginBrowserNote")}
-        // Имена инструментов есть на странице только при включённом сервере,
-        // а искать раздел по ним хочется в любом случае.
-        keywords={(status?.tools ?? []).join(" ")}
+        // Инструменты есть на странице только при включённом сервере, а искать
+        // раздел по ним — по имени или по тому, что он делает, — хочется в
+        // любом случае.
+        keywords={(status?.tools ?? [])
+          .flatMap((name) => {
+            const description = TOOL_DESCRIPTIONS[name];
+            return description ? [name, t(description)] : [name];
+          })
+          .join(" ")}
         control={
           <SettingsSwitch
             label={t("settings.pluginBrowser")}
@@ -103,18 +136,58 @@ function Note(props: { status: McpStatus | null; failure: string | null }) {
     );
   }
   return (
-    <p className="settings-note">
-      <span>
-        {t("settings.pluginTools", { tools: props.status.tools.join(" · ") })}
-      </span>
-      <br />
-      <span>{t("settings.pluginAgents", { agents: props.status.agents })}</span>
-      {props.status.socket && (
-        <>
-          <br />
-          <span className="settings-plugin-socket">{props.status.socket}</span>
-        </>
+    <div className="settings-note">
+      <ToolList tools={props.status.tools} />
+      <p className="settings-plugin-status">
+        <span>{t("settings.pluginAgents", { agents: props.status.agents })}</span>
+        {props.status.socket && (
+          <>
+            <br />
+            <span className="settings-plugin-socket">{props.status.socket}</span>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
+// Свёрнут по умолчанию: восемнадцать строк описаний заслонили бы и
+// выключатель, и число агентов, ради которых сюда обычно и заходят.
+function ToolList(props: { tools: string[] }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+
+  return (
+    <div className="settings-plugin-tools">
+      <button
+        type="button"
+        className="settings-plugin-tools-toggle"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <ChevronRightIcon
+          className="settings-plugin-tools-chevron"
+          aria-hidden="true"
+        />
+        {t("settings.pluginTools", { count: props.tools.length })}
+      </button>
+      {open && (
+        <dl id={listId} className="settings-plugin-tool-list">
+          {props.tools.map((name) => {
+            const description = TOOL_DESCRIPTIONS[name];
+            return (
+              <div key={name} className="settings-plugin-tool">
+                <dt>
+                  <code>{name}</code>
+                </dt>
+                <dd>{description ? t(description) : null}</dd>
+              </div>
+            );
+          })}
+        </dl>
       )}
-    </p>
+    </div>
   );
 }
