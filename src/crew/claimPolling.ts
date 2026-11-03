@@ -57,6 +57,12 @@ export function watchPanelClaims(workspaceId: string | null): () => void {
   }
   let stopped = false;
   const poll = async () => {
+    // Окно свёрнуто или спрятано в трей — подписи никто не читает. Агенты
+    // при этом работают часами, и опрос каждую секунду будил бы и окно, и
+    // бэкенд впустую.
+    if (document.hidden) {
+      return;
+    }
     try {
       const claims = await invoke<CrewClaim[]>("crew_claims", { workspaceId });
       if (!stopped) {
@@ -67,11 +73,19 @@ export function watchPanelClaims(workspaceId: string | null): () => void {
       // ошибкой поверх терминалов.
     }
   };
+  // Окно вернулось — подписи догоняют сразу, а не через секунду.
+  const onVisibility = () => {
+    if (!document.hidden) {
+      void poll();
+    }
+  };
   void poll();
   const timer = window.setInterval(poll, POLL_INTERVAL_MS);
+  document.addEventListener("visibilitychange", onVisibility);
   return () => {
     stopped = true;
     window.clearInterval(timer);
+    document.removeEventListener("visibilitychange", onVisibility);
     clearPanelClaims();
   };
 }
