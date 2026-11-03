@@ -14,8 +14,12 @@ import {
   DockviewTheme,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
-import { FileTree } from "./panels/FileTree";
-import { FileEditor } from "./panels/FileEditor";
+import {
+  BrowserViewLazy,
+  FileEditorLazy,
+  FileTreeLazy,
+  preloadFilePanels,
+} from "./panels/FilesLazy";
 import { ResizeHandle } from "./ui/ResizeHandle";
 import { closeUnder, moveUnder } from "./files/openFiles";
 import {
@@ -35,7 +39,6 @@ import {
   GitChangesPanelLazy,
   GitChangesViewLazy,
 } from "./panels/git/GitPanelLazy";
-import { BrowserView } from "./panels/BrowserView";
 import {
   createBannerGate,
   pageLabel,
@@ -281,6 +284,10 @@ export default function App() {
   useEffect(() => {
     void syncAutoReload();
   }, []);
+
+  // Дерево, редактор и браузер грузятся отдельно; подтягиваем их, пока
+  // человек смотрит на терминалы, чтобы первое открытие не ждало.
+  useEffect(() => preloadFilePanels(), []);
 
   // Сироты-снимки терминалов (панели/сессии удалены в прошлых запусках)
   // вычищаются один раз на старте по актуальным раскладкам.
@@ -992,7 +999,7 @@ export default function App() {
               } as CSSProperties
             }
           >
-            <FileTree
+            <FileTreeLazy
               workspaceId={treePresence.item}
               activePath={activeFilePath}
               onOpenFile={openFile}
@@ -1014,7 +1021,7 @@ export default function App() {
           />
         )}
         {workspaces.activeId && editorPresence && (
-          <FileEditor
+          <FileEditorLazy
             workspaceId={workspaces.activeId}
             // Пока колонка уезжает, показываем последний состав вкладок:
             // опустевшая на кадр колонка мигнула бы пустотой перед уходом.
@@ -1170,7 +1177,7 @@ export default function App() {
                   <CloseIcon />
                 </button>
               </div>
-              <BrowserView workspaceId={renderedBrowserWorkspaceId} />
+              <BrowserViewLazy workspaceId={renderedBrowserWorkspaceId} />
             </aside>
           )}
         </main>
