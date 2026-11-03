@@ -50,8 +50,9 @@ const SUPPORTED: [&str; 6] = [
 
 /// Агенты, которым обёртка умеет передать сервер флагом при запуске.
 ///
-/// opencode здесь нет и не нужно: он читает конфиг прямо из окружения, и
-/// обёртка ему ни к чему — см. `opencode_config`. Остальные — cursor, grok —
+/// opencode здесь нет: сервер он читает прямо из окружения — см.
+/// `opencode_config`. Обёртка у него своя и о другом — см.
+/// `opencode_shim_body`. Остальные — cursor, grok —
 /// читают только свои файлы, а писать в них значит опять вылезти наружу. Им
 /// плагин пока недоступен, и это честнее, чем сервер, висящий у человека в
 /// общем списке.
@@ -112,21 +113,23 @@ const OPENCODE_SCHEMA: &str = "https://opencode.ai/config.json";
 // ---------------------------------------------------------------------------
 // Внутрь: обёртки для панели.
 
-/// Разложить обёртки и наш конфиг; при выключенном плагине — убрать их.
+/// Разложить обёртки и наш конфиг; при выключенном плагине — убрать те, что
+/// несут сервер.
 ///
 /// Возвращает каталог, который панель добавит себе в начало `PATH`. `None` —
 /// раскладывать было некуда или незачем: панель тогда запускает агента как
-/// обычно, без нашего сервера.
+/// обычно. На unix каталог нужен и без плагина: в нём обёртка opencode, а она
+/// о другом — см. `opencode_shim_body`.
 pub fn shims(app: &tauri::AppHandle, enabled: bool) -> Option<PathBuf> {
     use tauri::Manager;
 
     let dir = app.path().app_data_dir().ok()?.join(SHIMS_DIR);
-    if !enabled {
+    if !enabled && !cfg!(unix) {
         let _ = std::fs::remove_dir_all(&dir);
         return None;
     }
     let exe = std::env::current_exe().ok()?;
-    write_shims(&dir, &exe).ok()?;
+    write_shims(&dir, &exe, enabled).ok()?;
     Some(dir)
 }
 
@@ -168,15 +171,27 @@ pub fn opencode_config(exe: &Path, inherited: Option<&str>) -> String {
 }
 
 #[cfg(unix)]
-fn write_shims(dir: &Path, exe: &Path) -> std::io::Result<()> {
+fn write_shims(dir: &Path, exe: &Path, enabled: bool) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
+    let runnable = |path: &Path, body: String| -> std::io::Result<()> {
+        std::fs::write(path, body)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+    };
     std::fs::create_dir_all(dir)?;
+    runnable(&dir.join(OPENCODE), opencode_shim_body())?;
+    if !enabled {
+        // Обёртки с сервером без плагина — обман: агент увидел бы сервер,
+        // которого нет. Их нет и в пути — значит, нет и файла.
+        let _ = std::fs::remove_file(dir.join(CONFIG_FILE));
+        for agent in WRAPPED {
+            let _ = std::fs::remove_file(dir.join(agent));
+        }
+        return Ok(());
+    }
     std::fs::write(dir.join(CONFIG_FILE), format!("{}\n", config_body(exe)))?;
     for agent in WRAPPED {
-        let path = dir.join(agent);
-        std::fs::write(&path, shim_body(agent, &shim_flags(agent, exe)))?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+        runnable(&dir.join(agent), shim_body(agent, &shim_flags(agent, exe)))?;
     }
     Ok(())
 }
@@ -185,8 +200,12 @@ fn write_shims(dir: &Path, exe: &Path) -> std::io::Result<()> {
 /// и PowerShell и файл без расширения для Git Bash. Каждая оболочка берёт
 /// свою и чужой не видит: cmd файл без расширения не запустит, а Git Bash
 /// `.cmd` не ищет.
+///
+/// Обёртки opencode здесь нет. v2 и на Windows ходит в общий фоновый сервер,
+/// но обёртку для cmd проверить живьём пока не на чем, а сломанная не дала бы
+/// запустить opencode в панели вовсе. Без плагина `shims` сюда не заходит.
 #[cfg(windows)]
-fn write_shims(dir: &Path, exe: &Path) -> std::io::Result<()> {
+fn write_shims(dir: &Path, exe: &Path, _enabled: bool) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let config = dir.join(CONFIG_FILE);
     std::fs::write(&config, format!("{}\n", config_body(exe)))?;
@@ -199,7 +218,7 @@ fn write_shims(dir: &Path, exe: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn write_shims(_dir: &Path, _exe: &Path) -> std::io::Result<()> {
+fn write_shims(_dir: &Path, _exe: &Path, _enabled: bool) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "обёртки агентов здесь не умеют",
@@ -220,16 +239,25 @@ fn config_body(exe: &Path) -> String {
 }
 
 /// Тело обёртки.
-///
-/// Настоящий CLI ищется в `PATH` мимо самой обёртки: она лежит там же и первой,
-/// поэтому обычный поиск нашёл бы её саму и агент запустил бы сам себя. Не
-/// нашли — говорим словами и уходим с кодом «команды нет», как сделала бы
-/// оболочка.
 fn shim_body(agent: &str, flags: &str) -> String {
+    let head = shim_head(
+        agent,
+        "# Браузер проекта доступен агенту только здесь, в панели: наружу, в\n\
+         # общий конфиг агента, приложение не пишет.",
+    );
+    format!("{head}exec \"$real\" {flags} \"$@\"\n")
+}
+
+/// Начало любой обёртки: поиск настоящего CLI.
+///
+/// Он ищется в `PATH` мимо самой обёртки: она лежит там же и первой, поэтому
+/// обычный поиск нашёл бы её саму и агент запустил бы сам себя. Не нашли —
+/// говорим словами и уходим с кодом «команды нет», как сделала бы оболочка.
+fn shim_head(agent: &str, about: &str) -> String {
     format!(
         r#"#!/bin/sh
-# Создано ModelCrew. Браузер проекта доступен агенту только здесь, в панели:
-# наружу, в общий конфиг агента, приложение не пишет.
+# Создано ModelCrew.
+{about}
 self=$(cd "$(dirname "$0")" && pwd)
 real=''
 saved_ifs=$IFS
@@ -244,7 +272,54 @@ if [ -z "$real" ]; then
   echo "ModelCrew: {agent} не найден в PATH" >&2
   exit 127
 fi
-exec "$real" {flags} "$@"
+"#
+    )
+}
+
+/// Имя opencode в каталоге обёрток.
+#[cfg_attr(not(unix), allow(dead_code))]
+const OPENCODE: &str = "opencode";
+
+/// Обёртка opencode: его собственный сервер на каждую панель.
+///
+/// v2 по умолчанию ходит в общий фоновый сервер, а тот наследует окружение
+/// того, кто поднял его первым, и живёт дольше всех. Поднятый из панели, он
+/// слал события плагина и вызовы браузера от имени той панели — даже когда
+/// она давно закрыта («панель не найдена»), — и продолжал работать после
+/// выхода из приложения. С `--standalone` у TUI свой сервер с окружением этой
+/// панели, и уходит он вместе с ней.
+///
+/// Флаг — только для запуска TUI: без аргументов или с ключами сразу. Подкоманды
+/// и явный выбор сервера человека не трогаем. v1 такого флага не знает и с
+/// ним не запустится вовсе, поэтому сначала спрашиваем версию: от ложного
+/// «да» opencode не стартовал бы совсем, а от ложного «нет» всё было бы как
+/// раньше. Отсюда и первая строка, и проверка «цифра, точка» за не-цифрой:
+/// в цветном выводе v2 цифры есть и в управляющих кодах.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn opencode_shim_body() -> String {
+    let head = shim_head(
+        OPENCODE,
+        "# Панель запускает opencode v2 со своим сервером: общий фоновый живёт с\n\
+         # окружением той панели, что подняла его первой.",
+    );
+    format!(
+        r#"{head}case ${{1-}} in
+  ''|-*) ;;
+  *) exec "$real" "$@" ;;
+esac
+for arg in "$@"; do
+  case $arg in
+    --standalone|--server|--server=*|-h|--help|-v|--version) exec "$real" "$@" ;;
+  esac
+done
+version=$(NO_COLOR=1 "$real" --version </dev/null 2>/dev/null)
+newline='
+'
+first=${{version%%"$newline"*}}
+case " $first" in
+  *[!0-9.][2-9].*|*[!0-9.][1-9][0-9].*) exec "$real" --standalone "$@" ;;
+esac
+exec "$real" "$@"
 "#
     )
 }
@@ -574,7 +649,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe()).unwrap();
+        write_shims(&shims, &exe(), true).unwrap();
         let real = dir.path().join("real");
         let agent = write(
             &real,
@@ -672,7 +747,7 @@ mod tests {
     fn through_cmd(agent: &str, app: &str) -> (Option<i32>, String, String) {
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe()).unwrap();
+        write_shims(&shims, &exe(), true).unwrap();
         let real = dir.path().join("real");
         write(
             &real,
@@ -719,7 +794,7 @@ mod tests {
     fn the_cmd_wrapper_without_the_real_agent_says_so_and_does_not_call_itself() {
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe()).unwrap();
+        write_shims(&shims, &exe(), true).unwrap();
         let output = std::process::Command::new(shims.join("copilot.cmd"))
             .env("PATH", &shims)
             .output()
@@ -741,7 +816,7 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe()).unwrap();
+        write_shims(&shims, &exe(), true).unwrap();
         let real = dir.path().join("real");
         write(
             &real,
@@ -779,14 +854,132 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe()).unwrap();
+        write_shims(&shims, &exe(), true).unwrap();
 
-        for agent in WRAPPED {
+        for agent in WRAPPED.into_iter().chain([OPENCODE]) {
             let path = shims.join(agent);
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o111, 0o111, "{agent} должен быть исполняемым");
         }
         assert!(shims.join(CONFIG_FILE).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn without_the_plugin_only_the_opencode_wrapper_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe(), true).unwrap();
+
+        write_shims(&shims, &exe(), false).unwrap();
+
+        // Сервер выключен — обёртки, что его несут, ушли вместе с конфигом.
+        for agent in WRAPPED {
+            assert!(!shims.join(agent).exists(), "{agent}");
+        }
+        assert!(!shims.join(CONFIG_FILE).exists());
+        // А своя у opencode — о другом и нужна всегда.
+        assert!(shims.join(OPENCODE).exists());
+    }
+
+    /// Запускает обёртку opencode против поддельного opencode, который
+    /// отвечает на `--version` заданным текстом, а иначе печатает аргументы.
+    /// Возвращает аргументы и то, спрашивали ли версию.
+    #[cfg(unix)]
+    fn through_the_opencode_wrapper(version: &str, args: &[&str]) -> (Vec<String>, bool) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe(), false).unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join(OPENCODE);
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\n\
+             if [ \"$1\" = --version ]; then echo asked >> \"$FAKE_LOG\"; cat \"$FAKE_VERSION\"; exit 0; fi\n\
+             for arg in \"$@\"; do echo \"$arg\"; done\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.path().join("version"), version).unwrap();
+
+        let output = std::process::Command::new(shims.join(OPENCODE))
+            .args(args)
+            .env(
+                "PATH",
+                format!("{}:{}:/usr/bin:/bin", shims.display(), bin.display()),
+            )
+            .env("FAKE_VERSION", dir.path().join("version"))
+            .env("FAKE_LOG", dir.path().join("log"))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let printed = String::from_utf8(output.stdout).unwrap();
+        (
+            printed.lines().map(str::to_string).collect(),
+            dir.path().join("log").exists(),
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_v2_gets_its_own_server_in_the_panel() {
+        // Так отвечает v2: имя, «v» и номер, а в терминале ещё и в цвете — в
+        // управляющих кодах тоже цифры.
+        for version in [
+            "opencode v2.2.5\n",
+            "\u{1b}[1mopencode\u{1b}[22m \u{1b}[2mv\u{1b}[22m\u{1b}[1m2.2.5\u{1b}[22m\n",
+            "10.0.1\n",
+        ] {
+            let (args, _) = through_the_opencode_wrapper(version, &[]);
+            assert_eq!(args, ["--standalone"], "{version:?}");
+            // Возобновление панели — ключами сразу, без подкоманды.
+            let (args, _) = through_the_opencode_wrapper(version, &["--session", "ses_1"]);
+            assert_eq!(args, ["--standalone", "--session", "ses_1"], "{version:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_v1_is_left_as_it_was() {
+        // v1 строг к ключам: с незнакомым `--standalone` он не запустился бы.
+        // Строка о новой версии ниже первой ничего не решает.
+        for version in [
+            "1.19.0\n",
+            "1.19.0\nupdate available: 2.2.5\n",
+            "local\n",
+            "",
+        ] {
+            let (args, asked) = through_the_opencode_wrapper(version, &["--continue"]);
+            assert_eq!(args, ["--continue"], "{version:?}");
+            assert!(asked, "{version:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_subcommands_and_explicit_servers_pass_untouched() {
+        for args in [
+            &["run", "hi"][..],
+            &["serve", "--service"][..],
+            &["--server", "http://127.0.0.1:4096"][..],
+            &["--standalone"][..],
+            &["--version"][..],
+        ] {
+            let (seen, asked) = through_the_opencode_wrapper("opencode v2.2.5\n", args);
+            // `--version` человека доходит до opencode — его и печатает
+            // поддельный, остальное — как было.
+            if args == ["--version"] {
+                assert!(asked);
+                assert_eq!(seen, ["opencode v2.2.5"]);
+                continue;
+            }
+            assert_eq!(seen, args, "{args:?}");
+            // Версию не спрашивали: лишние полсекунды на каждый вызов ни к чему.
+            assert!(!asked, "{args:?}");
+        }
     }
 
     #[test]
