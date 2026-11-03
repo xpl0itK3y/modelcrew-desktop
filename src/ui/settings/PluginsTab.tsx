@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type CSSProperties } from "react";
 import { localizeBackendError, useI18n, type MessageKey } from "../../i18n";
 import {
   refreshMcpStatus,
@@ -153,41 +153,54 @@ function Note(props: { status: McpStatus | null; failure: string | null }) {
 
 // Свёрнут по умолчанию: восемнадцать строк описаний заслонили бы и
 // выключатель, и число агентов, ради которых сюда обычно и заходят.
+//
+// Список в DOM всегда, свёрнутый — скрыт от чтения с экрана: так его
+// закрытие анимируется так же, как раскрытие, а не обрывается.
 function ToolList(props: { tools: string[] }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const listId = useId();
 
   return (
-    <div className="settings-plugin-tools">
+    <div className={`settings-plugin-tools ${open ? "is-expanded" : ""}`}>
       <button
         type="button"
         className="settings-plugin-tools-toggle"
         aria-expanded={open}
         aria-controls={listId}
+        aria-label={t("settings.pluginTools", { count: props.tools.length })}
         onClick={() => setOpen((value) => !value)}
       >
         <ChevronRightIcon
           className="settings-plugin-tools-chevron"
           aria-hidden="true"
         />
-        {t("settings.pluginTools", { count: props.tools.length })}
+        <span>{t("settings.pluginToolsTitle")}</span>
+        <span className="settings-plugin-tools-count" aria-hidden="true">
+          {props.tools.length}
+        </span>
       </button>
-      {open && (
-        <dl id={listId} className="settings-plugin-tool-list">
-          {props.tools.map((name) => {
-            const description = TOOL_DESCRIPTIONS[name];
-            return (
-              <div key={name} className="settings-plugin-tool">
-                <dt>
-                  <code>{name}</code>
-                </dt>
-                <dd>{description ? t(description) : null}</dd>
-              </div>
-            );
-          })}
-        </dl>
-      )}
+      <div className="settings-plugin-tools-shell" aria-hidden={!open}>
+        <div className="settings-plugin-tools-clip">
+          <dl id={listId} className="settings-plugin-tool-list">
+            {props.tools.map((name, index) => {
+              const description = TOOL_DESCRIPTIONS[name];
+              return (
+                <div
+                  key={name}
+                  className="settings-plugin-tool"
+                  style={{ "--tool-index": index } as CSSProperties}
+                >
+                  <dt>
+                    <code>{name}</code>
+                  </dt>
+                  <dd>{description ? t(description) : null}</dd>
+                </div>
+              );
+            })}
+          </dl>
+        </div>
+      </div>
     </div>
   );
 }

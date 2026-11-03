@@ -413,30 +413,43 @@
   color: var(--mc-danger);
 }
 
-/* Инструменты плагина: свёрнутый список, раскрывается кнопкой. */
+/* ---------- Инструменты плагина ---------- */
+
+/* Раскрытие — то же движение, что у проектов в боковой панели: стрелка
+   поворачивается, список вырастает по высоте. Одно действие в приложении —
+   одна пластика. */
 .settings-plugin-tools-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 0 4px -6px;
-  padding: 3px 8px 3px 4px;
+  gap: 7px;
+  margin: 0 0 0 -6px;
+  padding: 4px 8px 4px 5px;
   border: 0;
-  border-radius: var(--mc-radius-sm);
+  border-radius: var(--mc-radius-xs);
   background: transparent;
   color: var(--mc-text-muted);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.settings-plugin-tools-toggle:hover,
+.settings-plugin-tools.is-expanded .settings-plugin-tools-toggle {
+  color: var(--mc-text-bright);
 }
 
 .settings-plugin-tools-toggle:hover {
-  background: var(--mc-button-hover);
-  color: var(--mc-text-bright);
+  background: var(--mc-hover);
 }
 
 .settings-plugin-tools-toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+  background: var(--mc-hover);
+  box-shadow: inset 0 0 0 1px var(--mc-accent-border);
   color: var(--mc-text-bright);
 }
 
@@ -444,44 +457,149 @@
   width: 12px;
   height: 12px;
   flex: none;
-  transition: transform 120ms ease;
+  color: var(--mc-text-faint);
+  transition:
+    transform 170ms cubic-bezier(0.2, 0, 0.13, 1),
+    color 120ms ease;
 }
 
-.settings-plugin-tools-toggle[aria-expanded="true"]
-  .settings-plugin-tools-chevron {
+.settings-plugin-tools-toggle:hover .settings-plugin-tools-chevron,
+.settings-plugin-tools.is-expanded .settings-plugin-tools-chevron {
+  color: var(--mc-accent);
+}
+
+.settings-plugin-tools.is-expanded .settings-plugin-tools-chevron {
   transform: rotate(90deg);
 }
 
+/* Число инструментов — значок как у счётчика терминалов в проекте; в
+   раскрытом списке загорается акцентом, как всё, что сейчас открыто. */
+.settings-plugin-tools-count {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 1px solid var(--mc-border);
+  border-radius: 999px;
+  background: var(--mc-surface-raised);
+  color: var(--mc-text-faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 170ms ease,
+    border-color 170ms ease,
+    color 170ms ease;
+}
+
+.settings-plugin-tools.is-expanded .settings-plugin-tools-count {
+  border-color: var(--mc-accent-border);
+  background: var(--mc-accent-soft);
+  color: var(--mc-accent);
+}
+
+.settings-plugin-tools-shell {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 200ms cubic-bezier(0.2, 0, 0.13, 1),
+    opacity 120ms ease-in;
+}
+
+.settings-plugin-tools.is-expanded .settings-plugin-tools-shell {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 240ms cubic-bezier(0.2, 0, 0.13, 1),
+    opacity 160ms ease-out;
+}
+
+.settings-plugin-tools-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Колонка имён общая на весь список (subgrid), поэтому описания стоят
+   ровной колонкой. Где subgrid нет, строка держит ширину сама. */
 .settings-plugin-tool-list {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 7px 18px;
-  margin: 4px 0 12px;
-  padding: 12px 14px;
+  column-gap: 16px;
+  row-gap: 1px;
+  margin: 8px 0 12px;
+  padding: 5px;
   border: 1px solid var(--mc-border);
   border-radius: var(--mc-radius-sm);
   background: var(--mc-surface-raised);
 }
 
 .settings-plugin-tool {
-  display: contents;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 10.5rem minmax(0, 1fr);
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding: 7px 10px;
+  border-radius: var(--mc-radius-xs);
+  transition: background-color 120ms ease;
 }
 
-.settings-plugin-tool dt {
+.settings-plugin-tool:hover {
+  background: var(--mc-hover-subtle);
+}
+
+/* Строки въезжают лесенкой сверху вниз — читается как «раскрылось», а не
+   «список подменили». Задержка — по номеру строки (--tool-index). */
+.settings-plugin-tools.is-expanded .settings-plugin-tool {
+  animation: settings-plugin-tool-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(40ms + var(--tool-index, 0) * 14ms);
+}
+
+@keyframes settings-plugin-tool-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-plugin-tool dt,
+.settings-plugin-tool dd {
   margin: 0;
 }
 
 .settings-plugin-tool code {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-surface-active);
   color: var(--mc-text-bright);
   font-family: var(--mc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11.5px;
+  font-size: 11px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.settings-plugin-tool:hover code {
+  background: var(--mc-accent-soft);
+  color: var(--mc-accent);
 }
 
 .settings-plugin-tool dd {
-  margin: 0;
   color: var(--mc-text-muted);
   font-size: 12px;
   line-height: 1.45;
+  transition: color 120ms ease;
+}
+
+.settings-plugin-tool:hover dd {
+  color: var(--mc-text);
 }
 
 .settings-plugin-status {
@@ -955,11 +1073,11 @@
 
   .settings-plugin-tool-list {
     grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
   }
 
-  .settings-plugin-tool dd {
-    margin-bottom: 6px;
+  .settings-plugin-tool {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 5px;
   }
 
   .accent-grid {
@@ -975,7 +1093,14 @@
   .settings-switch,
   .settings-switch-thumb,
   .settings-plugin-tools-chevron,
+  .settings-plugin-tools-count,
+  .settings-plugin-tools-shell,
+  .settings-plugin-tools.is-expanded .settings-plugin-tools-shell,
   .theme-card {
     transition: none;
+  }
+
+  .settings-plugin-tools.is-expanded .settings-plugin-tool {
+    animation: none;
   }
 }

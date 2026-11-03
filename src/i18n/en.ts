@@ -515,6 +515,7 @@ export const en: Record<MessageKey, string> = {
   "settings.pluginBrowserNote":
     "The agent opens pages in the project browser and walks through them. The browser has no window of its own — the page shows inside ModelCrew. The switch takes effect at once; no need to restart the agent.",
   "settings.pluginTools": "Tools ({count})",
+  "settings.pluginToolsTitle": "Tools",
   "settings.pluginToolCrewPing":
     "Connection check: the agent learns which panel and project it was started from.",
   "settings.pluginToolOpen":

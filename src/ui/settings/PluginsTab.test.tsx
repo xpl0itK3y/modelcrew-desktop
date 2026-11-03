@@ -60,7 +60,9 @@ describe("PluginsTab", () => {
       name: "Инструменты (3)",
     });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("browser_open")).toBeNull();
+    // Свёрнутый список остаётся в DOM ради анимации закрытия, но для чтения
+    // с экрана его нет.
+    expect(screen.queryAllByRole("term")).toEqual([]);
     expect(screen.getByText(RUNNING.socket)).toBeVisible();
     expect(theSwitch()).toHaveAttribute("aria-checked", "true");
 
@@ -70,14 +72,16 @@ describe("PluginsTab", () => {
     const list = document.getElementById(toggle.getAttribute("aria-controls")!);
     expect(list).not.toBeNull();
     expect(
-      Array.from(list!.querySelectorAll("dt")).map((term) => term.textContent),
+      screen.getAllByRole("term").map((term) => term.textContent),
     ).toEqual(RUNNING.tools);
+    expect(list!.contains(screen.getAllByRole("term")[0])).toBe(true);
     expect(screen.getByText("browser_navigate").closest("div")).toHaveTextContent(
       "Открывает адрес (http или https) и ждёт, пока страница загрузится.",
     );
 
     fireEvent.click(toggle);
-    expect(screen.queryByText("browser_open")).toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryAllByRole("term")).toEqual([]);
   });
 
   it("shows a tool the settings know nothing about by its name alone", async () => {

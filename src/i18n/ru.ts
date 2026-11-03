@@ -515,6 +515,7 @@ export const ru = {
   "settings.pluginBrowserNote":
     "Агент открывает страницы в браузере проекта и ходит по ним. Своего окна у браузера нет — страницу видно в самом ModelCrew. Выключатель действует сразу, перезапускать агента не нужно.",
   "settings.pluginTools": "Инструменты ({count})",
+  "settings.pluginToolsTitle": "Инструменты",
   "settings.pluginToolCrewPing":
     "Проверка связи: агент узнаёт, из какой панели и какого проекта он запущен.",
   "settings.pluginToolOpen":
