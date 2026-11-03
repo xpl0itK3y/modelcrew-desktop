@@ -184,21 +184,38 @@
 
 /* Правая колонка — сама плоскость: карточки в ней собирает уже страница.
 
-   Место под полосу прокрутки держим всегда. Где полосы не плавающие (macOS с
-   «Показывать всегда», Windows, Linux), она отнимает у страницы 13px. Раздел
-   «Внешний вид» в окне 980×680 помещается почти впритык, и полоса то
-   появлялась, то пропадала: при открытии, при смене раздела. Вместе с ней
-   на 13px менялась ширина карточек, текст переносился заново, и всё окно
-   вздрагивало. Плавающим полосам место не нужно — там ничего не меняется. */
+   Полоса прокрутки стоит всегда (`scroll`, а не `auto`). Раздел «Внешний
+   вид» в окне 980×680 помещается почти впритык, и полоса то появлялась, то
+   пропадала: при открытии, при смене раздела. Вместе с ней менялась ширина
+   карточек, текст переносился заново, и всё окно вздрагивало. Когда
+   прокручивать нечего, ползунка нет, а дорожка прозрачная — полосы не видно.
+   `scrollbar-gutter: stable` не годится: без полосы WebKit держит под неё
+   место системной ширины (17px), а не нашей, и ширина скакала бы опять.
+
+   Саму полосу рисуем свою, тонкую, как у терминала. Системная, даже
+   `scrollbar-width: thin`, в WebKit занимает 13px и с дорожкой во всю высоту
+   выглядит чужой. Стандартные `scrollbar-width` и `scrollbar-color` здесь
+   задавать нельзя: при них WebKit и Chromium не смотрят на
+   `::-webkit-scrollbar` и возвращают системную полосу. */
 .settings-content {
   box-sizing: border-box;
   flex: 1;
   min-width: 0;
   padding: 20px 26px 26px 18px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-color: var(--mc-scrollbar) transparent;
-  scrollbar-width: thin;
+  overflow-y: scroll;
+}
+
+.settings-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-content::-webkit-scrollbar-thumb {
+  background: var(--mc-scrollbar);
+  border-radius: 3px;
+}
+
+.settings-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .settings-panel[hidden] {
