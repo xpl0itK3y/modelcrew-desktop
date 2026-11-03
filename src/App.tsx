@@ -28,6 +28,7 @@ import {
   type Column,
 } from "./ui/columnWidths";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import {
   GitChangesPanelLazy,
@@ -311,6 +312,36 @@ export default function App() {
         throw new Error(localizeBackendError(error));
       }
     }
+  }, [persistNow, suspendPersistence]);
+
+  // Выход по крестику (Linux) или из трея: бэкенд ждёт, пока мы допишем
+  // раскладку и историю терминалов, — снимки иначе отставали бы на десять
+  // секунд. Шеллы гасит сам выход. Не ответим — бэкенд выйдет по таймеру.
+  useEffect(() => {
+    if (!isTauri) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen("app-quit-requested", async () => {
+      try {
+        persistNow();
+        suspendPersistence();
+        await flushAllSnapshots();
+      } finally {
+        void invoke("app_quit").catch(() => {});
+      }
+    }).then((stop) => {
+      if (disposed) {
+        stop();
+      } else {
+        unlisten = stop;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [persistNow, suspendPersistence]);
 
   const updater = useAppUpdater({

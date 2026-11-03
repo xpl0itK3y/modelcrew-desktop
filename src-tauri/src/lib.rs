@@ -862,6 +862,53 @@ fn build_macos_menu<R: tauri::Runtime>(
         .build()
 }
 
+/// Что делает крестик главного окна. Windows и macOS прячут окно в трей или
+/// док, агенты работают дальше. Linux закрывает приложение: в GNOME трея по
+/// умолчанию нет, и спрятанное окно становилось невидимым фоном — шеллы и
+/// агенты жили, а окно всплывало само при следующем запуске.
+const CLOSE_HIDES_WINDOW: bool = cfg!(not(target_os = "linux"));
+
+/// Событие для главного окна: «сохрани, что не сохранено, и отпусти».
+const QUIT_REQUESTED_EVENT: &str = "app-quit-requested";
+
+/// Сколько ждём окно, прежде чем выйти без него. Сохранение занимает доли
+/// секунды; зависшее окно не должно держать приложение.
+const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Выход уже начат: окно сохраняется, таймер тикает.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Выйти, дав окну дописать раскладку и историю терминалов. Сразу выходить
+/// нельзя: снимки терминалов пишутся раз в десять секунд, и последний вывод
+/// агентов пропал бы из восстановленных панелей.
+fn request_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use std::sync::atomic::Ordering;
+
+    // Второй щелчок по крестику или «Выходу», пока окно сохраняется: человек
+    // ждать не хочет.
+    if QUITTING.swap(true, Ordering::SeqCst) {
+        app.exit(0);
+        return;
+    }
+    if app.emit_to("main", QUIT_REQUESTED_EVENT, ()).is_err() {
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_GRACE);
+        app.exit(0);
+    });
+}
+
+/// Окно всё сохранило — можно выходить.
+#[tauri::command]
+fn app_quit(window: tauri::Webview, app: tauri::AppHandle) -> CommandResult<()> {
+    ensure_main_window(&window)?;
+    app.exit(0);
+    Ok(())
+}
+
 #[cfg(desktop)]
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // Окно, а не webview-окно: в главном окне может оказаться не один webview,
@@ -904,7 +951,7 @@ fn setup_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "tray_show" => show_main_window(app),
-            "tray_quit" => app.exit(0),
+            "tray_quit" => request_quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -1007,9 +1054,11 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer_by_default();
 
-    // Окно закрывается в трей, а не завершает приложение. Без защиты от второго
-    // экземпляра каждый повторный запуск поднимал бы ещё один процесс со своей
-    // иконкой в трее — пользователь получал бы их пачку, не понимая откуда.
+    // На Windows окно закрывается в трей, а не завершает приложение. Без
+    // защиты от второго экземпляра каждый повторный запуск поднимал бы ещё
+    // один процесс со своей иконкой в трее — пользователь получал бы их пачку,
+    // не понимая откуда. На Linux крестик выходит, но второй запуск, пока
+    // окно открыто, всё равно должен поднять его, а не завести вторую копию.
     // Плагин должен идти первым: он перехватывает запуск до создания окна.
     // macOS не даёт запустить вторую копию сам, поэтому там он не нужен.
     let builder = tauri::Builder::default();
@@ -1041,10 +1090,15 @@ pub fn run() {
 
     builder
         .on_window_event(|window, event| {
-            // Закрытие окна не выходит из приложения — прячем в трей (фон).
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
+                    // Окно закрывает только сам выход: до него окну надо
+                    // успеть сохраниться.
                     api.prevent_close();
+                    if !CLOSE_HIDES_WINDOW {
+                        request_quit(window.app_handle());
+                        return;
+                    }
                     // Страница, стоявшая в панели, уходит к себе: в спрятанном
                     // окне она перестала бы рисоваться для агента.
                     browser_page::undock_all(window.app_handle());
@@ -1147,6 +1201,7 @@ pub fn run() {
             workspace_unregister_root,
             app_set_locale,
             app_set_badge,
+            app_quit,
             github_auth_available,
             github_device_start,
             github_device_poll,
