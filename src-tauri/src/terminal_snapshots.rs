@@ -46,6 +46,24 @@ fn shims_line(dir: &Path) -> String {
     format!("export PATH=\"{quoted}:$PATH\"\n")
 }
 
+/// То же для bash. Обёртки rc-файла у него нет: свой `.bashrc` он читает сам,
+/// мимо папки панели, и без этой строки обёрток в его панели не было вовсе.
+/// Зато перед каждым приглашением bash выполняет `PROMPT_COMMAND` — уже после
+/// всех файлов пользователя. Там каталог и встаёт первым.
+///
+/// Строка выполняется перед каждой командой, поэтому обязана ничего не
+/// делать, когда каталог уже первый, и не копить его: повторы дальше по PATH
+/// она убирает. Иначе чужая настройка, что ставит в начало своё, наращивала
+/// бы PATH с каждым приглашением. Каталог лежит в переменной, а не прямо в
+/// образце: слэши пути bash 3.2 принимает за конец образца даже в кавычках.
+#[cfg(unix)]
+pub fn shims_prompt_command(dir: &Path) -> String {
+    let dir = crate::mcp_register::sh_quote(&dir.display().to_string());
+    format!(
+        r#"__modelcrew_shims={dir}; case $PATH in "$__modelcrew_shims"|"$__modelcrew_shims":*) ;; *) __modelcrew_path=:$PATH:; __modelcrew_path=${{__modelcrew_path//":$__modelcrew_shims:"/:}}; __modelcrew_path=${{__modelcrew_path#:}}; __modelcrew_path=${{__modelcrew_path%:}}; PATH=$__modelcrew_shims${{__modelcrew_path:+:$__modelcrew_path}} ;; esac; unset __modelcrew_shims __modelcrew_path"#
+    )
+}
+
 fn validate_snapshot_id(id: &str) -> CommandResult<()> {
     if id.is_empty()
         || id.len() > 128
@@ -806,6 +824,58 @@ mod tests {
             .contains("INC_APPEND_HISTORY"));
         let _ = fs::remove_dir_all(base);
         let _ = fs::remove_dir_all(home);
+    }
+
+    /// PATH после того, как bash дважды выполнил строку: столько раз, сколько
+    /// приглашений перед второй командой.
+    #[cfg(unix)]
+    fn path_after_two_prompts(dir: &Path, path: &str) -> Option<String> {
+        let bash = Path::new("/bin/bash");
+        if !bash.is_file() {
+            eprintln!("bash не установлен — проверять не на чем");
+            return None;
+        }
+        let output = std::process::Command::new(bash)
+            .args([
+                "-c",
+                r#"PATH=$1; eval "$2"; eval "$2"; printf '%s' "$PATH"; [ -z "${__modelcrew_shims+x}${__modelcrew_path+x}" ] || echo ' + переменные остались'"#,
+                "bash",
+                path,
+                &shims_prompt_command(dir),
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        Some(String::from_utf8(output.stdout).unwrap())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bash_puts_the_wrappers_first_once() {
+        // Путь с пробелом, кавычкой и знаками шаблона: каждый из них ломал бы
+        // по-своему, будь он подставлен в строку как есть.
+        let dir = Path::new("/data/it's [my] *shims");
+        let shims = dir.display().to_string();
+        let cases = [
+            ("/usr/bin:/bin", format!("{shims}:/usr/bin:/bin")),
+            // Каталог уже был — дальше по PATH и дважды: остаётся один, первым.
+            (&*format!("/a:{shims}:/b:{shims}"), format!("{shims}:/a:/b")),
+            (&*format!("{shims}:/usr/bin"), format!("{shims}:/usr/bin")),
+            ("", shims.clone()),
+            // Пустые элементы — это текущий каталог, их человек ставил сам.
+            ("/a::/b:", format!("{shims}:/a::/b:")),
+            // Похожий, но чужой путь — не повтор.
+            (
+                "/data/it's [my] xshims:/y",
+                format!("{shims}:/data/it's [my] xshims:/y"),
+            ),
+        ];
+        for (before, after) in cases {
+            let Some(got) = path_after_two_prompts(dir, before) else {
+                return;
+            };
+            assert_eq!(got, after, "PATH был {before:?}");
+        }
     }
 
     #[cfg(unix)]

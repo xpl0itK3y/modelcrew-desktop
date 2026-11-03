@@ -429,7 +429,7 @@ fn cmd_flags(agent: &str) -> String {
 
 /// Строка для оболочки: одинарные кавычки закрывают всё, кроме самой одинарной
 /// кавычки, — её приходится выносить наружу.
-fn sh_quote(value: &str) -> String {
+pub(crate) fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 

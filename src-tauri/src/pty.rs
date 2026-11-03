@@ -51,10 +51,10 @@ pub struct SpawnOptions {
     // Папка изолированной истории команд панели (ZDOTDIR/HISTFILE);
     // None — общесистемная история.
     pub history_dir: Option<PathBuf>,
-    // Каталог обёрток агентов, которые подключают им наш MCP. На unix его
-    // ставит в PATH rc-файл панели (см. terminal_snapshots), здесь — только
-    // на Windows.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    // Каталог обёрток агентов: наш MCP для них и свой сервер для opencode.
+    // На unix у zsh его ставит в PATH rc-файл панели (см. terminal_snapshots),
+    // у bash — PROMPT_COMMAND, на Windows — само окружение.
+    #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
     pub agent_shims: Option<PathBuf>,
     // Шрифты, которыми панель рисует текст, через запятую (см.
     // TERMINAL_FONTS_ENV).
@@ -155,6 +155,8 @@ impl PtyManager {
                 cmd.env_remove(&key);
             }
         }
+        // Что bash выполнит перед каждым приглашением: история и PATH.
+        let mut prompt_command: Vec<String> = Vec::new();
         // Своя история команд у каждой панели. macOS /etc/zshrc жёстко ставит
         // HISTFILE=$ZDOTDIR/.zsh_history — поэтому подменяем ZDOTDIR (внутри
         // папки симлинки на реальные дотфайлы пользователя). bash уважает
@@ -164,7 +166,7 @@ impl PtyManager {
             cmd.env("HISTFILE", history.join("shell_history"));
             // bash пишет историю только на выходе — history -a после каждой
             // команды спасает её при принудительном завершении приложения.
-            cmd.env("PROMPT_COMMAND", "history -a");
+            prompt_command.push("history -a".into());
             let fish_name: String = opts
                 .id
                 .chars()
@@ -204,7 +206,7 @@ impl PtyManager {
                 cmd.env(crate::mcp::TOKEN_ENV, &token);
                 mcp_token = token;
             }
-            // opencode обёртки не читает — он читает конфиг из окружения.
+            // Сервер opencode берёт не из обёртки, а из конфига в окружении.
             // Здесь же, вместе с адресом: условие одно и то же — плагин в этой
             // панели доступен.
             if let Ok(exe) = std::env::current_exe() {
@@ -215,11 +217,21 @@ impl PtyManager {
                 );
             }
         }
-        // Обёртки агентов — в начало PATH. На unix это делает rc-файл панели,
-        // и обязательно после файла пользователя: тот пересобирает PATH. Ни
-        // cmd, ни PowerShell PATH из своих файлов не пересобирают, а Git Bash
-        // дописывает унаследованный следом за своими каталогами, где агентов
-        // нет. Поэтому на Windows хватает окружения.
+        // Обёртки агентов — в начало PATH, и обязательно после файлов
+        // пользователя: те пересобирают PATH. У zsh для этого есть rc-файл
+        // панели, а свой `.bashrc` bash читает сам — ему каталог ставит
+        // PROMPT_COMMAND. fish не делает ни того, ни другого, и обёрток в его
+        // панели нет.
+        #[cfg(unix)]
+        if let Some(shims) = &opts.agent_shims {
+            prompt_command.push(crate::terminal_snapshots::shims_prompt_command(shims));
+        }
+        if !prompt_command.is_empty() {
+            cmd.env("PROMPT_COMMAND", prompt_command.join("; "));
+        }
+        // Ни cmd, ни PowerShell PATH из своих файлов не пересобирают, а Git
+        // Bash дописывает унаследованный следом за своими каталогами, где
+        // агентов нет. Поэтому на Windows хватает окружения.
         #[cfg(windows)]
         if let Some(shims) = &opts.agent_shims {
             let inherited = cmd.get_env("PATH").map(std::ffi::OsStr::to_os_string);
@@ -2398,5 +2410,60 @@ mod tests {
         );
 
         let _ = manager.kill("p1/../$(id)");
+    }
+
+    /// Свой `.bashrc` bash читает мимо папки панели, и обёртки агентов ему
+    /// ставит в PATH только PROMPT_COMMAND. В унаследованном PATH каталога
+    /// нет: проба из него найдётся, только если строка сработала.
+    #[cfg(unix)]
+    #[test]
+    fn a_bash_panel_finds_the_agent_wrappers() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bash = "/bin/bash";
+        if !std::path::Path::new(bash).is_file() {
+            eprintln!("bash не установлен — проверять не на чем");
+            return;
+        }
+        let history = tempfile::tempdir().expect("временная папка");
+        let shims = tempfile::tempdir().expect("временная папка");
+        let probe = shims.path().join("modelcrew-probe");
+        // Маркер собирает шелл пробы: в эхе набранного имени его нет.
+        std::fs::write(&probe, "#!/bin/sh\necho WRAPPERS_\"ON\"_PATH\n").unwrap();
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let manager = PtyManager::default();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        manager
+            .spawn(
+                SpawnOptions {
+                    id: "bash-shims".into(),
+                    shell: Some(bash.into()),
+                    cwd: test_cwd(),
+                    cols: 80,
+                    rows: 24,
+                    // Своя история: иначе проба легла бы в настоящую.
+                    history_dir: Some(history.path().to_path_buf()),
+                    agent_shims: Some(shims.path().to_path_buf()),
+                    terminal_fonts: None,
+                },
+                move |bytes| {
+                    let _ = out_tx.send(bytes);
+                },
+                |_| {},
+            )
+            .expect("шелл должен запуститься");
+
+        manager
+            .write("bash-shims", &Shell::line("modelcrew-probe"))
+            .expect("запись в PTY");
+        let found = wait_for_output(
+            &manager,
+            "bash-shims",
+            &out_rx,
+            "WRAPPERS_ON_PATH",
+            Duration::from_secs(20),
+        );
+        let _ = manager.kill("bash-shims");
+        found.expect("обёртки не попали в PATH bash-панели");
     }
 }
