@@ -233,7 +233,8 @@ pub struct PtyManager {
 
 impl PtyManager {
     /// Терминал без обратного давления: вывод читается так быстро, как его
-    /// отдаёт программа.
+    /// отдаёт программа. Панели идут через spawn_paced, этим пользуются тесты.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn spawn(
         &self,
         opts: SpawnOptions,
