@@ -41,10 +41,12 @@ const settingsProps = {
   shell: null,
   shellBusy: false,
   terminalFontSize: 14,
+  terminalFontFamily: "",
   onSelectTheme: vi.fn(),
   onSelectAccent: vi.fn(),
   onSelectShell: vi.fn(),
   onSelectTerminalFontSize: vi.fn(),
+  onSelectTerminalFontFamily: vi.fn(),
   onClose: vi.fn(),
 } as const;
 

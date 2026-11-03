@@ -548,6 +548,34 @@
   cursor: wait;
 }
 
+.settings-text-input {
+  box-sizing: border-box;
+  width: 264px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+}
+
+.settings-text-input::placeholder {
+  color: var(--mc-text-faint);
+}
+
+.settings-text-input:hover {
+  background: var(--mc-button-hover);
+}
+
+.settings-text-input:focus-visible {
+  border-color: var(--mc-accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--mc-accent-glow);
+}
+
 .settings-select-chevron {
   position: absolute;
   right: 11px;
@@ -844,7 +872,8 @@
     margin-top: 12px;
   }
 
-  .settings-select-input {
+  .settings-select-input,
+  .settings-text-input {
     min-width: 0;
     width: 100%;
   }

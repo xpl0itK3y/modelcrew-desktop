@@ -36,16 +36,22 @@ const gitBash = {
   command: String.raw`C:\Program Files\Git\bin\bash.exe`,
 };
 
-function renderTerminalTab(onSelectShell = vi.fn()) {
+function renderTerminalTab(
+  onSelectShell = vi.fn(),
+  { terminalFontFamily = "", onSelectTerminalFontFamily = vi.fn() } = {},
+) {
   return {
     onSelectShell,
+    onSelectTerminalFontFamily,
     ...render(
       <TerminalTab
         shell={null}
         shellBusy={false}
         terminalFontSize={14}
+        terminalFontFamily={terminalFontFamily}
         onSelectShell={onSelectShell}
         onSelectTerminalFontSize={vi.fn()}
+        onSelectTerminalFontFamily={onSelectTerminalFontFamily}
       />,
     ),
   };
@@ -87,6 +93,57 @@ describe("terminal placement setting", () => {
     renderTerminalTab();
 
     expect(screen.getByText("Бета")).toBeVisible();
+  });
+});
+
+describe("terminal font setting", () => {
+  it("commits the normalized list on Enter, not on every keystroke", () => {
+    const { onSelectTerminalFontFamily } = renderTerminalTab();
+    const input = screen.getByRole("textbox", { name: "Шрифт терминала" });
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "Стандартный");
+
+    fireEvent.change(input, {
+      target: { value: ' "Claude Dials 4" ,  JetBrains   Mono, ' },
+    });
+    expect(onSelectTerminalFontFamily).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelectTerminalFontFamily).toHaveBeenCalledOnce();
+    expect(onSelectTerminalFontFamily).toHaveBeenCalledWith(
+      "Claude Dials 4, JetBrains Mono",
+    );
+    expect(input).toHaveValue("Claude Dials 4, JetBrains Mono");
+  });
+
+  it("commits on blur and keeps quiet when nothing changed", () => {
+    const { onSelectTerminalFontFamily } = renderTerminalTab(vi.fn(), {
+      terminalFontFamily: "Menlo",
+    });
+    const input = screen.getByRole("textbox", { name: "Шрифт терминала" });
+
+    // «Menlo,» — тот же список: сохранять нечего, но поле приводится в вид.
+    fireEvent.change(input, { target: { value: "Menlo," } });
+    fireEvent.blur(input);
+    expect(onSelectTerminalFontFamily).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Menlo");
+
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    expect(onSelectTerminalFontFamily).toHaveBeenCalledWith("");
+  });
+
+  it("returns to the saved value on Escape", () => {
+    const { onSelectTerminalFontFamily } = renderTerminalTab(vi.fn(), {
+      terminalFontFamily: "Menlo",
+    });
+    const input = screen.getByRole("textbox", { name: "Шрифт терминала" });
+
+    fireEvent.change(input, { target: { value: "Fira Code" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue("Menlo");
+    fireEvent.blur(input);
+    expect(onSelectTerminalFontFamily).not.toHaveBeenCalled();
   });
 });
 

@@ -62,9 +62,12 @@ import {
 import { localizeBackendError, translate } from "../i18n";
 import { loadShell } from "../shell";
 import {
+  loadTerminalFontFamily,
   loadTerminalFontSize,
   loadTerminalHistoryIsolation,
   normalizeTerminalFontSize,
+  terminalFontFamilyCss,
+  terminalFonts,
 } from "./preferences";
 import {
   findTerminalDropTargetAtPoint,
@@ -87,6 +90,7 @@ const RESIZE_DEBOUNCE_MS = 250;
 let currentTerminalTheme = getAppTheme(loadTheme()).terminal;
 let currentTerminalContrast = terminalMinimumContrast(loadTheme());
 let currentTerminalFontSize = loadTerminalFontSize();
+let currentTerminalFonts = terminalFonts(loadTerminalFontFamily());
 
 export type TerminalEntry = {
   id: string;
@@ -300,6 +304,22 @@ export function applyTerminalFontSize(size: number): void {
   }
 }
 
+export function applyTerminalFontFamily(custom: string): void {
+  currentTerminalFonts = terminalFonts(custom);
+  const fontFamily = terminalFontFamilyCss(currentTerminalFonts);
+  for (const entry of registry.values()) {
+    entry.term.options.fontFamily = fontFamily;
+    fitTerminal(entry);
+  }
+}
+
+// Шрифты панели для программ внутри неё (MODELCREW_TERMINAL_FONTS): по ним
+// статус-лайн решает, рисовать ли значки своего шрифта. Окружение оболочка
+// получает при запуске, поэтому новый список узнают новые терминалы.
+function terminalFontsForShell(): string {
+  return currentTerminalFonts.join(", ");
+}
+
 // Статус терминала для UI (точка в табе): running → exited.
 export type TerminalStatus = "running" | "exited";
 
@@ -341,8 +361,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   const term = new Terminal({
     cursorBlink: true,
     fontSize: currentTerminalFontSize,
-    fontFamily:
-      '"SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace',
+    fontFamily: terminalFontFamilyCss(currentTerminalFonts),
     lineHeight: 1.25,
     scrollback: 5000,
     theme: { ...currentTerminalTheme },
@@ -595,6 +614,7 @@ async function restartTerminal(
     rows: entry.term.rows,
     shell,
     isolatedHistory: loadTerminalHistoryIsolation(),
+    terminalFonts: terminalFontsForShell(),
     onOutput: output,
   });
 
@@ -809,6 +829,7 @@ async function spawnTerminal(
       // null → бэкенд возьмёт оболочку по умолчанию для ОС.
       shell: loadShell(),
       isolatedHistory: loadTerminalHistoryIsolation(),
+      terminalFonts: terminalFontsForShell(),
       onOutput: output,
     });
     const title = result.title.trim();

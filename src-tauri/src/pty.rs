@@ -56,6 +56,27 @@ pub struct SpawnOptions {
     // на Windows.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub agent_shims: Option<PathBuf>,
+    // Шрифты, которыми панель рисует текст, через запятую (см.
+    // TERMINAL_FONTS_ENV).
+    pub terminal_fonts: Option<String>,
+}
+
+/// Шрифты панели для программ внутри неё. Терминал в webview рисует значки
+/// из частной зоны Unicode, только если их шрифт есть в этом списке, — по нему
+/// статус-лайн и решает, рисовать ли их.
+const TERMINAL_FONTS_ENV: &str = "MODELCREW_TERMINAL_FONTS";
+
+/// Значение приходит с фронта: управляющие символы в окружение не пускаем,
+/// длину режем — список шрифтов длиннее не бывает.
+fn terminal_fonts_value(fonts: &str) -> Option<String> {
+    const MAX_CHARS: usize = 2048;
+    let clean: String = fonts
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(MAX_CHARS)
+        .collect();
+    let clean = clean.trim();
+    (!clean.is_empty()).then(|| clean.to_string())
 }
 
 struct PtySession {
@@ -158,6 +179,16 @@ impl PtyManager {
         cmd.env("MODELCREW_PANEL_ID", &opts.id);
         if let Some(events) = AGENT_EVENTS_DIR.get() {
             cmd.env("MODELCREW_EVENTS_DIR", events);
+        }
+        // Без своего списка панель не должна выдать за свой чужой: ModelCrew,
+        // запущенный из панели ModelCrew, унаследовал бы список той панели.
+        match opts
+            .terminal_fonts
+            .as_deref()
+            .and_then(terminal_fonts_value)
+        {
+            Some(fonts) => cmd.env(TERMINAL_FONTS_ENV, fonts),
+            None => cmd.env_remove(TERMINAL_FONTS_ENV),
         }
         // Тем же путём — адрес сокета MCP и пропуск панели на него. Шим
         // наследует то и другое, поэтому приложение знает, кто позвал, и берёт
@@ -1110,6 +1141,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1152,6 +1184,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 |_| {},
                 move |code| {
@@ -1190,6 +1223,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = stale_out_tx.send(bytes);
@@ -1212,6 +1246,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = fresh_out_tx.send(bytes);
@@ -1314,6 +1349,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1369,6 +1405,7 @@ mod tests {
                     rows: 40,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1451,6 +1488,7 @@ mod tests {
                         rows: 24,
                         history_dir: None,
                         agent_shims: None,
+                        terminal_fonts: None,
                     },
                     move |bytes| {
                         let _ = out_tx.send(bytes);
@@ -1500,6 +1538,7 @@ mod tests {
                 rows: 24,
                 history_dir: None,
                 agent_shims: None,
+                terminal_fonts: None,
             },
             |_| {},
             |_| {},
@@ -1540,6 +1579,7 @@ mod tests {
                 rows: 24,
                 history_dir: None,
                 agent_shims: None,
+                terminal_fonts: None,
             },
             |_| {},
             |_| {},
@@ -1584,6 +1624,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 |_| {},
                 |_| {},
@@ -1622,6 +1663,7 @@ mod tests {
                 rows: 24,
                 history_dir: None,
                 agent_shims: None,
+                terminal_fonts: None,
             },
             |_| {},
             |_| {},
@@ -1649,6 +1691,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 |_| {},
                 |_| {},
@@ -1686,6 +1729,7 @@ mod tests {
                 rows: 24,
                 history_dir: None,
                 agent_shims: None,
+                terminal_fonts: None,
             },
             |_| {},
             |_| {},
@@ -1770,6 +1814,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1810,6 +1855,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1874,6 +1920,7 @@ mod tests {
                     rows: 0,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1921,6 +1968,7 @@ mod tests {
                     rows: 40,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -1980,6 +2028,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -2013,6 +2062,83 @@ mod tests {
         let _ = manager.kill("t-env2");
     }
 
+    /// Список шрифтов панели доходит до программ внутри неё как есть, без
+    /// управляющих символов.
+    #[test]
+    fn terminal_fonts_value_keeps_the_list_and_drops_control_characters() {
+        assert_eq!(
+            terminal_fonts_value("Claude Dials 4, monospace").as_deref(),
+            Some("Claude Dials 4, monospace")
+        );
+        assert_eq!(
+            terminal_fonts_value("  Menlo,\n\u{1b}[31mmonospace\t ").as_deref(),
+            Some("Menlo,[31mmonospace")
+        );
+        assert_eq!(terminal_fonts_value(" \n\t "), None);
+        assert_eq!(
+            terminal_fonts_value(&"x".repeat(5000)).map(|v| v.len()),
+            Some(2048)
+        );
+    }
+
+    /// Свой список панель отдаёт шеллу, а без списка чужой не наследует:
+    /// ModelCrew из панели ModelCrew получил бы в окружении список той панели.
+    #[test]
+    fn a_panel_tells_its_shell_its_own_fonts_and_never_inherited_ones() {
+        std::env::set_var(TERMINAL_FONTS_ENV, "Inherited Font");
+
+        let manager = PtyManager::default();
+        for (id, fonts) in [
+            ("t-fonts", Some("Claude Dials 4, monospace")),
+            ("t-fonts-none", None),
+        ] {
+            let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+            manager
+                .spawn(
+                    SpawnOptions {
+                        id: id.into(),
+                        shell: Some(Shell::path()),
+                        cwd: test_cwd(),
+                        cols: 80,
+                        rows: 24,
+                        history_dir: None,
+                        agent_shims: None,
+                        terminal_fonts: fonts.map(String::from),
+                    },
+                    move |bytes| {
+                        let _ = out_tx.send(bytes);
+                    },
+                    |_| {},
+                )
+                .expect("шелл должен запуститься");
+
+            for line in Shell::evaluated_env_probe(&[TERMINAL_FONTS_ENV]) {
+                manager.write(id, &line).expect("запись в PTY");
+            }
+            let expected = match fonts {
+                Some(fonts) => format!("{}{fonts}", Shell::EVALUATED_PROBE),
+                None if cfg!(windows) => {
+                    format!("{}%{TERMINAL_FONTS_ENV}%", Shell::EVALUATED_PROBE)
+                }
+                None => format!("{}clean", Shell::EVALUATED_PROBE),
+            };
+            let output = wait_for_output(
+                &manager,
+                id,
+                &out_rx,
+                &expected,
+                Duration::from_secs(20),
+            )
+            .expect("шелл должен напечатать свой список шрифтов");
+            assert!(
+                !output.contains("Inherited Font"),
+                "чужой список шрифтов дошёл до шелла: {output}"
+            );
+
+            let _ = manager.kill(id);
+        }
+    }
+
     /// Панель узнаётся по тому, из кого вырос процесс агента, — без всякого
     /// пропуска. Это и есть путь для cursor, который вычищает окружение, и
     /// для постоянной регистрации, где конфиг один на проект, а панелей много.
@@ -2029,6 +2155,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 |_| {},
                 |_| {},
@@ -2075,6 +2202,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);
@@ -2144,6 +2272,7 @@ mod tests {
                     rows: 24,
                     history_dir: None,
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = off_tx.send(bytes);
@@ -2237,6 +2366,7 @@ mod tests {
                     rows: 24,
                     history_dir: Some(history.path().to_path_buf()),
                     agent_shims: None,
+                    terminal_fonts: None,
                 },
                 move |bytes| {
                     let _ = out_tx.send(bytes);

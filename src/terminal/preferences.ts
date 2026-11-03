@@ -165,3 +165,106 @@ export function saveTerminalFontSize(size: number): void {
     // Без localStorage значение действует только до закрытия приложения.
   }
 }
+
+// Моноширинный шрифт каждой ОС — за ним идут свои шрифты пользователя.
+export const DEFAULT_TERMINAL_FONTS: readonly string[] = [
+  "SF Mono",
+  "Cascadia Mono",
+  "JetBrains Mono",
+  "Menlo",
+  "Consolas",
+  "monospace",
+];
+
+// Общие семейства CSS: это ключевые слова, в кавычках они значат шрифт с
+// таким именем, которого нет.
+const GENERIC_FONT_FAMILIES = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "emoji",
+  "math",
+  "fangsong",
+]);
+
+// Шрифты из настройки по именам: человек пишет их через запятую, с кавычками
+// или без. Кавычки ставит terminalFontFamilyCss, поэтому здесь их снимаем.
+export function parseTerminalFonts(value: string): string[] {
+  const seen = new Set<string>();
+  const fonts: string[] = [];
+  for (const part of value.split(",")) {
+    // Пробельные сначала становятся пробелом (таб между словами — тоже
+    // пробел), потом уходят кавычки и прочие управляющие.
+    const name = part
+      .replace(/\s+/gu, " ")
+      .replace(/["'\\\p{Cc}]/gu, "")
+      .replace(/ {2,}/gu, " ")
+      .trim();
+    const key = name.toLowerCase();
+    if (name && !seen.has(key)) {
+      seen.add(key);
+      fonts.push(name);
+    }
+  }
+  return fonts;
+}
+
+export function normalizeTerminalFontFamily(value: string): string {
+  return parseTerminalFonts(value).join(", ");
+}
+
+// Свои шрифты идут первыми, стандартные — следом: чего нет в своих, терминал
+// возьмёт из них. Значки из своего шрифта (Nerd Font, циферблаты
+// статус-лайна) иначе не нарисовать: webview, в отличие от терминалов macOS,
+// символы из частной зоны Unicode в остальных установленных шрифтах не ищет.
+export function terminalFonts(custom: string): string[] {
+  const own = parseTerminalFonts(custom);
+  const taken = new Set(own.map((font) => font.toLowerCase()));
+  return [
+    ...own,
+    ...DEFAULT_TERMINAL_FONTS.filter((font) => !taken.has(font.toLowerCase())),
+  ];
+}
+
+// Список шрифтов как CSS font-family. Имя вроде «Claude Dials 4» без кавычек —
+// ошибка разбора (слово с цифры), и xterm молча рисовал бы шрифтом canvas по
+// умолчанию, поэтому в кавычки берётся каждое имя, кроме общих семейств.
+export function terminalFontFamilyCss(fonts: readonly string[]): string {
+  return fonts
+    .map((font) =>
+      GENERIC_FONT_FAMILIES.has(font.toLowerCase())
+        ? font.toLowerCase()
+        : `"${font}"`,
+    )
+    .join(", ");
+}
+
+export function loadTerminalFontFamily(): string {
+  try {
+    return normalizeTerminalFontFamily(
+      readSetting(KEYS.terminalFontFamily) ?? "",
+    );
+  } catch {
+    return "";
+  }
+}
+
+export function saveTerminalFontFamily(value: string): void {
+  try {
+    const normalized = normalizeTerminalFontFamily(value);
+    if (normalized) {
+      writeSetting(KEYS.terminalFontFamily, normalized);
+    } else {
+      removeSetting(KEYS.terminalFontFamily);
+    }
+  } catch {
+    // Без localStorage значение действует только до закрытия приложения.
+  }
+}

@@ -381,6 +381,7 @@ fn pty_create(
     rows: u16,
     shell: Option<String>,
     isolated_history: Option<bool>,
+    terminal_fonts: Option<String>,
     on_output: Channel<InvokeResponseBody>,
 ) -> CommandResult<PtyCreateResult> {
     ensure_main_window(&window)?;
@@ -414,6 +415,7 @@ fn pty_create(
             rows,
             history_dir,
             agent_shims: shims,
+            terminal_fonts,
         },
         move |bytes| {
             let _ = on_output.send(InvokeResponseBody::Raw(bytes));

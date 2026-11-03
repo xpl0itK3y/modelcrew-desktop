@@ -494,6 +494,10 @@ export const en: Record<MessageKey, string> = {
   "settings.terminalFontSize": "Terminal font size",
   "settings.terminalFontSizeNote": "Text size in every terminal",
   "settings.terminalFontSizeValue": "{size} px",
+  "settings.terminalFontFamily": "Terminal font",
+  "settings.terminalFontFamilyNote":
+    "Comma-separated. Whatever these fonts lack comes from the default ones. Icons from Nerd Fonts and other custom fonts show up only if the font is named here",
+  "settings.terminalFontFamilyPlaceholder": "Default",
   "settings.terminalSpawnMode": "New terminal placement",
   "settings.terminalSpawnModeNote":
     "Controls where the next terminal appears. Existing panels and saved layouts are not rearranged.",

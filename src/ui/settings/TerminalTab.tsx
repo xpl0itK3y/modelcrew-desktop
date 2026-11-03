@@ -13,6 +13,7 @@ import {
   MIN_TERMINAL_FONT_SIZE,
   loadTerminalHistoryIsolation,
   loadTerminalSpawnMode,
+  normalizeTerminalFontFamily,
   saveTerminalHistoryIsolation,
   saveTerminalSpawnMode,
   type TerminalSpawnMode,
@@ -25,6 +26,7 @@ import {
   SettingsButton,
   SettingsPage,
   SettingsSelect,
+  SettingsTextInput,
 } from "./SettingsControls";
 
 // Значение «системная оболочка» приходит из App как null, а <select> умеет
@@ -52,8 +54,10 @@ type TerminalTabProps = {
   shell: string | null;
   shellBusy: boolean;
   terminalFontSize: number;
+  terminalFontFamily: string;
   onSelectShell: (command: string | null, label: string) => void;
   onSelectTerminalFontSize: (size: number) => void;
+  onSelectTerminalFontFamily: (fonts: string) => void;
 };
 
 export function TerminalTab(props: TerminalTabProps) {
@@ -305,6 +309,21 @@ export function TerminalTab(props: TerminalTabProps) {
               })}
             </output>
           </div>
+        }
+      />
+
+      <SettingRow
+        title={t("settings.terminalFontFamily")}
+        description={t("settings.terminalFontFamilyNote")}
+        keywords="font family Nerd Font Claude Dials"
+        control={
+          <SettingsTextInput
+            label={t("settings.terminalFontFamily")}
+            value={props.terminalFontFamily}
+            placeholder={t("settings.terminalFontFamilyPlaceholder")}
+            normalize={normalizeTerminalFontFamily}
+            onCommit={props.onSelectTerminalFontFamily}
+          />
         }
       />
 

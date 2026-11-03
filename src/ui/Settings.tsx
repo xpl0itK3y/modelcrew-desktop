@@ -92,10 +92,12 @@ type SettingsProps = {
   shell: string | null;
   shellBusy: boolean;
   terminalFontSize: number;
+  terminalFontFamily: string;
   onSelectTheme: (themeId: ThemeId) => void;
   onSelectAccent: (color: string) => void;
   onSelectShell: (command: string | null, label: string) => void;
   onSelectTerminalFontSize: (size: number) => void;
+  onSelectTerminalFontFamily: (fonts: string) => void;
   // Раздел, открытый первым; без него — «Оформление».
   initialSection?: SettingsSectionId;
   // Диалог доигрывает exit-анимацию перед размонтированием.
@@ -340,8 +342,10 @@ function SettingsShell(props: ShellProps) {
             shell={props.shell}
             shellBusy={props.shellBusy}
             terminalFontSize={props.terminalFontSize}
+            terminalFontFamily={props.terminalFontFamily}
             onSelectShell={props.onSelectShell}
             onSelectTerminalFontSize={props.onSelectTerminalFontSize}
+            onSelectTerminalFontFamily={props.onSelectTerminalFontFamily}
           />
         </div>
 

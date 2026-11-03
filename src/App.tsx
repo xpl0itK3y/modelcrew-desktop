@@ -49,6 +49,7 @@ import { TerminalTab } from "./panels/TerminalTab";
 import { GroupActions } from "./panels/GroupActions";
 import { Welcome } from "./panels/Welcome";
 import {
+  applyTerminalFontFamily,
   applyTerminalFontSize,
   applyTerminalTheme,
   getRunningTerminalCount,
@@ -100,7 +101,9 @@ import { platform } from "./platform";
 import { shortcutLabel } from "./hotkeys/shortcuts";
 import { loadShell, saveShell } from "./shell";
 import {
+  loadTerminalFontFamily,
   loadTerminalFontSize,
+  saveTerminalFontFamily,
   saveTerminalFontSize,
 } from "./terminal/preferences";
 import { useAppUpdater } from "./updater/useAppUpdater";
@@ -176,6 +179,9 @@ export default function App() {
   const [themeId, setThemeId] = useState(loadTheme);
   const [terminalFontSize, setTerminalFontSize] = useState(
     loadTerminalFontSize,
+  );
+  const [terminalFontFamily, setTerminalFontFamily] = useState(
+    loadTerminalFontFamily,
   );
   const [shell, setShell] = useState<string | null>(loadShell);
   const [pendingShell, setPendingShell] = useState<{
@@ -1240,6 +1246,7 @@ export default function App() {
           shell={shell}
           shellBusy={shellBusy}
           terminalFontSize={terminalFontSize}
+          terminalFontFamily={terminalFontFamily}
           onSelectTheme={(nextThemeId) => {
             setThemeId(nextThemeId);
             saveTheme(nextThemeId);
@@ -1254,6 +1261,11 @@ export default function App() {
             setTerminalFontSize(size);
             saveTerminalFontSize(size);
             applyTerminalFontSize(size);
+          }}
+          onSelectTerminalFontFamily={(fonts) => {
+            setTerminalFontFamily(fonts);
+            saveTerminalFontFamily(fonts);
+            applyTerminalFontFamily(fonts);
           }}
           onClose={() => {
             if (!pendingShell && !shellBusy) {

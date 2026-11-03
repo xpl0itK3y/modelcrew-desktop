@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "../Icons";
 import {
   SettingsSectionProvider,
@@ -190,5 +190,56 @@ export function SettingsSelect<T extends string>(props: SelectProps<T>) {
       </select>
       <ChevronRightIcon className="settings-select-chevron" aria-hidden="true" />
     </div>
+  );
+}
+
+type TextInputProps = {
+  label: string;
+  value: string;
+  placeholder?: string;
+  // Приводит набранное к сохраняемому виду. Поле показывает уже приведённое
+  // значение, даже если сохранять нечего: «Menlo,» при сохранённом «Menlo».
+  normalize?: (value: string) => string;
+  onCommit: (value: string) => void;
+};
+
+// Сохраняет по Enter и при уходе фокуса, а не на каждую букву: настройка вроде
+// шрифта иначе перерисовывала бы терминалы на полуслове. Esc возвращает
+// сохранённое.
+export function SettingsTextInput(props: TextInputProps) {
+  const [draft, setDraft] = useState(props.value);
+  useEffect(() => setDraft(props.value), [props.value]);
+
+  const commit = () => {
+    const next = props.normalize ? props.normalize(draft) : draft;
+    setDraft(next);
+    if (next !== props.value) {
+      props.onCommit(next);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      className="settings-text-input"
+      aria-label={props.label}
+      value={draft}
+      placeholder={props.placeholder}
+      spellCheck={false}
+      autoComplete="off"
+      autoCapitalize="off"
+      autoCorrect="off"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        } else if (event.key === "Escape" && draft !== props.value) {
+          event.stopPropagation();
+          setDraft(props.value);
+        }
+      }}
+    />
   );
 }

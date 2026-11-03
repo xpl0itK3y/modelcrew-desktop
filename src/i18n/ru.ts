@@ -494,6 +494,10 @@ export const ru = {
   "settings.terminalFontSize": "Размер шрифта терминала",
   "settings.terminalFontSizeNote": "Размер текста во всех терминалах",
   "settings.terminalFontSizeValue": "{size} px",
+  "settings.terminalFontFamily": "Шрифт терминала",
+  "settings.terminalFontFamilyNote":
+    "Через запятую. Чего нет в этих шрифтах, терминал возьмёт из стандартных. Значки Nerd Font и других своих шрифтов видны, только если шрифт назван здесь",
+  "settings.terminalFontFamilyPlaceholder": "Стандартный",
   "settings.terminalSpawnMode": "Порядок добавления терминалов",
   "settings.terminalSpawnModeNote":
     "Определяет место следующего терминала. Уже открытые панели и сохранённые раскладки не перестраиваются.",

@@ -21,6 +21,7 @@ export const KEYS = {
   editorWidth: "modelcrew.editorWidth",
 
   terminalFontSize: "modelcrew.terminalFontSize",
+  terminalFontFamily: "modelcrew.terminalFontFamily",
   terminalHistoryIsolated: "modelcrew.terminalHistoryIsolated",
   terminalSpawnMode: "modelcrew.terminalSpawnMode",
   networkAvatars: "modelcrew.networkAvatars",
