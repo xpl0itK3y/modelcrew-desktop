@@ -1295,7 +1295,8 @@ impl ChangeWindow {
 
     /// Стоит ли пересобирать сводку после этого окна. Пути уходят git
     /// относительными: корень и так текущий каталог, а абсолютный путь на
-    /// Windows пришёл бы с префиксом `\\?\`, которого git не понимает.
+    /// Windows пришёл бы с префиксом `\\?\` от канонизации корня, и
+    /// полагаться на то, что git его разберёт, незачем.
     fn needs_summary(self, root: &Path) -> bool {
         self.certain || !unignored_paths(root, self.worktree.into_iter().collect()).is_empty()
     }
