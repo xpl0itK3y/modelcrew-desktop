@@ -110,6 +110,11 @@ export type TerminalEntry = {
   // Разобранный терминалом вывод, ещё не подтверждённый бэкенду (pty_ack).
   unackedBytes: number;
   resizeTimer: number | undefined;
+  // WebGL-рендерер панели; нет — xterm рисует DOM-рендерером (см. ensureGpuRenderer).
+  webgl: WebglAddon | null;
+  // Подгонка размера не чаще раза в FIT_THROTTLE_MS (см. requestFit).
+  fitTimer: number | undefined;
+  fitQueued: boolean;
   // Панель переименована руками — автоимя от процесса больше не трогаем.
   manualTitle: boolean;
   // Анимация появления играется только при первом монтировании.
@@ -382,15 +387,8 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   term.loadAddon(serialize);
   registerSnapshotSource(id, serialize);
   term.open(container);
-
-  try {
-    const webgl = new WebglAddon();
-    // При потере GL-контекста аддон снимается — xterm откатывается на canvas.
-    webgl.onContextLoss(() => webgl.dispose());
-    term.loadAddon(webgl);
-  } catch {
-    // WebGL недоступен — молча остаёмся на canvas-рендерере.
-  }
+  // WebGL-рендерер подключается, когда панель встаёт на экран
+  // (ensureGpuRenderer): терминалам других проектов и сессий он не нужен.
 
   const entry: TerminalEntry = {
     id,
@@ -406,6 +404,9 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     outputGeneration: 0,
     unackedBytes: 0,
     resizeTimer: undefined,
+    webgl: null,
+    fitTimer: undefined,
+    fitQueued: false,
     manualTitle: false,
     everAttached: false,
     pendingResume: null,
@@ -450,6 +451,88 @@ export function fitTerminal(entry: TerminalEntry): void {
     return;
   }
   entry.fit.fit();
+}
+
+// Пока тянут край окна или колонки, ResizeObserver зовёт на каждый кадр, а
+// каждая смена cols перекладывает весь скроллбэк терминала — дюжина панелей
+// не укладывалась в кадр. Первый вызов подгоняет сразу, следующие — не чаще
+// раза в интервал, и последний размер обязательно доходит до терминала.
+const FIT_THROTTLE_MS = 100;
+
+export function requestFit(entry: TerminalEntry): void {
+  if (entry.fitTimer !== undefined) {
+    entry.fitQueued = true;
+    return;
+  }
+  fitTerminal(entry);
+  entry.fitTimer = window.setTimeout(() => {
+    entry.fitTimer = undefined;
+    if (entry.fitQueued) {
+      entry.fitQueued = false;
+      requestFit(entry);
+    }
+  }, FIT_THROTTLE_MS);
+}
+
+// Сколько терминалов держат свой WebGL-контекст. Браузер даёт странице около
+// шестнадцати и при превышении молча отнимает самый старый — хоть у панели на
+// экране, которая после этого остаётся на медленном DOM-рендерере. Да и память
+// видеокарты у каждого контекста своя. В сессии не больше двенадцати панелей,
+// так что видимым хватает всегда, а терминалы ушедших с экрана проектов и
+// сессий отдают контекст первыми, начиная с давно не показанных. Недавние
+// держат свой — возврат к ним не платит за новый атлас глифов.
+const MAX_GPU_RENDERERS = 12;
+// Порядок показа: в конце — последний вставший на экран.
+const gpuRenderers: TerminalEntry[] = [];
+// WebGL не поднялся ни разу — дальше и не пытаемся.
+let gpuUnavailable = false;
+
+function releaseGpuRenderer(entry: TerminalEntry): void {
+  const index = gpuRenderers.indexOf(entry);
+  if (index >= 0) {
+    gpuRenderers.splice(index, 1);
+  }
+  const webgl = entry.webgl;
+  entry.webgl = null;
+  // Аддон снимается — xterm сам возвращается к DOM-рендереру.
+  webgl?.dispose();
+}
+
+export function ensureGpuRenderer(entry: TerminalEntry): void {
+  const index = gpuRenderers.indexOf(entry);
+  if (index >= 0) {
+    gpuRenderers.splice(index, 1);
+    gpuRenderers.push(entry);
+  } else if (!gpuUnavailable) {
+    try {
+      const webgl = new WebglAddon();
+      // Контекст отняли (драйвер, лимит браузера) — снимаем аддон; при
+      // следующем показе панели рендерер поднимется заново.
+      webgl.onContextLoss(() => {
+        if (entry.webgl === webgl) {
+          releaseGpuRenderer(entry);
+        }
+      });
+      entry.term.loadAddon(webgl);
+      entry.webgl = webgl;
+      gpuRenderers.push(entry);
+    } catch {
+      // WebGL недоступен — молча остаёмся на DOM-рендерере.
+      gpuUnavailable = true;
+    }
+  }
+  // Отдаём контексты терминалов не на экране, с давно ушедших.
+  for (
+    let i = 0;
+    gpuRenderers.length > MAX_GPU_RENDERERS && i < gpuRenderers.length;
+  ) {
+    const candidate = gpuRenderers[i];
+    if (candidate.container.isConnected) {
+      i += 1;
+    } else {
+      releaseGpuRenderer(candidate);
+    }
+  }
 }
 
 export function markManualTitle(id: string): void {
@@ -918,6 +1001,10 @@ export async function destroyTerminal(id: string): Promise<void> {
   if (entry.resizeTimer !== undefined) {
     window.clearTimeout(entry.resizeTimer);
   }
+  if (entry.fitTimer !== undefined) {
+    window.clearTimeout(entry.fitTimer);
+  }
+  releaseGpuRenderer(entry);
   if (entry.resumeTimer !== undefined) {
     window.clearTimeout(entry.resumeTimer);
   }

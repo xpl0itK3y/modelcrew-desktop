@@ -2,10 +2,12 @@ import { useEffect, useRef } from "react";
 import { IDockviewPanelProps } from "dockview";
 import {
   destroyTerminal,
+  ensureGpuRenderer,
   ensureSpawned,
   fitTerminal,
   getOrCreateTerminal,
   isManualTitle,
+  requestFit,
 } from "../terminal/registry";
 import { getAutoTitle } from "../terminal/panelTitles";
 
@@ -25,6 +27,7 @@ export function TerminalPanel(
     const entry = getOrCreateTerminal(props.api.id);
     let mounted = true;
     host.appendChild(entry.container);
+    ensureGpuRenderer(entry);
     fitTerminal(entry);
     // Панель знает только владельца. Фактический cwd разрешает Rust-реестр,
     // поэтому восстановленные панели одного воркспейса не могут разъехаться.
@@ -61,7 +64,7 @@ export function TerminalPanel(
 
     const observer = new ResizeObserver(() => {
       if (entry.container.isConnected) {
-        fitTerminal(entry);
+        requestFit(entry);
       }
     });
     observer.observe(host);
