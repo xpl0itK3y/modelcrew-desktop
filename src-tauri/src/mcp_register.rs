@@ -325,6 +325,12 @@ const OPENCODE: &str = "opencode";
 /// «да» opencode не стартовал бы совсем, а от ложного «нет» всё было бы как
 /// раньше. Отсюда и первая строка, и проверка «цифра, точка» за не-цифрой:
 /// в цветном выводе v2 цифры есть и в управляющих кодах.
+///
+/// Ответ на `--version` стоит заметных долей секунды на каждый запуск, а
+/// меняется только с самим opencode. Поэтому он запоминается рядом с
+/// обёрткой вместе с приметой файла (`ls -lLn`: размер и время изменения) и
+/// спрашивается снова, лишь когда примета другая. Пустой ответ не
+/// запоминаем: opencode мог просто не ответить.
 #[cfg_attr(not(unix), allow(dead_code))]
 fn opencode_shim_body() -> String {
     let head = shim_head(
@@ -342,10 +348,24 @@ for arg in "$@"; do
     --standalone|--server|--server=*|-h|--help|-v|--version) exec "$real" "$@" ;;
   esac
 done
-version=$(NO_COLOR=1 "$real" --version </dev/null 2>/dev/null)
 newline='
 '
-first=${{version%%"$newline"*}}
+cache="$self/.opencode-version"
+stamp=$(ls -lLn "$real" 2>/dev/null)
+seen=''
+first=''
+if [ -n "$stamp" ] && [ -r "$cache" ]; then
+  {{ IFS= read -r seen; IFS= read -r first; }} <"$cache" || first=''
+  [ "$seen" = "$stamp" ] || first=''
+fi
+if [ -z "$first" ]; then
+  version=$(NO_COLOR=1 "$real" --version </dev/null 2>/dev/null)
+  first=${{version%%"$newline"*}}
+  if [ -n "$first" ] && [ -n "$stamp" ]; then
+    printf '%s\n%s\n' "$stamp" "$first" >"$cache.$$" 2>/dev/null &&
+      mv -f "$cache.$$" "$cache" 2>/dev/null
+  fi
+fi
 case " $first" in
   *[!0-9.][2-9].*|*[!0-9.][1-9][0-9].*) exec "$real" --standalone "$@" ;;
 esac
@@ -969,6 +989,57 @@ mod tests {
             let (args, _) = through_the_opencode_wrapper(version, &["--session", "ses_1"]);
             assert_eq!(args, ["--standalone", "--session", "ses_1"], "{version:?}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_is_asked_its_version_once_per_binary() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join(SHIMS_DIR);
+        write_shims(&shims, &exe(), false).unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join(OPENCODE);
+        let install = |version: &str| {
+            std::fs::write(
+                &fake,
+                format!(
+                    "#!/bin/sh\n\
+                     if [ \"$1\" = --version ]; then echo asked >> \"$FAKE_LOG\"; echo '{version}'; exit 0; fi\n\
+                     for arg in \"$@\"; do echo \"$arg\"; done\n"
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let log = dir.path().join("log");
+        let run = || {
+            let output = std::process::Command::new(shims.join(OPENCODE))
+                .env(
+                    "PATH",
+                    format!("{}:{}:/usr/bin:/bin", shims.display(), bin.display()),
+                )
+                .env("FAKE_LOG", &log)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let asked = std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+            (String::from_utf8(output.stdout).unwrap(), asked)
+        };
+
+        install("opencode v2.2.5");
+        assert_eq!(run(), ("--standalone\n".to_string(), 1));
+        // Тот же opencode — ответ уже известен, спрашивать незачем.
+        assert_eq!(run(), ("--standalone\n".to_string(), 1));
+
+        // Другой opencode на том же месте (откатили на v1) — примета уже не
+        // та, и версию спрашивают заново. Иначе v1 получил бы флаг, с которым
+        // не запускается.
+        install("opencode 1.19.0 (a much longer build string)");
+        assert_eq!(run(), ("".to_string(), 2));
+        assert_eq!(run(), ("".to_string(), 2));
     }
 
     #[cfg(unix)]
