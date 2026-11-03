@@ -23,6 +23,16 @@ type SnapshotSource = {
 const sources = new Map<string, SnapshotSource>();
 const dirty = new Set<string>();
 let flushTimer: number | undefined;
+// Проходы записи идут строго друг за другом. Пометку dirty проход снимает в
+// начале, а на диск снимки попадают позже, — поэтому выход ждёт идущий
+// проход, а не только сохраняет оставшееся.
+let flushQueue: Promise<void> = Promise.resolve();
+
+function enqueueFlush(task: () => Promise<void>): Promise<void> {
+  const run = flushQueue.then(task);
+  flushQueue = run.catch(() => {});
+  return run;
+}
 
 function ensureFlushTimer(): void {
   if (!isTauri || flushTimer !== undefined) {
@@ -71,43 +81,58 @@ async function saveSnapshot(source: SnapshotSource): Promise<void> {
     await invoke("terminal_snapshot_save", { id: source.id, data });
   } catch {
     // Снимки — best-effort: сбой записи не должен мешать работе терминала.
+    // Но панель остаётся несохранённой: следующий проход попробует снова,
+    // иначе выход, который пишет только помеченные, пропустил бы её.
+    markSnapshotDirty(source.id);
   }
 }
 
-export async function flushSnapshot(id: string): Promise<void> {
+export function flushSnapshot(id: string): Promise<void> {
   if (!isTauri) {
-    return;
+    return Promise.resolve();
   }
-  const source = sources.get(id);
-  if (!source) {
-    return;
-  }
-  dirty.delete(id);
-  await saveSnapshot(source);
+  return enqueueFlush(async () => {
+    const source = sources.get(id);
+    if (!source) {
+      return;
+    }
+    dirty.delete(id);
+    await saveSnapshot(source);
+  });
 }
 
-export async function flushDirtySnapshots(): Promise<void> {
-  if (!isTauri || dirty.size === 0) {
-    return;
-  }
+// Снимки пишутся по одному: сериализация буфера синхронна, и пачка панелей
+// разом подвешивала бы окно на сумму их времени. Ожидание записи каждого
+// снимка отдаёт кадр отрисовке и вводу.
+async function saveDirtySnapshots(): Promise<void> {
   const ids = [...dirty];
   dirty.clear();
-  await Promise.all(
-    ids.map((id) => {
-      const source = sources.get(id);
-      return source ? saveSnapshot(source) : Promise.resolve();
-    }),
-  );
+  for (const id of ids) {
+    const source = sources.get(id);
+    if (source) {
+      await saveSnapshot(source);
+    }
+  }
 }
 
-// Полный флаш всех источников — перед установкой обновления, когда важно
-// сохранить даже панели без свежего вывода.
-export async function flushAllSnapshots(): Promise<void> {
-  if (!isTauri) {
-    return;
+export function flushDirtySnapshots(): Promise<void> {
+  if (!isTauri || dirty.size === 0) {
+    return Promise.resolve();
   }
-  dirty.clear();
-  await Promise.all([...sources.values()].map((source) => saveSnapshot(source)));
+  return enqueueFlush(saveDirtySnapshots);
+}
+
+// Перед выходом и перед установкой обновления: дождаться идущей записи и
+// дописать всё, что изменилось с прошлого прохода. Панели без пометки dirty
+// не трогаем — их буфер менялся только выводом PTY (а он помечает) или
+// восстановлением из того же снимка, так что на диске уже их последний
+// текст. Полная перезапись всех панелей не укладывалась в отпущенные
+// бэкендом на выход секунды, когда панелей много.
+export function flushPendingSnapshots(): Promise<void> {
+  if (!isTauri) {
+    return Promise.resolve();
+  }
+  return enqueueFlush(saveDirtySnapshots);
 }
 
 export async function loadSnapshot(id: string): Promise<string | null> {

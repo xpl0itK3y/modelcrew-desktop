@@ -57,7 +57,7 @@ import {
   isManualTitle,
   restartRunningTerminals,
 } from "./terminal/registry";
-import { flushAllSnapshots, pruneSnapshots } from "./terminal/snapshots";
+import { flushPendingSnapshots, pruneSnapshots } from "./terminal/snapshots";
 import { pruneAgentRecords } from "./agents";
 import { Titlebar } from "./ui/Titlebar";
 import { Sidebar } from "./ui/Sidebar";
@@ -304,7 +304,7 @@ export default function App() {
     suspendPersistence();
     // Историю терминалов фиксируем до гашения процессов: после обновления
     // панели восстановятся с последним текстом.
-    await flushAllSnapshots();
+    await flushPendingSnapshots();
     if (isTauri) {
       try {
         await invoke("pty_kill_all");
@@ -327,7 +327,7 @@ export default function App() {
       try {
         persistNow();
         suspendPersistence();
-        await flushAllSnapshots();
+        await flushPendingSnapshots();
       } finally {
         void invoke("app_quit").catch(() => {});
       }
