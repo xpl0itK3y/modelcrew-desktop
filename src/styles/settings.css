@@ -172,14 +172,48 @@
 }
 
 /* Кнопка висит над прокручиваемой колонкой вплотную к полосе прокрутки, и
-   своего фона у неё нет: сплошной квадрат ложился на полосу и спорил с ней.
-   Прятать под кнопкой нечего — содержимое колонки кончается у её правого
-   отступа, левее крестика, — а подсветку при наведении она берёт общую. */
+   подложки у неё нет ни в покое, ни под мышью: квадрат подсветки упирался
+   прямо в полосу и спорил с ней. Прятать под кнопкой нечего — содержимое
+   колонки кончается у её правого отступа, левее крестика. Наведение видно по
+   самому крестику: он светлеет и поворачивается на четверть оборота. */
 .settings-close {
   position: absolute;
   top: calc(var(--mc-gap) + 6px);
   right: calc(var(--mc-gap) + 6px);
   z-index: 2;
+  transition: color 140ms ease;
+}
+
+.settings-close:hover {
+  background: transparent;
+  color: var(--mc-text-bright);
+}
+
+.settings-close svg {
+  transition: transform 220ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.settings-close:hover svg {
+  transform: rotate(90deg);
+}
+
+.settings-close:active svg {
+  transform: rotate(90deg) scale(0.86);
+}
+
+/* Клавиатуре рамка нужна: без подложки фокус иначе не увидеть. Внутрь, чтобы
+   не лечь на полосу прокрутки. */
+.settings-close:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: -3px;
+  color: var(--mc-text-bright);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-close,
+  .settings-close svg {
+    transition: none;
+  }
 }
 
 /* Правая колонка — сама плоскость: карточки в ней собирает уже страница.
