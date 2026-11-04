@@ -378,6 +378,63 @@ describe("BrowserView", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("scrolls the page itself with the wheel over its picture", async () => {
+    // Картинку колесо прокрутить не может — только страницу за ней. Кадр
+    // 1280×800 ужат в ящике вдвое: точка и сдвиг уходят в пикселях кадра.
+    invoke.mockResolvedValue(
+      frame({ image: PIXEL, title: "Стенд", running: true }),
+    );
+    render(<BrowserView workspaceId="w1" />);
+    const picture = await screen.findByRole("img", { name: "Стенд" });
+    Object.defineProperty(picture, "naturalWidth", { value: 1280 });
+    Object.defineProperty(picture, "naturalHeight", { value: 800 });
+    picture.getBoundingClientRect = () => new DOMRect(0, 0, 640, 400);
+    const framesBefore = invoke.mock.calls.filter(
+      ([command]) => command === "browser_frame",
+    ).length;
+
+    const wheel = fireEvent.wheel(picture, {
+      clientX: 100,
+      clientY: 150,
+      deltaY: 50,
+    });
+
+    // Ящик сам не прокручивается: двигаться должна страница, не картинка.
+    expect(wheel).toBe(false);
+    expect(invoke).toHaveBeenCalledWith("browser_wheel", {
+      workspaceId: "w1",
+      x: 200,
+      y: 300,
+      dx: 0,
+      dy: 100,
+    });
+    // Что прокрутилось, видно сразу, а не через секунду.
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.filter(([command]) => command === "browser_frame")
+          .length,
+      ).toBeGreaterThan(framesBefore),
+    );
+  });
+
+  it("leaves the wheel alone where the live page stands", async () => {
+    // Живая страница получает колесо сама; поверх неё картинки нет.
+    invoke.mockResolvedValue(
+      frame({ url: "http://localhost:1420/", running: true, dockable: true }),
+    );
+    render(<BrowserView workspaceId="w1" />);
+    await waitFor(() =>
+      expect(address()).toHaveValue("http://localhost:1420/"),
+    );
+    const place = document.querySelector(".browser-page") as HTMLElement;
+
+    expect(fireEvent.wheel(place, { deltaY: 50 })).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith(
+      "browser_wheel",
+      expect.anything(),
+    );
+  });
+
   it("steps the page back, forward and anew", async () => {
     invoke.mockResolvedValue(frame({ image: PIXEL, running: true }));
     render(<BrowserView workspaceId="w1" />);

@@ -193,6 +193,42 @@ pub async fn browser_step(
     })
 }
 
+/// Колесо мыши над кадром страницы.
+///
+/// Там, где страница стоит в панели не живой, а картинкой, — на Linux
+/// всегда, на других системах, пока место чем-то закрыто, — колесо крутит
+/// картинку, и до страницы оно не доходит. Его передают сюда: точка и сдвиг —
+/// в пикселях кадра.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn browser_wheel(
+    window: tauri::Webview,
+    app: tauri::AppHandle,
+    roots: tauri::State<'_, WorkspaceRoots>,
+    workspace_id: String,
+    x: f64,
+    y: f64,
+    dx: f64,
+    dy: f64,
+) -> CommandResult<()> {
+    super::ensure_main_window(&window)?;
+    let root = roots.resolve(&workspace_id)?;
+    let key = root.to_string_lossy().to_string();
+    // Страницу закрыли, пока крутили колесо: прокручивать уже нечего.
+    if !crate::browser_page::is_open(&app, &key) {
+        return Ok(());
+    }
+    // Скрипт страницы отвечает своим вызовом; ждать его на рантайме команд
+    // нельзя, как и кадр.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::browser_actions::wheel(&app, &key, (x, y), (dx, dy)).map_err(|reason| {
+            CommandError::new(ErrorCode::BrowserCommandFailed).with_context("reason", reason)
+        })
+    })
+    .await
+    .map_err(|error| CommandError::new(ErrorCode::BrowserCommandFailed).with_debug(error))?
+}
+
 /// Консоль страницы для панели — та же запись, что читает агент
 /// (`browser_console`).
 #[derive(Serialize)]

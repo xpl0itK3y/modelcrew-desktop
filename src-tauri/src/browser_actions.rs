@@ -119,6 +119,20 @@ pub fn perform(app: &AppHandle, root: &str, mut request: Value) -> Result<Acted,
     })
 }
 
+/// Колесо человека над кадром в панели браузера: прокрутить то, что под
+/// мышью. Точка и сдвиг — в пикселях кадра. Ждать, пока страница ответит,
+/// незачем: человек увидит это следующим кадром.
+pub fn wheel(app: &AppHandle, root: &str, at: (f64, f64), by: (f64, f64)) -> Result<(), String> {
+    let request = json!({
+        "op": "wheel",
+        "at": { "x": at.0, "y": at.1 },
+        "dx": by.0,
+        "dy": by.1,
+        "shot": browser_page::shot_scale(app, root),
+    });
+    act(app, root, &request, None).map(|_| ())
+}
+
 /// Вызов скрипта страницы. Выражение встраивается отдельными строками: иначе
 /// комментарий в его конце съел бы закрывающую скобку.
 pub fn compose(request: &Value, expression: Option<&str>) -> String {

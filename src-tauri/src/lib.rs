@@ -56,7 +56,7 @@ use agent_sessions::{agent_session_locate, agent_session_locate_turn};
 use browser_page::AppOnly;
 use browser_view::{
     browser_auto_reload, browser_console, browser_dock, browser_frame, browser_go, browser_step,
-    browser_undock,
+    browser_undock, browser_wheel,
 };
 use clipboard_images::terminal_clipboard_image_save;
 use command_error::{CommandError, CommandResult, ErrorCode};
@@ -1144,6 +1144,7 @@ pub fn run() {
             browser_console,
             browser_dock,
             browser_undock,
+            browser_wheel,
             mcp_status,
             mcp_set_enabled,
             panel_snapshots,
@@ -1318,6 +1319,7 @@ mod tests {
         "browser_go",
         "browser_step",
         "browser_undock",
+        "browser_wheel",
         "crew_claims",
         "git_abort_operation",
         "git_available",

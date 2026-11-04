@@ -86,12 +86,23 @@ export function frameSource(image: string): string {
   return image ? `data:image/png;base64,${image}` : "";
 }
 
+// Кто сейчас следит за кадром каждого проекта. Их будят, когда страница
+// точно изменилась — например, её прокрутили колесом, — и ждать очередного
+// опроса незачем.
+const wakers = new Map<string, Set<() => void>>();
+
+/** Попросить свежий кадр проекта сейчас, не дожидаясь опроса. */
+export function refreshFrame(workspaceId: string): void {
+  wakers.get(workspaceId)?.forEach((wake) => wake());
+}
+
 /**
  * Следить за кадром проекта, пока ящик открыт.
  *
  * Следующий опрос ставится после ответа, а не по расписанию: снимок кадра
  * иногда идёт дольше секунды, и с обычным интервалом запросы наложились бы
- * друг на друга, разгоняя браузер до предела вместо ровной картинки.
+ * друг на друга, разгоняя браузер до предела вместо ровной картинки. Свежий
+ * кадр, попрошенный посреди опроса, поэтому тоже ждёт его конца.
  */
 export function watchBrowserFrame(
   workspaceId: string | null,
@@ -112,8 +123,12 @@ export function watchBrowserFrame(
   let stopped = false;
   let timer = 0;
   let loading = false;
+  let polling = false;
+  // Свежий кадр попросили, пока шёл опрос: следующий — сразу за ним.
+  let again = false;
 
   const poll = async () => {
+    polling = true;
     // Окно свёрнуто или перекрыто — смотреть некому, кадр не нужен.
     if (!document.hidden) {
       try {
@@ -139,19 +154,56 @@ export function watchBrowserFrame(
         }
       }
     }
+    polling = false;
     if (!stopped) {
-      timer = window.setTimeout(
-        poll,
-        loading ? LOADING_POLL_MS : POLL_INTERVAL_MS,
-      );
+      const delay = again ? 0 : loading ? LOADING_POLL_MS : POLL_INTERVAL_MS;
+      again = false;
+      timer = window.setTimeout(poll, delay);
     }
   };
+
+  const wake = () => {
+    if (stopped) {
+      return;
+    }
+    if (polling) {
+      again = true;
+      return;
+    }
+    window.clearTimeout(timer);
+    void poll();
+  };
+  const watching = wakers.get(workspaceId) ?? new Set<() => void>();
+  watching.add(wake);
+  wakers.set(workspaceId, watching);
 
   void poll();
   return () => {
     stopped = true;
     window.clearTimeout(timer);
+    watching.delete(wake);
+    if (watching.size === 0 && wakers.get(workspaceId) === watching) {
+      wakers.delete(workspaceId);
+    }
   };
+}
+
+/**
+ * Прокрутить страницу колесом человека: точка и сдвиг — в пикселях кадра.
+ * Подробнее — `browser/pageWheel.ts`.
+ */
+export function wheelPage(
+  workspaceId: string,
+  at: { x: number; y: number },
+  by: { x: number; y: number },
+): Promise<void> {
+  return invoke<void>("browser_wheel", {
+    workspaceId,
+    x: at.x,
+    y: at.y,
+    dx: by.x,
+    dy: by.y,
+  });
 }
 
 /** Открыть страницу по просьбе человека. Отказ уходит наверх — его показывают. */

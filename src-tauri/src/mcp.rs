@@ -654,12 +654,16 @@ fn browser_tools() -> Vec<Value> {
                 "так, чтобы этот элемент оказался на экране; с направлением — ",
                 "прокрутить внутри него. Если сама страница стоит, а ",
                 "прокручивается её часть, как во многих приложениях, ",
-                "прокручивается эта часть. Ответ говорит, где теперь прокрутка и ",
-                "сколько ещё осталось.",
+                "прокручивается эта часть. x и y вместо элемента — точка на ",
+                "кадре browser_screenshot: прокрутится то, что под ней, как под ",
+                "колесом мыши, — для того, чего нет в чтении. Ответ говорит, где ",
+                "теперь прокрутка и сколько ещё осталось.",
             ),
             "inputSchema": target_schema(
                 Some(("text", "Текст на элементе, если ref и селектора нет.")),
                 json!({
+                    "x": point_schema("x"),
+                    "y": point_schema("y"),
                     "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
                     "amount": { "type": "number", "description": "На сколько пикселей." },
                     "to": { "type": "string", "enum": ["top", "bottom"] },
@@ -1149,9 +1153,16 @@ fn scroll_request(arguments: &Value) -> Result<Value, String> {
     if let Some(other) = to.filter(|end| !matches!(*end, "top" | "bottom")) {
         return Err(format!("to — top или bottom, а не «{other}»."));
     }
+    let (at, target) = (point_of(arguments)?, target_of(arguments, Some("text")));
+    if at.is_some() && target.is_some() {
+        return Err(
+            "Укажите что-то одно: элемент — ref, selector, text — или точку x и y.".to_string(),
+        );
+    }
     Ok(json!({
         "op": "scroll",
-        "target": target_of(arguments, Some("text")),
+        "target": target,
+        "at": at,
         // В начало или в конец — уже и направление: второе только спутало бы.
         "direction": if to.is_some() { None } else { direction },
         "to": to,
@@ -2692,6 +2703,33 @@ mod tests {
         assert_eq!(asked[0]["direction"], Value::Null);
         assert_eq!(asked[1]["direction"], "right");
         assert_eq!(asked[1]["amount"], 300.0);
+    }
+
+    #[test]
+    fn scrolls_what_lies_under_a_point_on_the_shot() {
+        // Рисунок на canvas или карта в чтении не видны, а прокрутить их
+        // нужно: точка с кадра — как колесо мыши над ней.
+        let tools = StubTools::working();
+
+        call(
+            &tools,
+            "browser_scroll",
+            json!({ "x": 320, "y": 240.5, "direction": "down", "amount": 120 }),
+        );
+        let both = call(
+            &tools,
+            "browser_scroll",
+            json!({ "ref": "e4", "x": 1, "y": 2 }),
+        );
+        let half = call(&tools, "browser_scroll", json!({ "x": 10 }));
+
+        assert!(text_of(&both).contains("что-то одно"), "{both}");
+        assert!(text_of(&half).contains("x и y вместе"), "{half}");
+        let asked = tools.acted.lock().unwrap();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert_eq!(asked[0]["at"], json!({ "x": 320.0, "y": 240.5 }));
+        assert_eq!(asked[0]["target"], Value::Null);
+        assert_eq!(asked[0]["direction"], "down");
     }
 
     #[test]

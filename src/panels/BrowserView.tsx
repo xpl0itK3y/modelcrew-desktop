@@ -6,7 +6,8 @@
 // (`security/appSecurityConfig.test.ts`). Поэтому на место ящика бэкенд
 // ставит саму страницу, отдельным webview, и в ней щёлкают и печатают как в
 // браузере (`browser/pageDock.ts`). Где система так не умеет и пока место
-// чем-то закрыто, страница приходит картинкой.
+// чем-то закрыто, страница приходит картинкой; колесо над ней прокручивает
+// саму страницу (`browser/pageWheel.ts`).
 //
 // Тем же браузером пользуются агенты проекта. Поэтому ящик — не только
 // просмотр: адрес, набранный здесь и отправленный Enter, открывается в той же
@@ -22,8 +23,10 @@ import {
   normalizeAddress,
   openOutside,
   openPage,
+  refreshFrame,
   stepPage,
   watchBrowserFrame,
+  wheelPage,
   type BrowserFrame,
   type PageStep,
 } from "../browser/browserFrames";
@@ -43,6 +46,7 @@ import {
 import { keepPageDocked, type PageDock } from "../browser/pageDock";
 import { useScreen } from "../browser/pageDevice";
 import { PageScreenControls } from "../browser/PageScreenControls";
+import { createWheelRelay, wheelOnFrame } from "../browser/pageWheel";
 import { localizeBackendError, useI18n } from "../i18n";
 import { KEYS, readSetting, writeSetting } from "../settings/storage";
 import {
@@ -120,6 +124,8 @@ function BrowserProjectView(props: { workspaceId: string }) {
   // Место под кадр: по нему бэкенд подгоняет саму страницу, чтобы картинка
   // была той же формы, что и ящик. Живую страницу ставят ровно сюда же.
   const pageRef = useRef<HTMLDivElement | null>(null);
+  // Картинка страницы, если она сейчас показана, — над ней крутят колесо.
+  const pictureRef = useRef<HTMLImageElement | null>(null);
   // Стоит ли страница здесь живой. Пока стоит, картинку не просим.
   const docked = useRef(false);
   const dock = useRef<PageDock | null>(null);
@@ -191,6 +197,38 @@ function BrowserProjectView(props: { workspaceId: string }) {
     observer.observe(place);
     return () => observer.disconnect();
   }, []);
+
+  // Колесо над картинкой — странице. Слушаем сами, а не через React: его
+  // колесо пассивное, и отменить прокрутку самого ящика оно не даст, а
+  // прокрутиться должна страница, не картинка в нём.
+  useEffect(() => {
+    const place = pageRef.current;
+    if (!place) {
+      return;
+    }
+    const relay = createWheelRelay(
+      (at, by) => wheelPage(props.workspaceId, at, by),
+      () => refreshFrame(props.workspaceId),
+    );
+    const onWheel = (event: WheelEvent) => {
+      const picture = pictureRef.current;
+      // Ctrl с колесом — масштаб, и жест щипка приходит так же: не наше.
+      if (!picture || event.ctrlKey) {
+        return;
+      }
+      event.preventDefault();
+      const turn = wheelOnFrame(event, {
+        rect: picture.getBoundingClientRect(),
+        naturalWidth: picture.naturalWidth,
+        naturalHeight: picture.naturalHeight,
+      });
+      if (turn) {
+        relay(turn.at, turn.by);
+      }
+    };
+    place.addEventListener("wheel", onWheel, { passive: false });
+    return () => place.removeEventListener("wheel", onWheel);
+  }, [props.workspaceId]);
 
   const dockable = frame.running && frame.dockable;
   useEffect(() => {
@@ -389,6 +427,7 @@ function BrowserProjectView(props: { workspaceId: string }) {
         >
           {picture ? (
             <img
+              ref={pictureRef}
               className="browser-frame"
               src={picture}
               alt={frame.title || t("browser.frameAlt")}

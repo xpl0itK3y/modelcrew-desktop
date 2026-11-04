@@ -7,7 +7,9 @@ import {
   isWebAddress,
   normalizeAddress,
   openOutside,
+  refreshFrame,
   watchBrowserFrame,
+  wheelPage,
 } from "./browserFrames";
 
 const invoke = vi.hoisted(() => vi.fn());
@@ -310,6 +312,66 @@ describe("watchBrowserFrame", () => {
     hidden.mockRestore();
   });
 
+  it("brings a fresh frame at once when the page surely changed", async () => {
+    // Колесо прокрутило страницу: ждать секунду до очередного кадра —
+    // значит крутить вслепую.
+    invoke.mockResolvedValue(NO_FRAME);
+    const asked = (workspaceId: string) =>
+      invoke.mock.calls.filter(([, request]) => request.workspaceId === workspaceId)
+        .length;
+    const other = watchBrowserFrame("workspace-2", () => {});
+    const stop = watchBrowserFrame("workspace-1", () => {});
+    await vi.advanceTimersByTimeAsync(500);
+    expect([asked("workspace-1"), asked("workspace-2")]).toEqual([1, 1]);
+
+    refreshFrame("workspace-1");
+    await vi.advanceTimersByTimeAsync(0);
+    // Только тот проект, чья страница изменилась.
+    expect([asked("workspace-1"), asked("workspace-2")]).toEqual([2, 1]);
+
+    // Опрос пошёл заново с этого кадра, а не с прежнего расписания.
+    await vi.advanceTimersByTimeAsync(500);
+    expect([asked("workspace-1"), asked("workspace-2")]).toEqual([2, 2]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect([asked("workspace-1"), asked("workspace-2")]).toEqual([3, 2]);
+    stop();
+    other();
+  });
+
+  it("asks for the fresh frame right after the one in flight", async () => {
+    // Два снимка сразу браузеру не по силам: свежий ждёт конца текущего.
+    let release = () => {};
+    invoke.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(NO_FRAME);
+        }),
+    );
+    const stop = watchBrowserFrame("workspace-1", () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    refreshFrame("workspace-1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("wakes nobody once the drawer is closed", async () => {
+    invoke.mockResolvedValue(NO_FRAME);
+    const stop = watchBrowserFrame("workspace-1", () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+
+    refreshFrame("workspace-1");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("stops asking once the drawer is closed", async () => {
     invoke.mockResolvedValue(NO_FRAME);
 
@@ -319,5 +381,24 @@ describe("watchBrowserFrame", () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("wheelPage", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    invoke.mockResolvedValue(undefined);
+  });
+
+  it("hands the wheel to the page in frame pixels", async () => {
+    await wheelPage("workspace-1", { x: 10, y: 20.5 }, { x: 0, y: -120 });
+
+    expect(invoke).toHaveBeenCalledWith("browser_wheel", {
+      workspaceId: "workspace-1",
+      x: 10,
+      y: 20.5,
+      dx: 0,
+      dy: -120,
+    });
   });
 });

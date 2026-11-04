@@ -2598,31 +2598,38 @@
     return "";
   };
 
+  // Прокручивается ли элемент сам по этой оси — не окно, а его часть.
+  const scrolls = (el, axis) => {
+    const style = styleOf(el);
+    const overflow = axis === "y" ? style.overflowY : style.overflowX;
+    const room = axis === "y" ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth;
+    return /(auto|scroll|overlay)/.test(overflow) && room > 1;
+  };
+
   const scrollerOf = (el, axis) => {
     for (let at = el; isElement(at); at = up(at)) {
       if (at === at.ownerDocument.body || at === at.ownerDocument.documentElement) {
         break;
       }
-      const style = styleOf(at);
-      const overflow = axis === "y" ? style.overflowY : style.overflowX;
-      const room = axis === "y" ? at.scrollHeight - at.clientHeight : at.scrollWidth - at.clientWidth;
-      if (/(auto|scroll|overlay)/.test(overflow) && room > 1) {
+      if (scrolls(at, axis)) {
         return at;
       }
     }
     return null;
   };
 
-  const pageScrolls = (axis) => {
-    const page = document.scrollingElement || document.documentElement;
-    const room = axis === "y" ? page.scrollHeight - window.innerHeight : page.scrollWidth - window.innerWidth;
+  // Окно документа — самой страницы или рамки её сайта.
+  const pageScrolls = (axis, doc = document) => {
+    const view = doc.defaultView || window;
+    const page = doc.scrollingElement || doc.documentElement;
+    const room = axis === "y" ? page.scrollHeight - view.innerHeight : page.scrollWidth - view.innerWidth;
     if (room <= 1) {
       return false;
     }
     // Прокрутку окна запирают на html, а если там пусто — на body.
     const overflow = (el) => (el ? (axis === "y" ? styleOf(el).overflowY : styleOf(el).overflowX) : "visible");
-    const html = overflow(document.documentElement);
-    const viewport = html !== "visible" ? html : overflow(document.body);
+    const html = overflow(doc.documentElement);
+    const viewport = html !== "visible" ? html : overflow(doc.body);
     return viewport !== "hidden" && viewport !== "clip";
   };
 
@@ -2957,18 +2964,113 @@
     return { at: Math.round(at), max: Math.max(0, Math.round(total - shown)), shown: Math.round(shown) };
   };
 
+  // Что прокрутит колесо над элементом: ближайшее прокручиваемое вокруг, у
+  // которого есть куда сдвинуться в эту сторону, — а упёрлось оно в край,
+  // то, что снаружи, вплоть до окна страницы. Из рамки своего сайта —
+  // дальше, в страницу вокруг неё. Сдвигаться некуда никому — ближайшее:
+  // ответ скажет, что дальше некуда.
+  const scrollerToward = (el, axis, sign) => {
+    let nearest = null;
+    const pick = (box) => {
+      nearest = nearest || box;
+      const { at, max } = position(box, axis);
+      return sign < 0 ? at > 0 : at < max;
+    };
+    for (let from = el; isElement(from); ) {
+      const doc = from.ownerDocument;
+      for (let at = from; isElement(at); at = up(at)) {
+        if (at === doc.body || at === doc.documentElement) {
+          break;
+        }
+        if (scrolls(at, axis) && pick(at)) {
+          return at;
+        }
+      }
+      const page = doc.scrollingElement || doc.documentElement;
+      if (pageScrolls(axis, doc) && pick(page)) {
+        return page;
+      }
+      if (doc === document) {
+        break;
+      }
+      from = doc.defaultView?.frameElement;
+    }
+    return nearest;
+  };
+
+  // Событие колеса там, где его дал бы браузер. Ложь — страница его
+  // отменила: листает она сама, по-своему.
+  const wheelOn = (target, at, left, top) => {
+    const view = viewOf(target);
+    if (!view.WheelEvent) {
+      return true;
+    }
+    return target.dispatchEvent(
+      new view.WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view,
+        clientX: at.x,
+        clientY: at.y,
+        deltaX: left,
+        deltaY: top,
+        deltaMode: 0,
+      }),
+    );
+  };
+
+  // Колесо человека над кадром в панели браузера. Где страница стоит в
+  // панели не живой, а картинкой, сама она колеса не получает: крутят
+  // картинку. Прокручиваем за человека то, что под мышью, — как прокрутил
+  // бы браузер. Точка и сдвиг — в пикселях кадра. Ответа человек не читает:
+  // он видит следующий кадр.
+  const wheel = () => {
+    const spot = spotAt(request.at);
+    if (spot.foreign) {
+      return {};
+    }
+    const scale = shotScale();
+    const shift = { x: (Number(request.dx) || 0) / scale, y: (Number(request.dy) || 0) / scale };
+    if (wheelOn(spot.target, spot.at, shift.x, shift.y)) {
+      for (const axis of ["y", "x"]) {
+        const by = shift[axis];
+        const box = by ? scrollerToward(spot.target, axis, Math.sign(by)) : null;
+        if (box) {
+          instantly(box, axis === "y" ? { top: by } : { left: by });
+        }
+      }
+    }
+    return {};
+  };
+
   const scroll = () => {
-    const el = locate(request.target);
+    // Точка с кадра — для того, чего скрипту не найти: части рисунка, рамки.
+    // Прокручивается то, что под ней, как под колесом мыши.
+    const spot = request.at ? spotAt(request.at) : null;
+    if (spot?.foreign) {
+      refuse(
+        `В точке (${request.at.x}, ${request.at.y}) рамка с другого домена ${describe(spot.target)} — ` +
+          "скрипту страницы её не прокрутить. Листайте её клавишами: " +
+          `browser_press с ref ${refOf(spot.target)} и key PageDown или PageUp.`,
+      );
+    }
+    const el = spot ? spot.target : locate(request.target);
     const to = request.to;
-    const direction = request.direction || (to ? null : "down");
-    if (el && !direction && !to) {
+    // Элемент без направления — довести его до экрана. Точка без направления
+    // — как колесо: вниз.
+    const direction = request.direction || (to || (el && !spot) ? null : "down");
+    if (el && !spot && !direction && !to) {
       bring(el);
       flash(el);
       return { text: `Прокрутили к ${describe(el)}.`, ref: refOf(el) };
     }
     const axis = direction === "left" || direction === "right" ? "x" : "y";
+    const sign = to === "top" || direction === "up" || direction === "left" ? -1 : 1;
     let box;
-    if (el) {
+    if (spot) {
+      box = scrollerToward(el, axis, sign);
+    } else if (el) {
       box = scrollerOf(el, axis) || (pageScrolls(axis) ? document.scrollingElement || document.documentElement : null);
     } else if (pageScrolls(axis)) {
       box = document.scrollingElement || document.documentElement;
@@ -2983,7 +3085,8 @@
       refuse("Прокручивать нечего: страница целиком на экране, и прокручиваемых частей на ней нет.");
     }
     const page = box === document.scrollingElement || box === document.documentElement;
-    const what = page ? "страницу" : describe(box);
+    const framed = !page && box === box.ownerDocument.scrollingElement;
+    const what = page ? "страницу" : framed ? `рамку ${describe(viewOf(box).frameElement)}` : describe(box);
     const before = position(box, axis);
     guard();
     if (to === "top" || to === "bottom") {
@@ -2994,33 +3097,17 @@
         box.scrollTo(box.scrollLeft, top);
       }
     } else {
-      const sign = direction === "up" || direction === "left" ? -1 : 1;
       const amount = Number(request.amount) > 0 ? Number(request.amount) : Math.round(before.shown * 0.85);
       const top = axis === "y" ? sign * amount : 0;
       const left = axis === "x" ? sign * amount : 0;
       // Колесо — как от мыши: страница, что листает сама, отменит его и
-      // прокрутит по-своему.
+      // прокрутит по-своему. С точкой — там, где точка.
       const rect = page
         ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
         : box.getBoundingClientRect();
-      const at = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      const under = hitAt(document, at) || box;
-      const WheelKind = window.WheelEvent;
-      const wheeled = WheelKind
-        ? under.dispatchEvent(
-            new WheelKind("wheel", {
-              bubbles: true,
-              cancelable: true,
-              composed: true,
-              view: window,
-              clientX: at.x,
-              clientY: at.y,
-              deltaX: left,
-              deltaY: top,
-              deltaMode: 0,
-            }),
-          )
-        : true;
+      const at = spot ? spot.at : { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const under = spot ? spot.target : hitAt(document, at) || box;
+      const wheeled = wheelOn(under, at, left, top);
       if (!wheeled) {
         notes.push("Страница сама обрабатывает колесо и прокручивает по-своему — проверьте результат чтением или снимком.");
       } else {
@@ -3446,6 +3533,7 @@
     select: choose,
     press: pressOn,
     scroll,
+    wheel,
     upload,
     check,
     evaluate,
@@ -3455,8 +3543,9 @@
     leaving,
   };
   // Эти только подглядывают, пока сервер ждёт: что страница сделала сама,
-  // достанется ответу на действие.
-  const PEEKS = new Set(["pressed", "leaving"]);
+  // достанется ответу на действие. Колесо — человека, а не агента: и его
+  // ответ никто не читает.
+  const PEEKS = new Set(["pressed", "leaving", "wheel"]);
 
   try {
     const op = OPS[request.op];

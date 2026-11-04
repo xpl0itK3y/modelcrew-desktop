@@ -649,6 +649,67 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
     let mut seen = serde_json::Map::new();
     perform_all(app, &mut seen, steps);
 
+    // Точка с кадра прокручивает то, что под ней: агенту — browser_scroll с x
+    // и y, человеку — колесо над картинкой в ящике. Под точкой — коробка
+    // #box; упрётся она в край — прокрутится страница вокруг. Сдвиг страницы
+    // меряем от того места, где она встала здесь.
+    mark("где коробка");
+    let spot = browser_page::run(
+        app,
+        ROOT,
+        "(() => { const box = document.getElementById('box'); box.scrollTop = 0; \
+         box.scrollIntoView({ block: 'center' }); window.checkTop = scrollY; \
+         const r = box.getBoundingClientRect(); \
+         return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }); })()",
+    )?
+    .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+    .ok_or("где коробка, не узнать")?;
+    let at = (
+        spot["x"].as_f64().unwrap_or_default(),
+        spot["y"].as_f64().unwrap_or_default(),
+    );
+    let scrolled = || {
+        value(
+            "'коробка ' + document.getElementById('box').scrollTop + \
+             ', страница ' + Math.round(scrollY - window.checkTop)",
+        )
+    };
+    let wheel = |by: f64| {
+        mark(&format!("колесо на {by}"));
+        match crate::browser_actions::wheel(app, ROOT, at, (0.0, by)) {
+            Ok(()) => json!({ "text": "" }),
+            Err(error) => json!({ "error": error }),
+        }
+    };
+    perform_all(
+        app,
+        &mut seen,
+        [
+            (
+                "point_scroll",
+                json!({ "op": "scroll", "at": spot, "direction": "down", "amount": 100 }),
+            ),
+            ("point_scrolled", scrolled()),
+        ],
+    );
+    seen.insert("wheel".into(), wheel(150.0));
+    perform_all(app, &mut seen, [("wheeled", scrolled())]);
+    seen.insert("wheel_to_end".into(), wheel(5000.0));
+    perform_all(app, &mut seen, [("wheeled_to_end", scrolled())]);
+    seen.insert("wheel_past_end".into(), wheel(100.0));
+    perform_all(
+        app,
+        &mut seen,
+        [
+            ("wheeled_past_end", scrolled()),
+            // Элемент без направления — довести до экрана, а не листать.
+            (
+                "bring",
+                json!({ "op": "scroll", "target": { "selector": "#send" } }),
+            ),
+        ],
+    );
+
     // В рамку с другого домена скрипт страницы не попадёт — только мышь, в
     // точку на экране, и клавиатура туда, где в рамке фокус. Кнопка — в
     // верхней половине рамки, поле — в нижней.
@@ -718,6 +779,12 @@ fn actions(app: &AppHandle, site: &Site) -> Result<Value, String> {
                 json!({ "op": "type", "text": "ый", "append": true, "submit": true }),
             ),
             ("frame_replaced", inside()),
+            // Прокрутить рамку с другого домена скрипту не по силам: ответ
+            // говорит, чем её листать.
+            (
+                "frame_scroll",
+                json!({ "op": "scroll", "at": points["button"] }),
+            ),
             (
                 "link",
                 json!({ "op": "click", "target": { "text": "На зелёную" } }),

@@ -343,6 +343,30 @@ fn the_page_loads_shows_itself_and_closes() {
         done(actions, "scroll_box").contains("вниз на 200 px"),
         "{actions:#}"
     );
+    // Точка с кадра прокручивает то, что под ней, — коробку, а не страницу.
+    // Колесо человека — так же, а упёршись в край коробки, листает страницу
+    // вокруг: коробка 1000 px высотой в окне 80 px кончается на 920.
+    assert!(
+        done(actions, "point_scroll").contains("вниз на 100 px"),
+        "{actions:#}"
+    );
+    for (name, expected) in [
+        ("point_scrolled", "коробка 100, страница 0"),
+        ("wheeled", "коробка 250, страница 0"),
+        ("wheeled_to_end", "коробка 920, страница 0"),
+        ("wheeled_past_end", "коробка 920, страница 100"),
+    ] {
+        let text = done(actions, name);
+        assert!(text.ends_with(&format!("\n{expected}")), "{name}: {text}");
+    }
+    assert!(
+        done(actions, "bring").starts_with("Прокрутили к"),
+        "{actions:#}"
+    );
+    assert!(
+        refused(actions, "frame_scroll").contains("browser_press с ref"),
+        "{actions:#}"
+    );
     assert!(
         done(actions, "element").contains("<h1> ref=e"),
         "{actions:#}"
