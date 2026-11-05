@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { isTauri } from "../platform";
 import { useI18n } from "../i18n";
 import { useAnimatedPresence } from "./useAnimatedPresence";
+import { WaitingMark } from "./WaitingMark";
 import {
   githubCurrentUser,
   githubDevicePoll,
@@ -259,7 +260,12 @@ function GithubFlowBody(props: {
   const [copied, setCopied] = useState(false);
 
   if (flow.kind === "starting") {
-    return <div className="github-modal-status">{t("github.waiting")}</div>;
+    return (
+      <div className="github-modal-waiting is-starting" role="status">
+        <WaitingMark size={56} />
+        <div className="github-modal-status">{t("github.waiting")}</div>
+      </div>
+    );
   }
   if (flow.kind === "unconfigured") {
     return (
@@ -349,7 +355,13 @@ function GithubFlowBody(props: {
             {t("github.openGithub")}
           </button>
         </div>
-        <div className="github-modal-waiting">{t("github.waiting")}</div>
+        {/* Код вводят в браузере, и подтверждение мы узнаём только опросом,
+            раз в несколько секунд. Неподвижный экран в это время выглядит
+            зависшим — знак показывает, что приложение ждёт ответа. */}
+        <div className="github-modal-waiting" role="status">
+          <WaitingMark size={44} />
+          <span>{t("github.waiting")}</span>
+        </div>
       </>
     );
   }

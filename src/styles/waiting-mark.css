@@ -1,0 +1,145 @@
+/* ---------- Знак, который ждёт ---------- */
+
+/* Один ритм на весь знак — 1.2 с: голова качается влево и вправо, и на
+   каждом крайнем положении вскидывается ухо с той же стороны. Курсор мигает
+   вдвое чаще — в такт каждому уху. Ритмы, не кратные друг другу, читались бы
+   как дребезг, а не как ожидание. */
+
+.waiting-mark {
+  display: block;
+  flex: none;
+  /* Качаясь, голова выходит за свой квадрат на несколько пикселей. */
+  overflow: visible;
+}
+
+.waiting-mark-tile {
+  fill: #20242f;
+}
+
+.waiting-mark-ear,
+.waiting-mark-snout {
+  fill: #fefefe;
+  fill-rule: evenodd;
+}
+
+.waiting-mark-chevron,
+.waiting-mark-caret {
+  fill: #36dcf2;
+  fill-rule: evenodd;
+}
+
+/* Оси вращения — в координатах самого знака (512×512): голова качается на
+   нижнем краю, ухо — на своём основании, как настоящее. */
+.waiting-mark-head,
+.waiting-mark-ear {
+  transform-box: view-box;
+}
+
+.waiting-mark-head {
+  transform-origin: 256px 500px;
+  animation: waiting-mark-sway 1.2s ease-in-out infinite;
+}
+
+.waiting-mark-ear-left {
+  transform-origin: 130px 300px;
+  animation: waiting-mark-flick-left 1.2s infinite;
+}
+
+/* Правое ухо — та же дуга, но на полкруга позже: голова к этому времени
+   качнулась в его сторону. */
+.waiting-mark-ear-right {
+  transform-origin: 380px 300px;
+  animation: waiting-mark-flick-right 1.2s 0.6s infinite;
+}
+
+.waiting-mark-caret {
+  animation: waiting-mark-blink 0.6s steps(1, end) infinite;
+}
+
+@keyframes waiting-mark-sway {
+  0%,
+  50%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-6deg);
+  }
+  75% {
+    transform: rotate(6deg);
+  }
+}
+
+/* Ухо вскидывается резко, проскакивает назад за положение покоя и
+   успокаивается — так движение видно и на сорока пикселях. */
+@keyframes waiting-mark-flick-left {
+  0%,
+  6% {
+    transform: translateY(0) rotate(0deg);
+    animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+  }
+  20% {
+    transform: translateY(-20px) rotate(-18deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);
+  }
+  33% {
+    transform: translateY(-3px) rotate(8deg);
+    animation-timing-function: ease-in-out;
+  }
+  43% {
+    transform: translateY(0) rotate(-3deg);
+    animation-timing-function: ease-out;
+  }
+  52%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+@keyframes waiting-mark-flick-right {
+  0%,
+  6% {
+    transform: translateY(0) rotate(0deg);
+    animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+  }
+  20% {
+    transform: translateY(-20px) rotate(18deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);
+  }
+  33% {
+    transform: translateY(-3px) rotate(-8deg);
+    animation-timing-function: ease-in-out;
+  }
+  43% {
+    transform: translateY(0) rotate(3deg);
+    animation-timing-function: ease-out;
+  }
+  52%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+@keyframes waiting-mark-blink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0.14;
+  }
+}
+
+/* Без движения ожидание всё равно видно: курсор продолжает мигать, только
+   спокойнее. */
+@media (prefers-reduced-motion: reduce) {
+  .waiting-mark-head,
+  .waiting-mark-ear {
+    animation: none;
+  }
+
+  .waiting-mark-caret {
+    animation-duration: 1.2s;
+  }
+}
