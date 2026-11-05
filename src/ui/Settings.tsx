@@ -36,6 +36,7 @@ import {
   useSettingsSearch,
   type SettingsSectionId,
 } from "./settings/SettingsSearch";
+import { useScrollWhenNeeded } from "./settings/useScrollWhenNeeded";
 
 type SettingsTab = SettingsSectionId;
 
@@ -169,6 +170,7 @@ function SettingsShell(props: ShellProps) {
     () => props.initialSection ?? "appearance",
   );
   const contentRef = useRef<HTMLDivElement>(null);
+  const pagesRef = useRef<HTMLDivElement>(null);
   const searching = props.query.trim().length > 0;
 
   const visibleTabs = useMemo(() => {
@@ -187,6 +189,8 @@ function SettingsShell(props: ShellProps) {
       setTab(visibleTabs[0].id);
     }
   }, [visibleTabs, tab]);
+
+  useScrollWhenNeeded(contentRef, pagesRef);
 
   // Новый раздел читают с начала, а не с прокрутки, оставшейся от прошлого.
   useEffect(() => {
@@ -314,114 +318,118 @@ function SettingsShell(props: ShellProps) {
       </button>
 
       <div className="settings-content" ref={contentRef}>
-        <div
-          id={settingsPanelId("appearance")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("appearance")}
-          hidden={isHidden("appearance")}
-          tabIndex={0}
-        >
-          <AppearanceTab
-            themeId={props.themeId}
-            accent={props.accent}
-            onSelectTheme={props.onSelectTheme}
-            onSelectAccent={props.onSelectAccent}
-          />
-        </div>
+        <div className="settings-content-pages" ref={pagesRef}>
+          <div
+            id={settingsPanelId("appearance")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("appearance")}
+            hidden={isHidden("appearance")}
+            tabIndex={0}
+          >
+            <AppearanceTab
+              themeId={props.themeId}
+              accent={props.accent}
+              onSelectTheme={props.onSelectTheme}
+              onSelectAccent={props.onSelectAccent}
+            />
+          </div>
 
-        <div
-          id={settingsPanelId("terminal")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("terminal")}
-          hidden={isHidden("terminal")}
-          tabIndex={0}
-        >
-          <TerminalTab
-            shell={props.shell}
-            shellBusy={props.shellBusy}
-            terminalFontSize={props.terminalFontSize}
-            terminalFontFamily={props.terminalFontFamily}
-            onSelectShell={props.onSelectShell}
-            onSelectTerminalFontSize={props.onSelectTerminalFontSize}
-            onSelectTerminalFontFamily={props.onSelectTerminalFontFamily}
-          />
-        </div>
+          <div
+            id={settingsPanelId("terminal")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("terminal")}
+            hidden={isHidden("terminal")}
+            tabIndex={0}
+          >
+            <TerminalTab
+              shell={props.shell}
+              shellBusy={props.shellBusy}
+              terminalFontSize={props.terminalFontSize}
+              terminalFontFamily={props.terminalFontFamily}
+              onSelectShell={props.onSelectShell}
+              onSelectTerminalFontSize={props.onSelectTerminalFontSize}
+              onSelectTerminalFontFamily={props.onSelectTerminalFontFamily}
+            />
+          </div>
 
-        <div
-          id={settingsPanelId("agents")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("agents")}
-          hidden={isHidden("agents")}
-          tabIndex={0}
-        >
-          <AgentsTab />
-        </div>
+          <div
+            id={settingsPanelId("agents")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("agents")}
+            hidden={isHidden("agents")}
+            tabIndex={0}
+          >
+            <AgentsTab />
+          </div>
 
-        <div
-          id={settingsPanelId("mcp")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("mcp")}
-          hidden={isHidden("mcp")}
-          tabIndex={0}
-        >
-          <SoonTab
-            section="mcp"
-            title={t("settings.tabMcp")}
-            keywords="MCP CodeGraph CocoIndex сервер server"
-          />
-        </div>
+          <div
+            id={settingsPanelId("mcp")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("mcp")}
+            hidden={isHidden("mcp")}
+            tabIndex={0}
+          >
+            <SoonTab
+              section="mcp"
+              title={t("settings.tabMcp")}
+              keywords="MCP CodeGraph CocoIndex сервер server"
+            />
+          </div>
 
-        <div
-          id={settingsPanelId("plugins")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("plugins")}
-          hidden={isHidden("plugins")}
-          tabIndex={0}
-        >
-          <PluginsTab />
-        </div>
+          <div
+            id={settingsPanelId("plugins")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("plugins")}
+            hidden={isHidden("plugins")}
+            tabIndex={0}
+          >
+            <PluginsTab />
+          </div>
 
-        <div
-          id={settingsPanelId("hotkeys")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("hotkeys")}
-          hidden={isHidden("hotkeys")}
-          tabIndex={0}
-        >
-          <HotkeysTab />
-        </div>
+          <div
+            id={settingsPanelId("hotkeys")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("hotkeys")}
+            hidden={isHidden("hotkeys")}
+            tabIndex={0}
+          >
+            <HotkeysTab />
+          </div>
 
-        <div
-          id={settingsPanelId("notifications")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("notifications")}
-          hidden={isHidden("notifications")}
-          tabIndex={0}
-        >
-          <NotificationsTab />
-        </div>
+          <div
+            id={settingsPanelId("notifications")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("notifications")}
+            hidden={isHidden("notifications")}
+            tabIndex={0}
+          >
+            <NotificationsTab />
+          </div>
 
-        <div
-          id={settingsPanelId("account")}
-          className="settings-panel"
-          role="tabpanel"
-          aria-labelledby={settingsTabId("account")}
-          hidden={isHidden("account")}
-          tabIndex={0}
-        >
-          <AccountTab />
-        </div>
+          <div
+            id={settingsPanelId("account")}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={settingsTabId("account")}
+            hidden={isHidden("account")}
+            tabIndex={0}
+          >
+            <AccountTab />
+          </div>
 
-        {nothingFound && (
-          <p className="settings-content-empty">{t("settings.searchEmpty")}</p>
-        )}
+          {nothingFound && (
+            <p className="settings-content-empty">
+              {t("settings.searchEmpty")}
+            </p>
+          )}
+        </div>
       </div>
     </>
   );
