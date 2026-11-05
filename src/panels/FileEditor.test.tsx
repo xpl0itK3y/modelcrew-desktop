@@ -1432,6 +1432,93 @@ describe("FileEditor find", () => {
   });
 });
 
+describe("FileEditor status and going to a line", () => {
+  const doc = ["первая", "\tвторая", "третья строка"].join("\n");
+
+  async function opened(content = doc) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const field = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue(content.replace(/\r\n/g, "\n")));
+    return field;
+  }
+
+  function status(): string {
+    return document.querySelector(".file-view-status")?.textContent ?? "";
+  }
+
+  it("says where the cursor is and how much is selected", async () => {
+    const field = await opened();
+
+    field.setSelectionRange(doc.indexOf("строка"), doc.indexOf("строка"));
+    fireEvent.select(field);
+    expect(status()).toContain("Стр 3, кол 8");
+
+    field.setSelectionRange(doc.indexOf("вторая"), doc.indexOf("вторая") + 6);
+    fireEvent.select(field);
+    expect(status()).toContain("Стр 2, кол 8");
+    expect(status()).toContain("выделено 6");
+  });
+
+  it("names the indent and the line breaks of the file itself", async () => {
+    await opened();
+    expect(status()).toContain("Табуляция");
+    expect(status()).toContain("LF");
+  });
+
+  it("names CRLF for a Windows file", async () => {
+    await opened("a\r\n  b\r\n");
+    expect(status()).toContain("Пробелы: 2");
+    expect(status()).toContain("CRLF");
+  });
+
+  it("jumps to the line and column that were typed", async () => {
+    const field = await opened();
+
+    fireEvent.keyDown(field, { key: "g", code: "KeyG", ctrlKey: true });
+    const input = screen.getByLabelText("Перейти к строке");
+    fireEvent.change(input, { target: { value: "3:8" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.queryByLabelText("Перейти к строке")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(field);
+    expect(field.selectionStart).toBe(doc.indexOf("строка"));
+    expect(field.selectionEnd).toBe(doc.indexOf("строка"));
+  });
+
+  it("opens from the cursor position under the file", async () => {
+    await opened();
+
+    fireEvent.click(screen.getByRole("button", { name: /Стр 1, кол 1/ }));
+
+    expect(screen.getByLabelText("Перейти к строке")).toBeInTheDocument();
+  });
+
+  it("stays put and says so when there is no number", async () => {
+    const field = await opened();
+    field.setSelectionRange(2, 2);
+    fireEvent.keyDown(field, { key: "g", code: "KeyG", ctrlKey: true });
+    const input = screen.getByLabelText("Перейти к строке");
+
+    fireEvent.change(input, { target: { value: "куда-то" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(field.selectionStart).toBe(2);
+  });
+
+  it("takes the place of the find bar, not a second spot beside it", async () => {
+    const field = await opened();
+    fireEvent.keyDown(field, { key: "f", code: "KeyF", ctrlKey: true });
+    expect(screen.getByLabelText("Найти в файле")).toBeInTheDocument();
+
+    fireEvent.keyDown(field, { key: "g", code: "KeyG", ctrlKey: true });
+
+    expect(screen.queryByLabelText("Найти в файле")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Перейти к строке")).toBeInTheDocument();
+  });
+});
+
 describe("FileEditor wrapping", () => {
   const doc = ["первая", "вторая длинная строка", "третья"].join("\n");
 

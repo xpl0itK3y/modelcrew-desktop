@@ -1,7 +1,7 @@
 // Поиск по файлу: что находится и что показывается.
 
 import { describe, expect, it } from "vitest";
-import { findAll, lineAt, MAX_MATCHES, nearest } from "./search";
+import { findAll, lineAt, lineTarget, MAX_MATCHES, nearest } from "./search";
 import { lineOffsets } from "./highlight";
 
 describe("findAll", () => {
@@ -51,5 +51,36 @@ describe("nearest", () => {
     expect(nearest([10, 40, 90], 10)).toBe(0);
     // За последним совпадением поиск идёт по кругу.
     expect(nearest([10, 40, 90], 200)).toBe(0);
+  });
+});
+
+describe("lineTarget", () => {
+  const text = "первая\nвторая\nтретья";
+  const offsets = lineOffsets(text);
+  const go = (query: string) => lineTarget(query, offsets, text.length);
+
+  it("goes to the start of the line by its number", () => {
+    expect(go("2")).toBe(text.indexOf("вторая"));
+    expect(go("  3 ")).toBe(text.indexOf("третья"));
+  });
+
+  it("takes a column after a colon, the way errors print it", () => {
+    expect(go("2:3")).toBe(text.indexOf("вторая") + 2);
+    expect(go("2, 3")).toBe(text.indexOf("вторая") + 2);
+  });
+
+  it("stops at the edge instead of going nowhere", () => {
+    // За концом файла — последняя строка, за концом строки — её конец.
+    expect(go("99")).toBe(text.indexOf("третья"));
+    expect(go("1:99")).toBe("первая".length);
+    expect(go("3:99")).toBe(text.length);
+    expect(go("0")).toBe(0);
+  });
+
+  it("refuses what is not a number", () => {
+    expect(go("")).toBeNull();
+    expect(go("abc")).toBeNull();
+    expect(go("2:")).toBeNull();
+    expect(go("-1")).toBeNull();
   });
 });

@@ -33,7 +33,13 @@ import {
   lineOffsets,
   paintLines,
 } from "../files/highlight";
-import { findAll, lineAt, nearest, NO_MATCHES } from "../files/search";
+import {
+  findAll,
+  lineAt,
+  lineTarget,
+  nearest,
+  NO_MATCHES,
+} from "../files/search";
 import {
   breakLine,
   deleteLines,
@@ -54,6 +60,8 @@ import {
 } from "../files/lineEndings";
 import { useLineMarks } from "../git/useLineMarks";
 import { MarkdownView } from "./MarkdownView";
+import { FileStatus } from "./FileStatus";
+import { isMac } from "../platform";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -472,6 +480,30 @@ export function FileView(props: {
     );
   }, [lineCount]);
 
+  /// Подвинуть прокрутку так, чтобы место в тексте было видно. Полем, а не
+  /// элементом внутри слоя подсветки: слой рисует только окно показа, и того,
+  /// что за его краем, в нём просто нет.
+  const reveal = useCallback(
+    (at: number) => {
+      const field = textRef.current;
+      if (!field) {
+        return;
+      }
+      const perLine = field.scrollHeight / Math.max(1, lineCount);
+      if (!(perLine > 0)) {
+        return;
+      }
+      const top = lineAt(offsets, at) * perLine;
+      // Двигаемся, только если места не видно: иначе каждая буква в строке
+      // поиска дёргала бы файл под руками.
+      if (top < field.scrollTop || top > field.scrollTop + field.clientHeight - perLine) {
+        field.scrollTop = Math.max(0, top - field.clientHeight / 2);
+        follow();
+      }
+    },
+    [lineCount, offsets, follow],
+  );
+
   // Поиск по файлу. Пока строка не открыта, ничего не считается и ничего не
   // рисуется: у закрытого поиска нет ни запроса, ни совпадений.
   const [query, setQuery] = useState<string | null>(null);
@@ -483,6 +515,7 @@ export function FileView(props: {
   );
 
   const openFind = () => {
+    setGoTo(null);
     const field = textRef.current;
     // Выделенное слово и есть то, что ищут: это первое, что делают руками.
     const picked =
@@ -508,9 +541,8 @@ export function FileView(props: {
     setCurrent((was) => (was + delta + found.at.length) % found.at.length);
   };
 
-  // Показать текущее совпадение: выделить его в поле и подвинуть прокрутку.
-  // Прокрутка полем, а не элементом внутри слоя подсветки: слой рисует только
-  // окно показа, и того, что за его краем, в нём просто нет.
+  // Показать текущее совпадение: выделить его в поле и подвинуть к нему
+  // прокрутку.
   useEffect(() => {
     const field = textRef.current;
     const at = found.at[current];
@@ -524,18 +556,8 @@ export function FileView(props: {
       return;
     }
     field.setSelectionRange(at, at + found.length);
-    const perLine = field.scrollHeight / Math.max(1, lineCount);
-    if (perLine > 0) {
-      const line = lineAt(offsets, at);
-      const top = line * perLine;
-      // Двигаемся, только если совпадение вне видимого: иначе каждая буква в
-      // строке поиска дёргала бы файл под руками.
-      if (top < field.scrollTop || top > field.scrollTop + field.clientHeight - perLine) {
-        field.scrollTop = Math.max(0, top - field.clientHeight / 2);
-        follow();
-      }
-    }
-  }, [found, current, visible, lineCount, offsets, follow]);
+    reveal(at);
+  }, [found, current, visible, reveal]);
 
   const countLabel =
     query === null || query === ""
@@ -553,6 +575,40 @@ export function FileView(props: {
     setCurrent(nearest(found.at, field ? field.selectionStart : 0));
     // Только на смену набора совпадений: в остальном шагами двигает человек.
   }, [found]);
+
+  // Переход к строке по номеру: номер приходит из сообщения компилятора, из
+  // ответа агента, из стека ошибки — листать к нему вручную долго. Строка
+  // ввода живёт там же, где поиск, и вместо него: два поля в одном углу
+  // закрывали бы друг друга.
+  const [goTo, setGoTo] = useState<string | null>(null);
+  const goToRef = useRef<HTMLInputElement | null>(null);
+  const goToShortcut = isMac ? "⌃G" : "Ctrl+G";
+  const goToTarget =
+    goTo === null || goTo.trim() === ""
+      ? null
+      : lineTarget(goTo, offsets, text.length);
+
+  const openGoTo = () => {
+    setQuery(null);
+    setGoTo((was) => was ?? "");
+    globalThis.requestAnimationFrame(() => goToRef.current?.select());
+  };
+
+  const closeGoTo = () => {
+    setGoTo(null);
+    textRef.current?.focus();
+  };
+
+  const jump = () => {
+    const field = textRef.current;
+    if (!field || goToTarget === null) {
+      return;
+    }
+    setGoTo(null);
+    field.focus();
+    field.setSelectionRange(goToTarget, goToTarget);
+    reveal(goToTarget);
+  };
 
   // Перенос длинных строк. Длинный JSON и абзац в README уезжают вбок на
   // километр, и читать их можно только тягая полосу прокрутки.
@@ -783,6 +839,18 @@ export function FileView(props: {
                 openFind();
                 return;
               }
+              // ⌃G и на маке: ⌘G там уже «найти следующее».
+              if (
+                event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey &&
+                !event.shiftKey &&
+                pressed(event, "KeyG", "g")
+              ) {
+                event.preventDefault();
+                openGoTo();
+                return;
+              }
               if (event.key === "Escape" && query !== null) {
                 event.preventDefault();
                 closeFind();
@@ -901,7 +969,52 @@ export function FileView(props: {
               </button>
             </div>
           )}
+          {goTo !== null && (
+            <div className="file-find">
+              <input
+                ref={goToRef}
+                className="file-find-query"
+                value={goTo}
+                placeholder={t("files.goToQuery", { total: String(lineCount) })}
+                aria-label={t("files.goToLine")}
+                aria-invalid={goTo.trim() !== "" && goToTarget === null}
+                inputMode="numeric"
+                spellCheck={false}
+                onChange={(event) => setGoTo(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    jump();
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeGoTo();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="file-find-step icon-button"
+                title={t("files.goToClose")}
+                aria-label={t("files.goToClose")}
+                onClick={closeGoTo}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          )}
         </div>
+      )}
+      {loaded !== null && loaded.blocked === null && !showPreview && (
+        <FileStatus
+          field={textRef}
+          offsets={offsets}
+          unit={unit}
+          ending={loaded.ending}
+          goToLabel={t("files.goToLineShortcut", { shortcut: goToShortcut })}
+          onGoToLine={openGoTo}
+        />
       )}
       {asking && (
         <ConfirmDialog

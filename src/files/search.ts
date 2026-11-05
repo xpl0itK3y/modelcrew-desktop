@@ -79,3 +79,23 @@ export function nearest(matches: number[], position: number): number {
   }
   return 0;
 }
+
+/// Куда ведёт «перейти к строке»: «12» — в начало двенадцатой строки, «12:5» —
+/// к её пятому знаку. Номер за концом файла ведёт на последнюю строку, столбец
+/// за концом строки — в её конец: номер обычно списан из сообщения об ошибке, и
+/// промахнуться на единицу — не повод не идти никуда. `null` — набрано не число.
+export function lineTarget(
+  query: string,
+  offsets: number[],
+  length: number,
+): number | null {
+  const match = /^\s*(\d+)\s*(?:[:,]\s*(\d+)\s*)?$/.exec(query);
+  if (!match || offsets.length === 0) {
+    return null;
+  }
+  const line = Math.min(Math.max(Number(match[1]), 1), offsets.length) - 1;
+  const start = offsets[line];
+  const end = line + 1 < offsets.length ? offsets[line + 1] - 1 : length;
+  const column = match[2] === undefined ? 1 : Math.max(Number(match[2]), 1);
+  return Math.min(start + column - 1, end);
+}

@@ -766,6 +766,53 @@
   cursor: default;
 }
 
+/* Набрано не число — переходить некуда, и поле говорит об этом цветом, а не
+   молчанием в ответ на Enter. */
+.file-find-query[aria-invalid="true"] {
+  color: var(--mc-danger);
+}
+
+/* Строка под файлом. Та же мелкая и приглушённая, что и заголовок над ним:
+   справочная, а не рабочая. */
+.file-view-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--mc-panel-border);
+  color: var(--mc-text-faint);
+  font-size: 11px;
+  /* Цифры одной ширины: столбец меняется на каждое нажатие стрелки, и строка
+     без этого дёргалась бы вслед за ним. */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Позиция курсора — кнопка: щелчок по ней открывает переход к строке, как в
+   любом редакторе. */
+.file-view-caret {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+  padding: 0 4px;
+  margin-left: -4px;
+  border: 0;
+  border-radius: var(--mc-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.file-view-caret:hover {
+  background: var(--mc-hover);
+  color: var(--mc-text);
+}
+
+.file-view-selected {
+  color: var(--mc-text-muted);
+}
+
 .file-view-text {
   resize: none;
   background: transparent;
