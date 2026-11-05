@@ -574,6 +574,10 @@ export const en: Record<MessageKey, string> = {
   "shortcut.focusNeighbour": "Focus the neighbouring panel",
   "shortcut.swapNumber": "Swap with the panel of that number",
   "shortcut.movePanel": "Move the panel aside",
+  "shortcut.moveToSession": "Move the terminal to another session of the project",
+  "shortcut.moveToSessionNote":
+    "Hold the key and drag the terminal onto a session in the sidebar, or drag it by its header without the key. The agent in it keeps running.",
+  "shortcut.keyDrag": "drag",
   "settings.tabNotifications": "Notifications",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Account",

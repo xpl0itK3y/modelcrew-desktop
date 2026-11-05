@@ -573,6 +573,10 @@ export const ru = {
   "shortcut.focusNeighbour": "Перейти к соседней панели",
   "shortcut.swapNumber": "Поменять местами с панелью по номеру",
   "shortcut.movePanel": "Перенести панель в сторону",
+  "shortcut.moveToSession": "Перенести терминал в другую сессию проекта",
+  "shortcut.moveToSessionNote":
+    "Зажмите клавишу и перетащите терминал на сессию в боковой панели. Без клавиши — за заголовок панели. Агент в нём продолжает работать.",
+  "shortcut.keyDrag": "перетащить",
   "settings.tabNotifications": "Уведомления",
   "settings.tabAccount": "GitHub",
   "settings.groupAccount": "Аккаунт",

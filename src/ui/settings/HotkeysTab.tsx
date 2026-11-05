@@ -8,6 +8,7 @@ import { SettingRow, SettingsPage } from "./SettingsControls";
 // разъехаться с подсказками кнопок.
 export function HotkeysTab() {
   const { t } = useI18n();
+  const words = { drag: t("shortcut.keyDrag") };
 
   return (
     <SettingsPage
@@ -19,11 +20,12 @@ export function HotkeysTab() {
         <SettingRow
           key={shortcut.id}
           title={t(shortcut.label)}
+          description={shortcut.description && t(shortcut.description)}
           // Ищут и по самому сочетанию: «ctrl+w» или «⌘⇧w».
-          keywords={shortcutLabel(shortcut.keys, platform)}
+          keywords={shortcutLabel(shortcut.keys, platform, words)}
           control={
             <span className="shortcut-keys">
-              {shortcutKeys(shortcut.keys, platform).map((key, index) => (
+              {shortcutKeys(shortcut.keys, platform, words).map((key, index) => (
                 <kbd key={index}>{key}</kbd>
               ))}
             </span>

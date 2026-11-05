@@ -14,6 +14,7 @@ export type ShortcutToken =
   | "enter"
   | "arrows"
   | "digits"
+  | "drag"
   | string;
 
 const MAC_KEYS: Record<string, string> = {
@@ -35,14 +36,22 @@ const SHARED_KEYS: Record<string, string> = {
   digits: "1–9",
 };
 
-/** Подписи клавиш по одной: для отрисовки каждой в своём <kbd>. */
+/**
+ * Подписи клавиш по одной: для отрисовки каждой в своём <kbd>.
+ *
+ * `words` — то, что пишется словом на языке интерфейса, а не символом
+ * клавиши: «перетащить» у сочетания с мышью. Без перевода такой токен вышел
+ * бы заглавными буквами.
+ */
 export function shortcutKeys(
   tokens: readonly ShortcutToken[],
   platform: Platform,
+  words: Partial<Record<ShortcutToken, string>> = {},
 ): string[] {
   const named = platform === "mac" ? MAC_KEYS : PC_KEYS;
   return tokens.map(
-    (token) => SHARED_KEYS[token] ?? named[token] ?? token.toUpperCase(),
+    (token) =>
+      words[token] ?? SHARED_KEYS[token] ?? named[token] ?? token.toUpperCase(),
   );
 }
 
@@ -53,14 +62,18 @@ export function shortcutKeys(
 export function shortcutLabel(
   tokens: readonly ShortcutToken[],
   platform: Platform,
+  words: Partial<Record<ShortcutToken, string>> = {},
 ): string {
-  const keys = shortcutKeys(tokens, platform);
+  const keys = shortcutKeys(tokens, platform, words);
   return platform === "mac" ? keys.join("") : keys.join("+");
 }
 
 export type Shortcut = {
   id: string;
   label: MessageKey;
+  // Пояснение под названием — там, где одного сочетания мало, чтобы понять,
+  // что делать руками.
+  description?: MessageKey;
   keys: ShortcutToken[];
 };
 
@@ -99,5 +112,11 @@ export const SHORTCUTS: Shortcut[] = [
     id: "movePanel",
     label: "shortcut.movePanel",
     keys: ["mod", "shift", "arrows"],
+  },
+  {
+    id: "moveToSession",
+    label: "shortcut.moveToSession",
+    description: "shortcut.moveToSessionNote",
+    keys: ["mod", "drag"],
   },
 ];

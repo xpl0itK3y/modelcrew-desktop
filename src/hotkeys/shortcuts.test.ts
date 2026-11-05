@@ -38,6 +38,21 @@ describe("shortcut labels", () => {
     );
   });
 
+  it("writes a mouse gesture as a word in the interface language", () => {
+    expect(
+      shortcutKeys(["mod", "drag"], "mac", { drag: "перетащить" }),
+    ).toEqual(["⌘", "перетащить"]);
+    expect(shortcutLabel(["mod", "drag"], "windows", { drag: "drag" })).toBe(
+      "Ctrl+drag",
+    );
+  });
+
+  it("lists moving a terminal to another session with its gesture", () => {
+    const move = SHORTCUTS.find((shortcut) => shortcut.id === "moveToSession");
+    expect(move?.keys).toEqual(["mod", "drag"]);
+    expect(move?.description).toBe("shortcut.moveToSessionNote");
+  });
+
   it("keeps every listed shortcut printable", () => {
     for (const shortcut of SHORTCUTS) {
       expect(shortcutKeys(shortcut.keys, "mac").join("")).not.toContain(
