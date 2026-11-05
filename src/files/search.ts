@@ -20,8 +20,19 @@ export type Matches = {
 
 export const NO_MATCHES: Matches = { at: [], length: 0, capped: false };
 
-/// Все вхождения, без оглядки на регистр: ищут обычно на память, а помнят
-/// слово, а не то, какой буквой оно записано.
+/// Как искать. Без оглядки на регистр и в любом месте слова — так ищут
+/// обычно: на память, а помнят слово, а не то, какой буквой оно записано.
+/// Строгость нужна замене: `value` → `amount` без неё заодно превращает
+/// `setValue` в `setamount`, и код ломается там, куда не смотрели.
+export type FindOptions = {
+  /// Строчная и прописная — разные буквы.
+  matchCase: boolean;
+  /// Только отдельное слово: `value` не находится в `setValue` и `value2`.
+  wholeWord: boolean;
+};
+
+export const LOOSE: FindOptions = { matchCase: false, wholeWord: false };
+
 /// Где и что искать без оглядки на регистр.
 function caseless(text: string, query: string): { haystack: string; needle: string } {
   const lowered = text.toLowerCase();
@@ -34,27 +45,80 @@ function caseless(text: string, query: string): { haystack: string; needle: stri
   return { haystack, needle };
 }
 
-export function findAll(text: string, query: string): Matches {
-  if (query === "") {
-    return NO_MATCHES;
-  }
-  const { haystack, needle } = caseless(text, query);
-  const at: number[] = [];
+// Знак слова — буква, цифра, подчёркивание и то, что пишется поверх буквы.
+// По два знака с краю, а не по одному: буква за пределами основной плоскости
+// записана парой, и половинка пары буквой не считается.
+const WORD_START = /^[\p{L}\p{M}\p{N}_]/u;
+const WORD_END = /[\p{L}\p{M}\p{N}_]$/u;
+
+/// Совпадение стоит отдельным словом: с каждого края либо граница текста,
+/// либо не-буква — по ту сторону или в самом совпадении. Последнее нужно,
+/// чтобы `.map` находился в `list.map(` при поиске целых слов: граница там
+/// проходит внутри запроса, а не снаружи.
+function standsAlone(text: string, at: number, end: number): boolean {
+  const left =
+    !WORD_START.test(text.slice(at, at + 2)) ||
+    !WORD_END.test(text.slice(Math.max(0, at - 2), at));
+  const right =
+    !WORD_END.test(text.slice(Math.max(at, end - 2), end)) ||
+    !WORD_START.test(text.slice(end, end + 2));
+  return left && right;
+}
+
+/// Где и что искать при этих настройках. Считается один раз на поиск: весь
+/// текст, приведённый к строчным, — не та работа, что стоит делать дважды на
+/// каждую букву запроса.
+function target(
+  text: string,
+  query: string,
+  options: FindOptions,
+): { haystack: string; needle: string } {
+  return options.matchCase ? { haystack: text, needle: query } : caseless(text, query);
+}
+
+/// Вхождения запроса слева направо, без пересечений: поиск `aa` в `aaaa` даёт
+/// два, а не три — подсветить пересекающиеся разом нельзя, а заменить и
+/// подавно.
+function* occurrences(
+  text: string,
+  { haystack, needle }: { haystack: string; needle: string },
+  wholeWord: boolean,
+): Generator<number, void, undefined> {
   let from = 0;
   for (;;) {
     const found = haystack.indexOf(needle, from);
     if (found === -1) {
-      break;
+      return;
     }
-    if (at.length >= MAX_MATCHES) {
-      return { at, length: needle.length, capped: true };
+    if (wholeWord && !standsAlone(text, found, found + needle.length)) {
+      // Внутри чужого слова — ищем дальше со следующего знака: целое слово
+      // может начаться и внутри только что отвергнутого куска.
+      from = found + 1;
+      continue;
     }
-    at.push(found);
-    // Следующее ищем за концом найденного: иначе поиск `aa` в `aaaa` дал бы
-    // три пересекающихся совпадения, а подсветить их разом нельзя.
+    yield found;
     from = found + needle.length;
   }
-  return { at, length: needle.length, capped: false };
+}
+
+export function findAll(
+  text: string,
+  query: string,
+  options: FindOptions = LOOSE,
+): Matches {
+  if (query === "") {
+    return NO_MATCHES;
+  }
+  const sought = target(text, query, options);
+  const length = sought.needle.length;
+  const at: number[] = [];
+  for (const found of occurrences(text, sought, options.wholeWord)) {
+    if (at.length >= MAX_MATCHES) {
+      return { at, length, capped: true };
+    }
+    at.push(found);
+  }
+  return { at, length, capped: false };
 }
 
 /// Номер строки, в которой стоит смещение. Двоичным поиском по началам строк:
@@ -122,26 +186,24 @@ export function replaceAll(
   text: string,
   query: string,
   replacement: string,
+  options: FindOptions = LOOSE,
 ): Replaced {
   if (query === "") {
     return { text, count: 0, first: 0 };
   }
-  const { haystack, needle } = caseless(text, query);
+  const sought = target(text, query, options);
+  const length = sought.needle.length;
   const parts: string[] = [];
   let count = 0;
   let first = 0;
   let from = 0;
-  for (;;) {
-    const found = haystack.indexOf(needle, from);
-    if (found === -1) {
-      break;
-    }
+  for (const found of occurrences(text, sought, options.wholeWord)) {
     if (count === 0) {
       first = found;
     }
     count += 1;
     parts.push(text.slice(from, found), replacement);
-    from = found + needle.length;
+    from = found + length;
   }
   if (count === 0) {
     return { text, count: 0, first: 0 };

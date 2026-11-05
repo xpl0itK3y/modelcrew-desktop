@@ -758,6 +758,31 @@
   transform: rotate(90deg);
 }
 
+/* Строгость поиска — две узкие кнопки за полем, как в VS Code: «Aa» —
+   регистр, «ab» в скобке снизу — слово целиком. Включённая подсвечена
+   цветом акцента: по ней одной видно, почему совпадений меньше, чем ждали. */
+.file-find-option {
+  width: 24px;
+}
+
+.file-find-glyph {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.file-find-glyph.is-word {
+  padding: 0 1px 1px;
+  border: 1px solid currentColor;
+  border-top: 0;
+}
+
+.file-find-option[aria-pressed="true"] {
+  color: var(--mc-text-bright);
+  background: var(--mc-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--mc-accent-border);
+}
+
 /* Ширина стрелки (28px) за вычетом её сдвига влево и плюс зазор ряда. */
 .file-find-row.is-replace {
   padding-left: 28px;

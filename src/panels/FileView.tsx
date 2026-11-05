@@ -41,6 +41,7 @@ import {
   NO_MATCHES,
   replaceAll,
   stepFrom,
+  type FindOptions,
 } from "../files/search";
 import {
   breakLine,
@@ -119,6 +120,20 @@ function blockedBy(file: FileContent): Loaded["blocked"] {
   }
   return file.tooLarge ? "tooLarge" : null;
 }
+
+/// Строгость поиска помнится между запусками, как перенос строк: кто включил
+/// её ради замены, тот обычно и дальше ищет так.
+function readFindOptions(): FindOptions {
+  return {
+    matchCase: readSetting(KEYS.findMatchCase) === "1",
+    wholeWord: readSetting(KEYS.findWholeWord) === "1",
+  };
+}
+
+const OPTION_KEYS = {
+  matchCase: KEYS.findMatchCase,
+  wholeWord: KEYS.findWholeWord,
+} as const;
 
 function loadedFrom(file: FileContent): Loaded {
   return {
@@ -513,9 +528,10 @@ export function FileView(props: {
   const [query, setQuery] = useState<string | null>(null);
   const [current, setCurrent] = useState(0);
   const queryRef = useRef<HTMLInputElement | null>(null);
+  const [options, setOptions] = useState<FindOptions>(readFindOptions);
   const found = useMemo(
-    () => (query ? findAll(text, query) : NO_MATCHES),
-    [text, query],
+    () => (query ? findAll(text, query, options) : NO_MATCHES),
+    [text, query, options],
   );
 
   // Замена — вторая строка той же панели поиска. Открывается своей кнопкой или
@@ -531,6 +547,13 @@ export function FileView(props: {
 
   const openFind = (withReplace = false) => {
     setGoTo(null);
+    // Строгость могли переключить в соседней вкладке: она общая на все файлы.
+    setOptions((was) => {
+      const stored = readFindOptions();
+      return stored.matchCase === was.matchCase && stored.wholeWord === was.wholeWord
+        ? was
+        : stored;
+    });
     if (withReplace && editable) {
       setReplacing(true);
     }
@@ -551,6 +574,29 @@ export function FileView(props: {
     setReplacing(false);
     setReplaced(null);
     textRef.current?.focus();
+  };
+
+  const toggleOption = (name: keyof FindOptions) => {
+    setOptions((was) => {
+      writeSetting(OPTION_KEYS[name], was[name] ? "0" : "1");
+      return { ...was, [name]: !was[name] };
+    });
+    setReplaced(null);
+  };
+
+  /// ⌥⌘C и ⌥⌘W на маке, Alt+C и Alt+W у остальных — те же, что в VS Code:
+  /// переключать строгость, не уводя руку из строки поиска.
+  const optionPressed = (event: ReactKeyboardEvent): keyof FindOptions | null => {
+    const held = isMac
+      ? event.metaKey && event.altKey && !event.ctrlKey
+      : event.altKey && !event.ctrlKey && !event.metaKey;
+    if (!held || event.shiftKey) {
+      return null;
+    }
+    if (pressed(event, "KeyC", "c")) {
+      return "matchCase";
+    }
+    return pressed(event, "KeyW", "w") ? "wholeWord" : null;
   };
 
   /// Перейти к совпадению по кругу: за последним идёт первое.
@@ -606,7 +652,7 @@ export function FileView(props: {
     if (!field || !query || !editable) {
       return;
     }
-    const result = replaceAll(text, query, replacement);
+    const result = replaceAll(text, query, replacement, options);
     if (result.count === 0) {
       return;
     }
@@ -652,6 +698,8 @@ export function FileView(props: {
     platform,
   );
   const replaceAllShortcut = shortcutLabel(["mod", "alt", "enter"], platform);
+  const matchCaseShortcut = shortcutLabel(isMac ? ["mod", "alt", "c"] : ["alt", "c"], platform);
+  const wholeWordShortcut = shortcutLabel(isMac ? ["mod", "alt", "w"] : ["alt", "w"], platform);
 
   // Запрос сменился — идём к тому совпадению, что ближе к прежнему месту.
   useEffect(() => {
@@ -1074,12 +1122,42 @@ export function FileView(props: {
                       globalThis.requestAnimationFrame(() => replaceRef.current?.select());
                       return;
                     }
+                    const option = optionPressed(event);
+                    if (option) {
+                      event.preventDefault();
+                      toggleOption(option);
+                      return;
+                    }
                     if (event.key === "Escape") {
                       event.preventDefault();
                       closeFind();
                     }
                   }}
                 />
+                <button
+                  type="button"
+                  className="file-find-step file-find-option icon-button"
+                  title={t("files.matchCaseTitle", { shortcut: matchCaseShortcut })}
+                  aria-label={t("files.matchCase")}
+                  aria-pressed={options.matchCase}
+                  onClick={() => toggleOption("matchCase")}
+                >
+                  <span className="file-find-glyph" aria-hidden="true">
+                    Aa
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="file-find-step file-find-option icon-button"
+                  title={t("files.wholeWordTitle", { shortcut: wholeWordShortcut })}
+                  aria-label={t("files.wholeWord")}
+                  aria-pressed={options.wholeWord}
+                  onClick={() => toggleOption("wholeWord")}
+                >
+                  <span className="file-find-glyph is-word" aria-hidden="true">
+                    ab
+                  </span>
+                </button>
                 <span className="file-find-count">{countLabel}</span>
                 <button
                   type="button"
@@ -1131,6 +1209,12 @@ export function FileView(props: {
                       if (event.key === "Enter") {
                         event.preventDefault();
                         replaceCurrent();
+                        return;
+                      }
+                      const option = optionPressed(event);
+                      if (option) {
+                        event.preventDefault();
+                        toggleOption(option);
                         return;
                       }
                       if (event.key === "Escape") {

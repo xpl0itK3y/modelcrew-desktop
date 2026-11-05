@@ -15,6 +15,8 @@ export const KEYS = {
   diffView: "modelcrew.diffView",
   filePreview: "modelcrew.filePreview",
   wrapLines: "modelcrew.wrapLines",
+  findMatchCase: "modelcrew.findMatchCase",
+  findWholeWord: "modelcrew.findWholeWord",
   workspaces: "modelcrew.workspaces",
   sidebarWidth: "modelcrew.sidebarWidth",
   treeWidth: "modelcrew.treeWidth",

@@ -1540,6 +1540,74 @@ describe("FileEditor replace", () => {
   });
 });
 
+describe("FileEditor strict find", () => {
+  const clear = () => {
+    localStorage.removeItem("modelcrew.findMatchCase");
+    localStorage.removeItem("modelcrew.findWholeWord");
+  };
+  beforeEach(clear);
+  afterEach(clear);
+
+  async function opened(content: string, query: string) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const field = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue(content));
+    fireEvent.keyDown(field, { key: "h", code: "KeyH", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: query },
+    });
+    return field;
+  }
+
+  it("tells capitals from small letters when asked", async () => {
+    await opened(["дом и Дом", "ДОМ"].join("\n"), "дом");
+    expect(screen.getByText("1 из 3")).toBeInTheDocument();
+
+    const toggle = screen.getByRole("button", { name: "Учитывать регистр" });
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("1 из 1")).toBeInTheDocument();
+    expect(localStorage.getItem("modelcrew.findMatchCase")).toBe("1");
+  });
+
+  it("renames a word without touching the longer ones around it", async () => {
+    const field = await opened("value setValue value2 value", "value");
+    fireEvent.change(screen.getByLabelText("Заменить на"), {
+      target: { value: "x" },
+    });
+
+    // Alt+W из строки поиска, не уводя руку: в тестах платформа — не мак.
+    fireEvent.keyDown(screen.getByLabelText("Найти в файле"), {
+      key: "w",
+      code: "KeyW",
+      altKey: true,
+    });
+    expect(screen.getByRole("button", { name: "Слово целиком" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Заменить все" }));
+
+    // Без строгости `setValue` стал бы `setx`, а `value2` — `x2`.
+    expect(field).toHaveValue("x setValue value2 x");
+    expect(screen.getByText("Заменено: 2")).toBeInTheDocument();
+  });
+
+  it("opens with the strictness chosen last time", async () => {
+    localStorage.setItem("modelcrew.findWholeWord", "1");
+
+    await opened("дом домик", "дом");
+
+    expect(screen.getByRole("button", { name: "Слово целиком" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText("1 из 1")).toBeInTheDocument();
+  });
+});
+
 describe("FileEditor status and going to a line", () => {
   const doc = ["первая", "\tвторая", "третья строка"].join("\n");
 

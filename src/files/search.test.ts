@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findAll,
+  type FindOptions,
   lineAt,
   lineTarget,
   MAX_MATCHES,
@@ -142,5 +143,50 @@ describe("replaceAll", () => {
 
   it("says where the first replacement went", () => {
     expect(replaceAll("ab ab", "b", "c").first).toBe(1);
+  });
+});
+
+describe("finding with the strict options", () => {
+  const exact: FindOptions = { matchCase: true, wholeWord: false };
+  const word: FindOptions = { matchCase: false, wholeWord: true };
+  const both: FindOptions = { matchCase: true, wholeWord: true };
+
+  it("tells capitals from small letters when asked", () => {
+    expect(findAll("value Value VALUE", "Value", exact).at).toEqual([6]);
+  });
+
+  it("skips the word inside a longer one", () => {
+    const text = "value setValue value2 (value) value_x";
+    expect(findAll(text, "value", word).at).toEqual([0, 23]);
+  });
+
+  it("finds a whole word in any alphabet", () => {
+    // Граница слова у регулярного выражения знает только латиницу: `\b`
+    // посчитал бы «дом» в «домик» отдельным словом.
+    expect(findAll("дом домик подом дом.", "дом", word).at).toEqual([0, 16]);
+  });
+
+  it("lets the query carry its own edge", () => {
+    // Запрос начинается с точки — граница слова уже в нём самом.
+    expect(findAll("list.map(f) list.mapping", ".map", word).at).toEqual([4]);
+  });
+
+  it("keeps looking inside a rejected stretch", () => {
+    // `aa` внутри `aaa` отвергнуто, но следующее целое слово — сразу за ним.
+    expect(findAll("aaa aa", "aa", word).at).toEqual([4]);
+  });
+
+  it("renames a variable without breaking its neighbours", () => {
+    const text = "const [value, setValue] = useState(value);";
+    expect(replaceAll(text, "value", "amount", both)).toEqual({
+      text: "const [amount, setValue] = useState(amount);",
+      count: 2,
+      first: 7,
+    });
+  });
+
+  it("finds as before when nothing is asked", () => {
+    expect(findAll("Value", "value").at).toEqual([0]);
+    expect(replaceAll("setValue", "value", "x").text).toBe("setx");
   });
 });
