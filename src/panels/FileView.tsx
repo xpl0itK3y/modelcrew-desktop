@@ -39,6 +39,8 @@ import {
   lineTarget,
   nearest,
   NO_MATCHES,
+  replaceAll,
+  stepFrom,
 } from "../files/search";
 import {
   breakLine,
@@ -61,9 +63,11 @@ import {
 import { useLineMarks } from "../git/useLineMarks";
 import { MarkdownView } from "./MarkdownView";
 import { FileStatus } from "./FileStatus";
-import { isMac } from "../platform";
+import { isMac, platform } from "../platform";
+import { shortcutLabel } from "../hotkeys/shortcuts";
 import {
   ChevronDownIcon,
+  ChevronRightIcon,
   ChevronUpIcon,
   CloseIcon,
   CodeIcon,
@@ -514,8 +518,22 @@ export function FileView(props: {
     [text, query],
   );
 
-  const openFind = () => {
+  // Замена — вторая строка той же панели поиска. Открывается своей кнопкой или
+  // своим сочетанием и закрывается вместе с поиском: искать есть что и без
+  // неё, а заменять без поиска нечего.
+  const [replacing, setReplacing] = useState(false);
+  const [replacement, setReplacement] = useState("");
+  const replaceRef = useRef<HTMLInputElement | null>(null);
+  // Сколько заменили последним «Заменить все». Без этого счётчик после замены
+  // говорил бы «Ничего» — и не понять, заменилось или не нашлось.
+  const [replaced, setReplaced] = useState<number | null>(null);
+  const editable = loaded !== null && loaded.blocked === null;
+
+  const openFind = (withReplace = false) => {
     setGoTo(null);
+    if (withReplace && editable) {
+      setReplacing(true);
+    }
     const field = textRef.current;
     // Выделенное слово и есть то, что ищут: это первое, что делают руками.
     const picked =
@@ -530,6 +548,8 @@ export function FileView(props: {
 
   const closeFind = () => {
     setQuery(null);
+    setReplacing(false);
+    setReplaced(null);
     textRef.current?.focus();
   };
 
@@ -539,6 +559,63 @@ export function FileView(props: {
       return;
     }
     setCurrent((was) => (was + delta + found.at.length) % found.at.length);
+  };
+
+  /// Следующее совпадение прямо из файла — ⌘G или F3, не уходя из поля. Здесь
+  /// эффект ниже выделять не станет, раз поле в фокусе, поэтому выделяем сами.
+  const stepInField = (delta: 1 | -1) => {
+    const field = textRef.current;
+    if (!field || found.at.length === 0) {
+      return;
+    }
+    const index = stepFrom(found.at, field.selectionStart, field.selectionEnd, delta);
+    const at = found.at[index];
+    setCurrent(index);
+    field.setSelectionRange(at, at + found.length);
+    reveal(at);
+  };
+
+  /// Заменить показанное совпадение и перейти к следующему: так проходят файл,
+  /// глядя на каждое место, прежде чем его тронуть.
+  const replaceCurrent = () => {
+    const field = textRef.current;
+    const at = found.at[current];
+    if (!field || at === undefined || !editable) {
+      return;
+    }
+    const after = at + replacement.length;
+    const edit = {
+      text: text.slice(0, at) + replacement + text.slice(at + found.length),
+      from: after,
+      to: after,
+    };
+    if (edit.text === text) {
+      // Заменять нечем — совпадение уже такое, каким его хотят видеть.
+      step(1);
+      return;
+    }
+    // Правку пишет браузер, а он пишет в то поле, что в фокусе: без этого
+    // замена ушла бы в строку замены, а не в файл.
+    field.focus();
+    apply(edit);
+    replaceRef.current?.focus();
+  };
+
+  const replaceEverything = () => {
+    const field = textRef.current;
+    if (!field || !query || !editable) {
+      return;
+    }
+    const result = replaceAll(text, query, replacement);
+    if (result.count === 0) {
+      return;
+    }
+    // Одной правкой, а не по одной на совпадение: ⌘Z отменяет «Заменить все»
+    // целиком, как его и нажимали.
+    field.focus();
+    apply({ text: result.text, from: result.first, to: result.first });
+    setReplaced(result.count);
+    replaceRef.current?.focus();
   };
 
   // Показать текущее совпадение: выделить его в поле и подвинуть к нему
@@ -562,12 +639,19 @@ export function FileView(props: {
   const countLabel =
     query === null || query === ""
       ? ""
-      : found.at.length === 0
-        ? t("files.findNone")
-        : t(found.capped ? "files.findCapped" : "files.findCount", {
-            index: String(current + 1),
-            total: String(found.at.length),
-          });
+      : found.at.length === 0 && replaced !== null
+        ? t("files.replacedCount", { count: String(replaced) })
+        : found.at.length === 0
+          ? t("files.findNone")
+          : t(found.capped ? "files.findCapped" : "files.findCount", {
+              index: String(current + 1),
+              total: String(found.at.length),
+            });
+  const replaceShortcut = shortcutLabel(
+    isMac ? ["mod", "alt", "f"] : ["mod", "h"],
+    platform,
+  );
+  const replaceAllShortcut = shortcutLabel(["mod", "alt", "enter"], platform);
 
   // Запрос сменился — идём к тому совпадению, что ближе к прежнему месту.
   useEffect(() => {
@@ -825,7 +909,10 @@ export function FileView(props: {
             spellCheck={false}
             readOnly={loaded === null || loaded.blocked !== null}
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value);
+              setReplaced(null);
+            }}
             onScroll={follow}
             onKeyDown={(event) => {
               const meta = event.metaKey || event.ctrlKey;
@@ -834,9 +921,31 @@ export function FileView(props: {
                 requestSave();
                 return;
               }
+              // Замена: ⌥⌘F на маке, Ctrl+H у остальных — как в редакторах
+              // каждой из систем.
+              if (
+                isMac
+                  ? meta && event.altKey && pressed(event, "KeyF", "f")
+                  : event.ctrlKey && pressed(event, "KeyH", "h")
+              ) {
+                event.preventDefault();
+                openFind(true);
+                return;
+              }
               if (meta && pressed(event, "KeyF", "f")) {
                 event.preventDefault();
                 openFind();
+                return;
+              }
+              // Следующее и предыдущее совпадение прямо из файла: ⌘G на маке,
+              // F3 везде.
+              if (
+                query !== null &&
+                ((isMac && event.metaKey && pressed(event, "KeyG", "g")) ||
+                  event.key === "F3")
+              ) {
+                event.preventDefault();
+                stepInField(event.shiftKey ? -1 : 1);
                 return;
               }
               // ⌃G и на маке: ⌘G там уже «найти следующее».
@@ -917,91 +1026,176 @@ export function FileView(props: {
             /* Строка поиска лежит поверх текста, а не над ним: появившись в
                потоке, она сдвинула бы файл под курсором на свою высоту. */
             <div className="file-find">
-              <input
-                ref={queryRef}
-                className="file-find-query"
-                value={query}
-                placeholder={t("files.findQuery")}
-                aria-label={t("files.find")}
-                spellCheck={false}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    step(event.shiftKey ? -1 : 1);
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    closeFind();
-                  }
-                }}
-              />
-              <span className="file-find-count">{countLabel}</span>
-              <button
-                type="button"
-                className="file-find-step icon-button"
-                title={t("files.findPrevious")}
-                aria-label={t("files.findPrevious")}
-                disabled={found.at.length === 0}
-                onClick={() => step(-1)}
-              >
-                <ChevronUpIcon />
-              </button>
-              <button
-                type="button"
-                className="file-find-step icon-button"
-                title={t("files.findNext")}
-                aria-label={t("files.findNext")}
-                disabled={found.at.length === 0}
-                onClick={() => step(1)}
-              >
-                <ChevronDownIcon />
-              </button>
-              <button
-                type="button"
-                className="file-find-step icon-button"
-                title={t("files.findClose")}
-                aria-label={t("files.findClose")}
-                onClick={closeFind}
-              >
-                <CloseIcon />
-              </button>
+              <div className="file-find-row">
+                {editable && (
+                  <button
+                    type="button"
+                    className={`file-find-step file-find-toggle icon-button ${
+                      replacing ? "is-open" : ""
+                    }`}
+                    title={t("files.replaceToggle", { shortcut: replaceShortcut })}
+                    aria-label={t("files.replaceToggleLabel")}
+                    aria-expanded={replacing}
+                    onClick={() => setReplacing((was) => !was)}
+                  >
+                    <ChevronRightIcon />
+                  </button>
+                )}
+                <input
+                  ref={queryRef}
+                  className="file-find-query"
+                  value={query}
+                  placeholder={t("files.findQuery")}
+                  aria-label={t("files.find")}
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setReplaced(null);
+                  }}
+                  onKeyDown={(event) => {
+                    const meta = event.metaKey || event.ctrlKey;
+                    if (
+                      event.key === "Enter" ||
+                      event.key === "F3" ||
+                      (isMac && event.metaKey && pressed(event, "KeyG", "g"))
+                    ) {
+                      event.preventDefault();
+                      step(event.shiftKey ? -1 : 1);
+                      return;
+                    }
+                    if (
+                      editable &&
+                      (isMac
+                        ? meta && event.altKey && pressed(event, "KeyF", "f")
+                        : event.ctrlKey && pressed(event, "KeyH", "h"))
+                    ) {
+                      event.preventDefault();
+                      setReplacing(true);
+                      globalThis.requestAnimationFrame(() => replaceRef.current?.select());
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeFind();
+                    }
+                  }}
+                />
+                <span className="file-find-count">{countLabel}</span>
+                <button
+                  type="button"
+                  className="file-find-step icon-button"
+                  title={t("files.findPrevious")}
+                  aria-label={t("files.findPrevious")}
+                  disabled={found.at.length === 0}
+                  onClick={() => step(-1)}
+                >
+                  <ChevronUpIcon />
+                </button>
+                <button
+                  type="button"
+                  className="file-find-step icon-button"
+                  title={t("files.findNext")}
+                  aria-label={t("files.findNext")}
+                  disabled={found.at.length === 0}
+                  onClick={() => step(1)}
+                >
+                  <ChevronDownIcon />
+                </button>
+                <button
+                  type="button"
+                  className="file-find-step icon-button"
+                  title={t("files.findClose")}
+                  aria-label={t("files.findClose")}
+                  onClick={closeFind}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              {replacing && editable && (
+                <div className="file-find-row is-replace">
+                  <input
+                    ref={replaceRef}
+                    className="file-find-query"
+                    value={replacement}
+                    placeholder={t("files.replaceQuery")}
+                    aria-label={t("files.replaceWith")}
+                    spellCheck={false}
+                    onChange={(event) => setReplacement(event.target.value)}
+                    onKeyDown={(event) => {
+                      const meta = event.metaKey || event.ctrlKey;
+                      if (event.key === "Enter" && meta && event.altKey) {
+                        event.preventDefault();
+                        replaceEverything();
+                        return;
+                      }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        replaceCurrent();
+                        return;
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeFind();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="file-find-action"
+                    title={t("files.replaceOneTitle")}
+                    disabled={found.at.length === 0}
+                    onClick={replaceCurrent}
+                  >
+                    {t("files.replaceOne")}
+                  </button>
+                  <button
+                    type="button"
+                    className="file-find-action"
+                    title={t("files.replaceAllTitle", { shortcut: replaceAllShortcut })}
+                    disabled={found.at.length === 0}
+                    onClick={replaceEverything}
+                  >
+                    {t("files.replaceAll")}
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {goTo !== null && (
             <div className="file-find">
-              <input
-                ref={goToRef}
-                className="file-find-query"
-                value={goTo}
-                placeholder={t("files.goToQuery", { total: String(lineCount) })}
-                aria-label={t("files.goToLine")}
-                aria-invalid={goTo.trim() !== "" && goToTarget === null}
-                inputMode="numeric"
-                spellCheck={false}
-                onChange={(event) => setGoTo(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    jump();
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    closeGoTo();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="file-find-step icon-button"
-                title={t("files.goToClose")}
-                aria-label={t("files.goToClose")}
-                onClick={closeGoTo}
-              >
-                <CloseIcon />
-              </button>
+              <div className="file-find-row">
+                <input
+                  ref={goToRef}
+                  className="file-find-query"
+                  value={goTo}
+                  placeholder={t("files.goToQuery", { total: String(lineCount) })}
+                  aria-label={t("files.goToLine")}
+                  aria-invalid={goTo.trim() !== "" && goToTarget === null}
+                  inputMode="numeric"
+                  spellCheck={false}
+                  onChange={(event) => setGoTo(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      jump();
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeGoTo();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="file-find-step icon-button"
+                  title={t("files.goToClose")}
+                  aria-label={t("files.goToClose")}
+                  onClick={closeGoTo}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
             </div>
           )}
         </div>

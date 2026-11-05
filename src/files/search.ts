@@ -22,10 +22,8 @@ export const NO_MATCHES: Matches = { at: [], length: 0, capped: false };
 
 /// Все вхождения, без оглядки на регистр: ищут обычно на память, а помнят
 /// слово, а не то, какой буквой оно записано.
-export function findAll(text: string, query: string): Matches {
-  if (query === "") {
-    return NO_MATCHES;
-  }
+/// Где и что искать без оглядки на регистр.
+function caseless(text: string, query: string): { haystack: string; needle: string } {
   const lowered = text.toLowerCase();
   // Есть буквы, у которых строчная форма длиннее прописной — турецкая «İ»,
   // немецкая «ẞ». От них смещения в приведённом тексте разъезжаются с
@@ -33,6 +31,14 @@ export function findAll(text: string, query: string): Matches {
   // написано: это реже, чем ошибка на весь файл.
   const haystack = lowered.length === text.length ? lowered : text;
   const needle = haystack === text ? query : query.toLowerCase();
+  return { haystack, needle };
+}
+
+export function findAll(text: string, query: string): Matches {
+  if (query === "") {
+    return NO_MATCHES;
+  }
+  const { haystack, needle } = caseless(text, query);
   const at: number[] = [];
   let from = 0;
   for (;;) {
@@ -78,6 +84,70 @@ export function nearest(matches: number[], position: number): number {
     }
   }
   return 0;
+}
+
+/// К какому совпадению идти от курсора: вперёд — к первому, что начинается за
+/// выделением, назад — к последнему, что начинается до него. От курсора, а не
+/// от счётчика: ⌘G жмут в самом файле, и курсор там мог уйти от совпадения,
+/// показанного последним, куда угодно.
+export function stepFrom(
+  matches: number[],
+  from: number,
+  to: number,
+  delta: 1 | -1,
+): number {
+  if (delta > 0) {
+    const ahead = matches.findIndex((start) => start >= to);
+    return ahead === -1 ? 0 : ahead;
+  }
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    if (matches[index] < from) {
+      return index;
+    }
+  }
+  return matches.length - 1;
+}
+
+export type Replaced = {
+  text: string;
+  /// Сколько замен сделано.
+  count: number;
+  /// Где стоит первая из них: туда встаёт курсор.
+  first: number;
+};
+
+/// Заменить все вхождения — все, а не те, что показаны: предел на число
+/// совпадений нужен слою подсветки, а замене рисовать нечего.
+export function replaceAll(
+  text: string,
+  query: string,
+  replacement: string,
+): Replaced {
+  if (query === "") {
+    return { text, count: 0, first: 0 };
+  }
+  const { haystack, needle } = caseless(text, query);
+  const parts: string[] = [];
+  let count = 0;
+  let first = 0;
+  let from = 0;
+  for (;;) {
+    const found = haystack.indexOf(needle, from);
+    if (found === -1) {
+      break;
+    }
+    if (count === 0) {
+      first = found;
+    }
+    count += 1;
+    parts.push(text.slice(from, found), replacement);
+    from = found + needle.length;
+  }
+  if (count === 0) {
+    return { text, count: 0, first: 0 };
+  }
+  parts.push(text.slice(from));
+  return { text: parts.join(""), count, first };
 }
 
 /// Куда ведёт «перейти к строке»: «12» — в начало двенадцатой строки, «12:5» —

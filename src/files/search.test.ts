@@ -1,7 +1,15 @@
 // Поиск по файлу: что находится и что показывается.
 
 import { describe, expect, it } from "vitest";
-import { findAll, lineAt, lineTarget, MAX_MATCHES, nearest } from "./search";
+import {
+  findAll,
+  lineAt,
+  lineTarget,
+  MAX_MATCHES,
+  nearest,
+  replaceAll,
+  stepFrom,
+} from "./search";
 import { lineOffsets } from "./highlight";
 
 describe("findAll", () => {
@@ -82,5 +90,57 @@ describe("lineTarget", () => {
     expect(go("abc")).toBeNull();
     expect(go("2:")).toBeNull();
     expect(go("-1")).toBeNull();
+  });
+});
+
+describe("stepFrom", () => {
+  const matches = [10, 40, 90];
+
+  it("goes forward from the end of the selection", () => {
+    // Выделено само совпадение — следующее за ним, а не оно же.
+    expect(stepFrom(matches, 40, 43, 1)).toBe(2);
+    expect(stepFrom(matches, 41, 41, 1)).toBe(2);
+    expect(stepFrom(matches, 0, 0, 1)).toBe(0);
+    // За последним — первое.
+    expect(stepFrom(matches, 95, 95, 1)).toBe(0);
+  });
+
+  it("goes back from the start of the selection", () => {
+    expect(stepFrom(matches, 40, 43, -1)).toBe(0);
+    expect(stepFrom(matches, 95, 95, -1)).toBe(2);
+    // Перед первым — последнее.
+    expect(stepFrom(matches, 5, 5, -1)).toBe(2);
+  });
+});
+
+describe("replaceAll", () => {
+  it("replaces every occurrence, whatever the case", () => {
+    expect(replaceAll("Дом, дом и ДОМ", "дом", "сад")).toEqual({
+      text: "сад, сад и сад",
+      count: 3,
+      first: 0,
+    });
+  });
+
+  it("replaces past the cap the find bar stops at", () => {
+    const text = "а".repeat(MAX_MATCHES + 10);
+    const result = replaceAll(text, "а", "б");
+
+    expect(result.count).toBe(MAX_MATCHES + 10);
+    expect(result.text).toBe("б".repeat(MAX_MATCHES + 10));
+  });
+
+  it("does not chase a replacement that holds the query", () => {
+    expect(replaceAll("a b a", "a", "aa").text).toBe("aa b aa");
+  });
+
+  it("leaves the text alone when there is nothing to replace", () => {
+    const text = "текст";
+    expect(replaceAll(text, "нет", "да")).toEqual({ text, count: 0, first: 0 });
+    expect(replaceAll(text, "", "да").count).toBe(0);
+  });
+
+  it("says where the first replacement went", () => {
+    expect(replaceAll("ab ab", "b", "c").first).toBe(1);
   });
 });

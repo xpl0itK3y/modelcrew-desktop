@@ -724,13 +724,59 @@
   right: 14px;
   z-index: 3;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
   padding: 4px 5px 4px 8px;
   border: 1px solid var(--mc-border);
   border-radius: var(--mc-radius-xs);
   background: var(--mc-panel);
   box-shadow: 0 6px 18px #0006;
+}
+
+.file-find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Стрелка, открывающая замену, стоит впереди поиска — и строка замены
+   начинается под полем поиска, а не под стрелкой. */
+.file-find-toggle {
+  margin-left: -4px;
+}
+
+.file-find-toggle svg {
+  transition: transform 120ms ease;
+}
+
+.file-find-toggle.is-open svg {
+  transform: rotate(90deg);
+}
+
+/* Ширина стрелки (28px) за вычетом её сдвига влево и плюс зазор ряда. */
+.file-find-row.is-replace {
+  padding-left: 28px;
+}
+
+.file-find-action {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-xs);
+  background: var(--mc-button);
+  color: var(--mc-text-bright);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.file-find-action:hover:not(:disabled) {
+  background: var(--mc-button-hover);
+}
+
+.file-find-action:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .file-find-query {

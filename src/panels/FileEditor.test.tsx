@@ -1430,6 +1430,114 @@ describe("FileEditor find", () => {
     expect(screen.queryByLabelText("Найти в файле")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".file-found")).toHaveLength(0);
   });
+
+  it("goes to the next match from the file itself on Cmd+G and F3", async () => {
+    const field = await opened();
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+    field.focus();
+    // Курсор во второй строке: следующее — первое после него, а не то, что
+    // показывал счётчик.
+    field.setSelectionRange(doc.indexOf("вторая"), doc.indexOf("вторая"));
+
+    fireEvent.keyDown(field, { key: "F3", code: "F3" });
+
+    const third = doc.indexOf("дом", doc.indexOf("третья"));
+    expect(field.selectionStart).toBe(third);
+    expect(field.selectionEnd).toBe(third + 3);
+    expect(screen.getByText("2 из 3")).toBeInTheDocument();
+
+    fireEvent.keyDown(field, { key: "F3", code: "F3", shiftKey: true });
+    expect(field.selectionStart).toBe(doc.indexOf("дом"));
+  });
+
+});
+
+describe("FileEditor replace", () => {
+  const doc = ["дом и Дом", "сад", "ДОМ"].join("\n");
+
+  async function opened(content = doc) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    open("app.ts");
+    const field = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue(content));
+    // Ctrl+H: в тестах платформа — не мак.
+    fireEvent.keyDown(field, { key: "h", code: "KeyH", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Найти в файле"), {
+      target: { value: "дом" },
+    });
+    fireEvent.change(screen.getByLabelText("Заменить на"), {
+      target: { value: "кот" },
+    });
+    return field;
+  }
+
+  it("opens with the find bar on its own shortcut", async () => {
+    await opened();
+
+    expect(screen.getByLabelText("Найти в файле")).toBeInTheDocument();
+    expect(screen.getByLabelText("Заменить на")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Заменить в файле" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("replaces the match on show and moves on to the next one", async () => {
+    const field = await opened();
+
+    fireEvent.click(screen.getByRole("button", { name: "Заменить" }));
+
+    expect(field).toHaveValue(["кот и Дом", "сад", "ДОМ"].join("\n"));
+    // Дальше показано следующее — его и заменит следующее нажатие.
+    await waitFor(() => expect(screen.getByText("1 из 2")).toBeInTheDocument());
+    expect(field.selectionStart).toBe("кот и ".length);
+
+    fireEvent.keyDown(screen.getByLabelText("Заменить на"), { key: "Enter" });
+    expect(field).toHaveValue(["кот и кот", "сад", "ДОМ"].join("\n"));
+  });
+
+  it("replaces every match at once and says how many", async () => {
+    const field = await opened();
+
+    fireEvent.click(screen.getByRole("button", { name: "Заменить все" }));
+
+    expect(field).toHaveValue(["кот и кот", "сад", "кот"].join("\n"));
+    expect(screen.getByText("Заменено: 3")).toBeInTheDocument();
+    // Файл правлен — его есть что сохранять.
+    expect(screen.getByRole("button", { name: "Сохранить" })).not.toBeDisabled();
+  });
+
+  it("keeps the replacement out of the field it was typed in", async () => {
+    await opened();
+
+    fireEvent.click(screen.getByRole("button", { name: "Заменить" }));
+
+    // Правку пишет браузер в поле в фокусе: без возврата фокуса она ушла бы
+    // в строку замены.
+    expect(screen.getByLabelText("Заменить на")).toHaveValue("кот");
+    expect(document.activeElement).toBe(screen.getByLabelText("Заменить на"));
+  });
+
+  it("offers no replace in a file that cannot be edited", async () => {
+    readWorkspaceFile.mockResolvedValue({
+      content: "",
+      isBinary: true,
+      tooLarge: false,
+      exists: true,
+    });
+    open("app.bin");
+    const field = await screen.findByLabelText("app.bin");
+    await waitFor(() => expect(screen.getByText("Двоичный файл — показать нечем")).toBeInTheDocument());
+
+    fireEvent.keyDown(field, { key: "h", code: "KeyH", ctrlKey: true });
+
+    expect(screen.queryByLabelText("Заменить на")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Заменить в файле" }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("FileEditor status and going to a line", () => {
