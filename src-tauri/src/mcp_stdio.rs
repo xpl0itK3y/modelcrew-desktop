@@ -43,14 +43,7 @@ where
 
 #[cfg(any(unix, windows))]
 fn run() -> i32 {
-    // Окружение — первый и точный источник: только оно знает адрес, если сокет
-    // ушёл во временный каталог. Но полагаться на него одно нельзя: cursor
-    // чистит окружение перед запуском MCP-сервера, и тогда адрес приходится
-    // вычислять самим.
-    let path = std::env::var_os(mcp::SOCK_ENV)
-        .map(std::path::PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-        .or_else(mcp::well_known_socket_path);
+    let path = address(std::env::var_os(mcp::SOCK_ENV), std::env::args_os());
     if path.is_none() {
         // Не смертельно: разговор состоится и без приложения, просто целиком
         // нашими силами. Но строка в журнале — единственный способ для
@@ -78,6 +71,30 @@ fn run() -> i32 {
 fn run() -> i32 {
     eprintln!("ModelCrew MCP: на этой платформе плагин пока не поддержан.");
     1
+}
+
+/// Куда стучаться: окружение, затем адрес после ключа запуска, затем
+/// вычисленный по идентификатору пакета.
+///
+/// Окружение — первый и точный источник: его панель выдаёт своему агенту
+/// сама. Но codex и cursor чистят окружение перед запуском MCP-сервера, и
+/// тогда остаётся адрес, который приложение вписало в обёртку агента
+/// аргументом. Вычисленный — последний: он неверен у сборки с другим
+/// идентификатором и у сокета во временном каталоге, и живьём это было
+/// «ModelCrew недоступен» у codex в разработческой сборке.
+#[cfg(any(unix, windows))]
+fn address<I>(env: Option<std::ffi::OsString>, args: I) -> Option<std::path::PathBuf>
+where
+    I: IntoIterator<Item = std::ffi::OsString>,
+{
+    let given = |value: std::ffi::OsString| {
+        Some(value)
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    env.and_then(given)
+        .or_else(|| args.into_iter().nth(2).and_then(given))
+        .or_else(mcp::well_known_socket_path)
 }
 
 /// Разговор с агентом: строка за строкой, пока он не закончит.
@@ -364,6 +381,47 @@ mod tests {
         // хук отвечает и выходит, шим держит сессию.
         assert!(!is_shim(["ModelCrew", crate::agent_hook_cli::HOOK_FLAG]));
         assert!(crate::agent_hook_cli::mode_from_args(["ModelCrew", mcp::STDIO_FLAG]).is_none());
+    }
+
+    #[cfg(any(unix, windows))]
+    fn launched_with(args: &[&str]) -> Vec<std::ffi::OsString> {
+        args.iter().map(std::ffi::OsString::from).collect()
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn the_address_the_application_wrote_survives_a_cleared_environment() {
+        // Так шим запускает codex: окружение пустое, адрес — после ключа.
+        let args = launched_with(&["ModelCrew", mcp::STDIO_FLAG, "/data/dev/mcp.sock"]);
+        assert_eq!(
+            address(None, args.clone()),
+            Some(std::path::PathBuf::from("/data/dev/mcp.sock"))
+        );
+        // Пустая переменная — всё равно что её нет.
+        assert_eq!(
+            address(Some("".into()), args),
+            Some(std::path::PathBuf::from("/data/dev/mcp.sock"))
+        );
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn the_environment_of_the_panel_comes_first() {
+        let args = launched_with(&["ModelCrew", mcp::STDIO_FLAG, "/data/dev/mcp.sock"]);
+        assert_eq!(
+            address(Some("/tmp/panel.sock".into()), args),
+            Some(std::path::PathBuf::from("/tmp/panel.sock"))
+        );
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn with_nothing_given_the_shim_works_the_address_out_itself() {
+        // Обёртка прежней версии: адреса в аргументах нет.
+        let args = launched_with(&["ModelCrew", mcp::STDIO_FLAG]);
+        assert_eq!(address(None, args), mcp::well_known_socket_path());
+        let args = launched_with(&["ModelCrew", mcp::STDIO_FLAG, ""]);
+        assert_eq!(address(None, args), mcp::well_known_socket_path());
     }
 
     #[cfg(any(unix, windows))]

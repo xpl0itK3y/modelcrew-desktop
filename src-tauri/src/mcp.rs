@@ -1719,11 +1719,16 @@ fn remembered(
 #[cfg(unix)]
 fn choose_socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     let path = data_dir_socket_path(app)?;
-    if path.as_os_str().len() <= SOCK_PATH_LIMIT {
+    if path.as_os_str().len() <= SOCK_PATH_LIMIT && !someone_listens(&path) {
         return Some(path);
     }
     // Каталог данных оказался слишком глубоким для `sun_path` — уходим во
     // временный, он короткий на всех системах.
+    //
+    // Туда же — если на своём месте уже отвечает другая живая копия с тем же
+    // идентификатором. Прежде её файл просто удалялся ради своего: она
+    // продолжала слушать адрес, которого больше нет, и её новые агенты
+    // получали «ModelCrew недоступен», пока человек не перезапустит её.
     //
     // Не файлом прямо в нём: на Linux это общий `/tmp`, имя из pid угадывается
     // наперёд, и чужой процесс, заняв его первым, тихо оставил бы приложение
@@ -1744,6 +1749,17 @@ fn data_dir_socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     Some(app.path().app_data_dir().ok()?.join(SOCK_NAME))
 }
 
+/// Слушает ли кто-нибудь этот сокет прямо сейчас. Файл прошлого запуска на
+/// соединение не отвечает: создавший его процесс мёртв. Ответил — значит,
+/// это живая копия приложения, и её файл трогать нельзя.
+///
+/// Пробное соединение ей ничем не мешает: без рукопожатия разговор
+/// кончается на первой же строке.
+#[cfg(unix)]
+fn someone_listens(path: &Path) -> bool {
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
 /// Тот же путь, но вычисленный без приложения — так его находит шим.
 ///
 /// Переменной окружения не всегда достаточно: **cursor чистит окружение перед
@@ -1752,8 +1768,9 @@ fn data_dir_socket_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 /// приложение само выясняет, кто позвал.
 ///
 /// Совпадает с `socket_path`, пока каталог данных не оказался слишком глубоким
-/// для `sun_path`: в том редком случае сокет уходит во временный каталог, и
-/// найти его можно только по переменной окружения.
+/// для `sun_path` или занятым другой копией, а идентификатор — тем, с которым
+/// собрано приложение. Иначе сокет найти можно только по переменной окружения
+/// или по адресу, который приложение вписало в обёртку агента аргументом шима.
 #[cfg(unix)]
 pub fn well_known_socket_path() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
@@ -1863,8 +1880,10 @@ pub fn serve(app: tauri::AppHandle) {
         // пустому каталогу.
         //
         // Канал Windows уходит вместе с процессом, убирать за ним нечего.
+        //
+        // И только мёртвый: живой принадлежит другой копии приложения.
         #[cfg(unix)]
-        if let Some(path) = data_dir_socket_path(&app) {
+        if let Some(path) = data_dir_socket_path(&app).filter(|path| !someone_listens(path)) {
             let _ = std::fs::remove_file(path);
         }
         return;
@@ -1958,8 +1977,9 @@ fn start(app: tauri::AppHandle) {
         // неё успевает пройти чужое соединение.
         let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
-    // Файл прошлого запуска: bind поверх него не встанет, а живого слушателя
-    // за ним нет — процесс, который его создал, уже мёртв.
+    // Файл прошлого запуска или прошлого включения: bind поверх него не
+    // встанет. Чужого живого слушателя за ним нет — занятый адрес
+    // `choose_socket_path` не выбирает.
     let _ = std::fs::remove_file(&path);
 
     let listener = match UnixListener::bind(&path) {
@@ -2321,6 +2341,21 @@ mod tests {
         let first = remembered(&chosen, || Some(PathBuf::from("/tmp/first.sock"))).unwrap();
         let again = remembered(&chosen, || panic!("адрес выбрали второй раз")).unwrap();
         assert_eq!(first, again);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_live_socket_is_told_apart_from_one_left_behind() {
+        // Живой — чужая копия приложения, его удалять нельзя. Брошенный —
+        // от упавшего запуска, его убирают, чтобы встать на место.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SOCK_NAME);
+        assert!(!someone_listens(&path), "файла ещё нет");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert!(someone_listens(&path));
+        drop(listener);
+        assert!(path.exists(), "файл остаётся и после слушателя");
+        assert!(!someone_listens(&path));
     }
 
     #[test]

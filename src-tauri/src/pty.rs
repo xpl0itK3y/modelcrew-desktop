@@ -364,7 +364,7 @@ impl PtyManager {
         #[cfg(any(unix, windows))]
         if let Some(socket) = MCP_SOCKET.lock().unwrap().clone() {
             if let Some(token) = crate::mcp::new_token() {
-                cmd.env(crate::mcp::SOCK_ENV, socket);
+                cmd.env(crate::mcp::SOCK_ENV, &socket);
                 cmd.env(crate::mcp::TOKEN_ENV, &token);
                 mcp_token = token;
             }
@@ -375,7 +375,7 @@ impl PtyManager {
                 let inherited = std::env::var(crate::mcp_register::OPENCODE_ENV).ok();
                 cmd.env(
                     crate::mcp_register::OPENCODE_ENV,
-                    crate::mcp_register::opencode_config(&exe, inherited.as_deref()),
+                    crate::mcp_register::opencode_config(&exe, Some(&socket), inherited.as_deref()),
                 );
             }
         } else if let Ok(inherited) = std::env::var(crate::mcp_register::OPENCODE_ENV) {

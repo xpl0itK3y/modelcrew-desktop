@@ -129,8 +129,29 @@ pub fn shims(app: &tauri::AppHandle, enabled: bool) -> Option<PathBuf> {
         return None;
     }
     let exe = std::env::current_exe().ok()?;
-    write_shims(&dir, &exe, enabled).ok()?;
+    // Тот же адрес, что панели получают в окружение: выбран он раз и
+    // навсегда, поэтому годится и до того, как слушатель встал.
+    let address = if enabled {
+        crate::mcp::socket_path(app)
+    } else {
+        None
+    };
+    write_shims(&dir, &exe, address.as_deref(), enabled).ok()?;
     Some(dir)
+}
+
+/// Аргументы шима: ключ запуска и адрес приложения.
+///
+/// Адрес — не только окружением: **codex и cursor чистят окружение перед
+/// запуском MCP-сервера**, и шиму остаётся адрес, вычисленный по
+/// идентификатору пакета. Он неверен у любой сборки с другим
+/// идентификатором — у разработческой, например, — и у сокета, ушедшего во
+/// временный каталог. Живьём это выглядело как «ModelCrew недоступен» у
+/// codex в панели работающего приложения. Аргументы агент передаёт как есть.
+fn server_args(address: Option<&Path>) -> Vec<String> {
+    std::iter::once(STDIO_FLAG.to_string())
+        .chain(address.map(|address| address.to_string_lossy().into_owned()))
+        .collect()
 }
 
 /// Конфиг opencode с нашим сервером — тем же слоем, что и всё остальное.
@@ -143,7 +164,7 @@ pub fn shims(app: &tauri::AppHandle, enabled: bool) -> Option<PathBuf> {
 /// Значение накладывается последним слоем поверх глобального и проектного
 /// конфигов, а не вместо них (так это описано у самого opencode). Поэтому и
 /// здесь: то, что уже стояло в окружении, мы дополняем, а не затираем.
-pub fn opencode_config(exe: &Path, inherited: Option<&str>) -> String {
+pub fn opencode_config(exe: &Path, address: Option<&Path>, inherited: Option<&str>) -> String {
     let mut document = match inherited.and_then(|text| serde_json::from_str::<Value>(text).ok()) {
         Some(Value::Object(map)) => map,
         // Своего значения не было — или было, да не разобралось. Чинить чужое
@@ -154,9 +175,12 @@ pub fn opencode_config(exe: &Path, inherited: Option<&str>) -> String {
         .entry("$schema")
         .or_insert_with(|| json!(OPENCODE_SCHEMA));
     let servers = document.entry("mcp").or_insert_with(|| json!({}));
+    let command: Vec<String> = std::iter::once(exe.to_string_lossy().into_owned())
+        .chain(server_args(address))
+        .collect();
     let ours = json!({
         "type": "local",
-        "command": [exe.to_string_lossy(), STDIO_FLAG],
+        "command": command,
         "enabled": true,
     });
     match servers.as_object_mut() {
@@ -201,7 +225,12 @@ pub fn opencode_config_without_ours(inherited: &str) -> Option<String> {
 }
 
 #[cfg(unix)]
-fn write_shims(dir: &Path, exe: &Path, enabled: bool) -> std::io::Result<()> {
+fn write_shims(
+    dir: &Path,
+    exe: &Path,
+    address: Option<&Path>,
+    enabled: bool,
+) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let runnable = |path: &Path, body: String| -> std::io::Result<()> {
@@ -219,9 +248,15 @@ fn write_shims(dir: &Path, exe: &Path, enabled: bool) -> std::io::Result<()> {
         }
         return Ok(());
     }
-    std::fs::write(dir.join(CONFIG_FILE), format!("{}\n", config_body(exe)))?;
+    std::fs::write(
+        dir.join(CONFIG_FILE),
+        format!("{}\n", config_body(exe, address)),
+    )?;
     for agent in WRAPPED {
-        runnable(&dir.join(agent), shim_body(agent, &shim_flags(agent, exe)))?;
+        runnable(
+            &dir.join(agent),
+            shim_body(agent, &shim_flags(agent, exe, address)),
+        )?;
     }
     Ok(())
 }
@@ -235,20 +270,30 @@ fn write_shims(dir: &Path, exe: &Path, enabled: bool) -> std::io::Result<()> {
 /// но обёртку для cmd проверить живьём пока не на чем, а сломанная не дала бы
 /// запустить opencode в панели вовсе. Без плагина `shims` сюда не заходит.
 #[cfg(windows)]
-fn write_shims(dir: &Path, exe: &Path, _enabled: bool) -> std::io::Result<()> {
+fn write_shims(
+    dir: &Path,
+    exe: &Path,
+    address: Option<&Path>,
+    _enabled: bool,
+) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let config = dir.join(CONFIG_FILE);
-    std::fs::write(&config, format!("{}\n", config_body(exe)))?;
+    std::fs::write(&config, format!("{}\n", config_body(exe, address)))?;
     for agent in WRAPPED {
         std::fs::write(dir.join(format!("{agent}.cmd")), cmd_body(agent))?;
-        let flags = git_bash_flags(agent, exe, &config);
+        let flags = git_bash_flags(agent, exe, address, &config);
         std::fs::write(dir.join(agent), shim_body(agent, &flags))?;
     }
     Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]
-fn write_shims(_dir: &Path, _exe: &Path, _enabled: bool) -> std::io::Result<()> {
+fn write_shims(
+    _dir: &Path,
+    _exe: &Path,
+    _address: Option<&Path>,
+    _enabled: bool,
+) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "обёртки агентов здесь не умеют",
@@ -256,12 +301,12 @@ fn write_shims(_dir: &Path, _exe: &Path, _enabled: bool) -> std::io::Result<()> 
 }
 
 /// Наш конфиг серверов в том виде, как его читают claude и copilot.
-fn config_body(exe: &Path) -> String {
+fn config_body(exe: &Path, address: Option<&Path>) -> String {
     json!({
         "mcpServers": {
             SERVER: {
                 "command": exe.to_string_lossy(),
-                "args": [STDIO_FLAG],
+                "args": server_args(address),
             }
         }
     })
@@ -376,7 +421,7 @@ exec "$real" "$@"
 
 /// Чем каждому агенту передаётся сервер. Все трое читают его при запуске, но
 /// каждый по-своему: файлом, строкой или ключами настройки.
-fn shim_flags(agent: &str, exe: &Path) -> String {
+fn shim_flags(agent: &str, exe: &Path, address: Option<&Path>) -> String {
     match agent {
         // Файлом, и обязательно через «=»: без него claude считает своим
         // значением и всё, что идёт следом, — команда `claude mcp list` через
@@ -395,7 +440,11 @@ fn shim_flags(agent: &str, exe: &Path) -> String {
             )),
             sh_quote(&format!(
                 "mcp_servers.{SERVER}.args=[{}]",
-                toml_string(STDIO_FLAG)
+                server_args(address)
+                    .iter()
+                    .map(|arg| toml_string(arg))
+                    .collect::<Vec<_>>()
+                    .join(",")
             )),
             sh_quote(&format!(
                 "developer_instructions={}",
@@ -411,10 +460,10 @@ fn shim_flags(agent: &str, exe: &Path) -> String {
 /// claude.exe такого пути не знает. Остальным хватает unix-овых: copilot
 /// получает содержимое файла, а путь к приложению у codex и так виндовый.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn git_bash_flags(agent: &str, exe: &Path, config: &Path) -> String {
+fn git_bash_flags(agent: &str, exe: &Path, address: Option<&Path>, config: &Path) -> String {
     match agent {
         "claude" => format!("--mcp-config={}", sh_quote(&config.to_string_lossy())),
-        _ => shim_flags(agent, exe),
+        _ => shim_flags(agent, exe, address),
     }
 }
 
@@ -464,6 +513,10 @@ if not defined modelcrew_real (
 /// кавычках: внутри неё обратная косая — просто символ, а одинарная кавычка
 /// из имени папки строку не закроет. Рассказ о браузере — в одинарных: в нём
 /// нет ни кавычек, ни переводов строки.
+///
+/// Адреса приложения здесь нет, в отличие от `shim_flags`: путей в этом файле
+/// не бывает, а канал Windows шим и так находит сам — имя у него одно на
+/// пакет, без каталога данных и временного запасного места.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn cmd_flags(agent: &str) -> String {
     match agent {
@@ -614,7 +667,7 @@ mod tests {
 
     #[test]
     fn opencode_gets_the_server_without_any_wrapper() {
-        let config: Value = serde_json::from_str(&opencode_config(&exe(), None)).unwrap();
+        let config: Value = serde_json::from_str(&opencode_config(&exe(), None, None)).unwrap();
         let ours = &config["mcp"][SERVER];
         assert_eq!(ours["type"], "local");
         assert_eq!(ours["enabled"], true);
@@ -632,7 +685,8 @@ mod tests {
         // не вместо них. Затри мы чужое — человек внутри панели молча лишился
         // бы собственных серверов и настроек.
         let theirs = r#"{"model":"anthropic/claude","mcp":{"их-сервер":{"type":"local"}}}"#;
-        let config: Value = serde_json::from_str(&opencode_config(&exe(), Some(theirs))).unwrap();
+        let config: Value =
+            serde_json::from_str(&opencode_config(&exe(), None, Some(theirs))).unwrap();
         assert_eq!(config["model"], "anthropic/claude");
         assert_eq!(config["mcp"]["их-сервер"]["type"], "local");
         assert!(config["mcp"][SERVER].is_object());
@@ -644,7 +698,7 @@ mod tests {
         // opencode такое всё равно не прочтёт, а вот отдать ему битый конфиг
         // из-за этого нельзя — тогда он не прочтёт и наш сервер.
         for text in ["", "{", "[]", "\"строка\"", r#"{"mcp":"не список"}"#] {
-            let config: Value = serde_json::from_str(&opencode_config(&exe(), Some(text)))
+            let config: Value = serde_json::from_str(&opencode_config(&exe(), None, Some(text)))
                 .unwrap_or_else(|error| panic!("не JSON при {text:?}: {error}"));
             assert!(config["mcp"][SERVER].is_object(), "{text:?}");
         }
@@ -652,7 +706,7 @@ mod tests {
 
     #[test]
     fn the_wrapper_runs_the_real_agent_and_not_itself() {
-        let body = shim_body("claude", &shim_flags("claude", &exe()));
+        let body = shim_body("claude", &shim_flags("claude", &exe(), None));
         // Поиск идёт по PATH мимо собственного каталога — иначе обёртка нашла
         // бы себя и запустила рекурсию вместо агента.
         assert!(body.contains(r#"[ "$dir" = "$self" ] && continue"#));
@@ -663,9 +717,9 @@ mod tests {
     fn each_agent_gets_the_flag_it_understands() {
         // Именно «=»: без него значением флага становятся и аргументы
         // человека, идущие следом.
-        assert!(shim_flags("claude", &exe()).starts_with("--mcp-config="));
-        assert!(shim_flags("copilot", &exe()).starts_with("--additional-mcp-config="));
-        let codex = shim_flags("codex", &exe());
+        assert!(shim_flags("claude", &exe(), None).starts_with("--mcp-config="));
+        assert!(shim_flags("copilot", &exe(), None).starts_with("--additional-mcp-config="));
+        let codex = shim_flags("codex", &exe(), None);
         assert!(codex.contains("mcp_servers.modelcrew-browser.command="));
         assert!(codex.contains("--mcp-stdio"));
         assert!(codex.contains(&format!(r#"'developer_instructions="{CODEX_BRIEF}"'"#)));
@@ -694,12 +748,15 @@ mod tests {
     /// по аргументу в строке.
     #[cfg(unix)]
     #[test]
-    fn codex_gets_the_brief_as_one_whole_argument() {
+    fn codex_gets_the_brief_and_the_address_as_whole_arguments() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), true).unwrap();
+        // Пробел и кавычка — как у каталога данных на macOS и у имени
+        // человека: адрес обязан дойти до codex одним куском.
+        let address = dir.path().join("Application Support/o'brien/mcp.sock");
+        write_shims(&shims, &exe(), Some(&address), true).unwrap();
         let real = dir.path().join("real");
         let agent = write(
             &real,
@@ -725,12 +782,18 @@ mod tests {
         let args: Vec<&str> = args.lines().collect();
         let brief = format!(r#"developer_instructions="{CODEX_BRIEF}""#);
         assert!(args.contains(&brief.as_str()), "{args:#?}");
+        let servers = format!(
+            "mcp_servers.{SERVER}.args=[{},{}]",
+            toml_string(STDIO_FLAG),
+            toml_string(&address.to_string_lossy())
+        );
+        assert!(args.contains(&servers.as_str()), "{args:#?}");
         assert_eq!(args.last(), Some(&"hello"));
     }
 
     #[test]
     fn a_path_with_a_quote_does_not_break_the_wrapper() {
-        let flags = shim_flags("codex", Path::new("/Users/o'brien/ModelCrew"));
+        let flags = shim_flags("codex", Path::new("/Users/o'brien/ModelCrew"), None);
         // Одинарная кавычка в пути обязана остаться внутри строки оболочки, а
         // не закрыть её и превратить остаток в отдельные слова.
         assert!(flags.contains(r#"'\''"#));
@@ -781,13 +844,13 @@ mod tests {
     fn git_bash_hands_claude_a_path_it_can_open() {
         let config = Path::new(r"C:\Users\o'brien\AppData\Roaming\agent-shims\mcp.json");
         assert_eq!(
-            git_bash_flags("claude", &exe(), config),
+            git_bash_flags("claude", &exe(), None, config),
             r"--mcp-config='C:\Users\o'\''brien\AppData\Roaming\agent-shims\mcp.json'"
         );
         // Остальным путь к каталогу не нужен — флаги те же, что на unix.
         assert_eq!(
-            git_bash_flags("codex", &exe(), config),
-            shim_flags("codex", &exe())
+            git_bash_flags("codex", &exe(), None, config),
+            shim_flags("codex", &exe(), None)
         );
     }
 
@@ -797,7 +860,7 @@ mod tests {
     fn through_cmd(agent: &str, app: &str) -> (Option<i32>, String, String) {
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), true).unwrap();
+        write_shims(&shims, &exe(), None, true).unwrap();
         let real = dir.path().join("real");
         write(
             &real,
@@ -844,7 +907,7 @@ mod tests {
     fn the_cmd_wrapper_without_the_real_agent_says_so_and_does_not_call_itself() {
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), true).unwrap();
+        write_shims(&shims, &exe(), None, true).unwrap();
         let output = std::process::Command::new(shims.join("copilot.cmd"))
             .env("PATH", &shims)
             .output()
@@ -866,7 +929,7 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), true).unwrap();
+        write_shims(&shims, &exe(), None, true).unwrap();
         let real = dir.path().join("real");
         write(
             &real,
@@ -886,8 +949,34 @@ mod tests {
     }
 
     #[test]
+    fn the_shim_is_told_the_address_where_the_agent_would_lose_it() {
+        // Разработческая сборка: идентификатор другой, и адрес, который шим
+        // вычислил бы сам, ведёт в чужое приложение.
+        let address = Path::new(
+            "/Users/tester/Library/Application Support/com.modelcrew.desktop.dev/mcp.sock",
+        );
+        let config: Value = serde_json::from_str(&config_body(&exe(), Some(address))).unwrap();
+        assert_eq!(
+            config["mcpServers"][SERVER]["args"],
+            json!([STDIO_FLAG, address.to_string_lossy()])
+        );
+        let config: Value =
+            serde_json::from_str(&opencode_config(&exe(), Some(address), None)).unwrap();
+        assert_eq!(
+            config["mcp"][SERVER]["command"],
+            json!([
+                exe().to_string_lossy(),
+                STDIO_FLAG,
+                address.to_string_lossy()
+            ])
+        );
+        // Адреса нет — нет и лишнего аргумента: шим тогда ищет сам.
+        assert_eq!(server_args(None), [STDIO_FLAG]);
+    }
+
+    #[test]
     fn the_config_says_what_the_protocol_expects() {
-        let config: Value = serde_json::from_str(&config_body(&exe())).unwrap();
+        let config: Value = serde_json::from_str(&config_body(&exe(), None)).unwrap();
         assert_eq!(
             config["mcpServers"][SERVER],
             json!({
@@ -904,7 +993,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), true).unwrap();
+        write_shims(&shims, &exe(), None, true).unwrap();
 
         for agent in WRAPPED.into_iter().chain([OPENCODE]) {
             let path = shims.join(agent);
@@ -919,9 +1008,9 @@ mod tests {
     fn without_the_plugin_only_the_opencode_wrapper_stays() {
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), true).unwrap();
+        write_shims(&shims, &exe(), None, true).unwrap();
 
-        write_shims(&shims, &exe(), false).unwrap();
+        write_shims(&shims, &exe(), None, false).unwrap();
 
         // Сервер выключен — обёртки, что его несут, ушли вместе с конфигом.
         for agent in WRAPPED {
@@ -941,7 +1030,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), false).unwrap();
+        write_shims(&shims, &exe(), None, false).unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let fake = bin.join(OPENCODE);
@@ -998,7 +1087,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let shims = dir.path().join(SHIMS_DIR);
-        write_shims(&shims, &exe(), false).unwrap();
+        write_shims(&shims, &exe(), None, false).unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let fake = bin.join(OPENCODE);
@@ -1096,7 +1185,7 @@ mod tests {
             Some("{oops")
         );
         // Наш поверх его — уходит только наш.
-        let both = opencode_config(&exe(), Some(theirs));
+        let both = opencode_config(&exe(), None, Some(theirs));
         let left: Value =
             serde_json::from_str(&opencode_config_without_ours(&both).unwrap()).unwrap();
         assert!(left["mcp"].get(SERVER).is_none(), "{left}");
@@ -1104,7 +1193,7 @@ mod tests {
         assert_eq!(left["model"], "m");
         // Только наш — переменной не остаётся вовсе.
         assert_eq!(
-            opencode_config_without_ours(&opencode_config(&exe(), None)),
+            opencode_config_without_ours(&opencode_config(&exe(), None, None)),
             None
         );
     }
