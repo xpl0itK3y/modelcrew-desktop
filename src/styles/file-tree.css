@@ -584,7 +584,13 @@
   line-height: var(--file-line);
   tab-size: 2;
   white-space: pre;
-  overflow: auto;
+  /* Место под полосы прокрутки держат все слои сразу и всегда, а рисует их
+     одно поле. Иначе у слоёв разная видимая высота и ширина: поле упирается в
+     край позже подсветки, внизу файла и в конце длинной строки буквы
+     подсветки отстают от курсора на толщину полосы, а при переносе поле
+     переносит строку уже, чем слой под ним. `scrollbar-gutter` не годится:
+     при своей полосе WebKit держит под неё системную ширину, а не нашу. */
+  overflow: scroll;
 }
 
 /* Место под номера отдают оба слоя сразу: текст начинается за колонкой, а не
@@ -605,7 +611,10 @@
      первые буквы каждой строки прячутся под ней. */
   box-sizing: border-box;
   padding: 10px 8px 10px 6px;
-  overflow: hidden;
+  /* Вбок колонка не листается, а место под нижнюю полосу держит: без него
+     она выше поля на эту полосу, и внизу файла номера отстают от строк. */
+  overflow-x: scroll;
+  overflow-y: hidden;
   background: var(--mc-panel);
   border-right: 1px solid var(--mc-panel-border);
   color: var(--mc-text-faint);
@@ -625,6 +634,10 @@
 .file-view-code.is-wrapped .file-view-lines {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  /* Вбок при переносе листать нечего — и места под нижнюю полосу не держит
+     ни один слой, все разом. */
+  overflow-x: hidden;
+  overflow-y: scroll;
 }
 
 /* При переносе колонка номеров занимает всю ширину: в ней лежит тот же текст,
@@ -693,7 +706,6 @@
   /* Слой рисуют, но не трогают: щелчки и выделение — дело поля сверху. */
   pointer-events: none;
   color: var(--mc-text);
-  overflow: hidden;
 }
 
 /* Найденное. Слой лежит между подсветкой и полем: буквы в нём прозрачные, у
@@ -701,7 +713,6 @@
 .file-view-found {
   pointer-events: none;
   color: transparent;
-  overflow: hidden;
 }
 
 .file-found {
@@ -911,6 +922,35 @@
 
 .file-view-text:focus-visible {
   outline: 0;
+}
+
+/* Полосы прокрутки — свои, как у терминала: системная нижняя полоса шла под
+   колонкой номеров и торчала из-под неё обрубком. Толщина одна на все слои —
+   место под полосу у каждого должно быть одинаковым, — а видна она только у
+   поля. */
+.file-view-paint::-webkit-scrollbar,
+.file-view-found::-webkit-scrollbar,
+.file-view-text::-webkit-scrollbar,
+.file-view-lines::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+
+.file-view-text::-webkit-scrollbar-thumb {
+  background: var(--mc-scrollbar);
+  border-radius: 4px;
+}
+
+/* Нижняя полоса начинается за колонкой номеров: под ней её всё равно не
+   видно, и бегунок у левого края резался бы ею пополам. Отступ у дорожки, а
+   не у полосы: только его WebKit и Chromium учитывают, когда ставят бегунок. */
+.file-view-text::-webkit-scrollbar-track-piece:horizontal {
+  margin-left: var(--file-gutter);
+}
+
+.file-view-text::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Разряды токенов. Приглушённые нарочно: подсветка помогает глазу найти
