@@ -81,7 +81,12 @@ export type Shortcut = {
 // потом перестановка панелей.
 export const SHORTCUTS: Shortcut[] = [
   { id: "newTerminal", label: "shortcut.newTerminal", keys: ["mod", "t"] },
-  { id: "closePanel", label: "shortcut.closePanel", keys: ["mod", "w"] },
+  {
+    id: "closePanel",
+    label: "shortcut.closePanel",
+    description: "shortcut.closePanelNote",
+    keys: ["mod", "w"],
+  },
   {
     id: "closeGroup",
     label: "shortcut.closeGroup",

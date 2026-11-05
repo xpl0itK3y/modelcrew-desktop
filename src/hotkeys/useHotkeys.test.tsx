@@ -13,7 +13,9 @@ vi.mock("../animations", () => ({
 }));
 vi.mock("../layoutOps", () => ({ swapPanels: vi.fn() }));
 
+import { closePanelAnimated } from "../animations";
 import { useHotkeys } from "./useHotkeys";
+import { OWN_CLOSE_KEY } from "./ownCloseKey";
 
 // Сетка в объёме, которого хватает разбору комбинации: сами перестановки
 // делают замоканные помощники.
@@ -114,6 +116,74 @@ describe("grid shortcuts while a dialog covers the grid", () => {
     document.body.append(popover);
 
     press("KeyT");
+
+    expect(newTerminal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("closing with the key where tabs are the editor's own", () => {
+  /// Сетка с одним активным терминалом: ему и достаётся ⌘W, если оно дойдёт.
+  function gridWithPanel(): DockviewApi {
+    const panel = { group: { panels: [] } };
+    return {
+      groups: [],
+      panels: [panel],
+      activePanel: panel,
+      activeGroup: null,
+    } as unknown as DockviewApi;
+  }
+
+  function pressIn(target: HTMLElement, code: string, init: KeyboardEventInit = {}) {
+    const event = new KeyboardEvent("keydown", {
+      code,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    target.dispatchEvent(event);
+    return event;
+  }
+
+  function editorField(): HTMLElement {
+    const column = document.createElement("section");
+    column.setAttribute(OWN_CLOSE_KEY, "");
+    const field = document.createElement("textarea");
+    column.append(field);
+    document.body.append(column);
+    return field;
+  }
+
+  afterEach(() => {
+    vi.mocked(closePanelAnimated).mockClear();
+  });
+
+  it("leaves the terminal alone while a file is being typed in", () => {
+    mount(gridWithPanel());
+
+    const event = pressIn(editorField(), "KeyW");
+
+    // Раньше закрывался активный терминал — с агентом, который в нём шёл.
+    expect(closePanelAnimated).not.toHaveBeenCalled();
+    // И нажатие доходит до редактора: там его ждут, чтобы закрыть файл.
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("still closes the terminal from anywhere else", () => {
+    mount(gridWithPanel());
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+
+    const event = pressIn(elsewhere, "KeyW");
+
+    expect(closePanelAnimated).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("keeps the other grid keys working from the editor", () => {
+    const { newTerminal } = mount(gridWithPanel());
+
+    pressIn(editorField(), "KeyT");
 
     expect(newTerminal).toHaveBeenCalledTimes(1);
   });

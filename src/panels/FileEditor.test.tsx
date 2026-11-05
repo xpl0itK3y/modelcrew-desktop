@@ -1,6 +1,13 @@
 // Колонка редактора: вкладки открытых файлов.
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../i18n";
 
@@ -782,6 +789,115 @@ describe("FileView and the disk under it", () => {
       expect(container.querySelector(".file-editor")!.className).not.toContain(
         "is-overlay",
       ),
+    );
+  });
+});
+
+describe("FileEditor closing from the keyboard", () => {
+  function openTwo(onClose: (path: string) => void) {
+    readWorkspaceFile.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(file(`текст ${path}`)),
+    );
+    return render(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt", "b.txt"]}
+        activePath="b.txt"
+        onSelect={() => {}}
+        onClose={onClose}
+        width={520}
+      />,
+    );
+  }
+
+  async function shownField(): Promise<HTMLTextAreaElement> {
+    const field = (await screen.findByLabelText("b.txt")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue("текст b.txt"));
+    return field;
+  }
+
+  it("closes the file the cursor is in", async () => {
+    const closed = vi.fn();
+    openTwo(closed);
+    const field = await shownField();
+
+    // Ctrl, а не ⌘: в тестах платформа — не мак. Буква — та, что на русской
+    // раскладке стоит на месте W: клавиша та же.
+    const event = createEvent.keyDown(field, {
+      key: "ц",
+      code: "KeyW",
+      ctrlKey: true,
+    });
+    fireEvent(field, event);
+
+    expect(closed).toHaveBeenCalledWith("b.txt");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("asks first when the file holds unsaved work", async () => {
+    const closed = vi.fn();
+    openTwo(closed);
+    const field = await shownField();
+    fireEvent.change(field, { target: { value: "правка" } });
+
+    fireEvent.keyDown(field, { key: "w", code: "KeyW", ctrlKey: true });
+
+    expect(closed).not.toHaveBeenCalled();
+    expect(screen.getByText(/В «b.txt» есть несохранённая правка/)).toBeInTheDocument();
+    // Второе нажатие, пока висит вопрос, файл в обход него не закрывает.
+    fireEvent.keyDown(screen.getByRole("button", { name: "Закрыть без сохранения" }), {
+      key: "w",
+      code: "KeyW",
+      ctrlKey: true,
+    });
+    expect(closed).not.toHaveBeenCalled();
+  });
+
+  it("puts the cursor into the file that comes up next", async () => {
+    const closed = vi.fn();
+    const { rerender } = openTwo(closed);
+    const field = await shownField();
+    field.focus();
+
+    fireEvent.keyDown(field, { key: "w", code: "KeyW", ctrlKey: true });
+    rerender(
+      <FileEditor
+        workspaceId="w1"
+        files={["a.txt"]}
+        activePath="a.txt"
+        onSelect={() => {}}
+        onClose={closed}
+        width={520}
+      />,
+    );
+
+    // Иначе фокус уходит вместе с закрытым полем, и второе ⌘W некуда нажать.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("a.txt")));
+  });
+
+  it("closes a tab on the middle button", async () => {
+    const closed = vi.fn();
+    openTwo(closed);
+    await shownField();
+
+    const tab = screen.getAllByRole("tab")[0];
+    fireEvent(tab, new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+
+    expect(closed).toHaveBeenCalledWith("a.txt");
+  });
+
+  it("stays maximized when Escape only closes the find bar", async () => {
+    const { container } = open();
+    const field = (await screen.findByLabelText("a.txt")) as HTMLTextAreaElement;
+    await waitFor(() => expect(field).toHaveValue("текст"));
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть редактор" }));
+    fireEvent.keyDown(field, { key: "f", code: "KeyF", ctrlKey: true });
+
+    fireEvent.keyDown(screen.getByLabelText("Найти в файле"), { key: "Escape" });
+
+    expect(screen.queryByLabelText("Найти в файле")).not.toBeInTheDocument();
+    expect(container.querySelector(".file-editor")!.className).toContain(
+      "is-maximized",
     );
   });
 });

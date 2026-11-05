@@ -5,8 +5,11 @@
 // сохранения, и файл среди них выглядит как ещё один терминал, которым он не
 // является.
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useI18n } from "../i18n";
+import { isMac } from "../platform";
+import { isCoveredByModal } from "../hotkeys/modalGuard";
+import { OWN_CLOSE_KEY } from "../hotkeys/ownCloseKey";
 import { CloseIcon, MaximizeIcon } from "../ui/Icons";
 import { fileGlyph } from "../files/fileGlyph";
 import { fileName } from "../crew/claimLabel";
@@ -83,13 +86,42 @@ export function FileEditor(props: {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // Escape, который уже разобрал кто-то внутри, — поиск по файлу, диалог, —
+      // был про него: закрыв строку поиска, человек хочет остаться в
+      // развёрнутом файле, а не съехать заодно в колонку.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         setMaximized(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [maximized]);
+
+  // Закрыли вкладку с клавиатуры — курсор переходит в соседний файл, ставший
+  // видимым. Иначе фокус пропадает вместе с закрытым полем, и второе нажатие
+  // ⌘W, как и следующая набранная буква, уходит неизвестно куда.
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const refocus = useRef(false);
+  const current =
+    activePath && files.includes(activePath) ? activePath : (files[0] ?? null);
+  useEffect(() => {
+    if (!refocus.current) {
+      return;
+    }
+    refocus.current = false;
+    sectionRef.current
+      ?.querySelector<HTMLElement>(".file-view-slot.is-current textarea")
+      ?.focus();
+  }, [current]);
+
+  /// Закрыть вкладку; с несохранённой правкой — сперва спросить.
+  const requestClose = (path: string) => {
+    if (dirty.has(path)) {
+      setAsking(path);
+      return;
+    }
+    props.onClose(path);
+  };
 
   // Последний файл закрыт — разворачивать нечего, и остаться развёрнутым
   // редактор не должен: вернётся он уже пустым и поверх всего. Анимацию
@@ -101,10 +133,9 @@ export function FileEditor(props: {
     }
   }, [files.length]);
 
-  if (files.length === 0) {
+  if (files.length === 0 || current === null) {
     return null;
   }
-  const current = activePath && files.includes(activePath) ? activePath : files[0];
 
   return (
     <>
@@ -123,6 +154,30 @@ export function FileEditor(props: {
           overlay ? "is-overlay" : ""
         } ${maximized ? "is-maximized" : ""} ${restoring ? "is-restoring" : ""}`}
         aria-label={t("files.editorTitle")}
+        ref={sectionRef}
+        // ⌘W здесь закрывает файл, а не терминал: сетка, увидев эту метку,
+        // нажатие не трогает.
+        {...{ [OWN_CLOSE_KEY]: "" }}
+        onKeyDown={(event) => {
+          const mod = isMac ? event.metaKey : event.ctrlKey;
+          if (
+            !mod ||
+            event.shiftKey ||
+            event.altKey ||
+            (event.code !== "KeyW" && event.key.toLowerCase() !== "w")
+          ) {
+            return;
+          }
+          event.preventDefault();
+          // Поверх уже спрашивают — про эту же вкладку или про сохранение
+          // поверх чужой правки. Второе нажатие не должно закрыть файл в
+          // обход вопроса.
+          if (isCoveredByModal()) {
+            return;
+          }
+          refocus.current = true;
+          requestClose(current);
+        }}
         style={
           {
             "--column-width": `${props.width}px`,
@@ -153,6 +208,14 @@ export function FileEditor(props: {
               }`}
               role="tab"
               aria-selected={active}
+              // Средняя кнопка закрывает вкладку, как в браузере и в любом
+              // редакторе с вкладками.
+              onAuxClick={(event) => {
+                if (event.button === 1) {
+                  event.preventDefault();
+                  requestClose(path);
+                }
+              }}
             >
               <button
                 type="button"
@@ -180,13 +243,7 @@ export function FileEditor(props: {
                 className="file-tab-close icon-button"
                 title={t("files.close")}
                 aria-label={`${t("files.close")}: ${fileName(path)}`}
-                onClick={() => {
-                  if (dirty.has(path)) {
-                    setAsking(path);
-                    return;
-                  }
-                  props.onClose(path);
-                }}
+                onClick={() => requestClose(path)}
               >
                 <CloseIcon />
               </button>
@@ -211,7 +268,7 @@ export function FileEditor(props: {
       {files.map((path) => (
         <div
           key={path}
-          className="file-view-slot"
+          className={`file-view-slot ${path === current ? "is-current" : ""}`}
           style={{ display: path === current ? "flex" : "none" }}
         >
           {/* Картинку не правят — на неё смотрят, и текстовое поле ей ни к

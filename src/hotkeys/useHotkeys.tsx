@@ -9,6 +9,7 @@ import {
 } from "../animations";
 import { swapPanels } from "../layoutOps";
 import { isCoveredByModal } from "./modalGuard";
+import { closesItsOwn } from "./ownCloseKey";
 
 // Все хоткеи приложения перехватываются одним capture-слушателем на
 // window: он срабатывает раньше xterm, забирает только свои комбинации
@@ -284,6 +285,10 @@ export function useHotkeys(options: HotkeyOptions): QuickBadge[] | null {
 
       // Mod+W — закрыть терминал; Mod+Shift+W — группу (с подтверждением).
       if (code === "KeyW") {
+        // В редакторе Mod+W закрывает файл, и нажатие уходит ему нетронутым.
+        if (!event.shiftKey && closesItsOwn(event.target)) {
+          return;
+        }
         consume(event);
         if (event.shiftKey) {
           const group = api.activeGroup;

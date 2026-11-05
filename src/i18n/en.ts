@@ -567,6 +567,7 @@ export const en: Record<MessageKey, string> = {
     "Picked for your keyboard. They work while the focus is in a terminal: these combinations are captured before the shell, everything else goes through to it.",
   "shortcut.newTerminal": "Add a terminal to the grid",
   "shortcut.closePanel": "Close the terminal",
+  "shortcut.closePanelNote": "In the editor it closes the open file, not the terminal.",
   "shortcut.closeGroup": "Close the group, with confirmation",
   "shortcut.maximize": "Expand the terminal or restore the grid",
   "shortcut.panelNumbers": "Show panel numbers while the keys are held",
