@@ -1492,6 +1492,16 @@ body.is-resizing .sidebar-rail {
   animation: file-tab-in 140ms ease-out;
 }
 
+/* Закрытая вкладка ещё стоит на своём месте и сжимается — сжатие от её
+   настоящей ширины рисует FileEditor. Отсюда только то, что ей нужно на это
+   время: содержимое обрезается краем, а не вылезает к соседу, щелчок проходит
+   мимо, и приезд, положенный каждой новой вкладке, ей не играется. */
+.file-tab.is-closing {
+  overflow: hidden;
+  pointer-events: none;
+  animation: none;
+}
+
 @keyframes file-tab-in {
   from {
     opacity: 0;

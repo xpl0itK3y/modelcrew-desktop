@@ -1,7 +1,13 @@
 // Что остаётся открытым после удаления.
 
 import { describe, expect, it } from "vitest";
-import { closeOne, closeUnder, moveUnder } from "./openFiles";
+import {
+  closeOne,
+  closeUnder,
+  moveUnder,
+  shownTabs,
+  type ShownTab,
+} from "./openFiles";
 
 const OPEN = {
   files: ["src/a.rs", "src/panels/b.tsx", "README.md"],
@@ -97,5 +103,53 @@ describe("moveUnder", () => {
 
   it("keeps the very same state when nothing moved", () => {
     expect(moveUnder(OPEN, "docs", "notes")).toBe(OPEN);
+  });
+});
+
+describe("shownTabs", () => {
+  const open = (...paths: string[]): ShownTab[] =>
+    paths.map((path) => ({ path, closing: false }));
+
+  it("keeps a closed tab in its place while it leaves", () => {
+    expect(shownTabs(open("a", "b", "c"), ["a", "c"])).toEqual([
+      { path: "a", closing: false },
+      { path: "b", closing: true },
+      { path: "c", closing: false },
+    ]);
+  });
+
+  it("keeps every tab of a deleted folder in its place", () => {
+    expect(shownTabs(open("a", "d/x", "d/y", "b"), ["a", "b"])).toEqual([
+      { path: "a", closing: false },
+      { path: "d/x", closing: true },
+      { path: "d/y", closing: true },
+      { path: "b", closing: false },
+    ]);
+  });
+
+  it("puts an opened file at the end", () => {
+    expect(shownTabs(open("a", "b"), ["a", "b", "c"])).toEqual(
+      open("a", "b", "c"),
+    );
+  });
+
+  it("renames a tab in place instead of closing it", () => {
+    expect(shownTabs(open("a", "b", "c"), ["a", "B", "c"])).toEqual(
+      open("a", "B", "c"),
+    );
+  });
+
+  it("keeps a leaving tab while another one opens", () => {
+    const leaving = shownTabs(open("a", "b"), ["a"]);
+    expect(shownTabs(leaving, ["a", "c"])).toEqual([
+      { path: "a", closing: false },
+      { path: "b", closing: true },
+      { path: "c", closing: false },
+    ]);
+  });
+
+  it("drops the leaving tab when its file is opened again", () => {
+    const leaving = shownTabs(open("a", "b", "c"), ["a", "c"]);
+    expect(shownTabs(leaving, ["a", "c", "b"])).toEqual(open("a", "c", "b"));
   });
 });

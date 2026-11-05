@@ -5,7 +5,13 @@
 // сохранения, и файл среди них выглядит как ещё один терминал, которым он не
 // является.
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useI18n } from "../i18n";
 import { isMac } from "../platform";
 import { isCoveredByModal } from "../hotkeys/modalGuard";
@@ -18,10 +24,30 @@ import { ImageView } from "./ImageView";
 import { drawnAsImage } from "../files/media";
 import { useGitStatuses } from "../git/useGitStatuses";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { reducedMotion } from "../animations";
+import { shownTabs, type ShownTab } from "../files/openFiles";
 
 // Столько же живёт то же число в file-tree.css: по нему колонка возвращается
 // на место, и разъехаться им нельзя.
 const MAXIMIZE_MS = 200;
+
+// Сколько вкладка уходит и сколько проявляется файл, вставший на место
+// закрытого или только что открытый. Короче колонки: та уезжает целиком, а
+// здесь меняется одна вкладка.
+const TAB_MS = 160;
+
+/// Двигать есть чем и можно: движок умеет Web Animations, а человек не просил
+/// обходиться без движения. Без этого закрытие остаётся мгновенным, как было.
+function moving(): boolean {
+  return typeof Element.prototype.animate === "function" && !reducedMotion();
+}
+
+/// Ключ уходящей вкладки — не её путь: откроют файл снова, пока она уходит, и
+/// новая вкладка должна быть новой, а не той же, уже погасшей. Ноля в пути не
+/// бывает, так что с ключом открытой он не совпадёт.
+function tabKey(tab: ShownTab): string {
+  return tab.closing ? `\0${tab.path}` : tab.path;
+}
 
 export function FileEditor(props: {
   workspaceId: string;
@@ -133,6 +159,121 @@ export function FileEditor(props: {
     }
   }, [files.length]);
 
+  // Полоса рисует не сам список открытых, а его же с уходящими вкладками:
+  // закрытая сжимается на своём месте, и соседи подъезжают, а не прыгают.
+  const [tabs, setTabs] = useState<ShownTab[]>(() =>
+    files.map((path) => ({ path, closing: false })),
+  );
+  const [tabsOf, setTabsOf] = useState(files);
+  if (tabsOf !== files) {
+    setTabsOf(files);
+    setTabs(
+      moving()
+        ? shownTabs(tabs, files)
+        : files.map((path) => ({ path, closing: false })),
+    );
+  }
+
+  // Ушедшие снимаем, когда сжатие доиграно. Закрыли ещё одну — ждём заново:
+  // она только начала уходить, а сжатые раньше всё равно уже не видны.
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.closing)) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setTabs((shown) => shown.filter((tab) => !tab.closing)),
+      TAB_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [tabs]);
+
+  // Движение рисуется до первого кадра: иначе на кадр мелькнуло бы конечное
+  // состояние — вкладка уже на новом месте, файл уже целиком.
+  const tabElements = useRef(new Map<string, HTMLDivElement>());
+  const slotElements = useRef(new Map<string, HTMLDivElement>());
+  const drawn = useRef<{ tabs: ShownTab[]; current: string | null } | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    const before = drawn.current;
+    drawn.current = { tabs, current };
+    // Первый показ играет сама колонка: она выезжает вместе с вкладкой.
+    if (!before || !moving()) {
+      return;
+    }
+    const leftBefore = new Set(
+      before.tabs.filter((tab) => tab.closing).map((tab) => tab.path),
+    );
+    const openBefore = before.tabs.filter((tab) => !tab.closing).length;
+    let closed = false;
+    for (const tab of tabs) {
+      if (!tab.closing || leftBefore.has(tab.path)) {
+        continue;
+      }
+      closed = true;
+      const element = tabElements.current.get(tabKey(tab));
+      if (!element) {
+        continue;
+      }
+      // Ширину сжимаем от настоящей, а не от предела в 200px: короткая вкладка
+      // иначе половину времени стояла бы на месте. Отступ и рамку — вместе с
+      // ней, а зазор до соседа съедает отрицательное поле, и когда вкладку
+      // снимут, ничего не дёрнется.
+      //
+      // Содержимое замирает в своей ширине: сжимается вкладка, а имя в ней
+      // уходит за край. Иначе имя таяло бы многоточием, буква за буквой.
+      const children = [...element.children].filter(
+        (child): child is HTMLElement => child instanceof HTMLElement,
+      );
+      const widths = children.map((child) => child.getBoundingClientRect().width);
+      children.forEach((child, at) => {
+        child.style.flex = `0 0 ${widths[at]}px`;
+      });
+      const style = getComputedStyle(element);
+      const inner =
+        element.getBoundingClientRect().width -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight) -
+        parseFloat(style.borderLeftWidth) -
+        parseFloat(style.borderRightWidth);
+      element.animate(
+        [
+          {
+            maxWidth: `${Math.max(0, inner)}px`,
+            paddingRight: style.paddingRight,
+            borderRightWidth: style.borderRightWidth,
+            marginRight: "0px",
+            opacity: 1,
+          },
+          {
+            maxWidth: "0px",
+            paddingRight: "0px",
+            borderRightWidth: "0px",
+            marginRight: "-1px",
+            opacity: 0,
+          },
+        ],
+        {
+          duration: TAB_MS,
+          easing: "cubic-bezier(0.4, 0, 1, 1)",
+          fill: "forwards",
+        },
+      );
+    }
+    // Файл проявляется, когда его открыли или когда он встал на место
+    // закрытого. Простое переключение вкладок остаётся мгновенным: по ним
+    // ходят быстро, и ждать каждый раз, пока файл проявится, утомительно.
+    const opened = tabs.filter((tab) => !tab.closing).length > openBefore;
+    if ((opened || closed) && current !== null && current !== before.current) {
+      slotElements.current
+        .get(current)
+        ?.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: TAB_MS,
+          easing: "ease-out",
+        });
+    }
+  }, [tabs, current]);
+
   if (files.length === 0 || current === null) {
     return null;
   }
@@ -196,22 +337,34 @@ export function FileEditor(props: {
         }
       >
       <div className="file-editor-tabs" role="tablist">
-        {files.map((path) => {
+        {tabs.map((tab) => {
+          const { path, closing } = tab;
           const glyph = fileGlyph(fileName(path));
-          const active = path === current;
+          const active = !closing && path === current;
           const status = git.of(path);
+          const key = tabKey(tab);
           return (
             <div
-              key={path}
+              key={key}
+              ref={(element) => {
+                if (element) {
+                  tabElements.current.set(key, element);
+                } else {
+                  tabElements.current.delete(key);
+                }
+              }}
               className={`file-tab ${active ? "is-active" : ""} ${
-                status ? `is-git is-git-${status}` : ""
-              }`}
-              role="tab"
-              aria-selected={active}
+                closing ? "is-closing" : ""
+              } ${status ? `is-git is-git-${status}` : ""}`}
+              // Уходящая вкладка — уже не вкладка: ни нажать, ни дойти до неё
+              // клавиатурой, ни услышать её в списке нельзя.
+              {...(closing
+                ? { "aria-hidden": true, inert: "" }
+                : { role: "tab", "aria-selected": active })}
               // Средняя кнопка закрывает вкладку, как в браузере и в любом
               // редакторе с вкладками.
               onAuxClick={(event) => {
-                if (event.button === 1) {
+                if (event.button === 1 && !closing) {
                   event.preventDefault();
                   requestClose(path);
                 }
@@ -268,6 +421,13 @@ export function FileEditor(props: {
       {files.map((path) => (
         <div
           key={path}
+          ref={(element) => {
+            if (element) {
+              slotElements.current.set(path, element);
+            } else {
+              slotElements.current.delete(path);
+            }
+          }}
           className={`file-view-slot ${path === current ? "is-current" : ""}`}
           style={{ display: path === current ? "flex" : "none" }}
         >

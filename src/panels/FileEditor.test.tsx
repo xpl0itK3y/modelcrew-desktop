@@ -1757,3 +1757,93 @@ describe("FileEditor wrapping", () => {
     expect(localStorage.getItem("modelcrew.wrapLines")).toBe("1");
   });
 });
+
+describe("FileEditor opening and closing in motion", () => {
+  /// Что и в каком порядке двигали. В jsdom Web Animations нет — без подмены
+  /// редактор закрывает вкладки мгновенно, как и должен там, где двигать нечем.
+  const moved: Element[] = [];
+
+  beforeEach(() => {
+    moved.length = 0;
+    Object.defineProperty(Element.prototype, "animate", {
+      configurable: true,
+      writable: true,
+      value: function (this: Element) {
+        moved.push(this);
+        return { cancel() {}, finish() {} };
+      },
+    });
+  });
+
+  afterEach(() => {
+    delete (Element.prototype as { animate?: unknown }).animate;
+  });
+
+  function show(files: string[], active: string) {
+    return (
+      <FileEditor
+        workspaceId="w1"
+        files={files}
+        activePath={active}
+        onSelect={() => {}}
+        onClose={() => {}}
+        width={520}
+      />
+    );
+  }
+
+  /// Все вкладки полосы, уходящие тоже, — по порядку.
+  function strip(): string[] {
+    return [...document.querySelectorAll(".file-tab")].map(
+      (tab) => tab.querySelector(".file-tab-name")?.textContent ?? "",
+    );
+  }
+
+  function currentSlot(): Element | null {
+    return document.querySelector(".file-view-slot.is-current");
+  }
+
+  it("keeps a closed tab in its place while it shrinks away", async () => {
+    const view = render(show(["a.txt", "b.txt", "c.txt"], "b.txt"));
+    await screen.findByLabelText("b.txt");
+
+    view.rerender(show(["a.txt", "c.txt"], "c.txt"));
+
+    const leaving = document.querySelector(".file-tab.is-closing");
+    expect(leaving?.querySelector(".file-tab-name")?.textContent).toBe("b.txt");
+    // Стоит там же, где стояла, но вкладкой уже не считается.
+    expect(strip()).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(tabs()).toEqual(["a.txt", "c.txt"]);
+    expect(leaving).toHaveAttribute("aria-hidden", "true");
+    expect(leaving).toHaveAttribute("inert");
+    expect(moved).toContain(leaving);
+    // Файл, вставший на место закрытого, проявляется.
+    expect(moved).toContain(currentSlot());
+
+    await waitFor(() => expect(strip()).toEqual(["a.txt", "c.txt"]));
+  });
+
+  it("fades in a file that was opened, but not one switched to", async () => {
+    const view = render(show(["a.txt"], "a.txt"));
+    await screen.findByLabelText("a.txt");
+    expect(moved).toEqual([]);
+
+    view.rerender(show(["a.txt", "b.txt"], "b.txt"));
+    expect(moved).toEqual([currentSlot()]);
+
+    moved.length = 0;
+    view.rerender(show(["a.txt", "b.txt"], "a.txt"));
+    expect(moved).toEqual([]);
+  });
+
+  it("brings back a fresh tab when the leaving file is opened again", async () => {
+    const view = render(show(["a.txt", "b.txt"], "b.txt"));
+    await screen.findByLabelText("b.txt");
+
+    view.rerender(show(["a.txt"], "a.txt"));
+    view.rerender(show(["a.txt", "b.txt"], "b.txt"));
+
+    expect(strip()).toEqual(["a.txt", "b.txt"]);
+    expect(document.querySelector(".file-tab.is-closing")).toBeNull();
+  });
+});

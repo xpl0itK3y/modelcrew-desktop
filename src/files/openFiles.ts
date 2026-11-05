@@ -62,3 +62,51 @@ export function moveUnder(
     active: state.active === null ? null : moved(state.active),
   };
 }
+
+/// Вкладка в полосе: открытая или закрытая, но ещё доигрывающая уход.
+export type ShownTab = {
+  path: string;
+  closing: boolean;
+};
+
+/// Какие вкладки рисовать после того, как список открытых сменился.
+///
+/// Закрытая остаётся там, где стояла, пока не сожмётся: исчезни она сразу,
+/// соседи справа прыгнули бы на её место за один кадр, и глаз потерял бы, что
+/// именно закрылось. Вкладок стало не меньше — это открытие или
+/// переименование: переименованная стоит на прежнем месте под новым именем, и
+/// закрывать там нечего. Открыли снова ту, что ещё уходит, — уходящая
+/// пропадает, а файл встаёт в конец, как любой открытый.
+export function shownTabs(
+  previous: readonly ShownTab[],
+  files: readonly string[],
+): ShownTab[] {
+  const open = new Set(files);
+  const was = previous.filter((tab) => !tab.closing);
+  const closed = new Set(
+    files.length < was.length
+      ? was.map((tab) => tab.path).filter((path) => !open.has(path))
+      : [],
+  );
+  const shown: ShownTab[] = [];
+  // Открытые встают по порядку списка: он только дописывается в конец и
+  // теряет вкладки, но не переставляет их, так что прежнее место каждой
+  // открытой — её же место в новом списке.
+  let next = 0;
+  for (const tab of previous) {
+    if (tab.closing || closed.has(tab.path)) {
+      if (!open.has(tab.path)) {
+        shown.push({ path: tab.path, closing: true });
+      }
+      continue;
+    }
+    if (next < files.length) {
+      shown.push({ path: files[next], closing: false });
+      next += 1;
+    }
+  }
+  for (; next < files.length; next += 1) {
+    shown.push({ path: files[next], closing: false });
+  }
+  return shown;
+}
