@@ -18,8 +18,11 @@ import {
   addPanel,
   dockFloatingGroups,
   localizeDefaultPanelTitles,
+  placeArrivingPanels,
   snapshotActiveSessionLayout,
 } from "../layoutOps";
+import { flipGroups, snapshotGroupRects } from "../animations";
+import { loadTerminalSpawnMode } from "../terminal/preferences";
 import {
   activeSession,
   hasPersistedWorkspacesState,
@@ -33,6 +36,12 @@ import { useSessionCreation } from "./useSessionCreation";
 import { useWorkspaceCrud } from "./useWorkspaceCrud";
 import { useWorkspacePersistence } from "./useWorkspacePersistence";
 import { useWorkspaceRoots } from "./useWorkspaceRoots";
+import {
+  layoutTerminalCount,
+  terminalDropVerdict,
+  withTerminalMoved,
+  type TerminalDropVerdict,
+} from "./terminalMove";
 
 type UseWorkspacesOptions = {
   apiRef: RefObject<DockviewApi | null>;
@@ -178,6 +187,15 @@ export function useWorkspaces({
       if (rootAvailable && !restored) {
         addPanel(api, workspace.id, session.id);
       }
+      if (rootAvailable) {
+        placeArrivingPanels(
+          api,
+          session.layout,
+          workspace.id,
+          session.id,
+          loadTerminalSpawnMode(),
+        );
+      }
       applyAutoTitles(api);
       setTerminalCount(api.panels.length);
     },
@@ -249,6 +267,62 @@ export function useWorkspaces({
     [loadSession, snapshotActiveSession],
   );
 
+  // Перенести терминал с экрана в другую сессию того же проекта. Панель
+  // уходит из сетки так же, как при переключении сессий, — процесс и экран
+  // терминала остаются жить в реестре, — а её запись переезжает в раскладку
+  // целевой сессии. Сами мы остаёмся там, где были: можно унести несколько
+  // терминалов подряд. Ответ — что вышло; "move" — перенесли.
+  const moveTerminalToSession = useCallback(
+    (
+      panelId: string,
+      workspaceId: string,
+      sessionId: string,
+    ): TerminalDropVerdict => {
+      const current = workspacesRef.current;
+      const verdict = terminalDropVerdict(current, workspaceId, sessionId);
+      if (verdict !== "move") {
+        return verdict;
+      }
+      const api = apiRef.current;
+      const panel = api?.getPanel(panelId);
+      const state = api?.toJSON().panels[panelId];
+      if (
+        !api ||
+        !panel ||
+        !state ||
+        panel.view?.contentComponent !== "terminal"
+      ) {
+        return "here";
+      }
+      // Развёрнутая панель занимает всю сетку: уберём её — и соседи должны
+      // вернуться на свои места, а не остаться спрятанными.
+      if (api.hasMaximizedGroup()) {
+        api.exitMaximizedGroup();
+      }
+      const before = snapshotGroupRects(api);
+      suppressCleanupRef.current = true;
+      try {
+        panel.api.close();
+      } finally {
+        suppressCleanupRef.current = false;
+      }
+      flipGroups(api, before, 200);
+      const next = {
+        ...current,
+        list: withTerminalMoved(
+          snapshotActiveSession(current.list, current.activeId),
+          workspaceId,
+          sessionId,
+          state,
+        ),
+      };
+      workspacesRef.current = next;
+      setWorkspaces(next);
+      return "move";
+    },
+    [apiRef, snapshotActiveSession, suppressCleanupRef],
+  );
+
   // Перейти к панели по её id — из списка ожидающих в колокольчике. Панель
   // может лежать в скрытой сессии, поэтому сначала ищем её по сохранённым
   // раскладкам и переключаемся туда, и только потом делаем активной.
@@ -317,11 +391,7 @@ export function useWorkspaces({
           ).length ?? 0
         );
       }
-      return session.layout
-        ? Object.values(session.layout.panels).filter(
-            (panel) => (panel.contentComponent ?? "terminal") === "terminal",
-          ).length
-        : 0;
+      return layoutTerminalCount(session.layout);
     },
     [apiRef, workspaces.activeId],
   );
@@ -359,6 +429,7 @@ export function useWorkspaces({
     selectWorkspace,
     selectSession,
     revealPanel,
+    moveTerminalToSession,
     sessionPanelCount,
     workspacePanelCount,
     hasActiveWorkspace,

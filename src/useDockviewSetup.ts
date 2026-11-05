@@ -18,7 +18,9 @@ import {
   addPanel,
   dockFloatingGroups,
   localizeDefaultPanelTitles,
+  placeArrivingPanels,
 } from "./layoutOps";
+import { loadTerminalSpawnMode } from "./terminal/preferences";
 import {
   activeSession,
   type FolderRuntimeStatus,
@@ -184,6 +186,15 @@ export function useDockviewSetup({
           event.api.closeAllGroups();
           addPanel(event.api, workspace.id, session.id);
         }
+        // Терминалы, перенесённые сюда, пока сессия была скрыта, — если
+        // приложение закрыли раньше, чем её открыли.
+        placeArrivingPanels(
+          event.api,
+          session.layout,
+          workspace.id,
+          session.id,
+          loadTerminalSpawnMode(),
+        );
       } else if (
         workspace?.folder &&
         session &&

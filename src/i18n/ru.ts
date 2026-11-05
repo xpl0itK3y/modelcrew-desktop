@@ -660,6 +660,10 @@ export const ru = {
   "group.close": "Закрыть группу ({shortcut})",
   "layout.noSplitSpace": "Недостаточно места для нового терминала",
   "layout.terminalLimit": "Нельзя открыть больше {max} терминалов",
+  "layout.terminalMoved": "Терминал перенесён в «{name}»",
+  "layout.terminalMoveForeign":
+    "Терминал переносится только между сессиями своего проекта",
+  "layout.terminalMoveFull": "В «{name}» уже {max} терминалов",
   "layout.restore": "Вернуть раскладку",
   "layout.terminalExpanded": "Терминал развёрнут",
   "layout.restoreShortcut": "вернуть",

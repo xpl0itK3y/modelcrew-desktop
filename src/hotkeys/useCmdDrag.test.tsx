@@ -9,7 +9,8 @@ vi.mock("../animations", () => ({
 }));
 vi.mock("../layoutOps", () => ({ swapPanels: vi.fn() }));
 
-import { useCmdDrag } from "./useCmdDrag";
+import { useCmdDrag, type TerminalSessionDrop } from "./useCmdDrag";
+import { swapPanels } from "../layoutOps";
 
 // Панель во всё окно: ⌘-драг ищет её по координатам курсора, так что группе
 // нужен только прямоугольник.
@@ -27,17 +28,57 @@ function gridWithOnePanel(): DockviewApi {
       y: 0,
       toJSON: () => ({}),
     }) as DOMRect;
-  const group = { element } as unknown as DockviewGroupPanel;
+  const group = {
+    element,
+    activePanel: { id: "panel-1", title: "claude" },
+    panels: [{ id: "panel-1" }],
+  } as unknown as DockviewGroupPanel;
   return { groups: [group] } as unknown as DockviewApi;
 }
 
-function mount(api: DockviewApi = gridWithOnePanel()) {
+function mount(
+  api: DockviewApi = gridWithOnePanel(),
+  sessionDrop?: TerminalSessionDrop,
+) {
   renderHook(() =>
     useCmdDrag({
       getApi: () => api,
       suppressCleanupRef: { current: false },
+      sessionDrop,
     }),
   );
+}
+
+function pointer(type: "pointermove" | "pointerup", x: number, y: number) {
+  window.dispatchEvent(
+    new MouseEvent(type, {
+      clientX: x,
+      clientY: y,
+      button: 0,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+// Строка сессии в боковой панели. elementFromPoint в jsdom нет: под курсором
+// окажется то, что вернёт заглушка.
+function sessionRow(workspaceId: string, sessionId: string | null) {
+  const row = document.createElement("div");
+  row.dataset.terminalDrop = sessionId ? "session" : "workspace";
+  row.dataset.workspaceId = workspaceId;
+  if (sessionId) {
+    row.dataset.sessionId = sessionId;
+  }
+  const name = document.createElement("span");
+  row.append(name);
+  document.body.append(row);
+  return { row, name };
+}
+
+function pointAt(element: Element | null) {
+  document.elementFromPoint = () => element;
 }
 
 // PointerEvent есть не во всех окружениях, а обработчику нужны только
@@ -66,6 +107,8 @@ function openModal(): HTMLElement {
 afterEach(() => {
   document.body.replaceChildren();
   document.body.className = "";
+  vi.mocked(swapPanels).mockClear();
+  Reflect.deleteProperty(document, "elementFromPoint");
 });
 
 describe("grabbing a terminal with Mod held", () => {
@@ -100,5 +143,92 @@ describe("grabbing a terminal with Mod held", () => {
     grab();
 
     expect(document.body).toHaveClass("cmd-dragging");
+  });
+});
+
+describe("dropping a terminal onto a session in the sidebar", () => {
+  function sessions(verdicts: Record<string, ReturnType<TerminalSessionDrop["verdict"]>>) {
+    const drop = vi.fn();
+    const sessionDrop: TerminalSessionDrop = {
+      verdict: (workspaceId, sessionId) =>
+        verdicts[`${workspaceId}:${sessionId ?? ""}`] ?? "here",
+      drop,
+    };
+    return { sessionDrop, drop };
+  }
+
+  it("carries the terminal to the session it is dropped on", () => {
+    const { sessionDrop, drop } = sessions({ "w1:s2": "move" });
+    mount(gridWithOnePanel(), sessionDrop);
+    const { row, name } = sessionRow("w1", "s2");
+
+    grab(400, 300);
+    pointer("pointermove", 420, 320);
+    pointAt(name);
+    pointer("pointermove", 900, 40);
+
+    expect(row).toHaveClass("is-terminal-drop");
+    expect(document.body).not.toHaveClass("cmd-drag-refused");
+
+    pointer("pointerup", 900, 40);
+
+    expect(drop).toHaveBeenCalledWith("panel-1", "w1", "s2");
+    expect(row).not.toHaveClass("is-terminal-drop");
+    expect(swapPanels).not.toHaveBeenCalled();
+  });
+
+  it("says no over a session of another project before the terminal is let go", () => {
+    const { sessionDrop, drop } = sessions({ "w2:t1": "foreign" });
+    mount(gridWithOnePanel(), sessionDrop);
+    const { row } = sessionRow("w2", "t1");
+
+    grab(400, 300);
+    pointer("pointermove", 420, 320);
+    pointAt(row);
+    pointer("pointermove", 900, 80);
+
+    expect(row).toHaveClass("is-terminal-drop-refused");
+    expect(document.body).toHaveClass("cmd-drag-refused");
+
+    // Приложение само решит, что сказать про отказ.
+    pointer("pointerup", 900, 80);
+    expect(drop).toHaveBeenCalledWith("panel-1", "w2", "t1");
+    expect(document.body).not.toHaveClass("cmd-drag-refused");
+  });
+
+  it("drops the highlight once the cursor leaves the row", () => {
+    const { sessionDrop } = sessions({ "w1:s2": "move", "w2:": "foreign" });
+    mount(gridWithOnePanel(), sessionDrop);
+    const { row } = sessionRow("w1", "s2");
+    const { row: other } = sessionRow("w2", null);
+
+    grab(400, 300);
+    pointer("pointermove", 420, 320);
+    pointAt(row);
+    pointer("pointermove", 900, 40);
+    pointAt(other);
+    pointer("pointermove", 900, 10);
+
+    expect(row).not.toHaveClass("is-terminal-drop");
+    expect(other).toHaveClass("is-terminal-drop-refused");
+
+    pointAt(null);
+    pointer("pointermove", 500, 300);
+    expect(other).not.toHaveClass("is-terminal-drop-refused");
+    expect(document.body).not.toHaveClass("cmd-drag-refused");
+  });
+
+  it("leaves its own session quietly", () => {
+    const { sessionDrop } = sessions({});
+    mount(gridWithOnePanel(), sessionDrop);
+    const { row } = sessionRow("w1", "s1");
+
+    grab(400, 300);
+    pointer("pointermove", 420, 320);
+    pointAt(row);
+    pointer("pointermove", 900, 40);
+
+    expect(row.className).toBe("");
+    expect(document.body).not.toHaveClass("cmd-drag-refused");
   });
 });

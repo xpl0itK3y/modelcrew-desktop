@@ -368,6 +368,25 @@
   color: var(--mc-accent);
 }
 
+/* Сюда можно уронить терминал, который тащат. */
+.workspace-item.is-terminal-drop,
+.session-item.is-terminal-drop {
+  background: var(--mc-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--mc-accent-border);
+  color: var(--mc-text-bright);
+}
+
+.session-item.is-terminal-drop .session-icon {
+  color: var(--mc-accent);
+}
+
+/* А сюда нельзя: это другой проект или в сессии уже предел терминалов. */
+.workspace-item.is-terminal-drop-refused,
+.session-item.is-terminal-drop-refused {
+  background: var(--mc-danger-soft);
+  box-shadow: inset 0 0 0 1px var(--mc-danger-border);
+}
+
 .session-name {
   min-width: 0;
   flex: 1;

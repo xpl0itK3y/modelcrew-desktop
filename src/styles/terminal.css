@@ -661,6 +661,12 @@ body.cmd-dragging * {
   cursor: grabbing !important;
 }
 
+/* Терминал над сессией, куда его не перенести. */
+body.cmd-dragging.cmd-drag-refused,
+body.cmd-dragging.cmd-drag-refused * {
+  cursor: not-allowed !important;
+}
+
 .dv-groupview.cmd-drag-source {
   opacity: 0.4;
   /* Источник гаснет — будто карточку подняли и унесли. */

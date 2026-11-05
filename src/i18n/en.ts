@@ -661,6 +661,10 @@ export const en: Record<MessageKey, string> = {
   "group.close": "Close group ({shortcut})",
   "layout.noSplitSpace": "Not enough room for another terminal",
   "layout.terminalLimit": "Can’t open more than {max} terminals",
+  "layout.terminalMoved": "Terminal moved to “{name}”",
+  "layout.terminalMoveForeign":
+    "A terminal can only move between sessions of its own project",
+  "layout.terminalMoveFull": "“{name}” already has {max} terminals",
   "layout.restore": "Restore layout",
   "layout.terminalExpanded": "Terminal expanded",
   "layout.restoreShortcut": "restore",

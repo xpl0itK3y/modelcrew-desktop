@@ -5,10 +5,12 @@ import { flipGroups, snapshotGroupRects } from "../animations";
 import { swapPanels } from "../layoutOps";
 import { translate } from "../i18n";
 import { isCoveredByModal } from "./modalGuard";
+import type { TerminalDropVerdict } from "../workspaces/terminalMove";
 
 // ⌘-драг: зажал Mod, схватил терминал за любое место — под курсором
 // призрак панели; дроп на другой терминал меняет их местами, дроп у
-// края dock-области создаёт новый сплит по этому краю.
+// края dock-области создаёт новый сплит по этому краю, дроп на сессию в
+// боковой панели переносит терминал туда.
 
 const DRAG_THRESHOLD_PX = 5;
 const EDGE_BAND_PX = 36;
@@ -24,12 +26,38 @@ type DragSession = {
   edgeIndicator: HTMLDivElement | null;
   target: DockviewGroupPanel | null;
   edge: Edge | null;
+  row: SessionDrop | null;
+};
+
+// Куда в боковой панели можно уронить терминал. Строки помечены атрибутами:
+// data-terminal-drop и data-workspace-id, у строки сессии ещё data-session-id.
+export type TerminalSessionDrop = {
+  verdict: (
+    workspaceId: string,
+    sessionId: string | null,
+  ) => TerminalDropVerdict;
+  drop: (panelId: string, workspaceId: string, sessionId: string | null) => void;
+};
+
+type SessionDrop = {
+  element: HTMLElement;
+  workspaceId: string;
+  sessionId: string | null;
+  verdict: TerminalDropVerdict;
 };
 
 type CmdDragOptions = {
   getApi: () => DockviewApi | null;
   suppressCleanupRef: MutableRefObject<boolean>;
+  sessionDrop?: TerminalSessionDrop;
 };
+
+// Строка боковой панели под курсором. Призрак сюда не попадает: он
+// прозрачен для мыши.
+function sessionRowAt(x: number, y: number): HTMLElement | null {
+  const hit = document.elementFromPoint?.(x, y);
+  return hit?.closest<HTMLElement>("[data-terminal-drop]") ?? null;
+}
 
 function groupAtPoint(
   api: DockviewApi,
@@ -109,7 +137,19 @@ export function useCmdDrag(options: CmdDragOptions): void {
   useEffect(() => {
     let session: DragSession | null = null;
 
+    const clearRowHighlight = () => {
+      if (session?.row) {
+        session.row.element.classList.remove(
+          "is-terminal-drop",
+          "is-terminal-drop-refused",
+        );
+        session.row = null;
+      }
+      document.body.classList.remove("cmd-drag-refused");
+    };
+
     const clearTargetHighlight = () => {
+      clearRowHighlight();
       if (session?.target) {
         session.target.element.classList.remove("cmd-drag-over");
         session.target = null;
@@ -169,6 +209,7 @@ export function useCmdDrag(options: CmdDragOptions): void {
         edgeIndicator: null,
         target: null,
         edge: null,
+        row: null,
       };
       // Курсор-хват сразу по ⌘-нажатию — ощущение, что терминал уже взяли,
       // ещё до начала движения.
@@ -221,6 +262,30 @@ export function useCmdDrag(options: CmdDragOptions): void {
         }px)`;
       }
 
+      const sessionDrop = optionsRef.current.sessionDrop;
+      const row = sessionDrop ? sessionRowAt(event.clientX, event.clientY) : null;
+      if (row && sessionDrop) {
+        const workspaceId = row.dataset.workspaceId ?? "";
+        const sessionId = row.dataset.sessionId ?? null;
+        if (session.row?.element !== row) {
+          clearTargetHighlight();
+          const verdict = sessionDrop.verdict(workspaceId, sessionId);
+          session.row = { element: row, workspaceId, sessionId, verdict };
+          if (verdict === "move") {
+            row.classList.add("is-terminal-drop");
+          } else if (verdict !== "here") {
+            // Чужой проект или полная сессия: строка и курсор говорят «нельзя»
+            // ещё до того, как терминал отпустили.
+            row.classList.add("is-terminal-drop-refused");
+            document.body.classList.add("cmd-drag-refused");
+          }
+        }
+        return;
+      }
+      if (session.row) {
+        clearRowHighlight();
+      }
+
       const edge = edgeAtPoint(event.clientX, event.clientY);
       const target = edge
         ? null
@@ -250,7 +315,7 @@ export function useCmdDrag(options: CmdDragOptions): void {
         return;
       }
       const api = optionsRef.current.getApi();
-      const { sourceGroup, target, edge, active } = session;
+      const { sourceGroup, target, edge, active, row } = session;
       teardownVisuals();
       session = null;
 
@@ -262,7 +327,14 @@ export function useCmdDrag(options: CmdDragOptions): void {
         return;
       }
 
-      if (edge) {
+      if (row) {
+        // Что делать с отказом, решает приложение: оно и объяснит его.
+        optionsRef.current.sessionDrop?.drop(
+          sourcePanel.id,
+          row.workspaceId,
+          row.sessionId,
+        );
+      } else if (edge) {
         // Дроп у края — новый сплит по этому краю окна.
         if (api.groups.length === 1 && sourceGroup.panels.length === 1) {
           return;

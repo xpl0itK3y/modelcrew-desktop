@@ -3,6 +3,7 @@ import { MoreIcon, PlusIcon, TerminalGlyphIcon } from "../Icons";
 import { formatTerminalCount, useI18n } from "../../i18n";
 import { SidebarMenu } from "./SidebarMenu";
 import { sameTarget, type EditingTarget, type MenuTarget } from "./targets";
+import type { RowDrop } from "./terminalRowDrop";
 
 export type SessionNavItem = {
   id: string;
@@ -17,6 +18,8 @@ type SessionRowProps = {
   // Сессии свёрнутого проекта не участвуют в табуляции.
   isExpanded: boolean;
   isWorkspaceActive: boolean;
+  // Строка как место, куда роняют терминал.
+  drop?: RowDrop;
   editing: EditingTarget | null;
   openMenu: MenuTarget | null;
   inputRef: Ref<HTMLInputElement>;
@@ -52,7 +55,8 @@ export function SessionRow(props: SessionRowProps) {
             ? props.activeSessionRef
             : undefined
         }
-        className={`session-item ${session.isActive ? "is-active" : ""}`}
+        className={`session-item ${session.isActive ? "is-active" : ""} ${props.drop?.className ?? ""}`}
+        {...props.drop?.props}
       >
         {sameTarget(props.editing, sessionTarget) ? (
           <div className="session-main is-editing">

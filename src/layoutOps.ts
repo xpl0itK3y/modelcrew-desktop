@@ -2,6 +2,7 @@ import { MutableRefObject } from "react";
 import {
   DockviewApi,
   DockviewGroupPanel,
+  GroupviewPanelState,
   IDockviewPanel,
   SerializedDockview,
 } from "dockview";
@@ -14,6 +15,7 @@ import {
 } from "./constants";
 import type { Workspace } from "./persist";
 import type { TerminalSpawnMode } from "./terminal/preferences";
+import { arrivingPanels } from "./workspaces/terminalMove";
 
 // Swap позиций двух панелей через сериализованный layout: меняем их id
 // местами в дереве и восстанавливаем. Инстансы xterm живут вне React,
@@ -127,17 +129,26 @@ export function addPanel(
   options: {
     group?: DockviewGroupPanel;
     direction?: "left" | "right" | "above" | "below";
+    // Панель, у которой уже есть терминал: перенесённая из другой сессии.
+    // С прежним id она подхватывает свой живой процесс и экран.
+    panel?: GroupviewPanelState;
   } = {},
 ) {
+  const { panel } = options;
   api.addPanel({
-    id: crypto.randomUUID(),
+    id: panel?.id ?? crypto.randomUUID(),
     component: "terminal",
     tabComponent: "terminal",
     // Короткий placeholder только на время запуска PTY. pty_create сразу
     // вернёт имя оболочки, дальше watcher отслеживает codex/vim/другие процессы.
-    title: translate("terminal.defaultTitle"),
+    title: panel?.title ?? translate("terminal.defaultTitle"),
     // В layout сохраняется только владелец панели. cwd разрешает Rust.
-    params: { workspaceId, sessionId, titleKind: "default" },
+    params: {
+      titleKind: "default",
+      ...panel?.params,
+      workspaceId,
+      sessionId,
+    },
     minimumWidth: PANEL_MIN_WIDTH,
     minimumHeight: PANEL_MIN_HEIGHT,
     ...(options.group
@@ -382,10 +393,36 @@ export function addTerminalAutoGrid(
     options.onBlocked?.("limit");
     return;
   }
-  const groups = api.groups;
-  if (groups.length === 0) {
+  if (api.groups.length === 0) {
     addPanel(api, workspaceId, sessionId);
     return;
+  }
+  const spot = nextTerminalSpot(api, options.mode ?? "balanced");
+  if (!spot) {
+    options.onBlocked?.("space");
+    return;
+  }
+
+  // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
+  const before = snapshotGroupRects(api);
+  addPanel(api, workspaceId, sessionId, spot);
+  flipGroups(api, before, 200);
+}
+
+type TerminalSpot = {
+  group?: DockviewGroupPanel;
+  direction?: PanelDirection;
+};
+
+// Куда встанет ещё один терминал: рядом с какой группой и с какой стороны.
+// null — места нет: любой сплит ужал бы панели меньше минимума.
+function nextTerminalSpot(
+  api: DockviewApi,
+  mode: TerminalSpawnMode,
+): TerminalSpot | null {
+  const groups = api.groups;
+  if (groups.length === 0) {
+    return {};
   }
 
   // Предыдущее добавление могло ещё доигрывать FLIP: он двигает группы
@@ -416,26 +453,44 @@ export function addTerminalAutoGrid(
       height: group.height,
     };
   });
-  const plan = planTerminalPlacement(geometry, options.mode ?? "balanced");
+  const plan = planTerminalPlacement(geometry, mode);
   if (!plan) {
-    options.onBlocked?.("space");
-    return;
+    return null;
   }
   const referenceGroup = plan.referenceGroupId
     ? groups.find((group) => group.id === plan.referenceGroupId)
     : undefined;
   if (plan.referenceGroupId && !referenceGroup) {
-    options.onBlocked?.("space");
-    return;
+    return null;
   }
-
-  // Соседи ужимаются мгновенно, а плавность дорисовывает FLIP поверх.
-  const before = snapshotGroupRects(api);
-  addPanel(api, workspaceId, sessionId, {
+  return {
     ...(referenceGroup ? { group: referenceGroup } : {}),
     direction: plan.direction,
-  });
-  flipGroups(api, before, 200);
+  };
+}
+
+// Терминалы, перенесённые в эту сессию, пока она была скрыта. В раскладке
+// они уже числятся, а места в сетке у них нет: его можно выбрать только по
+// сетке на экране. Встают туда же, куда встал бы новый терминал. Предел числа
+// терминалов проверен ещё при переносе, а если не хватает места, панель всё
+// равно встаёт строкой снизу: процесс у неё живой, и потерять её нельзя.
+export function placeArrivingPanels(
+  api: DockviewApi,
+  layout: SerializedDockview | null,
+  workspaceId: string,
+  sessionId: string,
+  mode: TerminalSpawnMode,
+): number {
+  let placed = 0;
+  for (const panel of arrivingPanels(layout)) {
+    if (api.getPanel(panel.id)) {
+      continue;
+    }
+    const spot = nextTerminalSpot(api, mode) ?? { direction: "below" };
+    addPanel(api, workspaceId, sessionId, { ...spot, panel });
+    placed += 1;
+  }
+  return placed;
 }
 
 export function snapshotActiveSessionLayout(

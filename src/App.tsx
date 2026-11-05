@@ -12,6 +12,7 @@ import {
   DockviewGroupPanel,
   DockviewReact,
   DockviewTheme,
+  getPanelData,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import {
@@ -73,6 +74,8 @@ import { useAnimatedPresence } from "./ui/useAnimatedPresence";
 import { AppActionsProvider, type AppActions } from "./ui/AppActions";
 import { useHotkeys } from "./hotkeys/useHotkeys";
 import { useCmdDrag } from "./hotkeys/useCmdDrag";
+import type { TerminalRowDrop } from "./ui/sidebar/terminalRowDrop";
+import { terminalDropVerdict } from "./workspaces/terminalMove";
 import {
   getAppTheme,
   loadAccent,
@@ -101,7 +104,7 @@ import {
   translate,
   useI18n,
 } from "./i18n";
-import { WORKSPACE_NAME } from "./constants";
+import { MAX_TERMINALS, WORKSPACE_NAME } from "./constants";
 import { platform } from "./platform";
 import { shortcutLabel } from "./hotkeys/shortcuts";
 import { loadShell, saveShell } from "./shell";
@@ -228,6 +231,7 @@ export default function App() {
     selectWorkspace,
     selectSession,
     revealPanel,
+    moveTerminalToSession,
     sessionPanelCount,
     workspacePanelCount,
     hasActiveWorkspace,
@@ -458,10 +462,62 @@ export default function App() {
     suppressCleanupRef,
   });
 
+  // Терминал, отпущенный над строкой боковой панели, переезжает в другую
+  // сессию своего проекта. Приносят его ⌘-перетаскиванием или за шапку.
+  const terminalDrop = useMemo<TerminalRowDrop>(
+    () => ({
+      dragged: () => {
+        // Шапку тащит dockview, и что именно тащат, знает только он.
+        const data = getPanelData();
+        const api = apiRef.current;
+        if (!data || !api || data.viewId !== api.id) {
+          return null;
+        }
+        const panelId =
+          data.panelId ?? api.getGroup(data.groupId)?.activePanel?.id ?? null;
+        return panelId &&
+          api.getPanel(panelId)?.view?.contentComponent === "terminal"
+          ? panelId
+          : null;
+      },
+      verdict: (workspaceId, sessionId) =>
+        terminalDropVerdict(workspacesRef.current, workspaceId, sessionId),
+      drop: (panelId, workspaceId, sessionId) => {
+        if (!sessionId) {
+          // Строка проекта: свой проект — ничего не делаем, чужой — нельзя.
+          if (workspaceId !== workspacesRef.current.activeId) {
+            showToast(translate("layout.terminalMoveForeign"));
+          }
+          return;
+        }
+        const verdict = moveTerminalToSession(panelId, workspaceId, sessionId);
+        const session = workspacesRef.current.list
+          .find((workspace) => workspace.id === workspaceId)
+          ?.sessions.find((item) => item.id === sessionId);
+        const name = session
+          ? sessionDisplayName(session, (index) =>
+              translate("session.defaultName", { index }),
+            )
+          : "";
+        if (verdict === "move") {
+          showToast(translate("layout.terminalMoved", { name }));
+        } else if (verdict === "foreign") {
+          showToast(translate("layout.terminalMoveForeign"));
+        } else if (verdict === "full") {
+          showToast(
+            translate("layout.terminalMoveFull", { name, max: MAX_TERMINALS }),
+          );
+        }
+      },
+    }),
+    [moveTerminalToSession, showToast, workspacesRef],
+  );
+
   // ⌘-драг: перетаскивание терминала за любое место мышью.
   useCmdDrag({
     getApi: () => apiRef.current,
     suppressCleanupRef,
+    sessionDrop: terminalDrop,
   });
 
   // Действия для панелей dockview: ватермарк и шапка группы получают их
@@ -944,6 +1000,7 @@ export default function App() {
             onCreateProject={createWorkspace}
             onCreateSession={createSession}
             onCreateTerminal={newTerminalForSession}
+            terminalDrop={terminalDrop}
             onRenameWorkspace={renameWorkspace}
             onRenameSession={renameSession}
             onDeleteSession={(workspaceId, sessionId) => {

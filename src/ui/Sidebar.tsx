@@ -9,6 +9,10 @@ import {
   type EditingTarget,
   type MenuTarget,
 } from "./sidebar/targets";
+import {
+  useTerminalRowDrop,
+  type TerminalRowDrop,
+} from "./sidebar/terminalRowDrop";
 
 export type { SessionNavItem } from "./sidebar/SessionRow";
 
@@ -36,10 +40,13 @@ type SidebarProps = {
     name: string,
   ) => void;
   onDeleteSession: (workspaceId: string, sessionId: string) => void;
+  // Терминал, отпущенный над строкой сессии, переезжает в неё.
+  terminalDrop?: TerminalRowDrop;
 };
 
 export function Sidebar(props: SidebarProps) {
   const { locale, t } = useI18n();
+  const rowDrop = useTerminalRowDrop(props.terminalDrop);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() =>
     props.activeId ? new Set([props.activeId]) : new Set(),
   );
@@ -237,10 +244,14 @@ export function Sidebar(props: SidebarProps) {
             workspaceId: workspace.id,
           };
           const sessionsId = `workspace-sessions-${workspace.id}`;
+          const workspaceDrop = rowDrop(workspace.id, null);
 
           return (
             <li key={workspace.id} className="workspace-node">
-              <div className={`workspace-item ${isActive ? "is-active" : ""}`}>
+              <div
+                className={`workspace-item ${isActive ? "is-active" : ""} ${workspaceDrop.className}`}
+                {...workspaceDrop.props}
+              >
                 <button
                   type="button"
                   className="workspace-disclosure"
@@ -361,6 +372,7 @@ export function Sidebar(props: SidebarProps) {
                         session={session}
                         isExpanded={isExpanded}
                         isWorkspaceActive={isActive}
+                        drop={rowDrop(workspace.id, session.id)}
                         editing={editing}
                         openMenu={openMenu}
                         inputRef={inputRef}
