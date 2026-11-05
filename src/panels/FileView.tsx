@@ -1166,7 +1166,7 @@ export function FileView(props: {
               <div className="file-find-row">
                 <input
                   ref={goToRef}
-                  className="file-find-query"
+                  className="file-find-query is-line"
                   value={goTo}
                   placeholder={t("files.goToQuery", { total: String(lineCount) })}
                   aria-label={t("files.goToLine")}

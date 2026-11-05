@@ -731,6 +731,11 @@
   border-radius: var(--mc-radius-xs);
   background: var(--mc-panel);
   box-shadow: 0 6px 18px #0006;
+  /* Не шире файла под ней. В колонке минимальной ширины кнопки и счётчик
+     выталкивали панель за левый край, и обрезалось как раз поле, в котором
+     набирают: уступает место теперь оно. */
+  box-sizing: border-box;
+  max-width: calc(100% - 28px);
 }
 
 .file-find-row {
@@ -780,6 +785,8 @@
 }
 
 .file-find-query {
+  flex: 0 1 auto;
+  min-width: 0;
   width: 180px;
   padding: 2px 4px;
   border: 0;
@@ -787,6 +794,12 @@
   color: var(--mc-text-bright);
   font: inherit;
   font-size: 12px;
+}
+
+/* Подсказка перехода к строке длиннее поисковой: в 180px «строка:столбец»
+   обрезалась на середине слова, а в файле на десять тысяч строк — раньше. */
+.file-find-query.is-line {
+  width: 228px;
 }
 
 .file-find-query:focus-visible {
