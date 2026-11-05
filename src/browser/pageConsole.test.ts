@@ -3,9 +3,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   NO_CONSOLE,
+  clockTime,
   countKinds,
   endOf,
   entriesSince,
+  entryReport,
   kindOf,
   lostSince,
   matches,
@@ -255,5 +257,59 @@ describe("console entries", () => {
     // Повтор последнего — тоже новое.
     const repeated = log({ messages: [{ level: "log", text: "a", count: 2 }] });
     expect(sameConsole(first, repeated)).toBe(false);
+  });
+});
+
+describe("a console message in full", () => {
+  // Часы человека: время записи показываем по ним, а не по UTC.
+  const at = (hours: number, minutes: number, seconds: number, ms: number) =>
+    new Date(2026, 10, 5, hours, minutes, seconds, ms).getTime();
+
+  it("tells the time to the millisecond, like an inspector", () => {
+    expect(clockTime(at(9, 5, 7, 42))).toBe("09:05:07.042");
+  });
+
+  it("finds a message by a frame of the stack that called it", () => {
+    const entry = {
+      level: "error",
+      text: "Could not save",
+      stack: "save@http://localhost:1420/src/store.ts:40:9",
+    };
+
+    expect(matches(entry, "all", "store.ts")).toBe(true);
+  });
+
+  it("puts everything known about a message into one text to copy", () => {
+    expect(
+      entryReport({
+        level: "error",
+        text: "Unstructured backend error",
+        at: "http://localhost:1420/src/i18n/index.ts:170:13",
+        stack: [
+          "describeBackendError@http://localhost:1420/src/i18n/index.ts:170:13",
+          "App@http://localhost:1420/src/App.tsx:229:7",
+        ].join("\n"),
+        frame: "https://pay.test/widget",
+        count: 3,
+        time: at(10, 15, 4, 120),
+        until: at(10, 15, 6, 5),
+      }),
+    ).toBe(
+      [
+        "[error] Unstructured backend error",
+        "    describeBackendError@http://localhost:1420/src/i18n/index.ts:170:13",
+        "    App@http://localhost:1420/src/App.tsx:229:7",
+        "at http://localhost:1420/src/i18n/index.ts:170:13",
+        "frame https://pay.test/widget",
+        "repeated 3 times",
+        "time 10:15:04.120 – 10:15:06.005",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps a plain message plain", () => {
+    expect(entryReport({ level: "log", text: "[vite] connected." })).toBe(
+      "[log] [vite] connected.",
+    );
   });
 });

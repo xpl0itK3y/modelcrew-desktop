@@ -127,9 +127,12 @@ describe("PageConsolePanel height", () => {
       "поток http://app.test/w.js",
     );
     // Своё страница пишет без подписи.
-    expect(screen.getByText("страница").parentElement?.children).toHaveLength(
-      1,
-    );
+    expect(
+      screen
+        .getByText("страница")
+        .closest(".browser-console-line")
+        ?.querySelector(".browser-console-source"),
+    ).toBeNull();
   });
 
   it("shows where a message came from and how often, like an inspector", () => {
@@ -182,5 +185,108 @@ describe("PageConsolePanel height", () => {
 
     expect(panel.style.height).toBe("216px");
     expect(readSetting(KEYS.browserConsoleHeight)).toBeNull();
+  });
+});
+
+describe("PageConsolePanel details", () => {
+  const warning = {
+    index: 4,
+    level: "error",
+    text: [
+      "Warning: Maximum update depth exceeded.",
+      "App@http://localhost:1420/src/App.tsx:151:32",
+    ].join("\n"),
+    at: "http://localhost:1420/node_modules/.vite/deps/chunk-P5E.js:521:15",
+    stack: [
+      "printWarning@http://localhost:1420/node_modules/.vite/deps/chunk-P5E.js:521:15",
+      "App@http://localhost:1420/src/App.tsx:151:32",
+    ].join("\n"),
+    count: 989,
+    time: new Date(2026, 10, 5, 10, 15, 4, 120).getTime(),
+    until: new Date(2026, 10, 5, 10, 15, 9, 7).getTime(),
+  };
+
+  function showWarning() {
+    render(
+      <PageConsolePanel
+        entries={[warning]}
+        lost={0}
+        running
+        trouble={null}
+        onClear={() => {}}
+      />,
+    );
+    return screen.getByRole("button", { name: "Показать подробности" });
+  }
+
+  it("shows only the first line until the message is opened", () => {
+    showWarning();
+
+    expect(
+      screen.getByText("Warning: Maximum update depth exceeded."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/App\.tsx:151:32/)).toBeNull();
+    expect(screen.queryByText("Кто вызвал")).toBeNull();
+  });
+
+  it("opens with the whole text, the stack, the place and the time", () => {
+    const toggle = showWarning();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAccessibleName("Скрыть подробности");
+    expect(document.querySelector(".browser-console-text")?.textContent).toBe(
+      warning.text,
+    );
+    expect(screen.getByText("Кто вызвал")).toBeInTheDocument();
+    expect(screen.getByText(/^printWarning@/)).toBeInTheDocument();
+    expect(screen.getByText(warning.at)).toBeInTheDocument();
+    // Число повторов — и в кружке слева, и среди подробностей.
+    expect(
+      screen.getByText("Повторов подряд").nextElementSibling,
+    ).toHaveTextContent("989");
+    expect(screen.getByText("10:15:04.120 – 10:15:09.007")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Кто вызвал")).toBeNull();
+  });
+
+  it("opens by a click anywhere on the line, but not while text is selected", () => {
+    showWarning();
+    const line = screen.getByText("Warning: Maximum update depth exceeded.");
+
+    const selection = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ toString: () => "Maximum" } as Selection);
+    fireEvent.click(line);
+    expect(screen.queryByText("Кто вызвал")).toBeNull();
+
+    selection.mockRestore();
+    fireEvent.click(line);
+    expect(screen.getByText("Кто вызвал")).toBeInTheDocument();
+  });
+
+  it("copies the whole message as text", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    fireEvent.click(showWarning());
+
+    fireEvent.click(screen.getByRole("button", { name: "Скопировать" }));
+
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[error] Warning: Maximum update depth exceeded.",
+      ),
+    );
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("    printWarning@"),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Скопировано" }),
+    ).toBeInTheDocument();
   });
 });

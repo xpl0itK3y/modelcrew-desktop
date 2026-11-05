@@ -414,13 +414,115 @@
 }
 
 .browser-console-entry {
-  display: flex;
-  gap: 8px;
   padding: 2px 10px;
   border-bottom: 1px solid var(--mc-panel-border);
   color: var(--mc-text);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+/* Строка целиком — то, по чему щёлкают, чтобы раскрыть сообщение. */
+.browser-console-line {
+  display: flex;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Стрелка — та же кнопка, что и строка, но её видит клавиатура и
+   читалка экрана. Тихая: в списке из сотни ошибок сотня ярких стрелок
+   спорила бы с текстом. */
+.browser-console-disclosure {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  margin-top: 2.5px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.browser-console-disclosure svg {
+  width: 10px;
+  height: 10px;
+  transition: transform 120ms ease;
+}
+
+.browser-console-line:hover .browser-console-disclosure,
+.browser-console-disclosure:focus-visible {
+  opacity: 1;
+}
+
+.browser-console-disclosure:focus-visible {
+  outline: 1px solid var(--mc-accent);
+  outline-offset: 1px;
+}
+
+.browser-console-entry.is-open .browser-console-disclosure svg {
+  transform: rotate(90deg);
+}
+
+.browser-console-more {
+  color: var(--mc-text-muted);
+}
+
+/* Подробности — под текстом, с того же отступа, что и он: стрелка и
+   значок слева остаются колонкой. */
+.browser-console-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 4px 0 4px 40px;
+  cursor: auto;
+}
+
+.browser-console-details-label {
+  color: var(--mc-text-muted);
+  font-weight: 600;
+}
+
+.browser-console-stack {
+  padding-left: 12px;
+  border-left: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  opacity: 0.85;
+}
+
+.browser-console-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 1px 12px;
+  margin: 0;
+}
+
+.browser-console-facts dt {
+  color: var(--mc-text-muted);
+}
+
+.browser-console-facts dd {
+  margin: 0;
+}
+
+.browser-console-copy {
+  margin-top: 2px;
+  padding: 2px 8px;
+  border: 1px solid var(--mc-panel-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mc-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.browser-console-copy:hover {
+  border-color: var(--mc-accent-border);
+  color: var(--mc-text-bright);
 }
 
 .browser-console-entry.is-error {

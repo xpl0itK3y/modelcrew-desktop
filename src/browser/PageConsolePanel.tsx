@@ -1,5 +1,7 @@
 // Консоль под страницей проекта — как в инструментах разработчика, только
-// проще: сообщения по уровням, фильтр и «очистить».
+// проще: сообщения по уровням, фильтр и «очистить». Сообщение в списке —
+// первой строкой; по щелчку оно раскрывается целиком, со стеком, местом,
+// временем и кнопкой «скопировать».
 //
 // Пишет сюда чужая страница. Поэтому текст только текстом: ни разметки, ни
 // ссылок, ни цветов из `%c` — их запись срезала ещё в самой странице.
@@ -12,9 +14,16 @@ import {
   removeSetting,
   writeSetting,
 } from "../settings/storage";
-import { ClearIcon, ErrorIcon, WarningIcon } from "../ui/Icons";
+import {
+  ChevronRightIcon,
+  ClearIcon,
+  ErrorIcon,
+  WarningIcon,
+} from "../ui/Icons";
 import { ResizeHandle } from "../ui/ResizeHandle";
 import {
+  clockTime,
+  entryReport,
   kindOf,
   matches,
   shortPlace,
@@ -108,6 +117,156 @@ function Source(props: { entry: ConsoleEntry }) {
 }
 
 /**
+ * Какое сообщение раскрыто. Номер сообщения после перезагрузки страницы
+ * начинается заново, поэтому вместе с ним — текст: иначе раскрылось бы
+ * чужое сообщение с тем же номером.
+ */
+function openKey(entry: NumberedEntry): string {
+  return `${entry.index}\n${entry.level}\n${entry.text}`;
+}
+
+/** Сколько держать «Скопировано» на кнопке. */
+const COPIED_MS = 1_500;
+
+/**
+ * Раскрытое сообщение: всё, что о нём известно. Стек — кто позвал
+ * console.error или console.warn; у исключения он уже в самом тексте.
+ */
+function Details(props: { entry: ConsoleEntry }) {
+  const { t } = useI18n();
+  const { entry } = props;
+  const [copied, setCopied] = useState(false);
+  const source = sourceOf(entry);
+  const times = timesOf(entry);
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopied(false), COPIED_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(entryReport(entry));
+      setCopied(true);
+    } catch {
+      // Буфер недоступен — текст всё равно можно выделить и скопировать.
+    }
+  };
+
+  return (
+    <div className="browser-console-details">
+      {entry.stack && (
+        <>
+          <span className="browser-console-details-label">
+            {t("browser.consoleStack")}
+          </span>
+          <span className="browser-console-stack">{entry.stack}</span>
+        </>
+      )}
+      <dl className="browser-console-facts">
+        {entry.at && (
+          <>
+            <dt>{t("browser.consolePlace")}</dt>
+            <dd>{entry.at}</dd>
+          </>
+        )}
+        {source && (
+          <>
+            <dt>{t("browser.consoleOrigin")}</dt>
+            <dd>{t(SOURCES[source.kind], { address: source.address })}</dd>
+          </>
+        )}
+        {times > 1 && (
+          <>
+            <dt>{t("browser.consoleTimes")}</dt>
+            <dd>{times}</dd>
+          </>
+        )}
+        {entry.time !== undefined && (
+          <>
+            <dt>{t("browser.consoleTime")}</dt>
+            <dd>
+              {clockTime(entry.time)}
+              {entry.until !== undefined && ` – ${clockTime(entry.until)}`}
+            </dd>
+          </>
+        )}
+      </dl>
+      <button
+        type="button"
+        className="browser-console-copy"
+        onClick={() => void copy()}
+      >
+        {copied ? t("browser.consoleCopied") : t("browser.consoleCopy")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Строка сообщения. Свёрнутая — первая строка текста: ошибка со стеком в
+ * тридцать кадров иначе занимала бы всю консоль. Щелчок по строке
+ * раскрывает её, но не тогда, когда в ней выделяют текст.
+ */
+function Entry(props: {
+  entry: NumberedEntry;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  const { entry, open } = props;
+  const tag = TAGS[entry.level];
+  const breakAt = entry.text.indexOf("\n");
+  const head = breakAt === -1 ? entry.text : entry.text.slice(0, breakAt);
+  return (
+    <div
+      className={`browser-console-entry is-${kindOf(entry.level)}${
+        open ? " is-open" : ""
+      }`}
+    >
+      <div
+        className="browser-console-line"
+        onClick={() => {
+          if (!window.getSelection()?.toString()) {
+            props.onToggle();
+          }
+        }}
+      >
+        <button
+          type="button"
+          className="browser-console-disclosure"
+          aria-expanded={open}
+          aria-label={t(
+            open ? "browser.consoleHideDetails" : "browser.consoleShowDetails",
+          )}
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onToggle();
+          }}
+        >
+          <ChevronRightIcon aria-hidden />
+        </button>
+        <Mark entry={entry} />
+        {tag && <span className="browser-console-tag">{t(tag)}</span>}
+        <span className="browser-console-text">
+          {open ? entry.text : head}
+          {!open && breakAt !== -1 && (
+            <span className="browser-console-more" aria-hidden>
+              {" …"}
+            </span>
+          )}
+        </span>
+        <Source entry={entry} />
+      </div>
+      {open && <Details entry={entry} />}
+    </div>
+  );
+}
+
+/**
  * Слева, как в инспекторе: повтор — число в кружке, а иначе значок ошибки
  * или предупреждения. У простой записи значка нет.
  */
@@ -146,6 +305,7 @@ export function PageConsolePanel(props: {
   const { t } = useI18n();
   const [filter, setFilter] = useState<ConsoleFilter>("all");
   const [search, setSearch] = useState("");
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   const sectionRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   // Человек внизу — новое подтягиваем. Ушёл наверх читать — не дёргаем.
@@ -270,17 +430,22 @@ export function PageConsolePanel(props: {
           </p>
         )}
         {shown.map((entry) => {
-          const tag = TAGS[entry.level];
+          const key = openKey(entry);
           return (
-            <div
+            <Entry
               key={entry.index}
-              className={`browser-console-entry is-${kindOf(entry.level)}`}
-            >
-              <Mark entry={entry} />
-              {tag && <span className="browser-console-tag">{t(tag)}</span>}
-              <span className="browser-console-text">{entry.text}</span>
-              <Source entry={entry} />
-            </div>
+              entry={entry}
+              open={opened.has(key)}
+              onToggle={() =>
+                setOpened((current) => {
+                  const next = new Set(current);
+                  if (!next.delete(key)) {
+                    next.add(key);
+                  }
+                  return next;
+                })
+              }
+            />
           );
         })}
         {empty && <p className="browser-console-empty">{empty}</p>}

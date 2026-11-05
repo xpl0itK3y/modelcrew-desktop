@@ -598,6 +598,16 @@ pub struct ConsoleMessage {
     /// Сколько раз подряд сообщение повторилось, если больше одного.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<u64>,
+    /// Кто позвал console.error или console.warn: кадры стека, по строке на
+    /// кадр.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack: Option<String>,
+    /// Когда сообщение записано, в миллисекундах эпохи.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<f64>,
+    /// Когда оно повторилось в последний раз, если повторялось.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<f64>,
 }
 
 /// Консоль страницы проекта.
@@ -1166,6 +1176,9 @@ mod tests {
                     worker: None,
                     at: None,
                     count: None,
+                    stack: None,
+                    time: None,
+                    until: None,
                 }],
                 dropped: 3,
                 started: 0.0,

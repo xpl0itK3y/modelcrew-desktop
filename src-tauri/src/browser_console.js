@@ -7,8 +7,9 @@
 // всё, что не загрузилось: картинки и скрипты, запросы fetch и XHR с ошибкой
 // или без ответа, WebSocket, — нарушения политики безопасности (CSP),
 // предупреждения браузера об устаревшем, ошибки фоновых потоков (Worker).
-// У каждого сообщения — место в коде, откуда оно, а повтор подряд, как и в
-// инспекторе, — одна запись со счётчиком. Приложение забирает записанное
+// У каждого сообщения — место в коде, откуда оно, и время, у ошибок и
+// предупреждений console — ещё и стек того, кто их позвал. Повтор подряд,
+// как и в инспекторе, — одна запись со счётчиком и временем последнего раза. Приложение забирает записанное
 // через `__modelcrewConsole()` — строкой JSON.
 //
 // Скрипт ставится и во все рамки страницы — и в свои, и в рамки с других
@@ -38,6 +39,9 @@
   const LENGTH = 2000;
   // Адрес рамки, потока или места в коде — подпись, а не сообщение.
   const LABEL = 300;
+  // Сколько кадров стека хранить. Дальше — рамки фреймворка и планировщика:
+  // кто позвал, видно и так.
+  const FRAMES = 30;
   // Метка сообщений рамки. Без неё главная страница не отличила бы их от
   // своих postMessage, а со своими их перепутала бы сама страница.
   const MARK = "__modelcrewConsoleFrame";
@@ -70,6 +74,7 @@
   const knows = WeakMap.prototype.has;
   const clock = performance;
   const now = clock.now;
+  const wall = Date.now;
   const main = window.top;
   const framed = main !== window;
   const entries = [];
@@ -190,6 +195,17 @@
     }
     return lines;
   };
+  // Откуда позвали — место и стек, как у ошибки console в инспекторе. Стек
+  // из одного кадра повторил бы место — его не храним.
+  const called = () => {
+    const lines = theirs();
+    const place = lines.length > 0 ? placeOf(lines[0]) : null;
+    const extra = { at: place ? spot(place) : "" };
+    if (lines.length > 1) {
+      extra.stack = cut(lines.slice(0, FRAMES).join("\n"));
+    }
+    return extra;
+  };
   // Откуда позвали — как место справа у сообщения в инспекторе.
   const caller = () => {
     for (const line of stackOf(new Mistake())) {
@@ -231,12 +247,12 @@
 
   // Сообщение — в запись. В рамке — главной странице: запись одна на всех.
   // `extra` — чьё оно, если не самой страницы (frame — рамка, worker —
-  // поток), и откуда в коде (at).
+  // поток), откуда в коде (at) и кто позвал (stack).
   const keep = (level, text, extra) => {
     try {
       const entry = { level, text: cut(text) };
       if (extra) {
-        for (const key of ["frame", "worker", "at"]) {
+        for (const key of ["frame", "worker", "at", "stack"]) {
           if (extra[key]) {
             entry[key] = extra[key];
           }
@@ -262,8 +278,12 @@
         last.at === entry.at
       ) {
         last.count = (last.count || 1) + 1;
+        last.until = apply(wall, Date, []);
         return;
       }
+      // Время ставит главная страница: часы рамки с другого домена те же,
+      // но верить ей на слово незачем.
+      entry.time = apply(wall, Date, []);
       entries.push(entry);
       if (entries.length > LIMIT) {
         entries.shift();
@@ -295,13 +315,19 @@
     };
   };
 
-  for (const level of ["log", "info", "warn", "error", "debug"]) {
+  // Ошибке и предупреждению нужен стек: «где» мало, когда console.error
+  // зовёт общий обработчик ошибок. Простой записи хватает места — стек на
+  // каждый log стоил бы странице лишнего.
+  for (const level of ["log", "info", "debug"]) {
     wrap(level, (args) => keep(level, format(args), { at: caller() }));
+  }
+  for (const level of ["warn", "error"]) {
+    wrap(level, (args) => keep(level, format(args), called()));
   }
   wrap("assert", ([condition, ...args]) => {
     if (!condition) {
       const said = args.length > 0 ? format(args) : "console.assert";
-      keep("error", `Assertion failed: ${said}`, { at: caller() });
+      keep("error", `Assertion failed: ${said}`, called());
     }
   });
   for (const name of ["dir", "dirxml", "table"]) {
@@ -710,6 +736,7 @@
             frame,
             worker: label(entry.worker),
             at: label(entry.at),
+            stack: typeof entry.stack === "string" ? cut(entry.stack) : "",
           });
         } catch (_) {
           // То же.

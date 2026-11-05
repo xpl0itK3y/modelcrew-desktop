@@ -21,6 +21,11 @@ export type ConsoleEntry = {
   at?: string;
   // Сколько раз подряд сообщение повторилось, если больше одного.
   count?: number;
+  // Кто позвал console.error или console.warn: кадры стека по строке.
+  stack?: string;
+  // Когда записано и когда повторилось в последний раз — миллисекунды эпохи.
+  time?: number;
+  until?: number;
 };
 
 export type PageConsole = {
@@ -221,9 +226,13 @@ export function matches(
   // «всё из main.js».
   return (
     needle === "" ||
-    [entry.text, entry.frame ?? "", entry.worker ?? "", entry.at ?? ""].some(
-      (said) => said.toLowerCase().includes(needle),
-    )
+    [
+      entry.text,
+      entry.frame ?? "",
+      entry.worker ?? "",
+      entry.at ?? "",
+      entry.stack ?? "",
+    ].some((said) => said.toLowerCase().includes(needle))
   );
 }
 
@@ -251,4 +260,42 @@ export function shortPlace(at: string): string {
   const host = /^[a-z][\w+.-]*:\/\/([^/]+)/i.exec(path)?.[1];
   const file = name || (host ? `${host}/` : path);
   return line ? `${file}:${line}` : file;
+}
+
+/** Время записи по часам человека — с миллисекундами, как в инспекторе. */
+export function clockTime(ms: number): string {
+  const date = new Date(ms);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${two(date.getHours())}:${two(date.getMinutes())}:${two(
+    date.getSeconds(),
+  )}.${String(date.getMilliseconds()).padStart(3, "0")}`;
+}
+
+/**
+ * Сообщение целиком, одним текстом: его вставляют в вопрос агенту или в
+ * задачу. Подписи без перевода — как в стеке и в самих сообщениях: прочтёт
+ * это скорее агент, и язык интерфейса тут ни при чём.
+ */
+export function entryReport(entry: ConsoleEntry): string {
+  const lines = [`[${entry.level}] ${entry.text}`];
+  if (entry.stack) {
+    lines.push(...entry.stack.split("\n").map((frame) => `    ${frame}`));
+  }
+  if (entry.at) {
+    lines.push(`at ${entry.at}`);
+  }
+  const source = sourceOf(entry);
+  if (source) {
+    lines.push(`${source.kind} ${source.address}`);
+  }
+  const times = timesOf(entry);
+  if (times > 1) {
+    lines.push(`repeated ${times} times`);
+  }
+  if (entry.time !== undefined) {
+    const last =
+      entry.until !== undefined ? ` – ${clockTime(entry.until)}` : "";
+    lines.push(`time ${clockTime(entry.time)}${last}`);
+  }
+  return lines.join("\n");
 }
