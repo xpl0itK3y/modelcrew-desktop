@@ -153,6 +153,10 @@ export function FileView(props: {
   /// Есть ли несохранённая правка: по ней вкладка ставит метку, а закрытие
   /// спрашивает подтверждение.
   onDirtyChange?: (dirty: boolean) => void;
+  /// Файл показал своё — текст или ошибку, а не «Загрузка…». Открытый файл
+  /// проявляется с этой минуты: раньше проявлялась бы пустота, а текст потом
+  /// выскакивал рывком.
+  onReady?: () => void;
 }) {
   const { t } = useI18n();
   const { workspaceId, path, onDirtyChange } = props;
@@ -299,6 +303,18 @@ export function FileView(props: {
     // рендере, и эффект, зависящий от неё, перечитывал бы файл без конца —
     // синхронным циклом, в котором окно просто перестаёт отвечать.
   }, [workspaceId, path]);
+
+  // Сообщаем до первого кадра с текстом: колонка успевает спрятать его и
+  // поднять на место, а не показать сперва целиком. Обратный вызов — через
+  // ссылку, как и метка правки: у родителя он новый на каждом рендере.
+  const ready = loaded !== null || error !== null;
+  const announce = useRef(props.onReady);
+  announce.current = props.onReady;
+  useLayoutEffect(() => {
+    if (ready) {
+      announce.current?.();
+    }
+  }, [ready]);
 
   const ending = loaded?.ending ?? "\n";
   const save = useCallback(async () => {

@@ -1762,15 +1762,31 @@ describe("FileEditor opening and closing in motion", () => {
   /// Что и в каком порядке двигали. В jsdom Web Animations нет — без подмены
   /// редактор закрывает вкладки мгновенно, как и должен там, где двигать нечем.
   const moved: Element[] = [];
+  /// Чьё движение остановили на первом кадре и чьё потом пустили.
+  const paused: Element[] = [];
+  const played: Element[] = [];
 
   beforeEach(() => {
     moved.length = 0;
+    paused.length = 0;
+    played.length = 0;
     Object.defineProperty(Element.prototype, "animate", {
       configurable: true,
       writable: true,
       value: function (this: Element) {
-        moved.push(this);
-        return { cancel() {}, finish() {} };
+        const target = this;
+        moved.push(target);
+        return {
+          finished: Promise.resolve(),
+          cancel() {},
+          finish() {},
+          pause() {
+            paused.push(target);
+          },
+          play() {
+            played.push(target);
+          },
+        };
       },
     });
   });
@@ -1817,23 +1833,70 @@ describe("FileEditor opening and closing in motion", () => {
     expect(leaving).toHaveAttribute("aria-hidden", "true");
     expect(leaving).toHaveAttribute("inert");
     expect(moved).toContain(leaving);
-    // Файл, вставший на место закрытого, проявляется.
+    // Файл, вставший на место закрытого, проявляется — и сразу: он давно
+    // прочитан, ждать ему нечего.
     expect(moved).toContain(currentSlot());
+    expect(paused).toEqual([]);
 
     await waitFor(() => expect(strip()).toEqual(["a.txt", "c.txt"]));
   });
 
-  it("fades in a file that was opened, but not one switched to", async () => {
+  it("unrolls an opened tab and raises its file once the text is read", async () => {
     const view = render(show(["a.txt"], "a.txt"));
     await screen.findByLabelText("a.txt");
     expect(moved).toEqual([]);
 
     view.rerender(show(["a.txt", "b.txt"], "b.txt"));
-    expect(moved).toEqual([currentSlot()]);
+    const opened = [...document.querySelectorAll(".file-tab")].pop();
+    expect(opened?.querySelector(".file-tab-name")?.textContent).toBe("b.txt");
+    expect(moved).toEqual([opened, currentSlot()]);
+    // Пока на месте файла «Загрузка…», он стоит невидимым на первом кадре.
+    expect(paused).toEqual([currentSlot()]);
+    expect(played).toEqual([]);
+
+    await screen.findByLabelText("b.txt");
+    expect(played).toEqual([currentSlot()]);
+    // Развернулась — и отпущена: содержимое снова в своей ширине, край не режет.
+    expect((opened as HTMLElement).style.overflow).toBe("");
+    for (const child of (opened as HTMLElement).children) {
+      expect((child as HTMLElement).style.flex).toBe("");
+    }
 
     moved.length = 0;
     view.rerender(show(["a.txt", "b.txt"], "a.txt"));
     expect(moved).toEqual([]);
+  });
+
+  it("shows a file that reads too long as it is", async () => {
+    readWorkspaceFile.mockImplementation((_workspace: string, path: string) =>
+      path === "slow.txt" ? new Promise(() => {}) : Promise.resolve(file("текст")),
+    );
+    const view = render(show(["a.txt"], "a.txt"));
+    await screen.findByLabelText("a.txt");
+
+    view.rerender(show(["a.txt", "slow.txt"], "slow.txt"));
+    expect(paused).toEqual([currentSlot()]);
+
+    // Пустая колонка выглядела бы зависшей: не дождавшись, проявляем «Загрузка…».
+    await waitFor(() => expect(played).toEqual([currentSlot()]), {
+      timeout: 1000,
+    });
+    expect(screen.queryByLabelText("slow.txt")).toBeNull();
+  });
+
+  it("stops waiting for a file once another one is shown", async () => {
+    readWorkspaceFile.mockImplementation((_workspace: string, path: string) =>
+      path === "slow.txt" ? new Promise(() => {}) : Promise.resolve(file("текст")),
+    );
+    const view = render(show(["a.txt"], "a.txt"));
+    await screen.findByLabelText("a.txt");
+
+    view.rerender(show(["a.txt", "slow.txt"], "slow.txt"));
+    const slow = currentSlot();
+    view.rerender(show(["a.txt", "slow.txt"], "a.txt"));
+
+    // Ушли с него — держать его невидимым больше незачем.
+    expect(played).toEqual([slow]);
   });
 
   it("brings back a fresh tab when the leaving file is opened again", async () => {

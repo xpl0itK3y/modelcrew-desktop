@@ -5,7 +5,7 @@
 // README, то, что агент только что нарисовал. Открывать их приходилось в
 // стороннем просмотрщике, и картинка выпадала из проекта.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { localizeBackendError, useI18n } from "../i18n";
 import { parentOf, watchWorkspaceTree } from "../files/fileTree";
 import { mediaSource, readWorkspaceMedia, type FileMedia } from "../files/media";
@@ -30,6 +30,9 @@ export function ImageView(props: {
   /// Эту вкладку сейчас видно. Спрятанная за картинкой не ходит: она весит
   /// столько же, сколько файл, и держать её ради невидимой вкладки незачем.
   visible?: boolean;
+  /// Картинка нарисована — или ясно, что рисовать нечего. Открытый файл
+  /// проявляется с этой минуты, а не пока на его месте пусто.
+  onReady?: () => void;
 }) {
   const { locale, t } = useI18n();
   const { workspaceId, path } = props;
@@ -113,6 +116,16 @@ export function ImageView(props: {
   }, [visible]);
 
   const shown = media !== null && media.exists && !media.tooLarge && !broken;
+  // Ждём не ответа диска, а самой картинки: размеры она сообщает, когда
+  // разобрана, и проявлять раньше значило бы проявлять пустую клетку.
+  const ready = error !== null || (media !== null && (!shown || pixels !== null));
+  const announce = useRef(props.onReady);
+  announce.current = props.onReady;
+  useLayoutEffect(() => {
+    if (ready) {
+      announce.current?.();
+    }
+  }, [ready]);
   const meta: string[] = [];
   if (pixels) {
     meta.push(`${pixels.width} × ${pixels.height}`);

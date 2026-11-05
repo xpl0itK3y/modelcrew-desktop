@@ -36,10 +36,73 @@ const MAXIMIZE_MS = 200;
 // здесь меняется одна вкладка.
 const TAB_MS = 160;
 
+// Сколько разворачивается вкладка и поднимается на место открытый файл.
+// Дольше закрытия: уходящее не разглядывают, а появившееся — да, и глазу
+// нужно время понять, откуда оно взялось.
+const OPEN_MS = 220;
+
+// Открытое быстро выходит и мягко садится на место.
+const SETTLE = "cubic-bezier(0.2, 0, 0, 1)";
+
+// Сколько открытый файл ждёт своего текста невидимым. Обычно текст приходит
+// за пару десятков миллисекунд; большой файл читается дольше, и пустая
+// колонка всё это время выглядела бы зависшей — тогда проявляем что есть.
+const READY_WAIT_MS = 250;
+
 /// Двигать есть чем и можно: движок умеет Web Animations, а человек не просил
 /// обходиться без движения. Без этого закрытие остаётся мгновенным, как было.
 function moving(): boolean {
   return typeof Element.prototype.animate === "function" && !reducedMotion();
+}
+
+/// Вкладка во всю свою ширину и она же схлопнутая. От настоящей ширины, а не
+/// от предела в 200px: короткая вкладка иначе половину времени стояла бы на
+/// месте. Отступ и рамка меняются вместе с ней, а зазор до соседа съедает
+/// отрицательное поле — когда вкладку снимут или отпустят, ничего не дёрнется.
+///
+/// Содержимое замирает в своей ширине: меняется вкладка, а имя в ней уходит
+/// за край или выходит из-за него. Иначе имя таяло бы многоточием, буква за
+/// буквой. `release` отпускает его обратно.
+function tabFrames(element: HTMLElement): {
+  full: Keyframe;
+  gone: Keyframe;
+  release: () => void;
+} {
+  const children = [...element.children].filter(
+    (child): child is HTMLElement => child instanceof HTMLElement,
+  );
+  const widths = children.map((child) => child.getBoundingClientRect().width);
+  children.forEach((child, at) => {
+    child.style.flex = `0 0 ${widths[at]}px`;
+  });
+  const style = getComputedStyle(element);
+  const inner =
+    element.getBoundingClientRect().width -
+    parseFloat(style.paddingLeft) -
+    parseFloat(style.paddingRight) -
+    parseFloat(style.borderLeftWidth) -
+    parseFloat(style.borderRightWidth);
+  return {
+    full: {
+      maxWidth: `${Math.max(0, inner)}px`,
+      paddingRight: style.paddingRight,
+      borderRightWidth: style.borderRightWidth,
+      marginRight: "0px",
+      opacity: 1,
+    },
+    gone: {
+      maxWidth: "0px",
+      paddingRight: "0px",
+      borderRightWidth: "0px",
+      marginRight: "-1px",
+      opacity: 0,
+    },
+    release: () => {
+      for (const child of children) {
+        child.style.flex = "";
+      }
+    },
+  };
 }
 
 /// Ключ уходящей вкладки — не её путь: откроют файл снова, пока она уходит, и
@@ -194,9 +257,47 @@ export function FileEditor(props: {
   const drawn = useRef<{ tabs: ShownTab[]; current: string | null } | null>(
     null,
   );
+
+  // Какие файлы уже показали своё. Открытый проявляется, когда прочитан: до
+  // этого на его месте «Загрузка…», и проявлялась бы она, а текст выскакивал
+  // бы потом рывком — по виду ничего и не проявлялось.
+  const ready = useRef(new Set<string>());
+  // Проявление, которое ждёт текста: стоит на первом кадре и держит файл
+  // невидимым, пока его не прочли.
+  const waiting = useRef<{
+    path: string;
+    animation: Animation;
+    timer: number;
+  } | null>(null);
+  const release = () => {
+    const pending = waiting.current;
+    if (!pending) {
+      return;
+    }
+    waiting.current = null;
+    window.clearTimeout(pending.timer);
+    pending.animation.play();
+  };
+  const markReady = (path: string) => {
+    ready.current.add(path);
+    if (waiting.current?.path === path) {
+      release();
+    }
+  };
+  useEffect(() => () => window.clearTimeout(waiting.current?.timer), []);
+
   useLayoutEffect(() => {
     const before = drawn.current;
     drawn.current = { tabs, current };
+    const open = tabs.filter((tab) => !tab.closing);
+    // Закрытый файл, открытый снова, читается заново: прежняя отметка о нём
+    // уже ничего не значит.
+    const kept = new Set(open.map((tab) => tab.path));
+    for (const path of ready.current) {
+      if (!kept.has(path)) {
+        ready.current.delete(path);
+      }
+    }
     // Первый показ играет сама колонка: она выезжает вместе с вкладкой.
     if (!before || !moving()) {
       return;
@@ -204,7 +305,9 @@ export function FileEditor(props: {
     const leftBefore = new Set(
       before.tabs.filter((tab) => tab.closing).map((tab) => tab.path),
     );
-    const openBefore = before.tabs.filter((tab) => !tab.closing).length;
+    const openBefore = new Set(
+      before.tabs.filter((tab) => !tab.closing).map((tab) => tab.path),
+    );
     let closed = false;
     for (const tab of tabs) {
       if (!tab.closing || leftBefore.has(tab.path)) {
@@ -215,62 +318,69 @@ export function FileEditor(props: {
       if (!element) {
         continue;
       }
-      // Ширину сжимаем от настоящей, а не от предела в 200px: короткая вкладка
-      // иначе половину времени стояла бы на месте. Отступ и рамку — вместе с
-      // ней, а зазор до соседа съедает отрицательное поле, и когда вкладку
-      // снимут, ничего не дёрнется.
-      //
-      // Содержимое замирает в своей ширине: сжимается вкладка, а имя в ней
-      // уходит за край. Иначе имя таяло бы многоточием, буква за буквой.
-      const children = [...element.children].filter(
-        (child): child is HTMLElement => child instanceof HTMLElement,
-      );
-      const widths = children.map((child) => child.getBoundingClientRect().width);
-      children.forEach((child, at) => {
-        child.style.flex = `0 0 ${widths[at]}px`;
+      const frames = tabFrames(element);
+      element.animate([frames.full, frames.gone], {
+        duration: TAB_MS,
+        easing: "cubic-bezier(0.4, 0, 1, 1)",
+        fill: "forwards",
       });
-      const style = getComputedStyle(element);
-      const inner =
-        element.getBoundingClientRect().width -
-        parseFloat(style.paddingLeft) -
-        parseFloat(style.paddingRight) -
-        parseFloat(style.borderLeftWidth) -
-        parseFloat(style.borderRightWidth);
-      element.animate(
-        [
-          {
-            maxWidth: `${Math.max(0, inner)}px`,
-            paddingRight: style.paddingRight,
-            borderRightWidth: style.borderRightWidth,
-            marginRight: "0px",
-            opacity: 1,
-          },
-          {
-            maxWidth: "0px",
-            paddingRight: "0px",
-            borderRightWidth: "0px",
-            marginRight: "-1px",
-            opacity: 0,
-          },
-        ],
-        {
-          duration: TAB_MS,
-          easing: "cubic-bezier(0.4, 0, 1, 1)",
-          fill: "forwards",
-        },
-      );
+    }
+    // Открытая вкладка разворачивается из ничего на своём месте — так же, как
+    // закрытая там сжимается. По переименованию число вкладок то же, и
+    // новое имя встаёт на место старого сразу: разворачивать там нечего.
+    const opened = open.length > openBefore.size;
+    if (opened) {
+      for (const tab of open) {
+        const element = tabElements.current.get(tabKey(tab));
+        if (openBefore.has(tab.path) || !element) {
+          continue;
+        }
+        const frames = tabFrames(element);
+        element.style.overflow = "hidden";
+        const growth = element.animate([frames.gone, frames.full], {
+          duration: OPEN_MS,
+          easing: SETTLE,
+        });
+        // Развернулась — отпускаем: замершее имя не дало бы вкладке вырасти,
+        // когда на ней появится точка несохранённой правки. Отменили — тоже.
+        const settle = () => {
+          frames.release();
+          element.style.overflow = "";
+        };
+        void growth.finished.then(settle, settle);
+      }
+    }
+    // Видимым стал другой файл — тот, что ждал текста, больше не ждёт.
+    if (current !== before.current) {
+      release();
     }
     // Файл проявляется, когда его открыли или когда он встал на место
     // закрытого. Простое переключение вкладок остаётся мгновенным: по ним
     // ходят быстро, и ждать каждый раз, пока файл проявится, утомительно.
-    const opened = tabs.filter((tab) => !tab.closing).length > openBefore;
-    if ((opened || closed) && current !== null && current !== before.current) {
-      slotElements.current
-        .get(current)
-        ?.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: TAB_MS,
-          easing: "ease-out",
-        });
+    const slot = current === null ? undefined : slotElements.current.get(current);
+    if ((opened || closed) && slot && current !== before.current) {
+      // Открытый поднимается на место. Вставший на место закрытого только
+      // проявляется: он здесь уже был, его просто не было видно.
+      const entrance = opened
+        ? slot.animate(
+            [
+              { opacity: 0, transform: "translateY(8px)" },
+              { opacity: 1, transform: "none" },
+            ],
+            { duration: OPEN_MS, easing: SETTLE },
+          )
+        : slot.animate([{ opacity: 0 }, { opacity: 1 }], {
+            duration: TAB_MS,
+            easing: "ease-out",
+          });
+      if (current !== null && !ready.current.has(current)) {
+        entrance.pause();
+        waiting.current = {
+          path: current,
+          animation: entrance,
+          timer: window.setTimeout(release, READY_WAIT_MS),
+        };
+      }
     }
   }, [tabs, current]);
 
@@ -440,12 +550,14 @@ export function FileEditor(props: {
               workspaceId={props.workspaceId}
               path={path}
               visible={path === current}
+              onReady={() => markReady(path)}
             />
           ) : (
             <FileView
               workspaceId={props.workspaceId}
               path={path}
               visible={path === current}
+              onReady={() => markReady(path)}
               onDirtyChange={(isDirty) =>
                 setDirty((marked) => {
                   if (marked.has(path) === isDirty) {

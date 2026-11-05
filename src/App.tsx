@@ -1078,7 +1078,10 @@ export default function App() {
             workspaceId={workspaces.activeId}
             // Пока колонка уезжает, показываем последний состав вкладок:
             // опустевшая на кадр колонка мигнула бы пустотой перед уходом.
-            files={editorPresence.item}
+            // Открытую же — прямо из состояния: presence догоняет список
+            // эффектом, на рендер позже, и в этот рендер видимым становился
+            // файл, которого в списке ещё нет, — редактор показывал первый.
+            files={openFiles.length > 0 ? openFiles : editorPresence.item}
             activePath={activeFilePath}
             onSelect={setActiveFilePath}
             onClose={dropFiles}
