@@ -902,6 +902,55 @@ describe("FileEditor closing from the keyboard", () => {
   });
 });
 
+describe("FileView on a Windows file", () => {
+  async function opened(content: string) {
+    readWorkspaceFile.mockResolvedValue(file(content));
+    writeWorkspaceFile.mockResolvedValue(undefined);
+    open("app.ts");
+    const field = (await screen.findByLabelText("app.ts")) as HTMLTextAreaElement;
+    // Поле само держит строки через LF, какими бы они ни были в файле.
+    await waitFor(() => expect(field).toHaveValue(toLf(content)));
+    return field;
+  }
+
+  function toLf(text: string) {
+    return text.replace(/\r\n/g, "\n");
+  }
+
+  it("saves a CRLF file as CRLF", async () => {
+    const field = await opened("первая\r\nвторая\r\n");
+
+    fireEvent.change(field, { target: { value: "первая\nвторая\nтретья\n" } });
+    fireEvent.keyDown(field, { key: "s", code: "KeyS", ctrlKey: true });
+
+    // Раньше первая же правка писала весь файл в LF, и git видел изменённой
+    // каждую его строку.
+    await waitFor(() =>
+      expect(writeWorkspaceFile).toHaveBeenCalledWith(
+        "w1",
+        "app.ts",
+        "первая\r\nвторая\r\nтретья\r\n",
+      ),
+    );
+  });
+
+  it("puts the indent where the cursor is, not a character per line off", async () => {
+    const field = await opened("a\r\nb\r\nc");
+    field.setSelectionRange(5, 5);
+
+    fireEvent.keyDown(field, { key: "Tab", code: "Tab" });
+
+    // По буферу с CRLF курсор на конце третьей строки — это середина второй.
+    expect(field).toHaveValue("a\nb\nc  ");
+  });
+
+  it("does not call an untouched CRLF file unsaved", async () => {
+    await opened("a\r\nb\r\n");
+
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+  });
+});
+
 describe("FileView beside git", () => {
   function marks(): string[] {
     return [...document.querySelectorAll(".file-mark")].map((mark) =>
@@ -924,6 +973,18 @@ describe("FileView beside git", () => {
       exists: true,
     });
   }
+
+  it("compares a CRLF working copy with the LF that git keeps", async () => {
+    // Так на Windows с autocrlf: в истории LF, в рабочей копии CRLF.
+    inRepo("первая\nтретья");
+    readWorkspaceFile.mockResolvedValue(file("первая\r\nвторая\r\nтретья"));
+    open();
+    await waitFor(() =>
+      expect(screen.getByLabelText("a.txt")).toHaveValue("первая\nвторая\nтретья"),
+    );
+
+    await waitFor(() => expect(marks()).toEqual(["is-added"]));
+  });
 
   it("marks the line that is not committed yet, and only it", async () => {
     inRepo("первая\nтретья");

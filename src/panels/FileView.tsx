@@ -46,6 +46,12 @@ import {
   type Edit,
 } from "../files/editing";
 import { imageMimeOf, svgSource } from "../files/media";
+import {
+  lineEndingOf,
+  toLf,
+  withEnding,
+  type LineEnding,
+} from "../files/lineEndings";
 import { useLineMarks } from "../git/useLineMarks";
 import { MarkdownView } from "./MarkdownView";
 import {
@@ -61,7 +67,14 @@ import { fileName } from "../crew/claimLabel";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 type Loaded = {
+  /// Текст с диска в том виде, в каком его держит поле: с переводами строк LF.
   text: string;
+  /// Сам файл на диске, байт в байт. По нему узнаём, менялся ли файл: по тексту
+  /// в LF правка одних переводов строк была бы не видна, а файл со смешанными
+  /// переводами всякий раз казался бы изменённым.
+  raw: string;
+  /// Каким переводом строки файл записан — тем же он и сохраняется.
+  ending: LineEnding;
   /// Почему файл нельзя править: двоичный, слишком большой или его уже нет.
   /// Храним признак, а не готовую строку — строку собирает отрисовка, и при
   /// смене языка она меняется вместе со всем остальным.
@@ -93,6 +106,15 @@ function blockedBy(file: FileContent): Loaded["blocked"] {
     return "binary";
   }
   return file.tooLarge ? "tooLarge" : null;
+}
+
+function loadedFrom(file: FileContent): Loaded {
+  return {
+    text: toLf(file.content),
+    raw: file.content,
+    ending: lineEndingOf(file.content),
+    blocked: blockedBy(file),
+  };
 }
 
 export function FileView(props: {
@@ -234,8 +256,9 @@ export function FileView(props: {
         if (cancelled) {
           return;
         }
-        setLoaded({ text: file.content, blocked: blockedBy(file) });
-        setText(file.content);
+        const next = loadedFrom(file);
+        setLoaded(next);
+        setText(next.text);
       })
       .catch((cause) => {
         if (!cancelled) {
@@ -250,15 +273,17 @@ export function FileView(props: {
     // синхронным циклом, в котором окно просто перестаёт отвечать.
   }, [workspaceId, path]);
 
+  const ending = loaded?.ending ?? "\n";
   const save = useCallback(async () => {
     if (!dirtyRef.current || saving) {
       return;
     }
     setSaving(true);
     setError(null);
+    const raw = withEnding(text, ending);
     try {
-      await writeWorkspaceFile(workspaceId, path, text);
-      setLoaded((current) => (current ? { ...current, text } : current));
+      await writeWorkspaceFile(workspaceId, path, raw);
+      setLoaded((current) => (current ? { ...current, text, raw } : current));
       // Поверх писали осознанно: спрашивали, ответили.
       setStale(null);
     } catch (cause) {
@@ -266,7 +291,7 @@ export function FileView(props: {
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, path, text, saving]);
+  }, [workspaceId, path, text, ending, saving]);
 
   // Тот же файл правит агент в соседней панели — ради этого приложение и
   // существует. Сохранение пишет буфер целиком, так что версия агента исчезала
@@ -284,7 +309,7 @@ export function FileView(props: {
     void readWorkspaceFile(workspaceId, path)
       .then((file) => {
         const base = loadedRef.current;
-        if (!base || file.content === base.text) {
+        if (!base || file.content === base.raw) {
           // Ещё не прочитали или пришло наше же сохранение.
           return;
         }
@@ -295,8 +320,9 @@ export function FileView(props: {
         }
         // Нетронутый буфер догоняет диск сам: это то же самое, что открыть
         // файл заново, только без щелчка.
-        setLoaded({ text: file.content, blocked: blockedBy(file) });
-        setText(file.content);
+        const next = loadedFrom(file);
+        setLoaded(next);
+        setText(next.text);
       })
       .catch(() => {
         // Перечитывание фоновое: не прочиталось — покажем прежнее.
@@ -338,8 +364,9 @@ export function FileView(props: {
     if (!stale) {
       return;
     }
-    setLoaded({ text: stale.content, blocked: blockedBy(stale) });
-    setText(stale.content);
+    const next = loadedFrom(stale);
+    setLoaded(next);
+    setText(next.text);
     setStale(null);
   };
 

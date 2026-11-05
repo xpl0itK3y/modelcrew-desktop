@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { diffLines, type LineMark } from "./lineDiff";
+import { toLf } from "../files/lineEndings";
 import {
   readHeadFile,
   repoPathOf,
@@ -64,10 +65,13 @@ export function useLineMarks(
           // Двоичное и слишком большое сравнивать нечем: у первого нет строк,
           // у второго нет содержимого. И то, и другое — «меток нет», а не
           // «файл новый целиком».
+          // Переводы строк — к виду поля: на Windows git отдаёт из истории LF,
+          // а в рабочей копии лежит CRLF, и без этого изменённой считалась бы
+          // каждая строка файла.
           setCommitted(
             file.isBinary || file.tooLarge
               ? null
-              : { text: file.exists ? file.content : null },
+              : { text: file.exists ? toLf(file.content) : null },
           );
         })
         .catch(() => {
