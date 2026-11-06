@@ -10,7 +10,6 @@ Six agents, six panels — with live git diffs, per-panel history,
 and a nudge the moment one of them needs you.
 
 [![Release](https://img.shields.io/github/v/release/xpl0itK3y/modelcrew-desktop?label=release&color=e8567c)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
-[![Downloads](https://img.shields.io/github/downloads/xpl0itK3y/modelcrew-desktop/total?label=downloads&color=4fb864)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/xpl0itK3y/modelcrew-desktop/ci.yml?branch=main&label=CI)](https://github.com/xpl0itK3y/modelcrew-desktop/actions/workflows/ci.yml)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-supported-5c6472)](https://github.com/xpl0itK3y/modelcrew-desktop/releases)
 [![License](https://img.shields.io/badge/license-MIT-6f7bde)](LICENSE)
