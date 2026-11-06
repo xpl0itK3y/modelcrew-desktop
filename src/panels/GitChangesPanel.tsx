@@ -28,6 +28,7 @@ import {
   SyncStatus,
 } from "./git/BranchBar";
 import { HistoryView } from "./git/HistoryView";
+import { warmHistory } from "./git/history/historyCache";
 import { OperationBanner } from "./git/OperationBanner";
 import { GitErrorDialog } from "./git/GitErrorDialog";
 import { GitMissingNotice, NotARepoNotice } from "./git/GitOnboarding";
@@ -535,6 +536,18 @@ function GitChangesWorkspaceView(props: {
                   role="tab"
                   aria-selected={view === tab}
                   className={`git-tab ${view === tab ? "is-active" : ""}`}
+                  // Журнал просим, пока курсор только подбирается к вкладке:
+                  // к клику он обычно уже готов.
+                  onPointerEnter={
+                    tab === "history"
+                      ? () => warmHistory(workspaceId)
+                      : undefined
+                  }
+                  onFocus={
+                    tab === "history"
+                      ? () => warmHistory(workspaceId)
+                      : undefined
+                  }
                   onClick={() => {
                     // Метки «свежих» карточек сбрасываются, чтобы въезд
                     // не переигрывался при каждом переключении вкладок.

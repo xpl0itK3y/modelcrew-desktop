@@ -1,6 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { describeBackendError, useI18n, type BackendFailure } from "../../i18n";
-import { refreshGitChanges, subscribeGitChanges } from "../../git/gitChanges";
+import {
+  refreshGitChanges,
+  subscribeGitChanges,
+  type GitChangesSummary,
+} from "../../git/gitChanges";
 import { switchBranch, type GitRefKind } from "../../git/gitBranches";
 import { fetchLog, type GitCommitInfo } from "../../git/gitLog";
 import { formatRelativeTime } from "../../git/relativeTime";
@@ -17,8 +28,37 @@ import { AuthorAvatar } from "./history/AuthorAvatar";
 import { CommitActionsMenu } from "./history/CommitActionsMenu";
 import { CommitDetails, RevealHeight } from "./history/CommitDetails";
 import { CommitGraph, RefBadge } from "./history/CommitGraph";
+import {
+  HISTORY_PAGE,
+  fetchHistory,
+  recentHistory,
+} from "./history/historyCache";
 import { RewordEditor } from "./history/RewordEditor";
 import { GitErrorDialog } from "./GitErrorDialog";
+
+// Что из сводки видно в самом журнале. Сводка меняется и от каждой правки
+// файла: пока агент пишет код, она обновлялась непрерывно, и вкладка всякий
+// раз заново просила у git историю и перерисовывала все строки. Журнал от
+// правок не меняется — перечитываем его, только когда сдвинулся HEAD, ветка
+// или её расхождение с сервером.
+function historyKey(summary: GitChangesSummary): string {
+  return JSON.stringify([
+    summary.isRepo,
+    summary.branch,
+    summary.headHash,
+    summary.upstreamRef,
+    summary.ahead,
+    summary.behind,
+  ]);
+}
+
+// Git вернул то же, что уже на экране, — перерисовывать нечего.
+function sameLog(shown: GitCommitInfo[], next: GitCommitInfo[]): boolean {
+  return (
+    shown.length === next.length &&
+    JSON.stringify(shown) === JSON.stringify(next)
+  );
+}
 
 export function HistoryView(props: {
   workspaceId: string;
@@ -31,8 +71,12 @@ export function HistoryView(props: {
   headHash?: string;
   upstreamBranch?: string;
 }) {
-  const { locale, t } = useI18n();
-  const [commits, setCommits] = useState<GitCommitInfo[] | null>(null);
+  const { t } = useI18n();
+  // Журнал с прошлого открытия рисуется сразу; свежий подменит его, если
+  // за это время что-то изменилось.
+  const [commits, setCommits] = useState<GitCommitInfo[] | null>(() =>
+    recentHistory(props.workspaceId),
+  );
   const [graphMode, setGraphMode] = useState(true);
   // «Все ветки»: включает локальные и серверные ветки (без stash/tag-only
   // служебных историй), граф становится насыщенным, как в редакторах.
@@ -52,7 +96,7 @@ export function HistoryView(props: {
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
   // Сколько коммитов запрашивать; «Показать ещё» наращивает порциями.
-  const [limit, setLimit] = useState(100);
+  const [limit, setLimit] = useState(HISTORY_PAGE);
   const [loadingMore, setLoadingMore] = useState(false);
   // Открытое меню действий над коммитом: коммит и точка привязки на экране.
   const [menu, setMenu] = useState<{
@@ -68,60 +112,100 @@ export function HistoryView(props: {
   const logRequestRef = useRef(0);
   // Детали остаются смонтированными на время exit-анимации при сворачивании.
   const detailsPresence = useAnimatedPresence(expandedHash, 240);
-  const openMenu = (commit: GitCommitInfo, x: number, y: number) =>
-    setMenu({ commit, x, y });
+  // Строки графа и списка не перерисовываются, пока не изменились они сами,
+  // поэтому всё, что им передаётся, держим одними и теми же функциями.
+  const openMenu = useCallback(
+    (commit: GitCommitInfo, x: number, y: number) => setMenu({ commit, x, y }),
+    [],
+  );
+  const toggleCommit = useCallback(
+    (commit: GitCommitInfo) =>
+      setExpandedHash((current) =>
+        current === commit.hash ? null : commit.hash,
+      ),
+    [],
+  );
+  const openChangesRef = useRef(props.onOpenChanges);
+  openChangesRef.current = props.onOpenChanges;
+  const openChanges = useCallback(() => openChangesRef.current(), []);
   // Коммиты, появившиеся при открытой вкладке, въезжают с анимацией;
   // первоначальный список и догруженные «Показать ещё» (они старше уже
-  // виденных) показываются сразу.
+  // виденных) показываются сразу. Точку отсчёта задаёт первый ответ git, а
+  // не журнал с прошлого открытия: коммит, сделанный, пока вкладка была
+  // закрыта, — не новость этой минуты.
   const knownHashesRef = useRef<Set<string> | null>(null);
   const arrivedHashesRef = useRef(new Set<string>());
   const newestEpochRef = useRef(0);
-  if (commits !== null) {
-    if (knownHashesRef.current === null) {
-      knownHashesRef.current = new Set(commits.map((commit) => commit.hash));
-      newestEpochRef.current = commits[0]?.epochMs ?? 0;
-    } else {
-      for (const commit of commits) {
-        if (!knownHashesRef.current.has(commit.hash)) {
-          knownHashesRef.current.add(commit.hash);
-          if (commit.epochMs >= newestEpochRef.current) {
-            arrivedHashesRef.current.add(commit.hash);
-          }
+  if (commits !== null && knownHashesRef.current !== null) {
+    for (const commit of commits) {
+      if (!knownHashesRef.current.has(commit.hash)) {
+        knownHashesRef.current.add(commit.hash);
+        if (commit.epochMs >= newestEpochRef.current) {
+          arrivedHashesRef.current.add(commit.hash);
         }
       }
-      newestEpochRef.current = Math.max(
-        newestEpochRef.current,
-        commits[0]?.epochMs ?? 0,
-      );
     }
+    newestEpochRef.current = Math.max(
+      newestEpochRef.current,
+      commits[0]?.epochMs ?? 0,
+    );
   }
 
   useEffect(() => {
     let cancelled = false;
+    const usual = limit === HISTORY_PAGE && !allBranches && !filtering;
+    const show = (request: number, log: GitCommitInfo[], answered = true) => {
+      if (cancelled || logRequestRef.current !== request) {
+        return;
+      }
+      // Пустой список от ошибки — не точка отсчёта: иначе вся история, когда
+      // git ответит, въехала бы как только что сделанная.
+      if (knownHashesRef.current === null && answered) {
+        knownHashesRef.current = new Set(log.map((commit) => commit.hash));
+        newestEpochRef.current = log[0]?.epochMs ?? 0;
+      }
+      // Сотня строк графа — заметная работа. В переходе React делает её
+      // кусками между кадрами и не останавливает анимацию вкладки на
+      // середине; тот же журнал оставляет на экране прежний массив, и
+      // перерисовки нет вовсе.
+      startTransition(() => {
+        setCommits((current) =>
+          current !== null && sameLog(current, log) ? current : log,
+        );
+        setLoadingMore(false);
+      });
+    };
     const load = () => {
       const request = ++logRequestRef.current;
-      fetchLog(
-        props.workspaceId,
-        limit,
-        allBranches,
-        filtering ? { [searchField]: search } : undefined,
-      )
-        .then((log) => {
-          if (!cancelled && logRequestRef.current === request) {
-            setCommits(log);
-            setLoadingMore(false);
-          }
-        })
-        .catch(() => {
-          if (!cancelled && logRequestRef.current === request) {
-            setCommits([]);
-            setLoadingMore(false);
-          }
-        });
+      (usual
+        ? fetchHistory(props.workspaceId)
+        : fetchLog(
+            props.workspaceId,
+            limit,
+            allBranches,
+            filtering ? { [searchField]: search } : undefined,
+          )
+      ).then(
+        (log) => show(request, log),
+        () => show(request, [], false),
+      );
     };
     load();
     // Новый коммит (из панели или терминала) сразу появляется в истории.
-    const unsubscribe = subscribeGitChanges(props.workspaceId, load);
+    // Сводку, что уже есть в памяти, подписка отдаёт тут же, не дожидаясь
+    // git: журнал под неё только что запрошен строкой выше, и второй запрос
+    // лишь отбросил бы первый ответ, продлив заглушку загрузки.
+    let subscribing = true;
+    let shownKey: string | null = null;
+    const unsubscribe = subscribeGitChanges(props.workspaceId, (summary) => {
+      const key = historyKey(summary);
+      const changed = key !== shownKey;
+      shownKey = key;
+      if (changed && !subscribing) {
+        load();
+      }
+    });
+    subscribing = false;
     return () => {
       cancelled = true;
       logRequestRef.current += 1;
@@ -158,7 +242,7 @@ export function HistoryView(props: {
   const canLoadMore =
     commits !== null && commits.length >= limit && limit < 500;
 
-  const copyHash = async (commit: GitCommitInfo) => {
+  const copyHash = useCallback(async (commit: GitCommitInfo) => {
     try {
       await navigator.clipboard.writeText(commit.hash);
       setCopiedHash(commit.hash);
@@ -166,19 +250,23 @@ export function HistoryView(props: {
     } catch {
       // Буфер обмена недоступен — молча.
     }
-  };
+  }, []);
 
   // Переключение на ветку/тег по клику на бейдж; ошибка (грязное дерево и т.п.)
   // показывается баннером.
-  const switchTo = async (name: string, kind: GitRefKind) => {
-    try {
-      await switchBranch(props.workspaceId, name, kind);
-      void refreshGitChanges(props.workspaceId);
-      setReloadNonce((value) => value + 1);
-    } catch (error) {
-      setActionError(describeBackendError(error));
-    }
-  };
+  const { workspaceId } = props;
+  const switchTo = useCallback(
+    (name: string, kind: GitRefKind) => {
+      switchBranch(workspaceId, name, kind).then(
+        () => {
+          void refreshGitChanges(workspaceId);
+          setReloadNonce((value) => value + 1);
+        },
+        (error: unknown) => setActionError(describeBackendError(error)),
+      );
+    },
+    [workspaceId],
+  );
 
   if (commits === null) {
     return <div className="git-empty">{t("git.loading")}</div>;
@@ -217,7 +305,7 @@ export function HistoryView(props: {
           aria-pressed={allBranches}
           title={t("git.allBranchesHint")}
           onClick={() => {
-            setLimit(100);
+            setLimit(HISTORY_PAGE);
             setAllBranches((value) => !value);
           }}
         >
@@ -245,7 +333,7 @@ export function HistoryView(props: {
           value={searchDraft}
           spellCheck={false}
           onChange={(event) => {
-            setLimit(100);
+            setLimit(HISTORY_PAGE);
             setSearchDraft(event.target.value);
           }}
           onKeyDown={(event) => {
@@ -270,16 +358,14 @@ export function HistoryView(props: {
             commits={commits}
             workspaceId={props.workspaceId}
             selectedHash={expandedHash}
-            onSelect={(commit) =>
-              setExpandedHash(expandedHash === commit.hash ? null : commit.hash)
-            }
+            onSelect={toggleCommit}
             detailsPresence={detailsPresence}
             onMenu={openMenu}
-            onSwitchBranch={(name, kind) => void switchTo(name, kind)}
+            onSwitchBranch={switchTo}
             currentBranch={props.currentBranch}
             upstreamBranch={props.upstreamBranch}
             workingTreeCount={workingTreeCount}
-            onOpenChanges={props.onOpenChanges}
+            onOpenChanges={openChanges}
           />
         ) : (
           <div className="git-commit-list">
@@ -288,7 +374,7 @@ export function HistoryView(props: {
                 type="button"
                 className="git-worktree-card"
                 title={t("git.workingTreeHint")}
-                onClick={props.onOpenChanges}
+                onClick={openChanges}
               >
                 <span className="git-worktree-dot" aria-hidden="true" />
                 <span className="git-worktree-text">
@@ -296,112 +382,26 @@ export function HistoryView(props: {
                 </span>
               </button>
             )}
-            {commits.map((commit) => {
-              const expanded = expandedHash === commit.hash;
-              return (
-                <div
-                  key={commit.hash}
-                  className={`git-commit ${expanded ? "is-expanded" : ""} ${
-                    arrivedHashesRef.current.has(commit.hash)
-                      ? "is-arriving"
-                      : ""
-                  }`}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    openMenu(commit, event.clientX, event.clientY);
-                  }}
-                >
-                  {/* Клик по карточке раскрывает описание, автора и соавторов. */}
-                  <button
-                    type="button"
-                    className="git-commit-toggle"
-                    aria-expanded={expanded}
-                    onClick={() =>
-                      setExpandedHash(expanded ? null : commit.hash)
-                    }
-                  >
-                    <div className="git-commit-subject" title={commit.subject}>
-                      {commit.subject}
-                    </div>
-                  </button>
-                  <div className="git-commit-meta">
-                    <button
-                      type="button"
-                      className={`git-commit-hash ${
-                        copiedHash === commit.hash ? "is-done" : ""
-                      }`}
-                      title={t("git.copyHash")}
-                      onClick={() => void copyHash(commit)}
-                    >
-                      {copiedHash === commit.hash
-                        ? t("git.copied")
-                        : commit.shortHash}
-                    </button>
-                    <span
-                      className="git-commit-author"
-                      title={`${commit.displayAuthor ?? commit.author} <${commit.authorEmail}>`}
-                    >
-                      {/* В раскрытой карточке имя дополняется почтой прямо здесь,
-                    отдельной строки «Автор» нет — без дублей. */}
-                      <AuthorAvatar
-                        name={commit.displayAuthor ?? commit.author}
-                        email={commit.authorEmail}
-                      />
-                      {commit.displayAuthor ?? commit.author}
-                      {expanded && (
-                        <span className="git-commit-email">
-                          {" "}
-                          &lt;{commit.authorEmail}&gt;
-                        </span>
-                      )}
-                    </span>
-                    <span className="git-commit-date">
-                      {formatRelativeTime(commit.epochMs, locale)}
-                    </span>
-                    {commit.unpushed && (
-                      <span
-                        className="git-commit-unpushed"
-                        title={t("git.unpushedHint")}
-                      >
-                        {t("git.unpushed")}
-                      </span>
-                    )}
-                    {commit.refDetails.map((ref) => (
-                      <RefBadge
-                        key={`${ref.kind}:${ref.name}`}
-                        refName={ref.name}
-                        fullRefName={ref.fullName}
-                        kind={ref.kind}
-                        currentBranch={props.currentBranch}
-                        onSwitch={(name, kind) => void switchTo(name, kind)}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="git-commit-menu-btn"
-                    title={t("git.commitActions")}
-                    aria-label={t("git.commitActions")}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      openMenu(commit, rect.right, rect.bottom);
-                    }}
-                  >
-                    ⋯
-                  </button>
-                  {detailsPresence?.item === commit.hash && (
-                    <RevealHeight closing={detailsPresence.closing}>
-                      <CommitDetails
-                        workspaceId={props.workspaceId}
-                        commit={commit}
-                        closing={detailsPresence.closing}
-                      />
-                    </RevealHeight>
-                  )}
-                </div>
-              );
-            })}
+            {commits.map((commit) => (
+              <CommitCard
+                key={commit.hash}
+                commit={commit}
+                workspaceId={props.workspaceId}
+                expanded={expandedHash === commit.hash}
+                arriving={arrivedHashesRef.current.has(commit.hash)}
+                copied={copiedHash === commit.hash}
+                detailsClosing={
+                  detailsPresence?.item === commit.hash
+                    ? detailsPresence.closing
+                    : null
+                }
+                currentBranch={props.currentBranch}
+                onToggle={toggleCommit}
+                onCopy={copyHash}
+                onMenu={openMenu}
+                onSwitch={switchTo}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -453,3 +453,114 @@ export function HistoryView(props: {
     </div>
   );
 }
+
+// Карточка коммита в виде «Список». Отдельный memo-компонент: печать в поиске,
+// меню, «Скопировано» и раскрытие одной карточки не трогают остальные сотню.
+const CommitCard = memo(function CommitCard(props: {
+  commit: GitCommitInfo;
+  workspaceId: string;
+  expanded: boolean;
+  arriving: boolean;
+  copied: boolean;
+  // null — детали не показаны; иначе — идёт ли их exit-анимация.
+  detailsClosing: boolean | null;
+  currentBranch?: string;
+  onToggle: (commit: GitCommitInfo) => void;
+  onCopy: (commit: GitCommitInfo) => Promise<void>;
+  onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
+  onSwitch: (name: string, kind: GitRefKind) => void;
+}) {
+  const { locale, t } = useI18n();
+  const { commit, expanded } = props;
+  return (
+    <div
+      className={`git-commit ${expanded ? "is-expanded" : ""} ${
+        props.arriving ? "is-arriving" : ""
+      }`}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        props.onMenu(commit, event.clientX, event.clientY);
+      }}
+    >
+      {/* Клик по карточке раскрывает описание, автора и соавторов. */}
+      <button
+        type="button"
+        className="git-commit-toggle"
+        aria-expanded={expanded}
+        onClick={() => props.onToggle(commit)}
+      >
+        <div className="git-commit-subject" title={commit.subject}>
+          {commit.subject}
+        </div>
+      </button>
+      <div className="git-commit-meta">
+        <button
+          type="button"
+          className={`git-commit-hash ${props.copied ? "is-done" : ""}`}
+          title={t("git.copyHash")}
+          onClick={() => void props.onCopy(commit)}
+        >
+          {props.copied ? t("git.copied") : commit.shortHash}
+        </button>
+        <span
+          className="git-commit-author"
+          title={`${commit.displayAuthor ?? commit.author} <${commit.authorEmail}>`}
+        >
+          {/* В раскрытой карточке имя дополняется почтой прямо здесь,
+              отдельной строки «Автор» нет — без дублей. */}
+          <AuthorAvatar
+            name={commit.displayAuthor ?? commit.author}
+            email={commit.authorEmail}
+          />
+          {commit.displayAuthor ?? commit.author}
+          {expanded && (
+            <span className="git-commit-email">
+              {" "}
+              &lt;{commit.authorEmail}&gt;
+            </span>
+          )}
+        </span>
+        <span className="git-commit-date">
+          {formatRelativeTime(commit.epochMs, locale)}
+        </span>
+        {commit.unpushed && (
+          <span className="git-commit-unpushed" title={t("git.unpushedHint")}>
+            {t("git.unpushed")}
+          </span>
+        )}
+        {commit.refDetails.map((ref) => (
+          <RefBadge
+            key={`${ref.kind}:${ref.name}`}
+            refName={ref.name}
+            fullRefName={ref.fullName}
+            kind={ref.kind}
+            currentBranch={props.currentBranch}
+            onSwitch={props.onSwitch}
+          />
+        ))}
+      </div>
+      <button
+        type="button"
+        className="git-commit-menu-btn"
+        title={t("git.commitActions")}
+        aria-label={t("git.commitActions")}
+        onClick={(event) => {
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          props.onMenu(commit, rect.right, rect.bottom);
+        }}
+      >
+        ⋯
+      </button>
+      {props.detailsClosing !== null && (
+        <RevealHeight closing={props.detailsClosing}>
+          <CommitDetails
+            workspaceId={props.workspaceId}
+            commit={commit}
+            closing={props.detailsClosing}
+          />
+        </RevealHeight>
+      )}
+    </div>
+  );
+});

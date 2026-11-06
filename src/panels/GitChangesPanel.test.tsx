@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localizeBackendError, setLocale } from "../i18n";
 import type { GitChangesSummary } from "../git/gitChanges";
@@ -54,6 +61,11 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
         const listeners = mocks.listeners.get(workspaceId) ?? new Set();
         listeners.add(listener);
         mocks.listeners.set(workspaceId, listeners);
+        // Как настоящая подписка: уже известную сводку отдаёт тут же.
+        const known = mocks.summaries.get(workspaceId);
+        if (known) {
+          listener(known);
+        }
         return () => listeners.delete(listener);
       },
     ),
@@ -109,6 +121,7 @@ vi.mock("../git/githubAvatars", () => ({
 }));
 
 import { GitChangesView } from "./GitChangesPanel";
+import { forgetHistory } from "./git/history/historyCache";
 import { AppActionsProvider, type AppActions } from "../ui/AppActions";
 
 function summary(branch: string, path: string): GitChangesSummary {
@@ -138,6 +151,8 @@ beforeEach(() => {
   // Режим просмотра diff-а живёт в localStorage: без сброса выбор одного теста
   // протёк бы в следующие.
   localStorage.clear();
+  // Как и журнал, который «История» помнит между открытиями.
+  forgetHistory();
   mocks.summaries.clear();
   mocks.listeners.clear();
   mocks.summaries.set("project-a", summary("main", "from-a.txt"));
@@ -339,7 +354,11 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.click(screen.getByRole("tab", { name: "История" }));
     await waitFor(() => expect(mocks.fetchLog).toHaveBeenCalledTimes(1));
 
-    emitSummary("project-a", summary("main", "from-a.txt"));
+    // Новый коммит сдвинул HEAD — журнал перечитывается, первый ответ устарел.
+    emitSummary("project-a", {
+      ...summary("main", "from-a.txt"),
+      headHash: "b".repeat(40),
+    });
     await waitFor(() => expect(mocks.fetchLog).toHaveBeenCalledTimes(2));
     resolveNew([makeCommit("b", "new history")]);
     expect(await screen.findByText("new history")).toBeInTheDocument();
@@ -349,6 +368,68 @@ describe("GitChangesView workspace lifecycle", () => {
       expect(screen.queryByText("stale history")).not.toBeInTheDocument(),
     );
     expect(screen.getByText("new history")).toBeInTheDocument();
+  });
+
+  it("asks git for the history once when the tab opens", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    expect(await screen.findByText("tag me")).toBeInTheDocument();
+    // Сводка уже была в памяти, и подписка отдала её тут же. Перечитывать
+    // под неё журнал — значит отбросить первый ответ и продлить загрузку.
+    expect(mocks.fetchLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("rereads the history when HEAD moves, not on every file edit", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    expect(await screen.findByText("tag me")).toBeInTheDocument();
+
+    // Агент правит файлы: сводка меняется, журнал — нет.
+    emitSummary("project-a", summary("main", "another-file.txt"));
+    emitSummary("project-a", { ...summary("main", "x.txt"), files: [] });
+    expect(mocks.fetchLog).toHaveBeenCalledTimes(1);
+
+    emitSummary("project-a", {
+      ...summary("main", "x.txt"),
+      headHash: "c".repeat(40),
+    });
+    await waitFor(() => expect(mocks.fetchLog).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows the history it already read at once when the tab comes back", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+    expect(await screen.findByText("tag me")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Изменения" }));
+
+    // На этот раз git задумался — вкладке всё равно есть что показать.
+    mocks.fetchLog.mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole("tab", { name: "История" }));
+
+    expect(screen.getByText("tag me")).toBeInTheDocument();
+    expect(screen.queryByText("Читаем изменения…")).not.toBeInTheDocument();
+    // Свежий журнал всё равно спрошен: показанный может быть устаревшим.
+    expect(mocks.fetchLog).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts reading the history as the pointer reaches its tab", async () => {
+    mocks.fetchLog.mockResolvedValue([taggableCommit()]);
+    render(<GitChangesView workspaceId="project-a" />);
+    const tab = screen.getByRole("tab", { name: "История" });
+
+    fireEvent.pointerEnter(tab);
+    await waitFor(() =>
+      expect(mocks.fetchLog).toHaveBeenCalledWith("project-a", 100),
+    );
+    await act(async () => {});
+    fireEvent.click(tab);
+
+    // Журнал готов к клику: никакого «Читаем изменения…» в первый раз.
+    expect(screen.getByText("tag me")).toBeInTheDocument();
   });
 
   it("keeps Co-authored-by trailers visible when editing a message", async () => {
@@ -594,13 +675,9 @@ describe("GitChangesView workspace lifecycle", () => {
     fireEvent.change(screen.getByLabelText("Поиск по истории"), {
       target: { value: "" },
     });
+    // Без фильтра — обычная первая страница: ни веток, ни условий поиска.
     await waitFor(() =>
-      expect(mocks.fetchLog).toHaveBeenLastCalledWith(
-        "project-a",
-        100,
-        false,
-        undefined,
-      ),
+      expect(mocks.fetchLog).toHaveBeenLastCalledWith("project-a", 100),
     );
     expect(screen.getByRole("button", { name: "Граф" })).toBeEnabled();
   });

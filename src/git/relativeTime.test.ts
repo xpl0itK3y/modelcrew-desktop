@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRelativeTime } from "./relativeTime";
+import { formatFullDate, formatRelativeTime } from "./relativeTime";
 
 describe("formatRelativeTime", () => {
   it("scales units from seconds to years in both locales", () => {
@@ -18,5 +18,16 @@ describe("formatRelativeTime", () => {
     expect(
       formatRelativeTime(now - 2 * 365 * 24 * 60 * minute, "en", now),
     ).toContain("year");
+  });
+});
+
+describe("formatFullDate", () => {
+  it("spells the exact moment in the asked locale", () => {
+    const moment = new Date(2026, 10, 6, 14, 5).getTime();
+    expect(formatFullDate(moment, "ru")).toContain("2026");
+    expect(formatFullDate(moment, "ru")).toContain("14:05");
+    expect(formatFullDate(moment, "en")).toContain("Nov");
+    // Готовый форматтер одного языка не отвечает за другой.
+    expect(formatFullDate(moment, "ru")).not.toContain("Nov");
   });
 });

@@ -4,12 +4,17 @@
 // Геометрия вынесена в git/graphGeometry — здесь только отрисовка и поведение
 // строки: выбор, раскрытие карточки, вызов меню действий.
 
-import { Fragment, useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useI18n } from "../../../i18n";
 import { type GitRefKind } from "../../../git/gitBranches";
 import { type GitCommitInfo } from "../../../git/gitLog";
-import { formatRelativeTime } from "../../../git/relativeTime";
-import { computeCommitGraph, traceCurrentBranch } from "../../../git/commitGraph";
+import { formatFullDate, formatRelativeTime } from "../../../git/relativeTime";
+import {
+  computeCommitGraph,
+  traceCurrentBranch,
+  type GraphRow,
+  type GraphTrailRow,
+} from "../../../git/commitGraph";
 import {
   GRAPH_COLORS,
   GRAPH_CURRENT_HALO_OPACITY,
@@ -87,7 +92,7 @@ export function RefBadge(props: {
 // описание. Сохранение переписывает локальный коммит (бэкенд проверяет
 // безопасность). Доступен только для собственных локальных коммитов.
 
-export function CommitGraph(props: {
+export const CommitGraph = memo(function CommitGraph(props: {
   commits: GitCommitInfo[];
   workspaceId: string;
   selectedHash: string | null;
@@ -100,7 +105,7 @@ export function CommitGraph(props: {
   workingTreeCount: number;
   onOpenChanges: () => void;
 }) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const { rows, trail } = useMemo(() => {
     const inputs = props.commits.map((commit) => ({
       hash: commit.hash,
@@ -174,262 +179,289 @@ export function CommitGraph(props: {
         if (!row) {
           return null;
         }
-        const isMerge = commit.parents.length > 1;
-        const cx = graphLaneCenter(row.col);
-        const rowWidth = (row.width + 1) * GRAPH_LANE_WIDTH;
-        const selected = props.selectedHash === commit.hash;
-        // Ореол линии текущей ветки собираем заранее: он шире обычной дорожки
-        // и должен лежать позади всех, иначе размывает соседние линии.
-        const mark = trail[index];
-        const halo: { d: string; color: number }[] = [];
-        if (mark.through !== null) {
-          const edge = row.through[mark.through];
-          halo.push({
-            d: graphThroughPath(edge.fromCol, edge.toCol),
-            color: edge.color,
-          });
-        }
-        if (mark.top !== null) {
-          const edge = row.top[mark.top];
-          halo.push({
-            d: graphIncomingPath(edge.fromCol, edge.toCol),
-            color: edge.color,
-          });
-        }
-        if (mark.bottom !== null) {
-          const edge = row.bottom[mark.bottom];
-          halo.push({
-            d: graphParentPath(
-              edge.fromCol,
-              edge.toCol,
-              edge.parentIndex ?? 0,
-            ),
-            color: edge.color,
-          });
-        }
         return (
-          <Fragment key={commit.hash}>
-            <div
-              role="button"
-              tabIndex={0}
-              className={`git-graph-row ${selected ? "is-selected" : ""} ${
-                commit.isHead ? "is-head" : ""
-              }`}
-              onClick={() => props.onSelect(commit)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                props.onMenu(commit, event.clientX, event.clientY);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  props.onSelect(commit);
-                }
-              }}
-            >
-              <svg
-                className="git-graph-lines"
-                width={rowWidth}
-                height={GRAPH_ROW_HEIGHT}
-                style={{ width: rowWidth, minWidth: rowWidth }}
-                aria-hidden="true"
-              >
-                {halo.map((line, k) => (
-                  <path
-                    key={`g-${k}`}
-                    className="git-graph-current-halo"
-                    d={line.d}
-                    fill="none"
-                    stroke={laneColor(line.color)}
-                    strokeOpacity={GRAPH_CURRENT_HALO_OPACITY}
-                    strokeWidth={GRAPH_CURRENT_HALO_WIDTH}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ))}
-                {row.through.map((edge, k) => (
-                  <path
-                    key={`x-${edge.fromCol}-${edge.toCol}-${edge.targetHash}-${k}`}
-                    d={graphThroughPath(edge.fromCol, edge.toCol)}
-                    fill="none"
-                    stroke={laneColor(edge.color)}
-                    strokeWidth={
-                      mark.through === k
-                        ? GRAPH_CURRENT_STROKE_WIDTH
-                        : GRAPH_STROKE_WIDTH
-                    }
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ))}
-                {row.top.map((edge, k) => (
-                  <path
-                    key={`t-${edge.fromCol}-${edge.toCol}-${k}`}
-                    d={graphIncomingPath(edge.fromCol, edge.toCol)}
-                    fill="none"
-                    stroke={laneColor(edge.color)}
-                    strokeWidth={
-                      mark.top === k
-                        ? GRAPH_CURRENT_STROKE_WIDTH
-                        : GRAPH_STROKE_WIDTH
-                    }
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ))}
-                {row.bottom.map((edge, k) => (
-                  <path
-                    key={`b-${edge.fromCol}-${edge.toCol}-${edge.parentIndex}-${k}`}
-                    d={graphParentPath(
-                      edge.fromCol,
-                      edge.toCol,
-                      edge.parentIndex ?? 0,
-                    )}
-                    fill="none"
-                    stroke={laneColor(edge.color)}
-                    strokeWidth={
-                      mark.bottom === k
-                        ? GRAPH_CURRENT_STROKE_WIDTH
-                        : GRAPH_STROKE_WIDTH
-                    }
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ))}
-                {commit.isHead ? (
-                  <>
-                    <circle
-                      cx={cx}
-                      cy={GRAPH_ROW_HEIGHT / 2}
-                      r={GRAPH_HEAD_OUTER_RADIUS}
-                      fill={laneColor(row.color)}
-                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
-                      strokeWidth={GRAPH_NODE_STROKE_WIDTH}
-                    />
-                    <circle
-                      cx={cx}
-                      cy={GRAPH_ROW_HEIGHT / 2}
-                      r={GRAPH_HEAD_INNER_RADIUS}
-                      fill="var(--git-graph-node-bg, var(--mc-bg))"
-                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
-                      strokeWidth={GRAPH_HEAD_INNER_STROKE_WIDTH}
-                    />
-                  </>
-                ) : isMerge ? (
-                  <>
-                    <circle
-                      cx={cx}
-                      cy={GRAPH_ROW_HEIGHT / 2}
-                      r={GRAPH_MERGE_OUTER_RADIUS}
-                      fill={laneColor(row.color)}
-                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
-                      strokeWidth={GRAPH_NODE_STROKE_WIDTH}
-                    />
-                    <circle
-                      cx={cx}
-                      cy={GRAPH_ROW_HEIGHT / 2}
-                      r={GRAPH_MERGE_INNER_RADIUS}
-                      fill="var(--git-graph-node-bg, var(--mc-bg))"
-                      stroke="var(--git-graph-node-bg, var(--mc-bg))"
-                      strokeWidth={GRAPH_NODE_STROKE_WIDTH}
-                    />
-                  </>
-                ) : (
-                  <circle
-                    cx={cx}
-                    cy={GRAPH_ROW_HEIGHT / 2}
-                    r={GRAPH_DOT_RADIUS}
-                    fill={laneColor(row.color)}
-                    stroke="var(--git-graph-node-bg, var(--mc-bg))"
-                    strokeWidth={GRAPH_NODE_STROKE_WIDTH}
-                  />
-                )}
-              </svg>
-              <span className="git-graph-subject" title={commit.subject}>
-                {commit.subject}
-              </span>
-              {commit.refDetails.map((ref) => (
-                <RefBadge
-                  key={`${ref.kind}:${ref.name}`}
-                  refName={ref.name}
-                  fullRefName={ref.fullName}
-                  kind={ref.kind}
-                  currentBranch={props.currentBranch}
-                  onSwitch={props.onSwitchBranch}
-                />
-              ))}
-              <div className="git-graph-right">
-                <span
-                  className="git-graph-date"
-                  title={new Intl.DateTimeFormat(locale, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  }).format(new Date(commit.epochMs))}
-                >
-                  {formatRelativeTime(commit.epochMs, locale)}
-                </span>
-                <span className="git-graph-who">
-                  <AuthorAvatar
-                    name={commit.displayAuthor ?? commit.author}
-                    email={commit.authorEmail}
-                  />
-                  <span
-                    className="git-graph-author"
-                    title={commit.displayAuthor ?? commit.author}
-                  >
-                    {commit.displayAuthor ?? commit.author}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className="git-commit-menu-btn"
-                  title={t("git.commitActions")}
-                  aria-label={t("git.commitActions")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    props.onMenu(commit, rect.right, rect.bottom);
-                  }}
-                >
-                  ⋯
-                </button>
-              </div>
-            </div>
-            {props.detailsPresence?.item === commit.hash && (
-              <div
-                className="git-graph-details"
-                style={{ paddingLeft: rowWidth + 14 }}
-              >
-                {/* Продолжаем состояние дорожек с нижней границы строки,
-                    чтобы граф не рвался на раскрытой карточке коммита. */}
-                <span
-                  className="git-graph-details-lanes"
-                  style={{ width: rowWidth }}
-                  aria-hidden="true"
-                >
-                  {row.lanesBelow.map((lane) => (
-                    <span
-                      key={lane.col}
-                      className="git-graph-lane-through"
-                      style={{
-                        left: graphLaneCenter(lane.col),
-                        background: laneColor(lane.color),
-                      }}
-                    />
-                  ))}
-                </span>
-                <RevealHeight closing={props.detailsPresence.closing}>
-                  <CommitDetails
-                    workspaceId={props.workspaceId}
-                    commit={commit}
-                    closing={props.detailsPresence.closing}
-                  />
-                </RevealHeight>
-              </div>
-            )}
-          </Fragment>
+          <GraphCommitRow
+            key={commit.hash}
+            commit={commit}
+            row={row}
+            mark={trail[index]}
+            selected={props.selectedHash === commit.hash}
+            detailsClosing={
+              props.detailsPresence?.item === commit.hash
+                ? props.detailsPresence.closing
+                : null
+            }
+            workspaceId={props.workspaceId}
+            currentBranch={props.currentBranch}
+            onSelect={props.onSelect}
+            onMenu={props.onMenu}
+            onSwitchBranch={props.onSwitchBranch}
+          />
         );
       })}
     </div>
   );
-}
+});
+
+// Строка графа. Отдельный memo-компонент: раскрытие коммита, счётчик рабочего
+// дерева и печать в поиске перерисовывают одну-две строки, а не всю сотню.
+const GraphCommitRow = memo(function GraphCommitRow(props: {
+  commit: GitCommitInfo;
+  row: GraphRow;
+  mark: GraphTrailRow;
+  selected: boolean;
+  // null — детали не показаны; иначе — идёт ли их exit-анимация.
+  detailsClosing: boolean | null;
+  workspaceId: string;
+  currentBranch?: string;
+  onSelect: (commit: GitCommitInfo) => void;
+  onMenu: (commit: GitCommitInfo, x: number, y: number) => void;
+  onSwitchBranch: (name: string, kind: GitRefKind) => void;
+}) {
+  const { locale, t } = useI18n();
+  const { commit, row, mark, selected } = props;
+  const isMerge = commit.parents.length > 1;
+  const cx = graphLaneCenter(row.col);
+  const rowWidth = (row.width + 1) * GRAPH_LANE_WIDTH;
+  // Ореол линии текущей ветки собираем заранее: он шире обычной дорожки
+  // и должен лежать позади всех, иначе размывает соседние линии.
+  const halo: { d: string; color: number }[] = [];
+  if (mark.through !== null) {
+    const edge = row.through[mark.through];
+    halo.push({
+      d: graphThroughPath(edge.fromCol, edge.toCol),
+      color: edge.color,
+    });
+  }
+  if (mark.top !== null) {
+    const edge = row.top[mark.top];
+    halo.push({
+      d: graphIncomingPath(edge.fromCol, edge.toCol),
+      color: edge.color,
+    });
+  }
+  if (mark.bottom !== null) {
+    const edge = row.bottom[mark.bottom];
+    halo.push({
+      d: graphParentPath(edge.fromCol, edge.toCol, edge.parentIndex ?? 0),
+      color: edge.color,
+    });
+  }
+  return (
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        className={`git-graph-row ${selected ? "is-selected" : ""} ${
+          commit.isHead ? "is-head" : ""
+        }`}
+        onClick={() => props.onSelect(commit)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          props.onMenu(commit, event.clientX, event.clientY);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            props.onSelect(commit);
+          }
+        }}
+      >
+        <svg
+          className="git-graph-lines"
+          width={rowWidth}
+          height={GRAPH_ROW_HEIGHT}
+          style={{ width: rowWidth, minWidth: rowWidth }}
+          aria-hidden="true"
+        >
+          {halo.map((line, k) => (
+            <path
+              key={`g-${k}`}
+              className="git-graph-current-halo"
+              d={line.d}
+              fill="none"
+              stroke={laneColor(line.color)}
+              strokeOpacity={GRAPH_CURRENT_HALO_OPACITY}
+              strokeWidth={GRAPH_CURRENT_HALO_WIDTH}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {row.through.map((edge, k) => (
+            <path
+              key={`x-${edge.fromCol}-${edge.toCol}-${edge.targetHash}-${k}`}
+              d={graphThroughPath(edge.fromCol, edge.toCol)}
+              fill="none"
+              stroke={laneColor(edge.color)}
+              strokeWidth={
+                mark.through === k
+                  ? GRAPH_CURRENT_STROKE_WIDTH
+                  : GRAPH_STROKE_WIDTH
+              }
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {row.top.map((edge, k) => (
+            <path
+              key={`t-${edge.fromCol}-${edge.toCol}-${k}`}
+              d={graphIncomingPath(edge.fromCol, edge.toCol)}
+              fill="none"
+              stroke={laneColor(edge.color)}
+              strokeWidth={
+                mark.top === k ? GRAPH_CURRENT_STROKE_WIDTH : GRAPH_STROKE_WIDTH
+              }
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {row.bottom.map((edge, k) => (
+            <path
+              key={`b-${edge.fromCol}-${edge.toCol}-${edge.parentIndex}-${k}`}
+              d={graphParentPath(
+                edge.fromCol,
+                edge.toCol,
+                edge.parentIndex ?? 0,
+              )}
+              fill="none"
+              stroke={laneColor(edge.color)}
+              strokeWidth={
+                mark.bottom === k
+                  ? GRAPH_CURRENT_STROKE_WIDTH
+                  : GRAPH_STROKE_WIDTH
+              }
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {commit.isHead ? (
+            <>
+              <circle
+                cx={cx}
+                cy={GRAPH_ROW_HEIGHT / 2}
+                r={GRAPH_HEAD_OUTER_RADIUS}
+                fill={laneColor(row.color)}
+                stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+              />
+              <circle
+                cx={cx}
+                cy={GRAPH_ROW_HEIGHT / 2}
+                r={GRAPH_HEAD_INNER_RADIUS}
+                fill="var(--git-graph-node-bg, var(--mc-bg))"
+                stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                strokeWidth={GRAPH_HEAD_INNER_STROKE_WIDTH}
+              />
+            </>
+          ) : isMerge ? (
+            <>
+              <circle
+                cx={cx}
+                cy={GRAPH_ROW_HEIGHT / 2}
+                r={GRAPH_MERGE_OUTER_RADIUS}
+                fill={laneColor(row.color)}
+                stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+              />
+              <circle
+                cx={cx}
+                cy={GRAPH_ROW_HEIGHT / 2}
+                r={GRAPH_MERGE_INNER_RADIUS}
+                fill="var(--git-graph-node-bg, var(--mc-bg))"
+                stroke="var(--git-graph-node-bg, var(--mc-bg))"
+                strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+              />
+            </>
+          ) : (
+            <circle
+              cx={cx}
+              cy={GRAPH_ROW_HEIGHT / 2}
+              r={GRAPH_DOT_RADIUS}
+              fill={laneColor(row.color)}
+              stroke="var(--git-graph-node-bg, var(--mc-bg))"
+              strokeWidth={GRAPH_NODE_STROKE_WIDTH}
+            />
+          )}
+        </svg>
+        <span className="git-graph-subject" title={commit.subject}>
+          {commit.subject}
+        </span>
+        {commit.refDetails.map((ref) => (
+          <RefBadge
+            key={`${ref.kind}:${ref.name}`}
+            refName={ref.name}
+            fullRefName={ref.fullName}
+            kind={ref.kind}
+            currentBranch={props.currentBranch}
+            onSwitch={props.onSwitchBranch}
+          />
+        ))}
+        <div className="git-graph-right">
+          <span
+            className="git-graph-date"
+            title={formatFullDate(commit.epochMs, locale)}
+          >
+            {formatRelativeTime(commit.epochMs, locale)}
+          </span>
+          <span className="git-graph-who">
+            <AuthorAvatar
+              name={commit.displayAuthor ?? commit.author}
+              email={commit.authorEmail}
+            />
+            <span
+              className="git-graph-author"
+              title={commit.displayAuthor ?? commit.author}
+            >
+              {commit.displayAuthor ?? commit.author}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="git-commit-menu-btn"
+            title={t("git.commitActions")}
+            aria-label={t("git.commitActions")}
+            onClick={(event) => {
+              event.stopPropagation();
+              const rect = event.currentTarget.getBoundingClientRect();
+              props.onMenu(commit, rect.right, rect.bottom);
+            }}
+          >
+            ⋯
+          </button>
+        </div>
+      </div>
+      {props.detailsClosing !== null && (
+        <div
+          className="git-graph-details"
+          style={{ paddingLeft: rowWidth + 14 }}
+        >
+          {/* Продолжаем состояние дорожек с нижней границы строки,
+              чтобы граф не рвался на раскрытой карточке коммита. */}
+          <span
+            className="git-graph-details-lanes"
+            style={{ width: rowWidth }}
+            aria-hidden="true"
+          >
+            {row.lanesBelow.map((lane) => (
+              <span
+                key={lane.col}
+                className="git-graph-lane-through"
+                style={{
+                  left: graphLaneCenter(lane.col),
+                  background: laneColor(lane.color),
+                }}
+              />
+            ))}
+          </span>
+          <RevealHeight closing={props.detailsClosing}>
+            <CommitDetails
+              workspaceId={props.workspaceId}
+              commit={commit}
+              closing={props.detailsClosing}
+            />
+          </RevealHeight>
+        </div>
+      )}
+    </>
+  );
+});
