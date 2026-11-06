@@ -1020,6 +1020,16 @@
   text-align: left;
 }
 
+/* Справа налево точка или слэш на краю пути встают не туда: «.claude/x.json»
+   читался «claude/x.json.», «docs/» — «/docs». Невидимые метки «слева
+   направо» по краям держат их на месте, а обрыв с многоточием остаётся слева. */
+.git-file-path::before,
+.git-file-path::after,
+.git-commit-file-path::before,
+.git-commit-file-path::after {
+  content: "\200E";
+}
+
 .git-file-counts {
   flex: none;
   display: inline-flex;
