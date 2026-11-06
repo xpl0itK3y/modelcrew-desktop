@@ -1163,6 +1163,47 @@ fn summary_ignores_repository_config_that_hides_changes() {
         .contains("+two"));
 }
 
+// Панель показывает ровно то, что увидит git: всё, что вычеркнуто в
+// .gitignore, в .git/info/exclude или в личном файле исключений, в список
+// не попадает, а то, что не вычеркнуто нигде, — попадает, как бы оно ни
+// называлось.
+#[test]
+fn the_summary_leaves_out_what_git_is_told_to_ignore() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = history_repo(root);
+    std::fs::write(root.join(".gitignore"), "build/\n*.log\n").unwrap();
+    git(&["add", ".gitignore"]);
+    git(&["commit", "--quiet", "-m", "init"]);
+
+    std::fs::write(root.join(".git/info/exclude"), "scratch.txt\n").unwrap();
+    let personal = dir.path().join(".git/personal-ignore");
+    std::fs::write(&personal, ".agent/\n").unwrap();
+    git(&["config", "core.excludesFile", personal.to_str().unwrap()]);
+
+    for name in [
+        "build/out.js",
+        "trace.log",
+        "scratch.txt",
+        ".agent/notes.md",
+        ".claude/launch.json",
+        "kept.md",
+    ] {
+        let path = root.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x\n").unwrap();
+    }
+
+    let summary = collect_summary(root).unwrap();
+    let mut paths: Vec<&str> = summary
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    paths.sort_unstable();
+    assert_eq!(paths, [".claude/launch.json", "kept.md"]);
+}
+
 // NUL проходит проверку пути, но системный вызов видит строку целиком и
 // обязан отказать: обрезка до префикса означала бы работу с чужим файлом.
 #[test]
