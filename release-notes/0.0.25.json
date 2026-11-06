@@ -1,0 +1,25 @@
+{
+  "version": "0.0.25",
+  "ru": {
+    "title": "Поиск и замена в редакторе, перенос терминала между сессиями",
+    "summary": "В редакторе появились поиск с заменой и переход к строке. Терминал можно перенести в другую сессию без перезапуска, а история коммитов и список изменений больше не тормозят.",
+    "highlights": [
+      "Поиск и замена в редакторе с учётом регистра и целых слов, переход к строке по Ctrl+G и строка состояния под файлом",
+      "Терминал переносится в другую сессию проекта перетаскиванием на неё в боковой панели, а агент продолжает работать",
+      "История коммитов открывается сразу, а список изменений не дёргается, пока агент правит файлы",
+      "Cmd+W в редакторе закрывает файл, а не терминал, и файлы с CRLF сохраняются с CRLF",
+      "Codex больше не пишет «ModelCrew недоступен», а колесо мыши прокручивает страницу в браузере проекта"
+    ]
+  },
+  "en": {
+    "title": "Find and replace in the editor, terminals moved between sessions",
+    "summary": "The editor can find, replace and go to a line. A terminal moves to another session without a restart, and the commit history and the changes list no longer lag.",
+    "highlights": [
+      "Find and replace in the editor with match case and whole word, go to line on Ctrl+G and a status line under the file",
+      "Drag a terminal onto another session of the project in the sidebar to move it there while its agent keeps running",
+      "The commit history opens at once, and the changes list stays still while an agent edits files",
+      "Cmd+W in the editor closes the file instead of the terminal, and CRLF files are saved as CRLF",
+      "Codex no longer says ModelCrew is unavailable, and the mouse wheel scrolls the page in the project browser"
+    ]
+  }
+}

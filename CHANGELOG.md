@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.0.25
+
+### Русский
+
+В редакторе появились поиск с заменой и переход к строке. Терминал можно перенести в другую сессию без перезапуска, а история коммитов и список изменений больше не тормозят.
+
+- В редакторе появились поиск и замена: ⌘F, а замена — ⌥⌘F на маке и Ctrl+H на других системах; ⌘G и F3 идут к следующему совпадению прямо от курсора
+- Переключатели «Учитывать регистр» и «Целое слово» запоминаются между запусками, и замена больше не задевает части других слов
+- Под файлом видно строку и столбец курсора, длину выделения, отступ и переводы строк; Ctrl+G переходит к строке, а 12:5 — сразу к столбцу
+- Закрытая вкладка файла плавно сжимается, новая разворачивается, а файл появляется, когда его текст уже прочитан
+- Cmd+W в редакторе закрывает файл, а не активный терминал вместе с агентом; вкладку закрывает и средняя кнопка мыши
+- Файлы с CRLF остаются с CRLF: Tab и Enter встают на свои места, а сохранение не переписывает весь файл в LF
+- Терминал можно перенести в другую сессию проекта, перетащив его на сессию в боковой панели: процесс и агент продолжают работать
+- Пока GitHub ждёт подтверждения входа в браузере, в окне входа покачивается знак ModelCrew
+- История коммитов открывается сразу, без заглушки, и перечитывается, только когда сдвинулся HEAD, а не на каждую правку файла
+- Список изменений больше не перерисовывается целиком на каждое обновление: прокрутка не дёргается, пока агент пишет код
+- Пути dot-файлов вроде .claude/launch.json показываются правильно, а не как claude/launch.json.
+- Codex больше не отвечает «ModelCrew недоступен»: адрес сокета записан в его конфигурацию, а вторая копия приложения не удаляет сокет первой
+- В браузере проекта колесо мыши прокручивает страницу и там, где она показана снимком, а агенты могут прокручивать по точке на скриншоте
+- Сообщения консоли страницы раскрываются целиком: полный текст, стек того, кто их вызвал, время и кнопка копирования
+- Полоса прокрутки в настройках появляется, только когда страница не помещается, а крестик закрытия на неё больше не налезает
+
+### English
+
+The editor can find, replace and go to a line. A terminal moves to another session without a restart, and the commit history and the changes list no longer lag.
+
+- The editor can find and replace: Cmd+F, and replace on Cmd+Option+F on macOS or Ctrl+H elsewhere; Cmd+G and F3 step to the next match from the cursor
+- Match case and Whole word are remembered between launches, so a replace no longer touches parts of other words
+- A status line under the file shows the cursor's line and column, the selection, the indent and the line endings; Ctrl+G goes to a line, and 12:5 to a column
+- A closed file tab shrinks away, an opened one unrolls, and the file shows once its text is read
+- Cmd+W in the editor closes the file instead of the active terminal and its agent; the middle button closes a tab too
+- CRLF files stay CRLF: Tab and Enter land in the right place, and saving no longer rewrites the whole file as LF
+- A terminal can be moved to another session of the project by dropping it on the session in the sidebar: the process and the agent keep running
+- While GitHub waits for the sign-in to be confirmed in the browser, the ModelCrew mark sways in the sign-in window
+- The commit history opens at once, with no loading stub, and is reread only when HEAD moves, not on every file edit
+- The changes list no longer redraws as a whole on every update, so scrolling does not stutter while an agent writes code
+- Paths of dotfiles such as .claude/launch.json show correctly instead of as claude/launch.json.
+- Codex no longer answers that ModelCrew is unavailable: the socket address is written into its config, and a second copy of the app no longer deletes the first one's socket
+- In the project browser the mouse wheel scrolls the page even where it is shown as a picture, and agents can scroll at a point on the screenshot
+- Page console messages open in full: the whole text, the caller's stack, the time and a copy button
+- The settings scrollbar shows only when a page overflows, and the close button no longer presses against it
+
 ## 0.0.24
 
 ### Русский
