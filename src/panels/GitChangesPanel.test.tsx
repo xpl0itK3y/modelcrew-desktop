@@ -7,8 +7,8 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { localizeBackendError, setLocale } from "../i18n";
-import type { GitChangesSummary } from "../git/gitChanges";
+import { localizeBackendError, setLocale, useI18n } from "../i18n";
+import type { GitChangesSummary, GitFileDiff } from "../git/gitChanges";
 import type { GitBranchInfo } from "../git/gitBranches";
 import type { GitCommitInfo } from "../git/gitLog";
 
@@ -48,7 +48,21 @@ const mocks = vi.hoisted(() => ({
   fetchBranches: vi.fn<() => Promise<GitBranchInfo[]>>(async () => []),
   fetchLog: vi.fn<() => Promise<GitCommitInfo[]>>(async () => []),
   refreshGitChanges: vi.fn(async () => {}),
+  fetchFileDiff:
+    vi.fn<(workspaceId: string, path: string) => Promise<GitFileDiff>>(),
 }));
+
+// Без бэкенда diff файла не читается — как и было до мока.
+function noDiff(): Promise<GitFileDiff> {
+  return Promise.reject(new Error("no backend in tests"));
+}
+
+// Тот же хук, только с подсчётом вызовов: так видно, сколько компонентов
+// перерисовалось.
+vi.mock("../i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../i18n")>();
+  return { ...actual, useI18n: vi.fn(actual.useI18n) };
+});
 
 vi.mock("../git/gitChanges", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../git/gitChanges")>();
@@ -74,6 +88,7 @@ vi.mock("../git/gitChanges", async (importOriginal) => {
     continueOperation: mocks.continueOperation,
     abortOperation: mocks.abortOperation,
     refreshGitChanges: mocks.refreshGitChanges,
+    fetchFileDiff: mocks.fetchFileDiff,
   };
 });
 
@@ -159,6 +174,7 @@ beforeEach(() => {
   mocks.summaries.set("project-b", summary("dev", "from-b.txt"));
   mocks.fetchBranches.mockResolvedValue([]);
   mocks.fetchLog.mockResolvedValue([]);
+  mocks.fetchFileDiff.mockImplementation(noDiff);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: mocks.writeClipboard },
@@ -1037,6 +1053,94 @@ describe("GitChangesView workspace lifecycle", () => {
         "remote",
       ),
     );
+  });
+});
+
+describe("changed files", () => {
+  // Что в каждом файле добавлено поверх строки «keep».
+  const added = new Map<string, string[]>();
+
+  function changed(count: number): GitChangesSummary {
+    return {
+      isRepo: true,
+      branch: "main",
+      files: Array.from({ length: count }, (_, index) => {
+        const path = `src/file-${index}.ts`;
+        return {
+          path,
+          status: "modified" as const,
+          additions: (added.get(path) ?? ["first"]).length,
+          deletions: 0,
+        };
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    added.clear();
+    mocks.fetchFileDiff.mockImplementation(async (_workspaceId, path) => {
+      const lines = added.get(path) ?? ["first"];
+      return {
+        path,
+        isBinary: false,
+        truncated: false,
+        diff: `@@ -1,1 +1,${lines.length + 1} @@\n keep\n${lines
+          .map((line) => `+${line}\n`)
+          .join("")}`,
+      };
+    });
+  });
+
+  function diffReads(path: string): number {
+    return mocks.fetchFileDiff.mock.calls.filter((call) => call[1] === path)
+      .length;
+  }
+
+  it("rereads only the file the agent has just changed", async () => {
+    mocks.summaries.set("project-a", changed(2));
+    render(<GitChangesView workspaceId="project-a" />);
+    await waitFor(() => expect(screen.getAllByText("+first")).toHaveLength(2));
+
+    added.set("src/file-1.ts", ["first", "second"]);
+    act(() => emitSummary("project-a", changed(2)));
+
+    const fresh = await screen.findByText("+second");
+    expect(fresh.closest(".git-diff-line")).toHaveClass("is-fresh");
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    expect(diffReads("src/file-1.ts")).toBe(2);
+    expect(diffReads("src/file-0.ts")).toBe(1);
+  });
+
+  it("does not redraw the diffs while a commit message is typed", async () => {
+    // Сколько компонентов перерисовывает одна клавиша в заголовке коммита.
+    async function redrawnPerKey(files: number): Promise<number> {
+      mocks.summaries.set("project-a", changed(files));
+      const view = render(<GitChangesView workspaceId="project-a" />);
+      await waitFor(() =>
+        expect(screen.getAllByText("+first")).toHaveLength(files),
+      );
+      const subject = screen.getByLabelText("Заголовок коммита");
+      fireEvent.change(subject, { target: { value: "f" } });
+      const before = vi.mocked(useI18n).mock.calls.length;
+      fireEvent.change(subject, { target: { value: "fi" } });
+      const redrawn = vi.mocked(useI18n).mock.calls.length - before;
+      view.unmount();
+      return redrawn;
+    }
+
+    expect(await redrawnPerKey(12)).toBe(await redrawnPerKey(1));
+  });
+
+  it("still opens a diff line for editing in place", async () => {
+    mocks.summaries.set("project-a", changed(1));
+    render(<GitChangesView workspaceId="project-a" />);
+
+    fireEvent.click(await screen.findByText("+first"));
+    const input = screen.getByDisplayValue("first");
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByDisplayValue("first")).not.toBeInTheDocument();
+    expect(screen.getByText("+first")).toBeInTheDocument();
   });
 });
 

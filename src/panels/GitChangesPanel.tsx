@@ -1,4 +1,6 @@
 import {
+  memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -20,7 +22,7 @@ import {
   type GitFileDiff,
   writeRepoFile,
 } from "../git/gitChanges";
-import { parseUnifiedDiff } from "../git/unifiedDiff";
+import { parseUnifiedDiff, type DiffLine } from "../git/unifiedDiff";
 import { CopyIcon, UndoIcon } from "../ui/Icons";
 import {
   BranchSwitcher,
@@ -79,10 +81,11 @@ function FileDiff(props: { workspaceId: string; file: GitChangedFile }) {
     };
   }, [props.workspaceId, props.file.path, countsKey, reloadNonce]);
 
-  const startEditing = (newLine: number, text: string) => {
+  // Одна и та же функция на все строки: иначе memo строк бесполезен.
+  const startEditing = useCallback((newLine: number, text: string) => {
     setEditingLine(newLine);
     setEditValue(text);
-  };
+  }, []);
 
   // Сохраняет одну строку: перечитывает файл, заменяет строку с этим номером
   // и пишет обратно. Номер новой версии = номер строки в текущем файле.
@@ -153,88 +156,125 @@ function FileDiff(props: { workspaceId: string; file: GitChangedFile }) {
       {/* Обёртка шириной с самую длинную строку: фон коротких строк
           тянется до неё, а не обрывается на своём тексте. */}
       <div className="git-diff-body">
-        {lines.map((line, index) =>
-          line.kind === "hunk" ? (
+        {lines.map((line, index) => {
+          if (line.kind === "hunk") {
             // Служебную шапку @@ … @@ не показываем; между ханками — разрыв.
-            index === 0 ? null : (
+            return index === 0 ? null : (
               <div key={index} className="git-diff-gap" aria-hidden="true" />
-            )
-          ) : (
-            (() => {
-              // Редактировать можно строки, которые есть в текущем файле:
-              // добавленные и контекстные (у удалённых нет новой версии).
-              const editable = line.kind === "add" || line.kind === "context";
-              const isEditing = editable && editingLine === line.newLine;
-              const sign =
-                line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
-              return (
-                <div
-                  key={index}
-                  className={`git-diff-line is-${line.kind} ${
-                    editable ? "is-editable" : ""
-                  } ${
-                    line.kind === "add" &&
-                    freshTexts.has(`${line.newLine}\0${line.text}`)
-                      ? "is-fresh"
-                      : ""
-                  }`}
-                  onClick={
-                    editable && !isEditing
-                      ? () => startEditing(line.newLine!, line.text)
-                      : undefined
-                  }
-                >
-                  <span className="git-diff-gutter">
-                    {line.kind === "del" ? line.oldLine : line.newLine}
-                  </span>
-                  {isEditing ? (
-                    <span className="git-diff-text">
-                      <span className="git-diff-sign">{sign}</span>
-                      <input
-                        className="git-diff-input"
-                        value={editValue}
-                        spellCheck={false}
-                        disabled={saving}
-                        autoFocus
-                        size={Math.max(editValue.length + 2, 12)}
-                        onChange={(event) => setEditValue(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.nativeEvent.isComposing) {
-                            return;
-                          }
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            void saveLine(line.newLine!, editValue);
-                          } else if (event.key === "Escape") {
-                            setEditingLine(null);
-                          }
-                        }}
-                        onBlur={() => {
-                          if (editValue !== line.text) {
-                            void saveLine(line.newLine!, editValue);
-                          } else {
-                            setEditingLine(null);
-                          }
-                        }}
-                      />
-                    </span>
-                  ) : (
-                    <span className="git-diff-text">
-                      {sign}
-                      {line.text}
-                    </span>
-                  )}
-                </div>
-              );
-            })()
-          ),
-        )}
+            );
+          }
+          // Редактировать можно строки, которые есть в текущем файле:
+          // добавленные и контекстные (у удалённых нет новой версии).
+          const editable = line.kind === "add" || line.kind === "context";
+          const fresh =
+            line.kind === "add" &&
+            freshTexts.has(`${line.newLine}\0${line.text}`);
+          if (!editable || editingLine !== line.newLine) {
+            return (
+              <DiffLineRow
+                key={index}
+                line={line}
+                fresh={fresh}
+                onEdit={editable ? startEditing : undefined}
+              />
+            );
+          }
+          return (
+            <div
+              key={index}
+              className={`git-diff-line is-${line.kind} is-editable ${
+                fresh ? "is-fresh" : ""
+              }`}
+            >
+              <span className="git-diff-gutter">{line.newLine}</span>
+              <span className="git-diff-text">
+                <span className="git-diff-sign">
+                  {line.kind === "add" ? "+" : " "}
+                </span>
+                <input
+                  className="git-diff-input"
+                  value={editValue}
+                  spellCheck={false}
+                  disabled={saving}
+                  autoFocus
+                  size={Math.max(editValue.length + 2, 12)}
+                  onChange={(event) => setEditValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) {
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void saveLine(line.newLine!, editValue);
+                    } else if (event.key === "Escape") {
+                      setEditingLine(null);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (editValue !== line.text) {
+                      void saveLine(line.newLine!, editValue);
+                    } else {
+                      setEditingLine(null);
+                    }
+                  }}
+                />
+              </span>
+            </div>
+          );
+        })}
       </div>
       {diff.truncated && (
         <div className="git-diff-note">{t("git.diffTruncated")}</div>
       )}
     </div>
   );
+}
+
+// Строка diff-а без правки. Агент дописал файл — diff перечитывается и
+// разбирается заново, все строки приходят новыми объектами; сравнение по
+// содержимому оставляет на месте те, что не поменялись.
+const DiffLineRow = memo(
+  function DiffLineRow(props: {
+    line: DiffLine;
+    fresh: boolean;
+    onEdit?: (newLine: number, text: string) => void;
+  }) {
+    const { line, onEdit } = props;
+    return (
+      <div
+        className={`git-diff-line is-${line.kind} ${
+          onEdit ? "is-editable" : ""
+        } ${props.fresh ? "is-fresh" : ""}`}
+        onClick={onEdit ? () => onEdit(line.newLine!, line.text) : undefined}
+      >
+        <span className="git-diff-gutter">
+          {line.kind === "del" ? line.oldLine : line.newLine}
+        </span>
+        <span className="git-diff-text">
+          {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
+          {line.text}
+        </span>
+      </div>
+    );
+  },
+  (before, after) =>
+    before.fresh === after.fresh &&
+    before.onEdit === after.onEdit &&
+    before.line.kind === after.line.kind &&
+    before.line.text === after.line.text &&
+    before.line.oldLine === after.line.oldLine &&
+    before.line.newLine === after.line.newLine,
+);
+
+// Сводка приходит целиком новыми объектами, даже когда файл не менялся.
+function sameFile(before: GitChangedFile, after: GitChangedFile): boolean {
+  const keys = [...Object.keys(before), ...Object.keys(after)];
+  for (const key of keys as (keyof GitChangedFile)[]) {
+    if (before[key] !== after[key]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function FileCard(props: {
@@ -374,6 +414,19 @@ function FileCard(props: {
     </div>
   );
 }
+
+// Карточка перерисовывается, только когда изменился её файл. Пока агент пишет
+// код, сводка обновляется после каждой правки, а сообщение коммита — после
+// каждой клавиши; раньше любое из них заново строило все diff-ы панели, и
+// прокрутка длинного списка спотыкалась на каждом обновлении.
+const StableFileCard = memo(
+  FileCard,
+  (before, after) =>
+    before.workspaceId === after.workspaceId &&
+    before.arriving === after.arriving &&
+    sameFile(before.file, after.file),
+);
+
 type GitPanelView = "changes" | "history";
 
 const TABS = ["changes", "history"] as const;
@@ -687,7 +740,7 @@ function GitChangesWorkspaceView(props: {
                 )}
                 <div className="git-file-list">
                   {summary.files.map((file) => (
-                    <FileCard
+                    <StableFileCard
                       key={file.path}
                       workspaceId={workspaceId}
                       file={file}
